@@ -1,0 +1,24 @@
+[network]
+interface = "auto"
+
+[prodjlink]
+passive_mode = true
+
+[engine]
+fps = 60
+max_lookahead_ms = 1000
+
+[effect]
+active = "beat_pulse"
+
+[effect.beat_pulse]
+palette = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"]
+gamma = 2.0
+
+[devices.openrgb]
+enabled = true
+host = "127.0.0.1"
+port = 6742
+latency_strategy = "static"
+latency_ms = 10
+manual_offset_ms = 0
