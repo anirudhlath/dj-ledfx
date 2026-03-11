@@ -61,6 +61,12 @@ class OpenRGBAdapter:
                     f"(server has {len(client.devices)} devices)"
                 )
             device = client.devices[self._device_index]
+            # Switch to "Direct" mode for per-LED control
+            for i, mode in enumerate(device.modes):
+                if mode.name.lower() == "direct":
+                    device.set_mode(i)
+                    logger.debug("Set device '{}' to Direct mode", device.name)
+                    break
             self._client = client
             self._device = device
             self._led_count = len(device.colors)

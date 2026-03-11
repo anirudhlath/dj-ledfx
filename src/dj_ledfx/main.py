@@ -65,7 +65,7 @@ async def _run(args: argparse.Namespace) -> None:
 
     device_manager = DeviceManager(event_bus=event_bus)
 
-    if config.openrgb_enabled and not args.demo:
+    if config.openrgb_enabled:
         try:
             adapter = OpenRGBAdapter(
                 host=config.openrgb_host,
