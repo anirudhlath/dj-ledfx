@@ -5,8 +5,7 @@ import time
 
 from loguru import logger
 
-from dj_ledfx.events import EventBus
-from dj_ledfx.prodjlink.listener import BeatEvent
+from dj_ledfx.events import BeatEvent, EventBus
 
 
 class BeatSimulator:

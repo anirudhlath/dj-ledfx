@@ -108,3 +108,30 @@ class OpenRGBAdapter:
 
         await asyncio.to_thread(_send)
         logger.trace("Sent {} colors to '{}'", len(rgb_colors), self._device_name)
+
+    @staticmethod
+    async def discover(
+        host: str = "127.0.0.1", port: int = 6742
+    ) -> list[DeviceInfo]:
+        def _discover() -> list[DeviceInfo]:
+            if OpenRGBClient is None:
+                return []
+            try:
+                client = OpenRGBClient(host, port)
+                devices = []
+                for i, dev in enumerate(client.devices):
+                    devices.append(
+                        DeviceInfo(
+                            name=getattr(dev, "name", f"Device {i}"),
+                            device_type="openrgb",
+                            led_count=len(dev.colors),
+                            address=f"{host}:{port}",
+                        )
+                    )
+                client.disconnect()
+                return devices
+            except Exception:
+                logger.debug("OpenRGB discovery failed at {}:{}", host, port)
+                return []
+
+        return await asyncio.to_thread(_discover)

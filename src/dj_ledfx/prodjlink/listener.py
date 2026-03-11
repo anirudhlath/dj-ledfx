@@ -2,22 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
 
 from loguru import logger
 
-from dj_ledfx.events import EventBus
+from dj_ledfx.events import BeatEvent, EventBus
 from dj_ledfx.prodjlink.packets import parse_beat_packet
 
-
-@dataclass(frozen=True, slots=True)
-class BeatEvent:
-    bpm: float  # pitch-adjusted BPM
-    beat_position: int  # 1-4
-    next_beat_ms: int
-    device_number: int
-    device_name: str
-    timestamp: float  # time.monotonic()
+# Re-export BeatEvent for backward compatibility
+__all__ = ["BeatEvent", "ProDJLinkListener", "start_listener"]
 
 
 class ProDJLinkListener(asyncio.DatagramProtocol):

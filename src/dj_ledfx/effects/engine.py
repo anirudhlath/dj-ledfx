@@ -129,7 +129,7 @@ class EffectEngine:
             self.tick(now)
 
             self._last_tick_time += self._frame_period
-            sleep_time = self._last_tick_time + self._frame_period - time.monotonic()
+            sleep_time = self._last_tick_time - time.monotonic()
             if sleep_time > 0:
                 await asyncio.sleep(sleep_time)
             else:

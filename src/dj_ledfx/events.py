@@ -2,9 +2,20 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
+
+
+@dataclass(frozen=True, slots=True)
+class BeatEvent:
+    bpm: float  # pitch-adjusted BPM
+    beat_position: int  # 1-4
+    next_beat_ms: int
+    device_number: int
+    device_name: str
+    timestamp: float  # time.monotonic()
 
 
 class EventBus:
