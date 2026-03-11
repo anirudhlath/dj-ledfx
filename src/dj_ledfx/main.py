@@ -66,19 +66,25 @@ async def _run(args: argparse.Namespace) -> None:
     device_manager = DeviceManager(event_bus=event_bus)
 
     if config.openrgb_enabled:
-        try:
-            adapter = OpenRGBAdapter(
-                host=config.openrgb_host,
-                port=config.openrgb_port,
-            )
-            await adapter.connect()
-            tracker = LatencyTracker(
-                strategy=StaticLatency(config.openrgb_latency_ms),
-                manual_offset_ms=config.openrgb_manual_offset_ms,
-            )
-            device_manager.add_device(adapter, tracker)
-        except Exception:
-            logger.exception("Failed to connect to OpenRGB")
+        discovered = await OpenRGBAdapter.discover(
+            host=config.openrgb_host, port=config.openrgb_port
+        )
+        logger.info("Discovered {} OpenRGB devices", len(discovered))
+        for i in range(len(discovered)):
+            try:
+                adapter = OpenRGBAdapter(
+                    host=config.openrgb_host,
+                    port=config.openrgb_port,
+                    device_index=i,
+                )
+                await adapter.connect()
+                tracker = LatencyTracker(
+                    strategy=StaticLatency(config.openrgb_latency_ms),
+                    manual_offset_ms=config.openrgb_manual_offset_ms,
+                )
+                device_manager.add_device(adapter, tracker)
+            except Exception:
+                logger.exception("Failed to connect to OpenRGB device {}", i)
 
     led_count = device_manager.max_led_count or 60
     logger.info("Using {} LEDs", led_count)
