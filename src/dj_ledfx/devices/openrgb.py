@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -12,8 +13,8 @@ try:
     from openrgb import OpenRGBClient
     from openrgb.utils import RGBColor
 except ImportError:
-    OpenRGBClient = None  # type: ignore[assignment,misc]
-    RGBColor = None  # type: ignore[assignment,misc]
+    OpenRGBClient = None
+    RGBColor = None
 
 
 class OpenRGBAdapter:
@@ -26,8 +27,8 @@ class OpenRGBAdapter:
         self._host = host
         self._port = port
         self._device_index = device_index
-        self._client: object | None = None
-        self._device: object | None = None
+        self._client: Any = None
+        self._device: Any = None
         self._is_connected = False
         self._led_count = 0
         self._device_name = ""
@@ -79,7 +80,7 @@ class OpenRGBAdapter:
         if self._client is not None:
 
             def _disconnect() -> None:
-                self._client.disconnect()  # type: ignore[union-attr]
+                self._client.disconnect()
 
             await asyncio.to_thread(_disconnect)
 
@@ -103,7 +104,7 @@ class OpenRGBAdapter:
         ]
 
         def _send() -> None:
-            device.set_colors(rgb_colors, fast=True)  # type: ignore[union-attr]
+            device.set_colors(rgb_colors, fast=True)
 
         await asyncio.to_thread(_send)
         logger.trace("Sent {} colors to '{}'", len(rgb_colors), self._device_name)

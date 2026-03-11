@@ -18,7 +18,8 @@ def test_default_config() -> None:
 
 def test_load_config_from_toml(tmp_path: Path) -> None:
     toml_file = tmp_path / "config.toml"
-    toml_file.write_text(textwrap.dedent("""\
+    toml_file.write_text(
+        textwrap.dedent("""\
         [network]
         interface = "eth0"
 
@@ -36,7 +37,8 @@ def test_load_config_from_toml(tmp_path: Path) -> None:
         host = "192.168.1.100"
         port = 6742
         latency_ms = 20
-    """))
+    """)
+    )
     config = load_config(toml_file)
     assert config.network_interface == "eth0"
     assert config.engine_fps == 30

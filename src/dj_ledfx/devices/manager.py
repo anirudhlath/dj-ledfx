@@ -51,6 +51,4 @@ class DeviceManager:
             try:
                 await device.adapter.disconnect()
             except Exception:
-                logger.exception(
-                    "Failed to disconnect from '{}'", device.adapter.device_info.name
-                )
+                logger.exception("Failed to disconnect from '{}'", device.adapter.device_info.name)

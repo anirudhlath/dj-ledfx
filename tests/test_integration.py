@@ -35,9 +35,7 @@ async def test_full_pipeline_simulator_to_mock_device() -> None:
     type(mock_adapter).is_connected = PropertyMock(return_value=True)
     type(mock_adapter).led_count = PropertyMock(return_value=10)
     type(mock_adapter).device_info = PropertyMock(
-        return_value=DeviceInfo(
-            name="MockLED", device_type="mock", led_count=10, address="mock"
-        )
+        return_value=DeviceInfo(name="MockLED", device_type="mock", led_count=10, address="mock")
     )
 
     tracker = LatencyTracker(strategy=StaticLatency(10.0))

@@ -71,4 +71,5 @@ async def start_listener(
         allow_broadcast=True,
     )
     logger.info("Listening for Pro DJ Link beats on {}:{}", interface, port)
-    return protocol  # type: ignore[return-value]
+    assert isinstance(protocol, ProDJLinkListener)
+    return protocol

@@ -2,6 +2,13 @@
 
 Beat-synced LED effect engine driven by Pro DJ Link network data with per-device latency compensation.
 
+## Workflow
+
+- Use `/feature-dev` skill with **opus model** for all feature development
+- Use `/superpowers:brainstorming` before any new feature design
+- Use `/superpowers:writing-plans` to create implementation plans from specs
+- Spec documents live in `docs/superpowers/specs/`
+
 ## Commands
 
 ```bash

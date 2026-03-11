@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import time
 
-import numpy as np
 from loguru import logger
 
 from dj_ledfx.beat.clock import BeatClock

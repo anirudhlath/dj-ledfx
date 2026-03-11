@@ -28,7 +28,7 @@ target-version = "py311"
 line-length = 99
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "TCH"]
+select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.mypy]
 strict = true

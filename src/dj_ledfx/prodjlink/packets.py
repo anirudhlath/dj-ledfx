@@ -49,9 +49,7 @@ def parse_beat_packet(data: bytes) -> BeatPacket | None:
 
     capability = data[OFFSET_CAPABILITY]
     if capability != CAPABILITY_CDJ3000:
-        logger.debug(
-            "Ignoring packet from non-CDJ3000 hardware (capability=0x{:02X})", capability
-        )
+        logger.debug("Ignoring packet from non-CDJ3000 hardware (capability=0x{:02X})", capability)
         return None
 
     device_name = (

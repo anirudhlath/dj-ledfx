@@ -10,7 +10,7 @@ from loguru import logger
 
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
-from dj_ledfx.config import AppConfig, load_config
+from dj_ledfx.config import load_config
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.devices.openrgb import OpenRGBAdapter
 from dj_ledfx.effects.beat_pulse import BeatPulse
@@ -76,7 +76,7 @@ async def _run(args: argparse.Namespace) -> None:
                 strategy=StaticLatency(config.openrgb_latency_ms),
                 manual_offset_ms=config.openrgb_manual_offset_ms,
             )
-            device_manager.add_device(adapter, tracker)  # type: ignore[arg-type]
+            device_manager.add_device(adapter, tracker)
         except Exception:
             logger.exception("Failed to connect to OpenRGB")
 
@@ -130,7 +130,7 @@ async def _run(args: argparse.Namespace) -> None:
             logger.info("Status: {}", status.summary())
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=10.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
     tasks.append(asyncio.create_task(_status_loop()))
