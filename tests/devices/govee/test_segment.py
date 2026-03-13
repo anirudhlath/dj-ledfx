@@ -37,9 +37,7 @@ class TestGoveeSegmentAdapter:
         adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=15)
         assert adapter.led_count == 15
 
-    def test_device_info(
-        self, mock_transport: MagicMock, record: GoveeDeviceRecord
-    ) -> None:
+    def test_device_info(self, mock_transport: MagicMock, record: GoveeDeviceRecord) -> None:
         adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=15)
         info = adapter.device_info
         assert info.device_type == "govee_segment"
@@ -65,9 +63,7 @@ class TestGoveeSegmentAdapter:
         adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=3)
         await adapter.connect()
 
-        colors = np.array(
-            [[255, 0, 0], [0, 255, 0], [0, 0, 255]], dtype=np.uint8
-        )
+        colors = np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255]], dtype=np.uint8)
         await adapter.send_frame(colors)
 
         mock_transport.send_command.assert_awaited_once()

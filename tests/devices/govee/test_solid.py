@@ -64,9 +64,7 @@ class TestGoveeSolidAdapter:
         assert adapter.is_connected is False
 
     @pytest.mark.asyncio
-    async def test_disconnect(
-        self, mock_transport: MagicMock, record: GoveeDeviceRecord
-    ) -> None:
+    async def test_disconnect(self, mock_transport: MagicMock, record: GoveeDeviceRecord) -> None:
         adapter = GoveeSolidAdapter(mock_transport, record)
         await adapter.connect()
         await adapter.disconnect()
