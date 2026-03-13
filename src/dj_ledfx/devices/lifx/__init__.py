@@ -1,1 +1,1 @@
-# Populated when LifxBackend is implemented (Chunk 4, Task 14)
+from dj_ledfx.devices.lifx.discovery import LifxBackend as LifxBackend  # noqa: F401
