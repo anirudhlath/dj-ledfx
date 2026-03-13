@@ -47,6 +47,17 @@ class AppConfig:
     lifx_max_fps: int = 60
     lifx_latency_window_size: int = 60
 
+    # Govee
+    govee_enabled: bool = True
+    govee_discovery_timeout_s: float = 5.0
+    govee_latency_strategy: str = "ema"
+    govee_latency_ms: float = 100.0
+    govee_manual_offset_ms: float = 0.0
+    govee_max_fps: int = 40
+    govee_latency_window_size: int = 60
+    govee_probe_interval_s: float = 5.0
+    govee_segment_override: int | None = None
+
     def __post_init__(self) -> None:
         errors: list[str] = []
         if self.engine_fps <= 0:
@@ -75,6 +86,18 @@ class AppConfig:
             errors.append("lifx_default_kelvin must be between 2500 and 9000")
         if self.lifx_latency_ms < 0:
             errors.append("lifx_latency_ms must be non-negative")
+        if self.govee_max_fps <= 0:
+            errors.append("govee_max_fps must be positive")
+        if self.govee_latency_window_size <= 0:
+            errors.append("govee_latency_window_size must be positive")
+        if self.govee_latency_strategy not in {"static", "ema", "windowed_mean"}:
+            errors.append("govee_latency_strategy must be one of: static, ema, windowed_mean")
+        if self.govee_discovery_timeout_s <= 0:
+            errors.append("govee_discovery_timeout_s must be positive")
+        if self.govee_probe_interval_s <= 0:
+            errors.append("govee_probe_interval_s must be positive")
+        if self.govee_latency_ms < 0:
+            errors.append("govee_latency_ms must be non-negative")
         if errors:
             raise ValueError(f"Config validation failed: {'; '.join(errors)}")
 
@@ -152,5 +175,26 @@ def load_config(path: Path) -> AppConfig:
             kwargs["lifx_max_fps"] = lifx["max_fps"]
         if "latency_window_size" in lifx:
             kwargs["lifx_latency_window_size"] = lifx["latency_window_size"]
+
+    if "devices" in raw and "govee" in raw["devices"]:
+        govee = raw["devices"]["govee"]
+        if "enabled" in govee:
+            kwargs["govee_enabled"] = govee["enabled"]
+        if "discovery_timeout_s" in govee:
+            kwargs["govee_discovery_timeout_s"] = govee["discovery_timeout_s"]
+        if "latency_strategy" in govee:
+            kwargs["govee_latency_strategy"] = govee["latency_strategy"]
+        if "latency_ms" in govee:
+            kwargs["govee_latency_ms"] = govee["latency_ms"]
+        if "manual_offset_ms" in govee:
+            kwargs["govee_manual_offset_ms"] = govee["manual_offset_ms"]
+        if "max_fps" in govee:
+            kwargs["govee_max_fps"] = govee["max_fps"]
+        if "latency_window_size" in govee:
+            kwargs["govee_latency_window_size"] = govee["latency_window_size"]
+        if "probe_interval_s" in govee:
+            kwargs["govee_probe_interval_s"] = govee["probe_interval_s"]
+        if "segment_override" in govee:
+            kwargs["govee_segment_override"] = govee["segment_override"]
 
     return AppConfig(**kwargs)  # type: ignore[arg-type]
