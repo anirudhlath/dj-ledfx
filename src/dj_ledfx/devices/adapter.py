@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 from numpy.typing import NDArray
 
+from dj_ledfx.spatial.geometry import DeviceGeometry
 from dj_ledfx.types import DeviceInfo
 
 
@@ -29,6 +30,11 @@ class DeviceAdapter(ABC):
     @property
     @abstractmethod
     def led_count(self) -> int: ...
+
+    @property
+    def geometry(self) -> DeviceGeometry | None:
+        """Optional: report device's physical geometry for spatial mapping."""
+        return None
 
     @abstractmethod
     async def connect(self) -> None: ...
