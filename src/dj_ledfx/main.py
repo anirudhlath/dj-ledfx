@@ -19,6 +19,9 @@ from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import EventBus
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
+from dj_ledfx.spatial.compositor import SpatialCompositor
+from dj_ledfx.spatial.mapping import LinearMapping, RadialMapping
+from dj_ledfx.spatial.scene import SceneModel
 from dj_ledfx.status import SystemStatus
 
 
@@ -68,6 +71,39 @@ async def _run(args: argparse.Namespace) -> None:
     for device in devices:
         device_manager.add_device(device.adapter, device.tracker, device.max_fps)
 
+    # Build spatial scene if configured
+    compositor: SpatialCompositor | None = None
+    if config.scene_config is not None:
+        adapters = [d.adapter for d in device_manager.devices]
+        scene = SceneModel.from_config(config.scene_config, adapters)
+        if scene.placements:
+            mapping_name = config.scene_config.get("mapping", "linear")
+            mapping_params = config.scene_config.get("mapping_params", {})
+            mapping: LinearMapping | RadialMapping
+            if mapping_name == "radial":
+                center = mapping_params.get("center", [0.0, 0.0, 0.0])
+                max_radius = mapping_params.get("max_radius")
+                mapping = RadialMapping(
+                    center=(float(center[0]), float(center[1]), float(center[2])),
+                    max_radius=float(max_radius) if max_radius is not None else None,
+                )
+            else:
+                direction = mapping_params.get("direction", [1.0, 0.0, 0.0])
+                origin = mapping_params.get("origin")
+                origin_tuple = (
+                    (float(origin[0]), float(origin[1]), float(origin[2])) if origin else None
+                )
+                mapping = LinearMapping(
+                    direction=(float(direction[0]), float(direction[1]), float(direction[2])),
+                    origin=origin_tuple,
+                )
+            compositor = SpatialCompositor(scene, mapping)
+            logger.info(
+                "Spatial compositor active: {} mapping, {} devices",
+                mapping_name,
+                len(scene.placements),
+            )
+
     led_count = device_manager.max_led_count or 60
     logger.info("Using {} LEDs", led_count)
 
@@ -88,6 +124,7 @@ async def _run(args: argparse.Namespace) -> None:
         ring_buffer=engine.ring_buffer,
         devices=device_manager.devices,
         fps=config.engine_fps,
+        compositor=compositor,
     )
 
     stop_event = asyncio.Event()
