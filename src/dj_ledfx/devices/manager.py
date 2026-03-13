@@ -13,6 +13,7 @@ from dj_ledfx.latency.tracker import LatencyTracker
 class ManagedDevice:
     adapter: DeviceAdapter
     tracker: LatencyTracker
+    max_fps: int = 60
 
 
 class DeviceManager:
@@ -30,8 +31,8 @@ class DeviceManager:
             return 0
         return max(d.adapter.led_count for d in self._devices)
 
-    def add_device(self, adapter: DeviceAdapter, tracker: LatencyTracker) -> None:
-        self._devices.append(ManagedDevice(adapter=adapter, tracker=tracker))
+    def add_device(self, adapter: DeviceAdapter, tracker: LatencyTracker, max_fps: int = 60) -> None:
+        self._devices.append(ManagedDevice(adapter=adapter, tracker=tracker, max_fps=max_fps))
         logger.info(
             "Added device '{}' ({} LEDs, latency={:.0f}ms)",
             adapter.device_info.name,

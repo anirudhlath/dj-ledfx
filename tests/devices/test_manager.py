@@ -1,6 +1,6 @@
-from unittest.mock import AsyncMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
-from dj_ledfx.devices.manager import DeviceManager
+from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
 from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
@@ -22,7 +22,7 @@ def test_device_manager_add_device() -> None:
     manager = DeviceManager(event_bus=bus)
     adapter = _make_mock_adapter()
     tracker = LatencyTracker(strategy=StaticLatency(10.0))
-    manager.add_device(adapter, tracker)  # type: ignore[arg-type]
+    manager.add_device(adapter, tracker, max_fps=60)  # type: ignore[arg-type]
     assert len(manager.devices) == 1
 
 
@@ -35,7 +35,13 @@ def test_device_manager_max_led_count() -> None:
     t1 = LatencyTracker(strategy=StaticLatency(10.0))
     t2 = LatencyTracker(strategy=StaticLatency(10.0))
 
-    manager.add_device(a1, t1)  # type: ignore[arg-type]
-    manager.add_device(a2, t2)  # type: ignore[arg-type]
+    manager.add_device(a1, t1, max_fps=60)  # type: ignore[arg-type]
+    manager.add_device(a2, t2, max_fps=60)  # type: ignore[arg-type]
 
     assert manager.max_led_count == 30
+
+
+def test_managed_device_max_fps() -> None:
+    """ManagedDevice stores max_fps."""
+    md = ManagedDevice(adapter=MagicMock(), tracker=MagicMock(), max_fps=30)
+    assert md.max_fps == 30
