@@ -1,7 +1,11 @@
+import importlib
 import time
+from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
+import dj_ledfx.metrics as metrics_mod
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.engine import EffectEngine, RingBuffer
@@ -55,6 +59,35 @@ def test_ring_buffer_returns_copy() -> None:
 def test_ring_buffer_empty_returns_none() -> None:
     buf = RingBuffer(capacity=10, led_count=5)
     assert buf.find_nearest(100.0) is None
+
+
+@pytest.mark.asyncio
+async def test_engine_tick_observes_render_duration() -> None:
+    """Verify that EffectEngine.tick() calls metrics.RENDER_DURATION.observe()."""
+    importlib.reload(metrics_mod)
+    mock_duration = MagicMock()
+    mock_rendered = MagicMock()
+    original_duration = metrics_mod.RENDER_DURATION
+    original_rendered = metrics_mod.FRAMES_RENDERED
+    metrics_mod.RENDER_DURATION = mock_duration
+    metrics_mod.FRAMES_RENDERED = mock_rendered
+    try:
+        from dj_ledfx.effects.engine import EffectEngine
+        from dj_ledfx.beat.clock import BeatClock
+        from dj_ledfx.effects.beat_pulse import BeatPulse
+        import time as time_mod
+
+        clock = BeatClock()
+        now = time_mod.monotonic()
+        clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=now)
+        effect = BeatPulse()
+        engine = EffectEngine(clock=clock, effect=effect, led_count=10, fps=60)
+        engine.tick(now)
+        mock_duration.observe.assert_called_once()
+        mock_rendered.inc.assert_called_once()
+    finally:
+        metrics_mod.RENDER_DURATION = original_duration
+        metrics_mod.FRAMES_RENDERED = original_rendered
 
 
 def test_engine_render_tick_populates_buffer() -> None:
