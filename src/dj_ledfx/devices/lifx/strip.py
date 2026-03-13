@@ -7,7 +7,9 @@ from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.lifx.packet import (
-    LifxPacket, build_set_extended_color_zones, rgb_array_to_hsbk,
+    LifxPacket,
+    build_set_extended_color_zones,
+    rgb_array_to_hsbk,
 )
 from dj_ledfx.types import DeviceInfo
 
@@ -21,8 +23,12 @@ class LifxStripAdapter(DeviceAdapter):
     supports_latency_probing = False
 
     def __init__(
-        self, transport: LifxTransport, device_info: DeviceInfo,
-        target_mac: bytes, zone_count: int = 1, kelvin: int = 3500,
+        self,
+        transport: LifxTransport,
+        device_info: DeviceInfo,
+        target_mac: bytes,
+        zone_count: int = 1,
+        kelvin: int = 3500,
     ) -> None:
         self._transport = transport
         self._device_info = device_info
@@ -59,13 +65,19 @@ class LifxStripAdapter(DeviceAdapter):
                 (int(c[0]), int(c[1]), int(c[2]), int(c[3])) for c in chunk
             ]
             pkt = LifxPacket(
-                tagged=False, source=self._transport.source_id,
+                tagged=False,
+                source=self._transport.source_id,
                 target=self._target_mac + b"\x00\x00",
-                ack_required=False, res_required=False,
+                ack_required=False,
+                res_required=False,
                 sequence=self._transport.next_sequence() % 256,
                 msg_type=510,
                 payload=build_set_extended_color_zones(
-                    0, 1, chunk_start, count, hsbk_tuples,
+                    0,
+                    1,
+                    chunk_start,
+                    count,
+                    hsbk_tuples,
                 ),
             )
             self._transport.send_packet(pkt, self._addr)

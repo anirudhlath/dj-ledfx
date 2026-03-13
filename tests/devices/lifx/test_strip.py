@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
-from unittest.mock import MagicMock
 
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.types import DeviceInfo
@@ -20,8 +21,10 @@ def mock_transport() -> MagicMock:
 
 def test_led_count_returns_zone_count(mock_transport: MagicMock) -> None:
     adapter = LifxStripAdapter(
-        mock_transport, DeviceInfo("Strip", "lifx_strip", 1, "1.2.3.4:56700"),
-        target_mac=b"\xAA\xBB\xCC\xDD\xEE\xFF", zone_count=40,
+        mock_transport,
+        DeviceInfo("Strip", "lifx_strip", 1, "1.2.3.4:56700"),
+        target_mac=b"\xaa\xbb\xcc\xdd\xee\xff",
+        zone_count=40,
     )
     assert adapter.led_count == 40
 
@@ -29,8 +32,10 @@ def test_led_count_returns_zone_count(mock_transport: MagicMock) -> None:
 @pytest.mark.asyncio
 async def test_send_frame_sends_extended_color_zones(mock_transport: MagicMock) -> None:
     adapter = LifxStripAdapter(
-        mock_transport, DeviceInfo("Strip", "lifx_strip", 1, "1.2.3.4:56700"),
-        target_mac=b"\xAA\xBB\xCC\xDD\xEE\xFF", zone_count=40,
+        mock_transport,
+        DeviceInfo("Strip", "lifx_strip", 1, "1.2.3.4:56700"),
+        target_mac=b"\xaa\xbb\xcc\xdd\xee\xff",
+        zone_count=40,
     )
     adapter._is_connected = True
     colors = np.zeros((40, 3), dtype=np.uint8)
@@ -44,8 +49,10 @@ async def test_send_frame_sends_extended_color_zones(mock_transport: MagicMock) 
 @pytest.mark.asyncio
 async def test_send_frame_chunks_over_82_zones(mock_transport: MagicMock) -> None:
     adapter = LifxStripAdapter(
-        mock_transport, DeviceInfo("Strip", "lifx_strip", 1, "1.2.3.4:56700"),
-        target_mac=b"\xAA\xBB\xCC\xDD\xEE\xFF", zone_count=100,
+        mock_transport,
+        DeviceInfo("Strip", "lifx_strip", 1, "1.2.3.4:56700"),
+        target_mac=b"\xaa\xbb\xcc\xdd\xee\xff",
+        zone_count=100,
     )
     adapter._is_connected = True
     colors = np.zeros((100, 3), dtype=np.uint8)

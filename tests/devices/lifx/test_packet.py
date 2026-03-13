@@ -18,15 +18,19 @@ from dj_ledfx.devices.lifx.packet import (
     rgb_array_to_hsbk,
     rgb_to_hsbk,
 )
-from dj_ledfx.devices.lifx.types import TileInfo
 
 
 class TestLifxPacketHeader:
     def test_pack_header_size(self) -> None:
         pkt = LifxPacket(
-            tagged=False, source=12345, target=b"\x00" * 8,
-            ack_required=False, res_required=False, sequence=0,
-            msg_type=2, payload=b"",
+            tagged=False,
+            source=12345,
+            target=b"\x00" * 8,
+            ack_required=False,
+            res_required=False,
+            sequence=0,
+            msg_type=2,
+            payload=b"",
         )
         data = pkt.pack()
         assert len(data) == 36  # header only, no payload
@@ -34,9 +38,14 @@ class TestLifxPacketHeader:
     def test_pack_size_field_includes_payload(self) -> None:
         payload = b"\x01\x02\x03"
         pkt = LifxPacket(
-            tagged=False, source=0, target=b"\x00" * 8,
-            ack_required=False, res_required=False, sequence=0,
-            msg_type=102, payload=payload,
+            tagged=False,
+            source=0,
+            target=b"\x00" * 8,
+            ack_required=False,
+            res_required=False,
+            sequence=0,
+            msg_type=102,
+            payload=payload,
         )
         data = pkt.pack()
         size = int.from_bytes(data[0:2], "little")
@@ -44,9 +53,14 @@ class TestLifxPacketHeader:
 
     def test_pack_protocol_field(self) -> None:
         pkt = LifxPacket(
-            tagged=True, source=0, target=b"\x00" * 8,
-            ack_required=False, res_required=False, sequence=0,
-            msg_type=2, payload=b"",
+            tagged=True,
+            source=0,
+            target=b"\x00" * 8,
+            ack_required=False,
+            res_required=False,
+            sequence=0,
+            msg_type=2,
+            payload=b"",
         )
         data = pkt.pack()
         flags = int.from_bytes(data[2:4], "little")
@@ -57,9 +71,14 @@ class TestLifxPacketHeader:
 
     def test_pack_source_field(self) -> None:
         pkt = LifxPacket(
-            tagged=False, source=0xDEADBEEF, target=b"\x00" * 8,
-            ack_required=False, res_required=False, sequence=0,
-            msg_type=2, payload=b"",
+            tagged=False,
+            source=0xDEADBEEF,
+            target=b"\x00" * 8,
+            ack_required=False,
+            res_required=False,
+            sequence=0,
+            msg_type=2,
+            payload=b"",
         )
         data = pkt.pack()
         source = int.from_bytes(data[4:8], "little")
@@ -68,29 +87,44 @@ class TestLifxPacketHeader:
     def test_pack_target_field(self) -> None:
         mac = b"\xd0\x73\xd5\x01\x02\x03\x00\x00"
         pkt = LifxPacket(
-            tagged=False, source=0, target=mac,
-            ack_required=False, res_required=False, sequence=0,
-            msg_type=2, payload=b"",
+            tagged=False,
+            source=0,
+            target=mac,
+            ack_required=False,
+            res_required=False,
+            sequence=0,
+            msg_type=2,
+            payload=b"",
         )
         data = pkt.pack()
         assert data[8:16] == mac
 
     def test_pack_ack_res_flags(self) -> None:
         pkt = LifxPacket(
-            tagged=False, source=0, target=b"\x00" * 8,
-            ack_required=True, res_required=True, sequence=42,
-            msg_type=2, payload=b"",
+            tagged=False,
+            source=0,
+            target=b"\x00" * 8,
+            ack_required=True,
+            res_required=True,
+            sequence=42,
+            msg_type=2,
+            payload=b"",
         )
         data = pkt.pack()
         assert data[22] & 0x02  # ack_required
         assert data[22] & 0x01  # res_required
-        assert data[23] == 42   # sequence
+        assert data[23] == 42  # sequence
 
     def test_pack_msg_type(self) -> None:
         pkt = LifxPacket(
-            tagged=False, source=0, target=b"\x00" * 8,
-            ack_required=False, res_required=False, sequence=0,
-            msg_type=715, payload=b"",
+            tagged=False,
+            source=0,
+            target=b"\x00" * 8,
+            ack_required=False,
+            res_required=False,
+            sequence=0,
+            msg_type=715,
+            payload=b"",
         )
         data = pkt.pack()
         msg_type = int.from_bytes(data[32:34], "little")
@@ -98,9 +132,14 @@ class TestLifxPacketHeader:
 
     def test_unpack_roundtrip(self) -> None:
         original = LifxPacket(
-            tagged=True, source=9999, target=b"\xAA\xBB\xCC\xDD\xEE\xFF\x00\x00",
-            ack_required=True, res_required=False, sequence=200,
-            msg_type=102, payload=b"\x01\x02\x03\x04",
+            tagged=True,
+            source=9999,
+            target=b"\xaa\xbb\xcc\xdd\xee\xff\x00\x00",
+            ack_required=True,
+            res_required=False,
+            sequence=200,
+            msg_type=102,
+            payload=b"\x01\x02\x03\x04",
         )
         data = original.pack()
         parsed = LifxPacket.unpack(data)
@@ -120,7 +159,7 @@ class TestPayloadBuilders:
         assert len(payload) == 13
 
     def test_build_echo_request_size(self) -> None:
-        payload = build_echo_request(b"\xAA" * 64)
+        payload = build_echo_request(b"\xaa" * 64)
         assert len(payload) == 64
 
     def test_build_set_tile_state64_size(self) -> None:
@@ -148,7 +187,7 @@ class TestPayloadParsers:
         assert product == 55
 
     def test_parse_echo_response(self) -> None:
-        data = b"\xBB" * 64
+        data = b"\xbb" * 64
         assert parse_echo_response(data) == data
 
     def test_parse_state_extended_color_zones(self) -> None:
@@ -165,13 +204,21 @@ class TestPayloadParsers:
         header = struct.pack("<BB", 0, 1)
         tile_data = struct.pack(
             "<hhhh ff BB x III QQ HH I",
-            100, -200, 9800,
+            100,
+            -200,
+            9800,
             0,
-            1.0, 2.5,
-            8, 8,
-            1, 55, 0,
-            0, 0,
-            0, 0,
+            1.0,
+            2.5,
+            8,
+            8,
+            1,
+            55,
+            0,
+            0,
+            0,
+            0,
+            0,
             0,
         )
         payload = header + tile_data

@@ -2,12 +2,14 @@
 
 Beat-synced LED effect engine driven by Pro DJ Link network data with per-device latency compensation.
 
-## Workflow
+## Superpowers Skill Guidelines
 
-- Use `/feature-dev` skill with **opus model** for all feature development
-- Use `/superpowers:brainstorming` before any new feature design
-- Use `/superpowers:writing-plans` to create implementation plans from specs
-- Spec documents live in `docs/superpowers/specs/`
+- Use opus with max effort from brainstorming and planning.
+- Use sonnet for implementing the plan.
+- Use opus for reviewing and simplification stages.
+- Use haiku for committing.
+- Prefer latest internet grounded knowledge over training knowledge.
+- Use context7 to check latest docs and for external dependencies.
 
 ## Commands
 

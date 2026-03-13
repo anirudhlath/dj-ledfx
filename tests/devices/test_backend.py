@@ -72,6 +72,7 @@ async def test_shutdown_all_calls_shutdown() -> None:
 
 def test_discovered_device_dataclass() -> None:
     from unittest.mock import MagicMock
+
     dd = DiscoveredDevice(
         adapter=MagicMock(),
         tracker=MagicMock(),

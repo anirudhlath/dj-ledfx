@@ -127,7 +127,7 @@ def test_lifx_config_negative_offset_allowed() -> None:
 
 def test_lifx_config_from_toml(tmp_path: Path) -> None:
     toml_file = tmp_path / "config.toml"
-    toml_file.write_text('[devices.lifx]\nenabled = false\nmax_fps = 20\ndefault_kelvin = 4000\n')
+    toml_file.write_text("[devices.lifx]\nenabled = false\nmax_fps = 20\ndefault_kelvin = 4000\n")
     config = load_config(toml_file)
     assert config.lifx_enabled is False
     assert config.lifx_max_fps == 20

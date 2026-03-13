@@ -17,7 +17,10 @@ class LifxBulbAdapter(DeviceAdapter):
     supports_latency_probing = False
 
     def __init__(
-        self, transport: LifxTransport, device_info: DeviceInfo, target_mac: bytes,
+        self,
+        transport: LifxTransport,
+        device_info: DeviceInfo,
+        target_mac: bytes,
         kelvin: int = 3500,
     ) -> None:
         self._transport = transport
@@ -49,10 +52,13 @@ class LifxBulbAdapter(DeviceAdapter):
         r, g, b = int(colors[0, 0]), int(colors[0, 1]), int(colors[0, 2])
         hsbk = rgb_to_hsbk(r, g, b, kelvin=self._kelvin)
         pkt = LifxPacket(
-            tagged=False, source=self._transport.source_id,
+            tagged=False,
+            source=self._transport.source_id,
             target=self._target_mac + b"\x00\x00",
-            ack_required=False, res_required=False,
+            ack_required=False,
+            res_required=False,
             sequence=self._transport.next_sequence() % 256,
-            msg_type=102, payload=build_set_color(hsbk),
+            msg_type=102,
+            payload=build_set_color(hsbk),
         )
         self._transport.send_packet(pkt, self._addr)

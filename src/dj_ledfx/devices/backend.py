@@ -40,6 +40,7 @@ class DeviceBackend(ABC):
 
     async def shutdown(self) -> None:
         """Clean up backend resources. Default no-op."""
+        return
 
     @classmethod
     async def discover_all(cls, config: AppConfig) -> list[DiscoveredDevice]:

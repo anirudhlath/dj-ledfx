@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
-from unittest.mock import MagicMock
 
 from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
 from dj_ledfx.devices.lifx.types import TileInfo
@@ -28,8 +29,10 @@ def test_tile_info_frozen() -> None:
 
 def test_led_count_equals_tiles_times_64(mock_transport: MagicMock) -> None:
     adapter = LifxTileChainAdapter(
-        mock_transport, DeviceInfo("Tile", "lifx_tile", 320, "1.2.3.4:56700"),
-        target_mac=b"\xAA\xBB\xCC\xDD\xEE\xFF", tile_count=5,
+        mock_transport,
+        DeviceInfo("Tile", "lifx_tile", 320, "1.2.3.4:56700"),
+        target_mac=b"\xaa\xbb\xcc\xdd\xee\xff",
+        tile_count=5,
     )
     assert adapter.led_count == 320
 
@@ -37,8 +40,10 @@ def test_led_count_equals_tiles_times_64(mock_transport: MagicMock) -> None:
 @pytest.mark.asyncio
 async def test_send_frame_splits_into_per_tile_packets(mock_transport: MagicMock) -> None:
     adapter = LifxTileChainAdapter(
-        mock_transport, DeviceInfo("Tile", "lifx_tile", 320, "1.2.3.4:56700"),
-        target_mac=b"\xAA\xBB\xCC\xDD\xEE\xFF", tile_count=5,
+        mock_transport,
+        DeviceInfo("Tile", "lifx_tile", 320, "1.2.3.4:56700"),
+        target_mac=b"\xaa\xbb\xcc\xdd\xee\xff",
+        tile_count=5,
     )
     adapter._is_connected = True
     colors = np.zeros((320, 3), dtype=np.uint8)
@@ -52,7 +57,9 @@ async def test_send_frame_splits_into_per_tile_packets(mock_transport: MagicMock
 
 def test_supports_latency_probing_false(mock_transport: MagicMock) -> None:
     adapter = LifxTileChainAdapter(
-        mock_transport, DeviceInfo("Tile", "lifx_tile", 320, "1.2.3.4:56700"),
-        target_mac=b"\xAA\xBB\xCC\xDD\xEE\xFF", tile_count=5,
+        mock_transport,
+        DeviceInfo("Tile", "lifx_tile", 320, "1.2.3.4:56700"),
+        target_mac=b"\xaa\xbb\xcc\xdd\xee\xff",
+        tile_count=5,
     )
     assert adapter.supports_latency_probing is False

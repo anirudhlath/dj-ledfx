@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import time
 
 import pytest
 
-from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.packet import LifxPacket
+from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
 
@@ -56,8 +55,11 @@ async def test_rtt_probe_correlation() -> None:
 
     rtt_values: list[float] = []
     record = LifxDeviceRecord(
-        mac=b"\xAA\xBB\xCC\xDD\xEE\xFF",
-        ip="192.168.1.100", port=56700, vendor=1, product=55,
+        mac=b"\xaa\xbb\xcc\xdd\xee\xff",
+        ip="192.168.1.100",
+        port=56700,
+        vendor=1,
+        product=55,
     )
     transport.register_device(record, rtt_callback=lambda rtt: rtt_values.append(rtt))
 
@@ -67,10 +69,13 @@ async def test_rtt_probe_correlation() -> None:
 
     # Craft an EchoResponse with the seq embedded in payload
     echo_pkt = LifxPacket(
-        tagged=False, source=transport.source_id,
-        target=b"\xAA\xBB\xCC\xDD\xEE\xFF\x00\x00",
-        ack_required=False, res_required=False,
-        sequence=seq % 256, msg_type=59,
+        tagged=False,
+        source=transport.source_id,
+        target=b"\xaa\xbb\xcc\xdd\xee\xff\x00\x00",
+        ack_required=False,
+        res_required=False,
+        sequence=seq % 256,
+        msg_type=59,
         payload=seq.to_bytes(8, "little") + b"\x00" * 56,
     )
     # Feed the response directly into the handler

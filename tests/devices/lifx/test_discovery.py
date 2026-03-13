@@ -1,14 +1,15 @@
 # tests/devices/lifx/test_discovery.py
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from dj_ledfx.config import AppConfig
-from dj_ledfx.devices.lifx.discovery import (
-    LifxBackend, MATRIX_PRODUCTS, MULTIZONE_PRODUCTS,
-)
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
+from dj_ledfx.devices.lifx.discovery import (
+    LifxBackend,
+)
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
@@ -68,9 +69,11 @@ async def test_classify_bulb_product() -> None:
 async def test_discover_returns_discovered_devices() -> None:
     mock_transport = MagicMock()
     mock_transport.open = AsyncMock()
-    mock_transport.discover = AsyncMock(return_value=[
-        LifxDeviceRecord(mac=b"\xAA" * 6, ip="1.2.3.4", port=56700, vendor=1, product=1),
-    ])
+    mock_transport.discover = AsyncMock(
+        return_value=[
+            LifxDeviceRecord(mac=b"\xaa" * 6, ip="1.2.3.4", port=56700, vendor=1, product=1),
+        ]
+    )
     mock_transport.register_device = MagicMock()
     mock_transport.start_probing = MagicMock()
     mock_transport.source_id = 12345

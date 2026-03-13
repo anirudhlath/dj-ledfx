@@ -43,12 +43,16 @@ class LifxBackend(DeviceBackend):
             # Register for RTT probing
             self._transport.register_device(
                 record,
-                rtt_callback=lambda rtt, t=tracker: t.update(rtt),
+                rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
             )
 
-            results.append(DiscoveredDevice(
-                adapter=adapter, tracker=tracker, max_fps=config.lifx_max_fps,
-            ))
+            results.append(
+                DiscoveredDevice(
+                    adapter=adapter,
+                    tracker=tracker,
+                    max_fps=config.lifx_max_fps,
+                )
+            )
 
         # Start probing after all devices registered
         if results:
@@ -62,11 +66,16 @@ class LifxBackend(DeviceBackend):
             self._transport = None
 
     async def _create_adapter(
-        self, record: LifxDeviceRecord, config: AppConfig,
+        self,
+        record: LifxDeviceRecord,
+        config: AppConfig,
     ) -> LifxBulbAdapter | LifxStripAdapter | LifxTileChainAdapter:
         from dj_ledfx.devices.lifx.packet import (
-            LifxPacket, parse_state_device_chain, parse_state_extended_color_zones,
+            LifxPacket,
+            parse_state_device_chain,
+            parse_state_extended_color_zones,
         )
+
         assert self._transport is not None
         addr = (record.ip, record.port)
         target = record.mac + b"\x00\x00"
@@ -74,10 +83,14 @@ class LifxBackend(DeviceBackend):
 
         if record.product in MATRIX_PRODUCTS:
             pkt = LifxPacket(
-                tagged=False, source=self._transport.source_id,
-                target=target, ack_required=False, res_required=True,
+                tagged=False,
+                source=self._transport.source_id,
+                target=target,
+                ack_required=False,
+                res_required=True,
                 sequence=self._transport.next_sequence() % 256,
-                msg_type=701, payload=b"",
+                msg_type=701,
+                payload=b"",
             )
             resp = await self._transport.request_response(pkt, addr, response_type=702)
             tile_count = 5
@@ -88,18 +101,25 @@ class LifxBackend(DeviceBackend):
             led_count = tile_count * 64
             info = DeviceInfo(f"LIFX Tile ({record.ip})", "lifx_tile", led_count, str_addr)
             adapter = LifxTileChainAdapter(
-                self._transport, info, record.mac,
-                tile_count=tile_count, kelvin=config.lifx_default_kelvin,
+                self._transport,
+                info,
+                record.mac,
+                tile_count=tile_count,
+                kelvin=config.lifx_default_kelvin,
             )
             adapter._tiles = tiles
             return adapter
 
         elif record.product in MULTIZONE_PRODUCTS:
             pkt = LifxPacket(
-                tagged=False, source=self._transport.source_id,
-                target=target, ack_required=False, res_required=True,
+                tagged=False,
+                source=self._transport.source_id,
+                target=target,
+                ack_required=False,
+                res_required=True,
                 sequence=self._transport.next_sequence() % 256,
-                msg_type=511, payload=b"",
+                msg_type=511,
+                payload=b"",
             )
             resp = await self._transport.request_response(pkt, addr, response_type=512)
             zone_count = 1
@@ -107,17 +127,24 @@ class LifxBackend(DeviceBackend):
                 zone_count, _, _ = parse_state_extended_color_zones(resp.payload)
             info = DeviceInfo(f"LIFX Strip ({record.ip})", "lifx_strip", zone_count, str_addr)
             return LifxStripAdapter(
-                self._transport, info, record.mac,
-                zone_count=zone_count, kelvin=config.lifx_default_kelvin,
+                self._transport,
+                info,
+                record.mac,
+                zone_count=zone_count,
+                kelvin=config.lifx_default_kelvin,
             )
 
         else:
             info = DeviceInfo(f"LIFX Bulb ({record.ip})", "lifx_bulb", 1, str_addr)
             return LifxBulbAdapter(
-                self._transport, info, record.mac, kelvin=config.lifx_default_kelvin,
+                self._transport,
+                info,
+                record.mac,
+                kelvin=config.lifx_default_kelvin,
             )
 
     def _create_tracker(self, config: AppConfig) -> LatencyTracker:
+        strategy: StaticLatency | EMALatency | WindowedMeanLatency
         if config.lifx_latency_strategy == "static":
             strategy = StaticLatency(config.lifx_latency_ms)
         elif config.lifx_latency_strategy == "ema":

@@ -8,10 +8,10 @@ from pathlib import Path
 
 from loguru import logger
 
+import dj_ledfx.devices  # noqa: F401  # triggers backend auto-registration
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
 from dj_ledfx.config import load_config
-import dj_ledfx.devices  # noqa: F401  # triggers backend auto-registration
 from dj_ledfx.devices.backend import DeviceBackend
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.beat_pulse import BeatPulse

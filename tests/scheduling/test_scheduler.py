@@ -140,9 +140,7 @@ async def test_distributor_computes_correct_target_time() -> None:
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(
-        ring_buffer=buf, devices=[dev_fast, dev_slow], fps=60
-    )
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[dev_fast, dev_slow], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -449,6 +447,7 @@ async def test_get_device_stats_fps_accuracy() -> None:
 async def test_mixed_fps_per_device() -> None:
     """Devices with different max_fps send at different rates."""
     import contextlib
+
     fast_device = _make_device("fast", max_fps=60)
     slow_device = _make_device("slow", max_fps=30)
     buf = RingBuffer(capacity=60, led_count=10)

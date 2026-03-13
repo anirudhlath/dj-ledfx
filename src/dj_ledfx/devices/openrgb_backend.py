@@ -46,9 +46,13 @@ class OpenRGBBackend(DeviceBackend):
                     strategy=strategy,
                     manual_offset_ms=config.openrgb_manual_offset_ms,
                 )
-                results.append(DiscoveredDevice(
-                    adapter=adapter, tracker=tracker, max_fps=config.openrgb_max_fps,
-                ))
+                results.append(
+                    DiscoveredDevice(
+                        adapter=adapter,
+                        tracker=tracker,
+                        max_fps=config.openrgb_max_fps,
+                    )
+                )
             except Exception:
                 logger.exception("Failed to connect to OpenRGB device {}", i)
 

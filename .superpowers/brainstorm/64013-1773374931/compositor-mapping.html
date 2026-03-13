@@ -1,0 +1,138 @@
+<h2>Spatial Mapping & Compositor</h2>
+<p class="subtitle">How 1D effect strips get projected onto 3D device positions</p>
+
+<div class="section">
+  <h3>SpatialMapping Protocol</h3>
+  <div class="mockup">
+    <div class="mockup-header">Stateless protocol — maps 3D positions to 0.0–1.0 strip indices</div>
+    <div class="mockup-body" style="padding: 24px; font-family: monospace; font-size: 13px; line-height: 1.7;">
+      <div><span style="color: #facc15;">class</span> <span style="color: #4ade80;">SpatialMapping</span>(Protocol):</div>
+      <div style="margin-left: 24px;"><span style="color: #facc15;">def</span> <span style="color: #818cf8;">map_positions</span>(</div>
+      <div style="margin-left: 48px;">self,</div>
+      <div style="margin-left: 48px;">positions: <span style="color: #818cf8;">NDArray[np.float64]</span>,  <span style="color: #6b7280;"># (N, 3) world coords</span></div>
+      <div style="margin-left: 48px;">time: <span style="color: #818cf8;">float</span>,  <span style="color: #6b7280;"># for animated mappings (rotation, etc.)</span></div>
+      <div style="margin-left: 24px;">) -> <span style="color: #818cf8;">NDArray[np.float64]</span>:  <span style="color: #6b7280;"># (N,) values in [0.0, 1.0]</span></div>
+      <div style="margin-left: 48px;">...</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Built-in Mappings</h3>
+  <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+    <!-- Linear -->
+    <div class="mockup" style="flex: 1; min-width: 280px;">
+      <div class="mockup-header">LinearMapping</div>
+      <div class="mockup-body" style="padding: 24px; text-align: center;">
+        <svg width="260" height="120" viewBox="0 0 260 120">
+          <!-- Room outline -->
+          <rect x="10" y="10" width="240" height="100" fill="none" stroke="#374151" stroke-width="1" rx="4"/>
+          <!-- Direction arrow -->
+          <defs><marker id="arrow1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#4ade80"/></marker></defs>
+          <line x1="20" y1="60" x2="240" y2="60" stroke="#4ade80" stroke-width="2" marker-end="url(#arrow1)" stroke-dasharray="6,4"/>
+          <!-- Devices colored by position -->
+          <circle cx="40" cy="35" r="8" fill="#3b82f6" opacity="0.9"/><text x="40" y="38" text-anchor="middle" fill="white" font-size="8">0.1</text>
+          <circle cx="100" cy="80" r="8" fill="#8b5cf6" opacity="0.9"/><text x="100" y="83" text-anchor="middle" fill="white" font-size="8">0.4</text>
+          <circle cx="180" cy="40" r="8" fill="#ec4899" opacity="0.9"/><text x="180" y="43" text-anchor="middle" fill="white" font-size="8">0.7</text>
+          <circle cx="230" cy="75" r="8" fill="#ef4444" opacity="0.9"/><text x="230" y="78" text-anchor="middle" fill="white" font-size="8">0.9</text>
+        </svg>
+        <div style="color: #9ca3af; font-size: 13px; margin-top: 8px;">
+          Projects positions onto a direction vector<br/>
+          <code style="background: #1f2937; padding: 2px 6px; border-radius: 4px; font-size: 12px;">dot(pos, direction) → normalized to [0, 1]</code>
+        </div>
+        <div style="color: #6b7280; font-size: 12px; margin-top: 8px;">
+          Params: <code>direction</code>, <code>origin</code> (optional)
+        </div>
+      </div>
+    </div>
+    <!-- Radial -->
+    <div class="mockup" style="flex: 1; min-width: 280px;">
+      <div class="mockup-header">RadialMapping</div>
+      <div class="mockup-body" style="padding: 24px; text-align: center;">
+        <svg width="260" height="120" viewBox="0 0 260 120">
+          <!-- Room outline -->
+          <rect x="10" y="10" width="240" height="100" fill="none" stroke="#374151" stroke-width="1" rx="4"/>
+          <!-- Radial rings -->
+          <circle cx="130" cy="60" r="20" fill="none" stroke="#4ade80" stroke-width="1" opacity="0.3"/>
+          <circle cx="130" cy="60" r="45" fill="none" stroke="#4ade80" stroke-width="1" opacity="0.3"/>
+          <circle cx="130" cy="60" r="70" fill="none" stroke="#4ade80" stroke-width="1" opacity="0.3"/>
+          <circle cx="130" cy="60" r="95" fill="none" stroke="#4ade80" stroke-width="1" opacity="0.3"/>
+          <!-- Center point -->
+          <circle cx="130" cy="60" r="4" fill="#4ade80"/>
+          <!-- Devices colored by distance -->
+          <circle cx="140" cy="50" r="8" fill="#3b82f6" opacity="0.9"/><text x="140" y="53" text-anchor="middle" fill="white" font-size="8">0.1</text>
+          <circle cx="85" cy="45" r="8" fill="#8b5cf6" opacity="0.9"/><text x="85" y="48" text-anchor="middle" fill="white" font-size="8">0.4</text>
+          <circle cx="200" cy="85" r="8" fill="#ec4899" opacity="0.9"/><text x="200" y="88" text-anchor="middle" fill="white" font-size="8">0.7</text>
+          <circle cx="40" cy="30" r="8" fill="#ef4444" opacity="0.9"/><text x="40" y="33" text-anchor="middle" fill="white" font-size="8">0.9</text>
+        </svg>
+        <div style="color: #9ca3af; font-size: 13px; margin-top: 8px;">
+          Distance from a center point<br/>
+          <code style="background: #1f2937; padding: 2px 6px; border-radius: 4px; font-size: 12px;">dist(pos, center) → normalized to [0, 1]</code>
+        </div>
+        <div style="color: #6b7280; font-size: 12px; margin-top: 8px;">
+          Params: <code>center</code>, <code>max_radius</code> (optional, auto from scene)
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Compositor Pipeline</h3>
+  <div class="mockup">
+    <div class="mockup-header">SpatialCompositor — per-device color sampling</div>
+    <div class="mockup-body" style="padding: 24px; font-family: monospace; font-size: 13px; line-height: 1.7;">
+      <div><span style="color: #facc15;">class</span> <span style="color: #4ade80;">SpatialCompositor</span>:</div>
+      <div style="margin-left: 24px;"><span style="color: #6b7280;"># Initialized once with scene data</span></div>
+      <div style="margin-left: 24px;">scene: <span style="color: #818cf8;">SceneModel</span></div>
+      <div style="margin-left: 24px;">mapping: <span style="color: #818cf8;">SpatialMapping</span></div>
+      <div style="margin-left: 24px;"><span style="color: #6b7280;"># Pre-computed at init:</span></div>
+      <div style="margin-left: 24px;">_led_positions: <span style="color: #818cf8;">dict[str, NDArray]</span>  <span style="color: #6b7280;"># device_id → (N, 3)</span></div>
+      <div style="margin-left: 24px;">_strip_indices: <span style="color: #818cf8;">dict[str, NDArray]</span>  <span style="color: #6b7280;"># device_id → (N,) cached mapping</span></div>
+      <br/>
+      <div style="margin-left: 24px;"><span style="color: #facc15;">def</span> <span style="color: #818cf8;">composite</span>(</div>
+      <div style="margin-left: 48px;">self,</div>
+      <div style="margin-left: 48px;">effect_strip: <span style="color: #818cf8;">NDArray[np.uint8]</span>,  <span style="color: #6b7280;"># (led_count, 3) from Effect.render()</span></div>
+      <div style="margin-left: 48px;">device_id: <span style="color: #818cf8;">str</span>,</div>
+      <div style="margin-left: 48px;">time: <span style="color: #818cf8;">float</span>,</div>
+      <div style="margin-left: 24px;">) -> <span style="color: #818cf8;">NDArray[np.uint8]</span>:  <span style="color: #6b7280;"># (device_led_count, 3)</span></div>
+      <div style="margin-left: 48px;"><span style="color: #6b7280;"># 1. Get cached strip indices for this device (or recompute if animated)</span></div>
+      <div style="margin-left: 48px;"><span style="color: #6b7280;"># 2. Sample effect_strip at those indices (numpy fancy indexing)</span></div>
+      <div style="margin-left: 48px;"><span style="color: #6b7280;"># 3. Return per-LED colors for this device</span></div>
+      <br/>
+      <div style="border-top: 1px solid #374151; padding-top: 12px; margin-top: 8px;">
+        <div style="color: #9ca3af; margin-bottom: 8px;">Sampling: indices map to strip positions via:</div>
+        <div style="margin-left: 24px;"><span style="color: #6b7280;"># strip_idx = mapping.map_positions(led_positions, time)  → [0.0, 1.0]</span></div>
+        <div style="margin-left: 24px;"><span style="color: #6b7280;"># pixel_idx = (strip_idx * (strip_len - 1)).astype(int)</span></div>
+        <div style="margin-left: 24px;"><span style="color: #6b7280;"># colors = effect_strip[pixel_idx]  → (N, 3)</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Integration with Scheduler</h3>
+  <div class="mockup">
+    <div class="mockup-header">Where compositing happens in the per-device send loop</div>
+    <div class="mockup-body" style="padding: 24px; font-size: 14px; line-height: 1.8;">
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="background: #374151; color: #9ca3af; padding: 6px 12px; border-radius: 4px; min-width: 40px; text-align: center;">1</div>
+          <div style="color: #d1d5db;">Per-device send loop picks frame from ring buffer (unchanged)</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="background: #16a34a; color: white; padding: 6px 12px; border-radius: 4px; min-width: 40px; text-align: center; font-weight: bold;">2</div>
+          <div style="color: #4ade80; font-weight: bold;">NEW: compositor.composite(frame.colors, device_id, time)</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="background: #374151; color: #9ca3af; padding: 6px 12px; border-radius: 4px; min-width: 40px; text-align: center;">3</div>
+          <div style="color: #d1d5db;">Send per-device colors to adapter (unchanged)</div>
+        </div>
+      </div>
+      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #374151; color: #6b7280; font-size: 13px;">
+        Compositing is a single numpy indexing operation — sub-microsecond for typical device sizes.
+        <br/>No spatial config? Compositor is <code>None</code>, send loop falls back to current broadcast behavior.
+      </div>
+    </div>
+  </div>
+</div>

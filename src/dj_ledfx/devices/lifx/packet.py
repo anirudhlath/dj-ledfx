@@ -41,16 +41,16 @@ class LifxPacket:
 
         header = struct.pack(
             "<HHI8s6sBB8sHH",
-            size,                    # 0-1: size
-            flags,                   # 2-3: flags
-            self.source,             # 4-7: source
-            self.target,             # 8-15: target
-            b"\x00" * 6,            # 16-21: reserved
-            ack_res,                 # 22: ack/res flags
-            self.sequence & 0xFF,    # 23: sequence
-            b"\x00" * 8,            # 24-31: reserved
-            self.msg_type,           # 32-33: type
-            0,                       # 34-35: reserved
+            size,  # 0-1: size
+            flags,  # 2-3: flags
+            self.source,  # 4-7: source
+            self.target,  # 8-15: target
+            b"\x00" * 6,  # 16-21: reserved
+            ack_res,  # 22: ack/res flags
+            self.sequence & 0xFF,  # 23: sequence
+            b"\x00" * 8,  # 24-31: reserved
+            self.msg_type,  # 32-33: type
+            0,  # 34-35: reserved
         )
         return header + self.payload
 
@@ -59,8 +59,16 @@ class LifxPacket:
         if len(data) < HEADER_SIZE:
             raise ValueError(f"Packet too short: {len(data)} < {HEADER_SIZE}")
         (
-            size, flags, source, target, _reserved,
-            ack_res, sequence, _reserved2, msg_type, _reserved3,
+            size,
+            flags,
+            source,
+            target,
+            _reserved,
+            ack_res,
+            sequence,
+            _reserved2,
+            msg_type,
+            _reserved3,
         ) = struct.unpack("<HHI8s6sBB8sHH", data[:HEADER_SIZE])
         return cls(
             tagged=bool(flags & 0x2000),
@@ -245,7 +253,8 @@ def rgb_array_to_hsbk(
     hue[mask_b] = 60.0 * (((r[mask_b] - g[mask_b]) / delta[mask_b]) + 4)
 
     # Saturation
-    sat = np.where(cmax > 0, delta / cmax, 0.0)
+    with np.errstate(invalid="ignore"):
+        sat = np.where(cmax > 0, delta / cmax, 0.0)
 
     # Build output
     result = np.zeros((len(colors), 4), dtype=np.uint16)
