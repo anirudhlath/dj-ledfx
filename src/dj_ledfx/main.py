@@ -4,11 +4,13 @@ import argparse
 import asyncio
 import signal
 import sys
+import time
 from pathlib import Path
 
 from loguru import logger
 
 import dj_ledfx.devices  # noqa: F401  # triggers backend auto-registration
+from dj_ledfx import metrics
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
 from dj_ledfx.config import load_config
@@ -57,11 +59,13 @@ def _parse_args() -> argparse.Namespace:
 
 async def _run(args: argparse.Namespace) -> None:
     config = load_config(args.config)
+    metrics.init(enabled=args.metrics, port=args.metrics_port)
 
     event_bus = EventBus()
     clock = BeatClock()
 
     def on_beat(event: BeatEvent) -> None:
+        metrics.BEATS_RECEIVED.inc()
         clock.on_beat(
             bpm=event.bpm,
             beat_number=event.beat_position,
@@ -109,6 +113,14 @@ async def _run(args: argparse.Namespace) -> None:
 
     stop_event = asyncio.Event()
 
+    async def _event_loop_lag_loop() -> None:
+        interval = 0.1
+        while not stop_event.is_set():
+            t0 = time.monotonic()
+            await asyncio.sleep(interval)
+            lag = time.monotonic() - t0 - interval
+            metrics.EVENT_LOOP_LAG.observe(max(0.0, lag))
+
     def _signal_handler() -> None:
         logger.info("Shutdown signal received")
         stop_event.set()
@@ -133,6 +145,7 @@ async def _run(args: argparse.Namespace) -> None:
                 avg_frame_render_time_ms=engine.avg_render_time_ms,
                 device_stats=scheduler.get_device_stats(),
             )
+            metrics.RING_BUFFER_DEPTH.set(engine.ring_buffer.fill_level)
             summary = status.summary()
             await asyncio.to_thread(logger.info, "Status: {}", summary)
             try:
@@ -141,6 +154,8 @@ async def _run(args: argparse.Namespace) -> None:
                 pass
 
     tasks.append(asyncio.create_task(_status_loop()))
+    if args.metrics:
+        tasks.append(asyncio.create_task(_event_loop_lag_loop()))
 
     logger.info("dj-ledfx started")
     await stop_event.wait()
