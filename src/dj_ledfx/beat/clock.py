@@ -4,6 +4,7 @@ import time
 
 from loguru import logger
 
+from dj_ledfx import metrics
 from dj_ledfx.types import BeatState
 
 _DRIFT_HARD_SNAP_MS = 5.0
@@ -51,6 +52,8 @@ class BeatClock:
         self._last_beat_number = beat_number
         self._last_packet_time = timestamp
         self._is_playing = True
+        metrics.BEAT_BPM.set(bpm)
+        metrics.BEAT_PHASE.set((self._last_beat_number - 1) / 4.0)
 
     def get_state(self) -> BeatState:
         return self.get_state_at(time.monotonic())

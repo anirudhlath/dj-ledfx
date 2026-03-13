@@ -5,6 +5,7 @@ import time
 
 from loguru import logger
 
+from dj_ledfx import metrics
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.types import RenderedFrame
@@ -97,6 +98,8 @@ class EffectEngine:
             led_count=self._led_count,
         )
         render_elapsed = time.monotonic() - render_start
+        metrics.RENDER_DURATION.observe(render_elapsed)
+        metrics.FRAMES_RENDERED.inc()
 
         self._render_times.append(render_elapsed)
         if len(self._render_times) > 600:
@@ -116,6 +119,7 @@ class EffectEngine:
 
     async def run(self) -> None:
         self._running = True
+        metrics.RENDER_FPS.set(self._fps)
         self._last_tick_time = time.monotonic()
         logger.info(
             "EffectEngine started: {}fps, {}ms lookahead, {} LEDs",
