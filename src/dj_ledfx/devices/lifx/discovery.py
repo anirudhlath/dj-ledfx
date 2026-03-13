@@ -36,9 +36,17 @@ class LifxBackend(DeviceBackend):
 
         results: list[DiscoveredDevice] = []
         for record in records:
-            adapter = await self._create_adapter(record, config)
-            tracker = self._create_tracker(config)
-            await adapter.connect()
+            try:
+                adapter = await self._create_adapter(record, config)
+                tracker = self._create_tracker(config)
+                await adapter.connect()
+            except Exception:
+                logger.exception(
+                    "Failed to set up LIFX device {} (product={})",
+                    record.ip,
+                    record.product,
+                )
+                continue
 
             # Register for RTT probing
             self._transport.register_device(

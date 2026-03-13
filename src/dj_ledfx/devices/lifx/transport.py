@@ -218,7 +218,13 @@ class LifxTransport:
             finally:
                 self._on_packet_received = original_handler  # type: ignore[method-assign]
 
-            vendor, product, _version = version_responses[0] if version_responses else (1, 0, 0)
+            if version_responses:
+                vendor, product, _version = version_responses[0]
+            else:
+                logger.warning(
+                    "LIFX device {} did not respond to GetVersion, defaulting to bulb", ip
+                )
+                vendor, product, _version = 1, 0, 0
             results.append(
                 LifxDeviceRecord(
                     mac=mac,
