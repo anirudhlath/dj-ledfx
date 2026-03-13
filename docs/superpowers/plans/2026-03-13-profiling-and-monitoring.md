@@ -769,22 +769,12 @@ In `tick()` method, after `render_elapsed = time.monotonic() - render_start` (li
         metrics.FRAMES_RENDERED.inc()
 ```
 
-In the `run()` method, inside the `while self._running:` loop, after `self.tick(now)`, add actual realized FPS tracking:
+At the start of the `run()` method (after `self._running = True`), set the target FPS gauge once:
 ```python
-            if self._render_times:
-                avg_render = sum(self._render_times[-60:]) / min(len(self._render_times), 60)
-                if avg_render > 0:
-                    metrics.RENDER_FPS.set(min(self._fps, 1.0 / (avg_render + (self._frame_period - avg_render))))
-                else:
-                    metrics.RENDER_FPS.set(self._fps)
+        metrics.RENDER_FPS.set(self._fps)
 ```
 
-Actually, the simplest accurate approach: use `FRAMES_RENDERED` counter and compute actual FPS via `rate(ledfx_frames_rendered_total[30s])` in PromQL/Grafana. So instead, just set the configured target FPS as a reference line:
-```python
-            metrics.RENDER_FPS.set(self._fps)
-```
-
-This gives the target FPS; actual FPS is derived from `rate(ledfx_frames_rendered_total[30s])` in Grafana queries. Both are useful.
+This reports the configured target FPS as a reference. Actual realized FPS is derived in Grafana via `rate(ledfx_frames_rendered_total[30s])`.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -835,7 +825,7 @@ After the send count increment, add device latency and FPS update:
             metrics.DEVICE_LATENCY.labels(device=device_name).set(
                 device.tracker.effective_latency_s
             )
-            metrics.DEVICE_FPS.labels(device=device_name).set(1.0 / device.max_fps)
+            metrics.DEVICE_FPS.labels(device=device_name).set(device.max_fps)
 ```
 
 Note: Like RENDER_FPS, DEVICE_FPS reports the target cap. Actual realized FPS can be derived in Grafana via `rate(ledfx_device_send_duration_seconds_count{device="..."}[30s])`.
