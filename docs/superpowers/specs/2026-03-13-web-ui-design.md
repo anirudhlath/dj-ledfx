@@ -128,16 +128,20 @@ A single WebSocket connection at `ws://host:port/ws` with multiplexed channels.
 ```json
 { "ch": "beat", "d": { "bpm": 128.0, "beat_phase": 0.73, "bar_phase": 0.43, "is_playing": true, "beat_pos": 3, "pitch_percent": 2.3, "deck_number": 1, "deck_name": "XDJ-AZ" }}
 { "ch": "stats", "d": { "devices": [{ "device_name": "shelf_strip", "send_fps": 42.1, "effective_latency_ms": 52.3, "frames_dropped": 0, "connected": true }] }}
-{ "ch": "status", "d": { "buffer_fill": 0.95, "render_ms": 0.3, "player_count": 1, "engine_fps": 60 }}
+{ "ch": "status", "d": { "buffer_fill": 0.95, "render_ms": 0.3, "player_count": 1, "engine_fps": 59.8 }}
 { "ch": "ack", "id": "cmd-123", "ok": true }
 { "ch": "error", "id": "cmd-123", "msg": "Unknown effect: foo" }
 ```
 
-**Beat channel field mapping:** `BeatState` provides `beat_phase`, `bar_phase`, `bpm`, `is_playing`. Additional fields require expanding `BeatClock`:
+**Beat channel field mapping:** `BeatState` provides `beat_phase`, `bar_phase`, `bpm`, `is_playing`. The `next_beat_time` field from `BeatState` is intentionally omitted from the WS beat channel — it's a monotonic clock timestamp meaningful only to the server, not the browser. The client derives timing from `beat_phase` interpolation instead. Additional fields require expanding both `BeatEvent` and `BeatClock`:
 - `beat_pos` (1-4): Derived from `bar_phase` as `floor(bar_phase * 4) + 1`, clamped to [1,4].
-- `pitch_percent`, `deck_number`, `deck_name`: Stored on `BeatClock` from the last `BeatEvent` received via `on_beat()`. Added as optional properties on `BeatClock` (default `None` when no beat received yet).
+- `pitch_percent`: Must be added to `BeatEvent` (extracted from beat packet in `parse_beat_packet()`). CDJ-3000 beat packets carry raw pitch data. In passive mode (port 50001 only), this is the pitch value as reported in the beat packet — no separate track-BPM vs adjusted-BPM calculation is available without status packets on port 50002.
+- `deck_number`, `deck_name`: Mapped from `BeatEvent.device_number` and `BeatEvent.device_name` respectively.
+- All three are stored on `BeatClock` via an extended `on_beat()` signature (see Section 15.1). Added as optional properties on `BeatClock` (default `None` when no beat received yet).
 
 **Stats channel field mapping:** Field names match `DeviceStats` dataclass (`device_name`, `send_fps`, `effective_latency_ms`, `frames_dropped`). The `connected` field is added to `DeviceStats`.
+
+**Status channel field mapping:** WS field names are intentional short aliases of `SystemStatus` fields: `buffer_fill` ← `buffer_fill_level`, `render_ms` ← `avg_frame_render_time_ms`, `player_count` ← `active_player_count`. The `engine_fps` field is the actual measured render FPS (add to `SystemStatus` — track via EMA in `EffectEngine`, since configured FPS and achieved FPS may differ).
 
 **JSON messages (client → server):**
 ```json
@@ -173,7 +177,7 @@ Per-device "last sent" snapshot slots replace push-based frame streaming. Zero h
 
 **Mechanism:**
 1. `LookaheadScheduler._send_loop` already copies the frame before calling `adapter.send_frame(colors)`.
-2. After a successful send, the send loop writes: `self._frame_snapshots[device_id] = (colors, time.monotonic())`
+2. After a successful send, the send loop writes: `self._frame_snapshots[device_name] = (colors, time.monotonic())`
 3. The WebSocket handler runs a separate polling loop at the client's requested FPS. Each tick: read all subscribed device snapshot slots, compare timestamps to last-sent, serialize and send only changed frames.
 
 **Safety:** Python reference assignment is atomic under the GIL. The WS handler either reads the old or new reference, never a torn state. The colors array is already copied (for the device thread), so no mutation risk.
@@ -219,10 +223,10 @@ POST   /api/presets/{name}/load  # Load preset (applies to active deck)
 ```
 GET    /api/devices                    # List all managed devices + stats
 POST   /api/devices/discover           # Trigger device discovery scan
-POST   /api/devices/{id}/identify      # Flash physical device for 3 seconds
-PUT    /api/devices/{id}/latency       # Update latency config
+POST   /api/devices/{name}/identify      # Flash physical device for 3 seconds
+PUT    /api/devices/{name}/latency       # Update latency config
   Body: { "strategy": "ema", "manual_offset_ms": 5.0 }
-PUT    /api/devices/{id}/group         # Assign device to group
+PUT    /api/devices/{name}/group         # Assign device to group
   Body: { "group": "dj_booth" }
 GET    /api/devices/groups             # List all device groups
 POST   /api/devices/groups             # Create group
@@ -238,9 +242,9 @@ GET    /api/scene                      # Current scene model (placements + mappi
 PUT    /api/scene/mapping              # Update spatial mapping config
   Body: { "type": "linear", "params": { "direction": [1,0,0] } }
 GET    /api/scene/devices              # List device placements with LED positions
-PUT    /api/scene/devices/{id}         # Add/update device placement
+PUT    /api/scene/devices/{name}         # Add/update device placement
   Body: { "position": [1.0, 0.0, 1.5], "geometry": "matrix", "group": "dj_booth" }
-DELETE /api/scene/devices/{id}         # Remove device from scene
+DELETE /api/scene/devices/{name}         # Remove device from scene
 ```
 
 ### 3.5 Config Endpoints
@@ -257,7 +261,7 @@ POST   /api/config/import              # Upload TOML to apply
 
 All endpoints return JSON. Errors use standard HTTP status codes with body:
 ```json
-{ "error": "Device not found", "detail": "No device with id 'foo'" }
+{ "error": "Device not found", "detail": "No device with name 'foo'" }
 ```
 
 ---
@@ -306,6 +310,22 @@ class Effect(ABC):
         unknown keys or out-of-range values. Clamping is NOT done — the caller
         (REST layer) should validate before calling, but set_params is the
         authoritative validation point."""
+        schema = self.parameters()
+        for key, value in kwargs.items():
+            if key not in schema:
+                raise ValueError(f"Unknown parameter: {key}")
+            param = schema[key]
+            if param.type in ("float", "int"):
+                if param.min is not None and value < param.min:
+                    raise ValueError(f"{key}={value} below min {param.min}")
+                if param.max is not None and value > param.max:
+                    raise ValueError(f"{key}={value} above max {param.max}")
+            if param.type == "choice" and value not in (param.choices or []):
+                raise ValueError(f"{key}={value} not in {param.choices}")
+        self._apply_params(**kwargs)
+
+    def _apply_params(self, **kwargs: Any) -> None:
+        """Subclass hook: apply validated parameters. Override in subclasses."""
         ...
 
     @abstractmethod
@@ -327,7 +347,7 @@ class BeatPulse(Effect):
     def get_params(self) -> dict[str, Any]:
         return {"gamma": self._gamma, "palette": [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in self._palette]}
 
-    def set_params(self, **kwargs: Any) -> None:
+    def _apply_params(self, **kwargs: Any) -> None:
         if "gamma" in kwargs:
             self._gamma = float(kwargs["gamma"])
         if "palette" in kwargs:
@@ -369,6 +389,8 @@ def create_effect(name: str, **params: Any) -> Effect:
     return cls(**params)
 ```
 
+**Constructor contract:** Effect constructor keyword argument names MUST match the keys in `parameters()`. The registry's `create_effect()` passes params directly as `cls(**params)`.
+
 Effect names are derived by converting the class name to snake_case: `BeatPulse` → `"beat_pulse"`, `RainbowWave` → `"rainbow_wave"`. This matches the existing `active_effect` config key convention.
 
 The REST API `/api/effects` returns the full schema for all effects, enabling the frontend to auto-generate parameter controls (sliders for floats, color pickers for colors, etc.).
@@ -402,7 +424,7 @@ class EffectDeck:
         return self._effect.render(beat_phase, bar_phase, dt, led_count)
 ```
 
-**Integration:** `EffectEngine` calls `deck.render()` instead of `effect.render()`. The deck reference is passed to the web API layer for effect switching.
+**Integration:** `EffectEngine.__init__` signature changes from `effect: Effect` to `deck: EffectDeck`. Internally, `EffectEngine.render()` calls `self._deck.render()` instead of `self._effect.render()`. The deck reference is passed to both `EffectEngine` and the web API layer (`create_app()`) — the single `EffectDeck` instance is shared.
 
 **Hot-swap behavior:** When the effect is swapped, the ring buffer still contains frames rendered by the old effect (up to `max_lookahead_s` of future frames). High-latency devices will display old-effect frames until the buffer cycles. This is acceptable — a ~1 second transition at worst. No crossfade needed for MVP.
 
@@ -516,8 +538,8 @@ LED colors come from the frame snapshot WebSocket channel. The scene editor subs
 ### 8.3 Interactions
 
 - **Click** to select a device in the viewport or the device list (bi-directional selection sync)
-- **Drag** (TransformControls) to reposition devices — updates position in real-time, sends `PUT /api/scene/devices/{id}` on mouse-up
-- **Identify** button flashes the physical device via `POST /api/devices/{id}/identify`
+- **Drag** (TransformControls) to reposition devices — updates position in real-time, sends `PUT /api/scene/devices/{name}` on mouse-up
+- **Identify** button flashes the physical device via `POST /api/devices/{name}/identify`
 - **Add to scene** — drag from "Unplaced" list into the viewport, or click "Add" which places at origin
 
 ---
@@ -778,8 +800,10 @@ Scene editor and config views redirect to a "use a larger screen" message on mob
 | File | Change |
 |------|--------|
 | `main.py` | Add `--web`, `--web-port`, `--web-host`, `--web-static-dir` args. Conditionally import and start web server. Create `EffectDeck` and pass to both `EffectEngine` and `create_app()`. |
-| `config.py` | Add `[web]` config section: `enabled`, `host`, `port`, `static_dir`, `cors_origins`. Add `save_config()` function with atomic write. |
-| `beat/clock.py` | Add `pitch_percent`, `last_deck_number`, `last_deck_name` properties. Store from last `BeatEvent` in `on_beat()`. |
+| `config.py` | Refactor `AppConfig` from flat fields to nested dataclasses: `EngineConfig` (`engine_fps`, `max_lookahead_s`), `EffectConfig` (`active_effect`, `led_count`), `NetworkConfig` (`interface`, `passive_mode`), `WebConfig` (`enabled`, `host`, `port`, `static_dir`, `cors_origins`), `DevicesConfig` (per-backend settings). Each maps to a TOML section (`[engine]`, `[effect]`, `[network]`, `[web]`, `[devices]`). The REST config PUT body mirrors this nested structure. Add `save_config()` function with atomic write via `tomli_w`. |
+| `events.py` | Add `pitch_percent: float` field to `BeatEvent` dataclass. |
+| `prodjlink/listener.py` | Pass `BeatPacket.pitch_percent` through to `BeatEvent` in `datagram_received()` (the packet parser already extracts it into `BeatPacket`). |
+| `beat/clock.py` | Extend `on_beat()` signature to accept `pitch_percent: float | None = None`, `device_number: int | None = None`, `device_name: str | None = None`. Add corresponding read-only properties. Update `main.py`'s `on_beat` wrapper to forward these fields from `BeatEvent`. |
 | `types.py` | Add `connected: bool` field to `DeviceStats`. |
 | `effects/base.py` | Add `_registry` classvar, `__init_subclass__`, `parameters()` classmethod, `get_params()`, `set_params()` to Effect ABC. |
 | `effects/beat_pulse.py` | Implement `parameters()`, `get_params()`, `set_params()`. |
