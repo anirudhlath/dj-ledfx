@@ -2,25 +2,26 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 
-def build_scan_message() -> dict:
+def build_scan_message() -> dict[str, Any]:
     return {"msg": {"cmd": "scan", "data": {"account_topic": "reserve"}}}
 
 
-def build_turn_message(on: bool) -> dict:
+def build_turn_message(on: bool) -> dict[str, Any]:
     return {"msg": {"cmd": "turn", "data": {"value": 1 if on else 0}}}
 
 
-def build_brightness_message(value: int) -> dict:
+def build_brightness_message(value: int) -> dict[str, Any]:
     clamped = max(1, min(100, value))
     return {"msg": {"cmd": "brightness", "data": {"value": clamped}}}
 
 
-def build_solid_color_message(r: int, g: int, b: int) -> dict:
+def build_solid_color_message(r: int, g: int, b: int) -> dict[str, Any]:
     return {
         "msg": {
             "cmd": "colorwc",
@@ -29,7 +30,7 @@ def build_solid_color_message(r: int, g: int, b: int) -> dict:
     }
 
 
-def build_status_query() -> dict:
+def build_status_query() -> dict[str, Any]:
     return {"msg": {"cmd": "devStatus", "data": {}}}
 
 
@@ -67,7 +68,7 @@ def build_segment_color_packet(r: int, g: int, b: int, segment_mask: bytes) -> b
     return build_ble_packet(0x05, 0x0B, payload)
 
 
-def build_pt_real_message(ble_packets: Sequence[bytes]) -> dict:
+def build_pt_real_message(ble_packets: Sequence[bytes]) -> dict[str, Any]:
     encoded = [base64.b64encode(pkt).decode("ascii") for pkt in ble_packets]
     return {"msg": {"cmd": "ptReal", "data": {"command": encoded}}}
 

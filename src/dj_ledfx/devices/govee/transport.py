@@ -27,12 +27,12 @@ class GoveeTransport:
         self._probe_task: asyncio.Task[None] | None = None
 
         # Response routing: cmd → handler
-        self._cmd_handlers: dict[str, Callable[[dict, tuple[str, int]], None]] = {}
+        self._cmd_handlers: dict[str, Callable[[dict[str, Any], tuple[str, int]], None]] = {}
         # Registered devices for probing
         self._devices: dict[str, GoveeDeviceRecord] = {}  # ip → record
         self._rtt_callbacks: dict[str, Callable[[float], None]] = {}  # ip → callback
         # Pending status queries: ip → (event, result_container)
-        self._pending_status: dict[str, tuple[asyncio.Event, list[dict]]] = {}
+        self._pending_status: dict[str, tuple[asyncio.Event, list[dict[str, Any]]]] = {}
         # Probe RTT tracking: ip → send_time (monotonic)
         self._probe_times: dict[str, float] = {}
 
@@ -79,7 +79,7 @@ class GoveeTransport:
         self._cmd_handlers.clear()
         logger.debug("Govee transport closed")
 
-    async def send_command(self, ip: str, payload: dict) -> None:
+    async def send_command(self, ip: str, payload: dict[str, Any]) -> None:
         if self._send_transport:
             data = json.dumps(payload).encode("utf-8")
             self._send_transport.sendto(data, (ip, COMMAND_PORT))
@@ -87,7 +87,7 @@ class GoveeTransport:
     async def discover(self, timeout_s: float = 5.0) -> list[GoveeDeviceRecord]:
         discovered: dict[str, GoveeDeviceRecord] = {}  # device_id → record
 
-        def _scan_handler(msg_data: dict, addr: tuple[str, int]) -> None:
+        def _scan_handler(msg_data: dict[str, Any], addr: tuple[str, int]) -> None:
             data = msg_data.get("data", {})
             device_id = data.get("device", "")
             if device_id and device_id not in discovered:
@@ -122,9 +122,9 @@ class GoveeTransport:
         logger.info("Govee discovery found {} devices", len(discovered))
         return list(discovered.values())
 
-    async def query_status(self, ip: str, timeout_s: float = 2.0) -> dict | None:
+    async def query_status(self, ip: str, timeout_s: float = 2.0) -> dict[str, Any] | None:
         event = asyncio.Event()
-        result: list[dict] = []
+        result: list[dict[str, Any]] = []
         self._pending_status[ip] = (event, result)
 
         try:
@@ -183,7 +183,7 @@ class GoveeTransport:
         if cmd == "devStatus":
             self._handle_status_response(inner, addr)
 
-    def _handle_status_response(self, msg: dict, addr: tuple[str, int]) -> None:
+    def _handle_status_response(self, msg: dict[str, Any], addr: tuple[str, int]) -> None:
         ip = addr[0]
 
         # Check pending query_status calls first
