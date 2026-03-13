@@ -54,6 +54,21 @@ class TestGoveeSolidAdapter:
         mock_transport.query_status.assert_awaited_once_with(record.ip)
 
     @pytest.mark.asyncio
+    async def test_connect_turns_on_if_off(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        mock_transport.query_status = AsyncMock(return_value={"onOff": 0})
+        adapter = GoveeSolidAdapter(mock_transport, record)
+        await adapter.connect()
+        # Should have sent turn(on) and brightness(100)
+        calls = mock_transport.send_command.call_args_list
+        turn_call = calls[0][0][1]
+        assert turn_call["msg"]["cmd"] == "turn"
+        assert turn_call["msg"]["data"]["value"] == 1
+        brightness_call = calls[1][0][1]
+        assert brightness_call["msg"]["cmd"] == "brightness"
+
+    @pytest.mark.asyncio
     async def test_connect_raises_on_unreachable(
         self, mock_transport: MagicMock, record: GoveeDeviceRecord
     ) -> None:
@@ -76,6 +91,7 @@ class TestGoveeSolidAdapter:
     ) -> None:
         adapter = GoveeSolidAdapter(mock_transport, record)
         await adapter.connect()
+        mock_transport.send_command.reset_mock()
 
         colors = np.array([[255, 128, 0], [0, 0, 0]], dtype=np.uint8)
         await adapter.send_frame(colors)

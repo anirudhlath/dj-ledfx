@@ -22,9 +22,16 @@ class GoveeBackend(DeviceBackend):
 
     async def discover(self, config: AppConfig) -> list[DiscoveredDevice]:
         self._transport = GoveeTransport()
-        await self._transport.open()
+        try:
+            await self._transport.open()
+        except OSError:
+            logger.exception("Failed to open Govee transport (port 4002 in use?)")
+            self._transport = None
+            return []
 
         records = await self._transport.discover(timeout_s=config.govee_discovery_timeout_s)
+        if not records:
+            logger.info("No Govee devices found — ensure LAN control is enabled in Govee app")
 
         results: list[DiscoveredDevice] = []
         for record in records:
@@ -38,8 +45,19 @@ class GoveeBackend(DeviceBackend):
                     adapter: GoveeSegmentAdapter | GoveeSolidAdapter = GoveeSegmentAdapter(
                         self._transport, record, num_segments=segment_count
                     )
+                    logger.info(
+                        "Govee {} at {} → segment adapter ({} segments)",
+                        record.sku,
+                        record.ip,
+                        segment_count,
+                    )
                 else:
                     adapter = GoveeSolidAdapter(self._transport, record)
+                    logger.info(
+                        "Govee {} at {} → solid adapter",
+                        record.sku,
+                        record.ip,
+                    )
 
                 await adapter.connect()
                 tracker = self._create_tracker(config)

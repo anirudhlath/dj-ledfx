@@ -59,6 +59,7 @@ class TestGoveeBackend:
             mock_transport.open = AsyncMock()
             mock_transport.discover = AsyncMock(return_value=[rgbic_record])
             mock_transport.query_status = AsyncMock(return_value={"onOff": 1})
+            mock_transport.send_command = AsyncMock()
             mock_transport.register_device = MagicMock()
             mock_transport.start_probing = MagicMock()
             MockTransport.return_value = mock_transport
@@ -79,6 +80,7 @@ class TestGoveeBackend:
             mock_transport.open = AsyncMock()
             mock_transport.discover = AsyncMock(return_value=[unknown_record])
             mock_transport.query_status = AsyncMock(return_value={"onOff": 1})
+            mock_transport.send_command = AsyncMock()
             mock_transport.register_device = MagicMock()
             mock_transport.start_probing = MagicMock()
             MockTransport.return_value = mock_transport

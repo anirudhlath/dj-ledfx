@@ -62,6 +62,7 @@ class TestGoveeSegmentAdapter:
     ) -> None:
         adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=3)
         await adapter.connect()
+        mock_transport.send_command.reset_mock()
 
         colors = np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255]], dtype=np.uint8)
         await adapter.send_frame(colors)
@@ -89,6 +90,7 @@ class TestGoveeSegmentAdapter:
         """6 LEDs → 3 segments = downsampled."""
         adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=3)
         await adapter.connect()
+        mock_transport.send_command.reset_mock()
 
         colors = np.array(
             [[200, 0, 0], [100, 0, 0], [0, 200, 0], [0, 100, 0], [0, 0, 200], [0, 0, 100]],

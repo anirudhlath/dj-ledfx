@@ -8,8 +8,10 @@ from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.govee.protocol import (
+    build_brightness_message,
     build_pt_real_message,
     build_segment_color_packet,
+    build_turn_message,
     encode_segment_mask,
     map_colors_to_segments,
 )
@@ -53,6 +55,11 @@ class GoveeSegmentAdapter(DeviceAdapter):
         if status is None:
             msg = f"Govee device {self._record.ip} ({self._record.sku}) not reachable"
             raise ConnectionError(msg)
+        # Ensure device is on and at full brightness for LED effects
+        if not status.get("onOff"):
+            logger.info("Turning on Govee device {}", self._record.ip)
+            await self._transport.send_command(self._record.ip, build_turn_message(on=True))
+        await self._transport.send_command(self._record.ip, build_brightness_message(100))
         self._is_connected = True
 
     async def disconnect(self) -> None:
