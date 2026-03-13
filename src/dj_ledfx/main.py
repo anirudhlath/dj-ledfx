@@ -35,6 +35,23 @@ def _parse_args() -> argparse.Namespace:
         help="Log level",
     )
     parser.add_argument("--bpm", type=float, default=128.0, help="Demo mode BPM")
+    parser.add_argument(
+        "--profile",
+        nargs="?",
+        const="sampling",
+        default=None,
+        choices=["sampling", "deep"],
+        help="Enable profiling: 'sampling' (default, py-spy) or 'deep' (VizTracer)",
+    )
+    parser.add_argument(
+        "--metrics", action="store_true", help="Enable Prometheus metrics endpoint"
+    )
+    parser.add_argument(
+        "--metrics-port",
+        type=int,
+        default=9091,
+        help="Prometheus metrics port (default: 9091)",
+    )
     return parser.parse_args()
 
 
