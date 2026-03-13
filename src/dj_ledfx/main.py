@@ -166,10 +166,45 @@ def main() -> None:
     logger.remove()
     logger.add(sys.stderr, level=args.log_level)
 
-    try:
-        asyncio.run(_run(args))
-    except KeyboardInterrupt:
-        pass
+    if args.profile == "deep":
+        from datetime import datetime
+        from pathlib import Path
+
+        try:
+            from viztracer import VizTracer
+        except ImportError:
+            logger.error(
+                "VizTracer not installed. Install with: uv pip install viztracer"
+            )
+            sys.exit(1)
+
+        profiles_dir = Path("profiles")
+        profiles_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        output_path = profiles_dir / f"profile-{timestamp}.json"
+
+        tracer = VizTracer(
+            tracer_entries=1_000_000,
+            include_files=["*/dj_ledfx/*"],
+            min_duration=50,
+            log_async=True,
+        )
+        tracer.start()
+        try:
+            asyncio.run(_run(args))
+        except KeyboardInterrupt:
+            pass
+        finally:
+            tracer.stop()
+            tracer.save(str(output_path))
+            logger.info("VizTracer profile saved to {}", output_path)
+            print(f"\nProfile saved to: {output_path}")
+            print("Open at: https://ui.perfetto.dev/ (load local file)")
+    else:
+        try:
+            asyncio.run(_run(args))
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":
