@@ -99,3 +99,36 @@ def test_load_config_new_toml_fields(tmp_path: Path) -> None:
     assert config.openrgb_max_fps == 30
     assert config.openrgb_latency_window_size == 120
     assert config.openrgb_latency_strategy == "ema"
+
+
+def test_lifx_config_defaults() -> None:
+    config = AppConfig()
+    assert config.lifx_enabled is True
+    assert config.lifx_default_kelvin == 3500
+    assert config.lifx_max_fps == 30
+    assert config.lifx_latency_strategy == "ema"
+    assert config.lifx_echo_probe_interval_s == 2.0
+
+
+def test_lifx_config_validation_bad_kelvin() -> None:
+    with pytest.raises(ValueError, match="lifx_default_kelvin"):
+        AppConfig(lifx_default_kelvin=1000)
+
+
+def test_lifx_config_validation_bad_strategy() -> None:
+    with pytest.raises(ValueError, match="lifx_latency_strategy"):
+        AppConfig(lifx_latency_strategy="invalid")
+
+
+def test_lifx_config_negative_offset_allowed() -> None:
+    config = AppConfig(lifx_manual_offset_ms=-10.0)
+    assert config.lifx_manual_offset_ms == -10.0
+
+
+def test_lifx_config_from_toml(tmp_path: Path) -> None:
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text('[devices.lifx]\nenabled = false\nmax_fps = 20\ndefault_kelvin = 4000\n')
+    config = load_config(toml_file)
+    assert config.lifx_enabled is False
+    assert config.lifx_max_fps == 20
+    assert config.lifx_default_kelvin == 4000
