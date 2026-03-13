@@ -11,6 +11,7 @@ from dj_ledfx.devices.govee.protocol import (
     build_brightness_message,
     build_pt_real_message,
     build_segment_color_packet,
+    build_solid_color_message,
     build_turn_message,
     encode_segment_mask,
     map_colors_to_segments,
@@ -26,11 +27,17 @@ class GoveeSegmentAdapter(DeviceAdapter):
     supports_latency_probing = False
 
     def __init__(
-        self, transport: GoveeTransport, record: GoveeDeviceRecord, num_segments: int
+        self,
+        transport: GoveeTransport,
+        record: GoveeDeviceRecord,
+        num_segments: int,
+        *,
+        use_pt_real: bool = False,
     ) -> None:
         self._transport = transport
         self._record = record
         self._num_segments = num_segments
+        self._use_pt_real = use_pt_real
         self._is_connected = False
 
     @property
@@ -68,12 +75,17 @@ class GoveeSegmentAdapter(DeviceAdapter):
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         segment_colors = map_colors_to_segments(colors, self._num_segments)
 
-        ble_packets: list[bytes] = []
-        for i, (r, g, b) in enumerate(segment_colors):
-            mask = encode_segment_mask([i], self._num_segments)
-            ble_packets.append(build_segment_color_packet(r, g, b, mask))
+        if self._use_pt_real:
+            ble_packets: list[bytes] = []
+            for i, (r, g, b) in enumerate(segment_colors):
+                mask = encode_segment_mask([i], self._num_segments)
+                ble_packets.append(build_segment_color_packet(r, g, b, mask))
+            msg = build_pt_real_message(ble_packets)
+        else:
+            # Fallback: average all segments into a single colorwc command
+            avg = colors.mean(axis=0).astype(np.uint8)
+            msg = build_solid_color_message(int(avg[0]), int(avg[1]), int(avg[2]))
 
-        msg = build_pt_real_message(ble_packets)
         try:
             await self._transport.send_command(self._record.ip, msg)
         except OSError:

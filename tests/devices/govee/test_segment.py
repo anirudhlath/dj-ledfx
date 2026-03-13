@@ -57,10 +57,28 @@ class TestGoveeSegmentAdapter:
         assert adapter.is_connected is False
 
     @pytest.mark.asyncio
+    async def test_send_frame_colorwc_fallback(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        """Default mode sends colorwc with averaged color."""
+        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=3)
+        await adapter.connect()
+        mock_transport.send_command.reset_mock()
+
+        colors = np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255]], dtype=np.uint8)
+        await adapter.send_frame(colors)
+
+        mock_transport.send_command.assert_awaited_once()
+        call_args = mock_transport.send_command.call_args
+        payload = call_args[0][1]
+        assert payload["msg"]["cmd"] == "colorwc"
+        assert "color" in payload["msg"]["data"]
+
+    @pytest.mark.asyncio
     async def test_send_frame_sends_pt_real(
         self, mock_transport: MagicMock, record: GoveeDeviceRecord
     ) -> None:
-        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=3)
+        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=3, use_pt_real=True)
         await adapter.connect()
         mock_transport.send_command.reset_mock()
 
@@ -87,8 +105,8 @@ class TestGoveeSegmentAdapter:
     async def test_send_frame_downsamples(
         self, mock_transport: MagicMock, record: GoveeDeviceRecord
     ) -> None:
-        """6 LEDs → 3 segments = downsampled."""
-        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=3)
+        """6 LEDs → 3 segments = downsampled (ptReal mode)."""
+        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=3, use_pt_real=True)
         await adapter.connect()
         mock_transport.send_command.reset_mock()
 
