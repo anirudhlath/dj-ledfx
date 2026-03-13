@@ -1,6 +1,30 @@
+import importlib
 import time
+from unittest.mock import MagicMock
 
+import dj_ledfx.metrics as metrics_mod
 from dj_ledfx.beat.clock import BeatClock
+
+
+def test_on_beat_sets_bpm_metric() -> None:
+    """Verify on_beat() calls metrics.BEAT_BPM.set()."""
+    importlib.reload(metrics_mod)
+    mock_bpm = MagicMock()
+    mock_phase = MagicMock()
+    original_bpm = metrics_mod.BEAT_BPM
+    original_phase = metrics_mod.BEAT_PHASE
+    metrics_mod.BEAT_BPM = mock_bpm
+    metrics_mod.BEAT_PHASE = mock_phase
+    try:
+        from dj_ledfx.beat.clock import BeatClock
+
+        clock = BeatClock()
+        clock.on_beat(bpm=128.0, beat_number=1, next_beat_ms=468, timestamp=time.monotonic())
+        mock_bpm.set.assert_called_once_with(128.0)
+        mock_phase.set.assert_called_once()
+    finally:
+        metrics_mod.BEAT_BPM = original_bpm
+        metrics_mod.BEAT_PHASE = original_phase
 
 
 def test_initial_state() -> None:
