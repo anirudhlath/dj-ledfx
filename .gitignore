@@ -10,3 +10,4 @@ build/
 *.egg
 .DS_Store
 .superpowers/
+.worktrees/
