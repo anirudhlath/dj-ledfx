@@ -187,9 +187,7 @@ def main() -> None:
         try:
             from viztracer import VizTracer
         except ImportError:
-            logger.error(
-                "VizTracer not installed. Install with: uv pip install viztracer"
-            )
+            logger.error("VizTracer not installed. Install with: uv pip install viztracer")
             sys.exit(1)
 
         profiles_dir = Path("profiles")
