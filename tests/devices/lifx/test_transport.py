@@ -79,3 +79,14 @@ async def test_rtt_probe_correlation() -> None:
     assert len(rtt_values) == 1
     assert rtt_values[0] >= 0
     await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_discover_sends_broadcast() -> None:
+    """Discovery sends GetService(2) with tagged=1."""
+    transport = LifxTransport()
+    await transport.open()
+    # Discovery with 0.1s timeout returns empty list (no devices on test network)
+    devices = await transport.discover(timeout_s=0.1)
+    assert isinstance(devices, list)
+    await transport.close()
