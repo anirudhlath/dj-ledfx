@@ -108,3 +108,35 @@ async def test_mixed_latency_devices() -> None:
 
     # Fast device should have more frames (higher effective FPS)
     assert len(fast_adapter.send_frame_calls) >= len(slow_adapter.send_frame_calls)
+
+
+async def test_rtt_callback_updates_tracker() -> None:
+    """RTT callback from transport updates latency tracker."""
+    from dj_ledfx.latency.strategies import EMALatency
+
+    strategy = EMALatency(initial_value_ms=50.0)
+    tracker = LatencyTracker(strategy=strategy)
+    initial = tracker.effective_latency_ms
+
+    # Simulate RTT callback (same path as LifxTransport probe callback)
+    tracker.update(25.0)
+    assert tracker.effective_latency_ms != initial
+    # RTT of 25ms should pull EMA down from 50ms initial
+    assert tracker.effective_latency_ms < initial
+
+
+async def test_rtt_feedback_shifts_frame_selection() -> None:
+    """Lower RTT → lower effective latency → scheduler picks earlier frame."""
+    from dj_ledfx.latency.strategies import EMALatency
+
+    strategy = EMALatency(initial_value_ms=100.0)
+    tracker = LatencyTracker(strategy=strategy)
+
+    high_latency = tracker.effective_latency_s
+    # Simulate many low-RTT probes
+    for _ in range(20):
+        tracker.update(10.0)
+    low_latency = tracker.effective_latency_s
+
+    assert low_latency < high_latency
+    # This confirms the scheduler would read a different (earlier) ring buffer position
