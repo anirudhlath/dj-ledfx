@@ -162,3 +162,16 @@ class TestGoveeConfigValidation:
     def test_govee_latency_ms_must_be_non_negative(self) -> None:
         with pytest.raises(ValueError, match="govee_latency_ms"):
             AppConfig(govee_latency_ms=-1)
+
+    def test_govee_config_from_toml(self, tmp_path: Path) -> None:
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text(
+            "[devices.govee]\n"
+            "enabled = false\nmax_fps = 30\n"
+            "latency_ms = 80\nprobe_interval_s = 10.0\n"
+        )
+        config = load_config(toml_file)
+        assert config.govee_enabled is False
+        assert config.govee_max_fps == 30
+        assert config.govee_latency_ms == 80.0
+        assert config.govee_probe_interval_s == 10.0

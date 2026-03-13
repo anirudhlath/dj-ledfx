@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+from loguru import logger
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
@@ -66,4 +67,8 @@ class GoveeSegmentAdapter(DeviceAdapter):
             ble_packets.append(build_segment_color_packet(r, g, b, mask))
 
         msg = build_pt_real_message(ble_packets)
-        await self._transport.send_command(self._record.ip, msg)
+        try:
+            await self._transport.send_command(self._record.ip, msg)
+        except OSError:
+            self._is_connected = False
+            logger.warning("Govee send_frame failed for {}", self._record.ip)

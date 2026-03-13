@@ -83,6 +83,8 @@ class GoveeTransport:
         if self._send_transport:
             data = json.dumps(payload).encode("utf-8")
             self._send_transport.sendto(data, (ip, COMMAND_PORT))
+        else:
+            logger.warning("Govee send_command called but transport is not open")
 
     async def discover(self, timeout_s: float = 5.0) -> list[GoveeDeviceRecord]:
         discovered: dict[str, GoveeDeviceRecord] = {}  # device_id → record
@@ -153,7 +155,7 @@ class GoveeTransport:
 
     async def _probe_loop(self, interval_s: float) -> None:
         while self._is_open:
-            for ip in self._devices:
+            for ip in list(self._devices):
                 self._probe_times[ip] = time.monotonic()
                 await self.send_command(ip, build_status_query())
 
@@ -208,7 +210,7 @@ class _GoveeUDPProtocol(asyncio.DatagramProtocol):
     def __init__(self, owner: GoveeTransport) -> None:
         self._owner = owner
 
-    def datagram_received(self, data: bytes, addr: tuple[str | Any, int]) -> None:
+    def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         self._owner._on_datagram_received(data, addr)
 
     def error_received(self, exc: Exception) -> None:

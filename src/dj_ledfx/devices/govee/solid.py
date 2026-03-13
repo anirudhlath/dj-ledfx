@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+from loguru import logger
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
@@ -54,4 +55,8 @@ class GoveeSolidAdapter(DeviceAdapter):
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         r, g, b = int(colors[0, 0]), int(colors[0, 1]), int(colors[0, 2])
         msg = build_solid_color_message(r, g, b)
-        await self._transport.send_command(self._record.ip, msg)
+        try:
+            await self._transport.send_command(self._record.ip, msg)
+        except OSError:
+            self._is_connected = False
+            logger.warning("Govee send_frame failed for {}", self._record.ip)

@@ -25,7 +25,6 @@ class GoveeBackend(DeviceBackend):
         await self._transport.open()
 
         records = await self._transport.discover(timeout_s=config.govee_discovery_timeout_s)
-        logger.info("Govee discovery found {} devices", len(records))
 
         results: list[DiscoveredDevice] = []
         for record in records:
