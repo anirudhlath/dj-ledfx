@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from loguru import logger
 from numpy.typing import NDArray
 
 
@@ -78,6 +79,13 @@ def expand_positions(
         return pos + np.outer(t * geometry.length, direction)
 
     if isinstance(geometry, MatrixGeometry):
+        total_pixels = sum(t.width * t.height for t in geometry.tiles)
+        if total_pixels != led_count:
+            logger.warning(
+                "MatrixGeometry has {} pixels but led_count is {} — using tile dimensions",
+                total_pixels,
+                led_count,
+            )
         positions_list: list[NDArray[np.float64]] = []
         for tile in geometry.tiles:
             tile_offset = np.array([tile.offset_x, tile.offset_y, 0.0], dtype=np.float64)

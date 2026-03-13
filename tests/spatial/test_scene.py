@@ -24,34 +24,42 @@ class TestDevicePlacement:
 
 class TestSceneModel:
     def test_get_led_positions_point(self) -> None:
-        scene = SceneModel(placements={
-            "bulb": DevicePlacement("bulb", (1.0, 2.0, 0.0), PointGeometry(), 1),
-        })
+        scene = SceneModel(
+            placements={
+                "bulb": DevicePlacement("bulb", (1.0, 2.0, 0.0), PointGeometry(), 1),
+            }
+        )
         pos = scene.get_led_positions("bulb")
         assert pos.shape == (1, 3)
         np.testing.assert_array_almost_equal(pos[0], [1.0, 2.0, 0.0])
 
     def test_get_led_positions_strip(self) -> None:
         geo = StripGeometry(direction=(1.0, 0.0, 0.0), length=1.0)
-        scene = SceneModel(placements={
-            "strip": DevicePlacement("strip", (0.0, 0.0, 0.0), geo, 4),
-        })
+        scene = SceneModel(
+            placements={
+                "strip": DevicePlacement("strip", (0.0, 0.0, 0.0), geo, 4),
+            }
+        )
         pos = scene.get_led_positions("strip")
         assert pos.shape == (4, 3)
 
     def test_get_led_positions_cached(self) -> None:
-        scene = SceneModel(placements={
-            "bulb": DevicePlacement("bulb", (1.0, 2.0, 0.0), PointGeometry(), 1),
-        })
+        scene = SceneModel(
+            placements={
+                "bulb": DevicePlacement("bulb", (1.0, 2.0, 0.0), PointGeometry(), 1),
+            }
+        )
         pos1 = scene.get_led_positions("bulb")
         pos2 = scene.get_led_positions("bulb")
         assert pos1 is pos2  # same object, cached
 
     def test_get_bounds(self) -> None:
-        scene = SceneModel(placements={
-            "a": DevicePlacement("a", (0.0, 0.0, 0.0), PointGeometry(), 1),
-            "b": DevicePlacement("b", (10.0, 5.0, 3.0), PointGeometry(), 1),
-        })
+        scene = SceneModel(
+            placements={
+                "a": DevicePlacement("a", (0.0, 0.0, 0.0), PointGeometry(), 1),
+                "b": DevicePlacement("b", (10.0, 5.0, 3.0), PointGeometry(), 1),
+            }
+        )
         bounds_min, bounds_max = scene.get_bounds()
         np.testing.assert_array_almost_equal(bounds_min, [0.0, 0.0, 0.0])
         np.testing.assert_array_almost_equal(bounds_max, [10.0, 5.0, 3.0])
@@ -174,6 +182,22 @@ class TestSceneModel:
         }
         scene = SceneModel.from_config(config, adapters)
         assert scene.placements["dev"].position == (5.0, 5.0, 5.0)
+
+    def test_get_bounds_empty_scene(self) -> None:
+        scene = SceneModel(placements={})
+        bounds_min, bounds_max = scene.get_bounds()
+        np.testing.assert_array_almost_equal(bounds_min, [0.0, 0.0, 0.0])
+        np.testing.assert_array_almost_equal(bounds_max, [0.0, 0.0, 0.0])
+
+    def test_from_config_unknown_geometry_type_skipped(self) -> None:
+        adapters = [MockDeviceAdapter(name="dev", led_count=1)]
+        config = {
+            "devices": [
+                {"name": "dev", "position": [0.0, 0.0, 0.0], "geometry": "sphere"},
+            ],
+        }
+        scene = SceneModel.from_config(config, adapters)
+        assert len(scene.placements) == 0
 
     def test_from_config_strip_missing_length_defaults(self) -> None:
         adapters = [MockDeviceAdapter(name="strip", led_count=10)]

@@ -7,7 +7,11 @@ from numpy.typing import NDArray
 
 
 class SpatialMapping(Protocol):
-    """Maps 3D positions to [0.0, 1.0] strip indices."""
+    """Maps 3D positions to [0.0, 1.0] strip indices.
+
+    Normalization is relative to the input set: pass ALL positions together
+    for global normalization. The SpatialCompositor does this automatically.
+    """
 
     def map_positions(
         self,
