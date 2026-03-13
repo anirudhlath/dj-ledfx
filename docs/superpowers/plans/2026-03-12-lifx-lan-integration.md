@@ -664,6 +664,18 @@ class LifxDeviceRecord:
     port: int           # service port (from StateService)
     vendor: int         # vendor ID (1 = LIFX)
     product: int        # product ID (determines device type)
+
+
+@dataclass(frozen=True, slots=True)
+class TileInfo:
+    """Spatial metadata for a single tile in a chain."""
+    user_x: float
+    user_y: float
+    width: int
+    height: int
+    accel_x: int
+    accel_y: int
+    accel_z: int
 ```
 
 - [ ] **Step 2: Commit**
@@ -897,7 +909,7 @@ from dj_ledfx.devices.lifx.packet import (
     parse_state_device_chain, parse_state_extended_color_zones,
     rgb_to_hsbk, rgb_array_to_hsbk,
 )
-from dj_ledfx.devices.lifx.tile_chain import TileInfo
+from dj_ledfx.devices.lifx.types import TileInfo
 
 
 class TestPayloadBuilders:
@@ -1105,7 +1117,7 @@ def parse_state_device_chain(
     payload: bytes,
 ) -> list["TileInfo"]:
     """Parse StateDeviceChain(702) → list of TileInfo."""
-    from dj_ledfx.devices.lifx.tile_chain import TileInfo
+    from dj_ledfx.devices.lifx.types import TileInfo
 
     start_index = payload[0]
     total_count = payload[1]
@@ -1401,6 +1413,33 @@ class LifxTransport:
         self._devices[key] = record
         if rtt_callback:
             self._rtt_callbacks[record.ip] = rtt_callback
+
+    async def request_response(
+        self, packet: LifxPacket, addr: tuple[str, int],
+        response_type: int, timeout: float = 1.0,
+    ) -> LifxPacket | None:
+        """Send a packet and wait for a specific response type. Returns None on timeout."""
+        result: list[LifxPacket] = []
+        original = self._on_packet_received
+
+        def _response_handler(data: bytes, recv_addr: tuple[str, int]) -> None:
+            try:
+                pkt = LifxPacket.unpack(data)
+            except Exception:
+                return
+            if pkt.msg_type == response_type:
+                result.append(pkt)
+
+        self._on_packet_received = _response_handler  # type: ignore[assignment]
+        try:
+            self.send_packet(packet, addr)
+            deadline = time.monotonic() + timeout
+            while not result and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+        finally:
+            self._on_packet_received = original  # type: ignore[assignment]
+
+        return result[0] if result else None
 
     def start_probing(self, interval_s: float = 2.0) -> None:
         if self._probe_task is None or self._probe_task.done():
@@ -1874,7 +1913,9 @@ class LifxStripAdapter(DeviceAdapter):
         for chunk_start in range(0, len(hsbk), MAX_ZONES_PER_PACKET):
             chunk = hsbk[chunk_start : chunk_start + MAX_ZONES_PER_PACKET]
             count = len(chunk)
-            hsbk_tuples = [tuple(c) for c in chunk.tolist()]
+            hsbk_tuples: list[tuple[int, int, int, int]] = [
+                (int(c[0]), int(c[1]), int(c[2]), int(c[3])) for c in chunk
+            ]
             pkt = LifxPacket(
                 tagged=False, source=self._transport.source_id,
                 target=self._target_mac + b"\x00\x00",
@@ -1984,7 +2025,6 @@ Expected: FAIL — module not found
 # src/dj_ledfx/devices/lifx/tile_chain.py
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -1994,23 +2034,13 @@ from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.lifx.packet import (
     LifxPacket, build_set_tile_state64, rgb_array_to_hsbk,
 )
+from dj_ledfx.devices.lifx.types import TileInfo  # defined in types.py to avoid circular imports
 from dj_ledfx.types import DeviceInfo
 
 if TYPE_CHECKING:
     from dj_ledfx.devices.lifx.transport import LifxTransport
 
 PIXELS_PER_TILE = 64
-
-
-@dataclass(frozen=True, slots=True)
-class TileInfo:
-    user_x: float
-    user_y: float
-    width: int
-    height: int
-    accel_x: int
-    accel_y: int
-    accel_z: int
 
 
 class LifxTileChainAdapter(DeviceAdapter):
@@ -2059,7 +2089,9 @@ class LifxTileChainAdapter(DeviceAdapter):
             start = tile_idx * PIXELS_PER_TILE
             end = start + PIXELS_PER_TILE
             chunk = hsbk[start:end]
-            hsbk_tuples = [tuple(c) for c in chunk.tolist()]
+            hsbk_tuples: list[tuple[int, int, int, int]] = [
+                (int(c[0]), int(c[1]), int(c[2]), int(c[3])) for c in chunk
+            ]
             pkt = LifxPacket(
                 tagged=False, source=self._transport.source_id,
                 target=self._target_mac + b"\x00\x00",
@@ -2120,27 +2152,47 @@ def test_is_enabled_checks_config() -> None:
     assert backend.is_enabled(AppConfig(lifx_enabled=False)) is False
 
 
-def test_classify_tile_product() -> None:
+@pytest.mark.asyncio
+async def test_classify_tile_product() -> None:
+    mock_transport = MagicMock()
+    mock_transport.source_id = 12345
+    mock_transport.next_sequence = MagicMock(return_value=1)
+    mock_transport.request_response = AsyncMock(return_value=None)  # no device to query
+
     backend = LifxBackend()
+    backend._transport = mock_transport
     config = AppConfig()
     record = LifxDeviceRecord(mac=b"\x00" * 6, ip="1.2.3.4", port=56700, vendor=1, product=55)
-    adapter = backend._create_adapter(record, config)
+    adapter = await backend._create_adapter(record, config)
     assert isinstance(adapter, LifxTileChainAdapter)
 
 
-def test_classify_strip_product() -> None:
+@pytest.mark.asyncio
+async def test_classify_strip_product() -> None:
+    mock_transport = MagicMock()
+    mock_transport.source_id = 12345
+    mock_transport.next_sequence = MagicMock(return_value=1)
+    mock_transport.request_response = AsyncMock(return_value=None)
+
     backend = LifxBackend()
+    backend._transport = mock_transport
     config = AppConfig()
     record = LifxDeviceRecord(mac=b"\x00" * 6, ip="1.2.3.4", port=56700, vendor=1, product=31)
-    adapter = backend._create_adapter(record, config)
+    adapter = await backend._create_adapter(record, config)
     assert isinstance(adapter, LifxStripAdapter)
 
 
-def test_classify_bulb_product() -> None:
+@pytest.mark.asyncio
+async def test_classify_bulb_product() -> None:
+    mock_transport = MagicMock()
+    mock_transport.source_id = 12345
+    mock_transport.next_sequence = MagicMock(return_value=1)
+
     backend = LifxBackend()
+    backend._transport = mock_transport
     config = AppConfig()
     record = LifxDeviceRecord(mac=b"\x00" * 6, ip="1.2.3.4", port=56700, vendor=1, product=1)
-    adapter = backend._create_adapter(record, config)
+    adapter = await backend._create_adapter(record, config)
     assert isinstance(adapter, LifxBulbAdapter)
 
 
@@ -2209,7 +2261,7 @@ class LifxBackend(DeviceBackend):
 
         results: list[DiscoveredDevice] = []
         for record in records:
-            adapter = self._create_adapter(record, config)
+            adapter = await self._create_adapter(record, config)
             tracker = self._create_tracker(config)
             await adapter.connect()
 
@@ -2234,24 +2286,62 @@ class LifxBackend(DeviceBackend):
             await self._transport.close()
             self._transport = None
 
-    def _create_adapter(
+    async def _create_adapter(
         self, record: LifxDeviceRecord, config: AppConfig,
     ) -> LifxBulbAdapter | LifxStripAdapter | LifxTileChainAdapter:
-        addr = f"{record.ip}:{record.port}"
+        from dj_ledfx.devices.lifx.packet import (
+            LifxPacket, parse_state_device_chain, parse_state_extended_color_zones,
+        )
+        assert self._transport is not None  # always called after open()
+        addr = (record.ip, record.port)
+        target = record.mac + b"\x00\x00"
+        str_addr = f"{record.ip}:{record.port}"
+
         if record.product in MATRIX_PRODUCTS:
-            info = DeviceInfo(f"LIFX Tile ({record.ip})", "lifx_tile", 320, addr)
-            return LifxTileChainAdapter(
-                self._transport, info, record.mac, kelvin=config.lifx_default_kelvin,  # type: ignore[arg-type]
+            # Query tile chain layout
+            pkt = LifxPacket(
+                tagged=False, source=self._transport.source_id,
+                target=target, ack_required=False, res_required=True,
+                sequence=self._transport.next_sequence() % 256,
+                msg_type=701, payload=b"",  # GetDeviceChain
             )
+            resp = await self._transport.request_response(pkt, addr, response_type=702)
+            tile_count = 5  # default
+            tiles: list[TileInfo] = []
+            if resp:
+                tiles = parse_state_device_chain(resp.payload)
+                tile_count = len(tiles) if tiles else 5
+            led_count = tile_count * 64
+            info = DeviceInfo(f"LIFX Tile ({record.ip})", "lifx_tile", led_count, str_addr)
+            adapter = LifxTileChainAdapter(
+                self._transport, info, record.mac,
+                tile_count=tile_count, kelvin=config.lifx_default_kelvin,
+            )
+            adapter._tiles = tiles
+            return adapter
+
         elif record.product in MULTIZONE_PRODUCTS:
-            info = DeviceInfo(f"LIFX Strip ({record.ip})", "lifx_strip", 1, addr)
-            return LifxStripAdapter(
-                self._transport, info, record.mac, kelvin=config.lifx_default_kelvin,  # type: ignore[arg-type]
+            # Query zone count
+            pkt = LifxPacket(
+                tagged=False, source=self._transport.source_id,
+                target=target, ack_required=False, res_required=True,
+                sequence=self._transport.next_sequence() % 256,
+                msg_type=511, payload=b"",  # GetExtendedColorZones
             )
+            resp = await self._transport.request_response(pkt, addr, response_type=512)
+            zone_count = 1  # default fallback
+            if resp:
+                zone_count, _, _ = parse_state_extended_color_zones(resp.payload)
+            info = DeviceInfo(f"LIFX Strip ({record.ip})", "lifx_strip", zone_count, str_addr)
+            return LifxStripAdapter(
+                self._transport, info, record.mac,
+                zone_count=zone_count, kelvin=config.lifx_default_kelvin,
+            )
+
         else:
-            info = DeviceInfo(f"LIFX Bulb ({record.ip})", "lifx_bulb", 1, addr)
+            info = DeviceInfo(f"LIFX Bulb ({record.ip})", "lifx_bulb", 1, str_addr)
             return LifxBulbAdapter(
-                self._transport, info, record.mac, kelvin=config.lifx_default_kelvin,  # type: ignore[arg-type]
+                self._transport, info, record.mac, kelvin=config.lifx_default_kelvin,
             )
 
     def _create_tracker(self, config: AppConfig) -> LatencyTracker:
