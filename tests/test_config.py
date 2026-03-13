@@ -61,3 +61,41 @@ def test_config_validation_bad_fps() -> None:
 def test_config_validation_bad_lookahead() -> None:
     with pytest.raises(ValueError, match="max_lookahead_ms"):
         AppConfig(max_lookahead_ms=-1)
+
+
+def test_default_config_new_fields() -> None:
+    config = AppConfig()
+    assert config.openrgb_max_fps == 60
+    assert config.openrgb_latency_window_size == 60
+    assert config.openrgb_latency_strategy == "windowed_mean"
+
+
+def test_config_validation_bad_max_fps() -> None:
+    with pytest.raises(ValueError, match="openrgb_max_fps"):
+        AppConfig(openrgb_max_fps=0)
+
+
+def test_config_validation_bad_window_size() -> None:
+    with pytest.raises(ValueError, match="openrgb_latency_window_size"):
+        AppConfig(openrgb_latency_window_size=0)
+
+
+def test_config_validation_bad_strategy() -> None:
+    with pytest.raises(ValueError, match="openrgb_latency_strategy"):
+        AppConfig(openrgb_latency_strategy="invalid")
+
+
+def test_load_config_new_toml_fields(tmp_path: Path) -> None:
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text(
+        textwrap.dedent("""\
+        [devices.openrgb]
+        max_fps = 30
+        latency_window_size = 120
+        latency_strategy = "ema"
+    """)
+    )
+    config = load_config(toml_file)
+    assert config.openrgb_max_fps == 30
+    assert config.openrgb_latency_window_size == 120
+    assert config.openrgb_latency_strategy == "ema"

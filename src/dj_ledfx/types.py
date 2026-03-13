@@ -31,3 +31,13 @@ class BeatState:
     bpm: float
     is_playing: bool
     next_beat_time: float  # monotonic timestamp
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceStats:
+    """Per-device send statistics snapshot."""
+
+    device_name: str
+    effective_latency_ms: float
+    send_fps: float
+    frames_dropped: int

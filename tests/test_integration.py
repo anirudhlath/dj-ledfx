@@ -1,7 +1,7 @@
 import asyncio
-from unittest.mock import AsyncMock, PropertyMock
 
 import numpy as np
+from conftest import MockDeviceAdapter
 
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
@@ -9,15 +9,17 @@ from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import EventBus
-from dj_ledfx.latency.strategies import StaticLatency
+from dj_ledfx.latency.strategies import StaticLatency, WindowedMeanLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.prodjlink.listener import BeatEvent
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
-from dj_ledfx.types import DeviceInfo
 
 
-async def test_full_pipeline_simulator_to_mock_device() -> None:
-    """Integration test: BeatSimulator -> BeatClock -> EffectEngine -> Scheduler -> MockDevice."""
+def _setup_pipeline(
+    devices: list[ManagedDevice],
+    bpm: float = 300.0,
+) -> tuple[BeatSimulator, EffectEngine, LookaheadScheduler, EventBus]:
+    """Create a full pipeline: BeatSimulator -> Clock -> Engine -> Scheduler."""
     event_bus = EventBus()
     clock = BeatClock()
 
@@ -31,16 +33,6 @@ async def test_full_pipeline_simulator_to_mock_device() -> None:
 
     event_bus.subscribe(BeatEvent, on_beat)
 
-    mock_adapter = AsyncMock()
-    type(mock_adapter).is_connected = PropertyMock(return_value=True)
-    type(mock_adapter).led_count = PropertyMock(return_value=10)
-    type(mock_adapter).device_info = PropertyMock(
-        return_value=DeviceInfo(name="MockLED", device_type="mock", led_count=10, address="mock")
-    )
-
-    tracker = LatencyTracker(strategy=StaticLatency(10.0))
-    managed = ManagedDevice(adapter=mock_adapter, tracker=tracker)
-
     effect = BeatPulse()
     engine = EffectEngine(
         clock=clock,
@@ -52,11 +44,22 @@ async def test_full_pipeline_simulator_to_mock_device() -> None:
 
     scheduler = LookaheadScheduler(
         ring_buffer=engine.ring_buffer,
-        devices=[managed],
+        devices=devices,
         fps=60,
+        max_fps=60,
     )
 
-    simulator = BeatSimulator(event_bus=event_bus, bpm=300.0)
+    simulator = BeatSimulator(event_bus=event_bus, bpm=bpm)
+    return simulator, engine, scheduler, event_bus
+
+
+async def test_full_pipeline_simulator_to_mock_device() -> None:
+    """Integration: BeatSimulator -> BeatClock -> EffectEngine -> Scheduler -> MockDevice."""
+    adapter = MockDeviceAdapter(name="MockLED", led_count=10)
+    tracker = LatencyTracker(strategy=StaticLatency(10.0))
+    managed = ManagedDevice(adapter=adapter, tracker=tracker)
+
+    simulator, engine, scheduler, _ = _setup_pipeline([managed])
 
     sim_task = asyncio.create_task(simulator.run())
     engine_task = asyncio.create_task(engine.run())
@@ -69,9 +72,40 @@ async def test_full_pipeline_simulator_to_mock_device() -> None:
     scheduler.stop()
     await asyncio.gather(sim_task, engine_task, sched_task, return_exceptions=True)
 
-    assert mock_adapter.send_frame.call_count > 0
-
-    first_call = mock_adapter.send_frame.call_args_list[0]
-    sent_colors = first_call[0][0]
+    assert len(adapter.send_frame_calls) > 0
+    sent_colors = adapter.send_frame_calls[0]
     assert isinstance(sent_colors, np.ndarray)
     assert sent_colors.shape == (10, 3)
+
+
+async def test_mixed_latency_devices() -> None:
+    """Two devices with different latencies both receive frames."""
+    fast_adapter = MockDeviceAdapter(name="USB Device", led_count=10)
+    fast_tracker = LatencyTracker(strategy=StaticLatency(5.0))
+    fast_device = ManagedDevice(adapter=fast_adapter, tracker=fast_tracker)
+
+    slow_adapter = MockDeviceAdapter(name="Govee WiFi", led_count=10)
+    slow_tracker = LatencyTracker(
+        strategy=WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
+    )
+    slow_device = ManagedDevice(adapter=slow_adapter, tracker=slow_tracker)
+
+    simulator, engine, scheduler, _ = _setup_pipeline([fast_device, slow_device])
+
+    sim_task = asyncio.create_task(simulator.run())
+    engine_task = asyncio.create_task(engine.run())
+    sched_task = asyncio.create_task(scheduler.run())
+
+    await asyncio.sleep(1.0)
+
+    simulator.stop()
+    engine.stop()
+    scheduler.stop()
+    await asyncio.gather(sim_task, engine_task, sched_task, return_exceptions=True)
+
+    # Both devices received frames
+    assert len(fast_adapter.send_frame_calls) > 0
+    assert len(slow_adapter.send_frame_calls) > 0
+
+    # Fast device should have more frames (higher effective FPS)
+    assert len(fast_adapter.send_frame_calls) >= len(slow_adapter.send_frame_calls)

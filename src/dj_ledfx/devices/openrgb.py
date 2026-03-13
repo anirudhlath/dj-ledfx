@@ -7,6 +7,7 @@ import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
 
+from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.types import DeviceInfo
 
 try:
@@ -17,7 +18,9 @@ except ImportError:
     RGBColor = None
 
 
-class OpenRGBAdapter:
+class OpenRGBAdapter(DeviceAdapter):
+    supports_latency_probing = False
+
     def __init__(
         self,
         host: str = "127.0.0.1",
@@ -112,13 +115,15 @@ class OpenRGBAdapter:
         def _send() -> None:
             device.set_colors(rgb_colors, fast=True)
 
-        await asyncio.to_thread(_send)
+        try:
+            await asyncio.to_thread(_send)
+        except (ConnectionError, OSError):
+            self._is_connected = False
+            raise
         logger.trace("Sent {} colors to '{}'", len(rgb_colors), self._device_name)
 
     @staticmethod
-    async def discover(
-        host: str = "127.0.0.1", port: int = 6742
-    ) -> list[DeviceInfo]:
+    async def discover(host: str = "127.0.0.1", port: int = 6742) -> list[DeviceInfo]:
         def _discover() -> list[DeviceInfo]:
             if OpenRGBClient is None:
                 return []

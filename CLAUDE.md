@@ -27,11 +27,11 @@ src/dj_ledfx/ layout:
 - `prodjlink/` — Pro DJ Link UDP protocol (passive listener on port 50001)
 - `beat/` — BeatClock phase interpolation + BeatSimulator for demo mode
 - `effects/` — Effect ABC + 60fps render engine writing future frames to ring buffer
-- `scheduling/` — LookaheadScheduler: per-device latency-compensated frame dispatch
-- `devices/` — DeviceAdapter protocol + OpenRGB adapter (asyncio.to_thread wrapped)
+- `scheduling/` — LookaheadScheduler: per-device send loops with FrameSlot depth-1 slots, FPS cap, RTT measurement
+- `devices/` — DeviceAdapter ABC + OpenRGB adapter (asyncio.to_thread wrapped) + device-type heuristics
 - `latency/` — ProbeStrategy protocol + StaticLatency/EMA/WindowedMean strategies
 - `config.py` — TOML config loading (stdlib tomllib)
-- `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState)
+- `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
 - `events.py` — Typed callback event bus (sync, non-blocking callbacks only)
 - `status.py` — SystemStatus health tracking
 - `main.py` — Application coordinator (startup/shutdown orchestration)
@@ -45,7 +45,7 @@ src/dj_ledfx/ layout:
 - All device I/O must be async. Synchronous libs (openrgb-python) wrapped in `asyncio.to_thread()`
 - Effect render methods are synchronous (pure numpy math, no I/O)
 - BeatClock read methods are synchronous and lock-free (called from render loop)
-- Adapter pattern for devices and latency strategies — always code to the Protocol/ABC
+- DeviceAdapter is ABC (abstract base class). ProbeStrategy remains Protocol. Always code to the interface.
 - All components run on a single asyncio event loop — no cross-thread state access
 
 ## Key Design Decisions
@@ -59,6 +59,9 @@ src/dj_ledfx/ layout:
 - `is_playing` inferred from packet flow in passive mode (no explicit play/pause signal).
 - LED count is global (max across devices); adapters map/truncate to their actual count.
 - Event bus callbacks must be non-blocking (<1ms). Async work uses `create_task()`.
+- Per-device send loops: each device runs at its natural FPS (bounded by configurable cap). Distributor writes target_time floats to depth-1 FrameSlots — no numpy copies until actual send.
+- Device-type heuristic latency: Govee WiFi=100ms, LIFX WiFi=50ms, USB=5ms. Seeds the latency strategy. OpenRGB adapters use heuristics permanently (supports_latency_probing=False).
+- DeviceAdapter is ABC (not Protocol). Provides supports_latency_probing class attribute. discover() excluded from base — adapters own their own discovery.
 
 ## Logging Discipline
 

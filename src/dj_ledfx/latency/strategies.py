@@ -26,9 +26,10 @@ class StaticLatency:
 
 
 class EMALatency:
-    def __init__(self, alpha: float = 0.3) -> None:
+    def __init__(self, alpha: float = 0.3, initial_value_ms: float = 0.0) -> None:
         self._alpha = alpha
-        self._value: float = 0.0
+        self._initial_value_ms = initial_value_ms
+        self._value: float = initial_value_ms
         self._initialized = False
         self._samples: list[float] = []
 
@@ -53,24 +54,27 @@ class EMALatency:
             self._value = self._alpha * new_sample + (1.0 - self._alpha) * self._value
 
     def get_latency(self) -> float:
+        if not self._initialized:
+            return self._initial_value_ms
         return self._value
 
     def reset(self) -> None:
-        self._value = 0.0
+        self._value = self._initial_value_ms
         self._initialized = False
         self._samples.clear()
 
 
 class WindowedMeanLatency:
-    def __init__(self, window_size: int = 10) -> None:
+    def __init__(self, window_size: int = 10, initial_value_ms: float = 0.0) -> None:
         self._window: deque[float] = deque(maxlen=window_size)
+        self._initial_value_ms = initial_value_ms
 
     def update(self, new_sample: float) -> None:
         self._window.append(new_sample)
 
     def get_latency(self) -> float:
         if not self._window:
-            return 0.0
+            return self._initial_value_ms
         return sum(self._window) / len(self._window)
 
     def reset(self) -> None:

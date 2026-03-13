@@ -11,12 +11,13 @@ from loguru import logger
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
 from dj_ledfx.config import load_config
+from dj_ledfx.devices.heuristics import estimate_device_latency_ms
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.devices.openrgb import OpenRGBAdapter
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import EventBus
-from dj_ledfx.latency.strategies import StaticLatency
+from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
@@ -78,8 +79,21 @@ async def _run(args: argparse.Namespace) -> None:
                     device_index=i,
                 )
                 await adapter.connect()
+                heuristic_ms = estimate_device_latency_ms(adapter.device_info.name)
+
+                strategy: StaticLatency | EMALatency | WindowedMeanLatency
+                if config.openrgb_latency_strategy == "static":
+                    strategy = StaticLatency(config.openrgb_latency_ms)
+                elif config.openrgb_latency_strategy == "ema":
+                    strategy = EMALatency(initial_value_ms=heuristic_ms)
+                else:  # "windowed_mean"
+                    strategy = WindowedMeanLatency(
+                        window_size=config.openrgb_latency_window_size,
+                        initial_value_ms=heuristic_ms,
+                    )
+
                 tracker = LatencyTracker(
-                    strategy=StaticLatency(config.openrgb_latency_ms),
+                    strategy=strategy,
                     manual_offset_ms=config.openrgb_manual_offset_ms,
                 )
                 device_manager.add_device(adapter, tracker)
@@ -106,6 +120,7 @@ async def _run(args: argparse.Namespace) -> None:
         ring_buffer=engine.ring_buffer,
         devices=device_manager.devices,
         fps=config.engine_fps,
+        max_fps=config.openrgb_max_fps,
     )
 
     stop_event = asyncio.Event()
@@ -132,6 +147,7 @@ async def _run(args: argparse.Namespace) -> None:
                 connected_devices=[d.adapter.device_info.name for d in device_manager.devices],
                 buffer_fill_level=engine.ring_buffer.fill_level,
                 avg_frame_render_time_ms=engine.avg_render_time_ms,
+                device_stats=scheduler.get_device_stats(),
             )
             logger.info("Status: {}", status.summary())
             try:

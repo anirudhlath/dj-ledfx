@@ -30,9 +30,11 @@ class AppConfig:
     openrgb_enabled: bool = True
     openrgb_host: str = "127.0.0.1"
     openrgb_port: int = 6742
-    openrgb_latency_strategy: str = "static"
+    openrgb_latency_strategy: str = "windowed_mean"
     openrgb_latency_ms: float = 10.0
     openrgb_manual_offset_ms: float = 0.0
+    openrgb_max_fps: int = 60
+    openrgb_latency_window_size: int = 60
 
     def __post_init__(self) -> None:
         errors: list[str] = []
@@ -42,6 +44,12 @@ class AppConfig:
             errors.append("max_lookahead_ms must be non-negative")
         if self.beat_pulse_gamma <= 0:
             errors.append("beat_pulse gamma must be positive")
+        if self.openrgb_max_fps <= 0:
+            errors.append("openrgb_max_fps must be positive")
+        if self.openrgb_latency_window_size <= 0:
+            errors.append("openrgb_latency_window_size must be positive")
+        if self.openrgb_latency_strategy not in {"static", "ema", "windowed_mean"}:
+            errors.append("openrgb_latency_strategy must be one of: static, ema, windowed_mean")
         if errors:
             raise ValueError(f"Config validation failed: {'; '.join(errors)}")
 
@@ -94,5 +102,9 @@ def load_config(path: Path) -> AppConfig:
             kwargs["openrgb_latency_ms"] = orgb["latency_ms"]
         if "manual_offset_ms" in orgb:
             kwargs["openrgb_manual_offset_ms"] = orgb["manual_offset_ms"]
+        if "max_fps" in orgb:
+            kwargs["openrgb_max_fps"] = orgb["max_fps"]
+        if "latency_window_size" in orgb:
+            kwargs["openrgb_latency_window_size"] = orgb["latency_window_size"]
 
     return AppConfig(**kwargs)  # type: ignore[arg-type]
