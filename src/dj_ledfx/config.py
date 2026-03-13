@@ -3,6 +3,7 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -46,6 +47,9 @@ class AppConfig:
     lifx_manual_offset_ms: float = 0.0
     lifx_max_fps: int = 60
     lifx_latency_window_size: int = 60
+
+    # Scene (raw dict, validated later by SceneModel.from_config)
+    scene_config: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         errors: list[str] = []
@@ -152,5 +156,8 @@ def load_config(path: Path) -> AppConfig:
             kwargs["lifx_max_fps"] = lifx["max_fps"]
         if "latency_window_size" in lifx:
             kwargs["lifx_latency_window_size"] = lifx["latency_window_size"]
+
+    if "scene" in raw:
+        kwargs["scene_config"] = raw["scene"]
 
     return AppConfig(**kwargs)  # type: ignore[arg-type]
