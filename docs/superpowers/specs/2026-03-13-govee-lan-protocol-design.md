@@ -144,11 +144,12 @@ Example: segment 0 only → LEFT=`0x01`, RIGHT=`0x00`.
 ```
 src/dj_ledfx/devices/govee/
 ├── __init__.py          # Exports GoveeBackend (triggers auto-registration)
-├── transport.py         # GoveeTransport — UDP socket management, discovery
+├── types.py             # GoveeDeviceRecord, GoveeDeviceCapability dataclasses
+├── transport.py         # GoveeTransport — UDP socket management, discovery, probing
 ├── protocol.py          # Pure functions: BLE encoding, base64, checksums, JSON builders
 ├── solid.py             # GoveeSolidAdapter — whole-device color via colorwc
 ├── segment.py           # GoveeSegmentAdapter — per-segment color via ptReal
-├── sku_registry.py      # SKU → segment count/capability lookup
+├── sku_registry.py      # SKU → capability lookup (imports types from types.py)
 └── backend.py           # GoveeBackend(DeviceBackend) — discovery orchestration
 
 tests/devices/govee/
@@ -162,9 +163,9 @@ tests/devices/govee/
 
 ## Component Designs
 
-### GoveeTransport
+### Govee Types (`types.py`)
 
-Shared UDP socket manager — one instance owns all Govee network I/O.
+Shared dataclasses used across the Govee subpackage.
 
 ```python
 @dataclass(frozen=True)
@@ -175,6 +176,17 @@ class GoveeDeviceRecord:
     wifi_version: str      # WiFi firmware version
     ble_version: str       # BLE firmware version (for future BLE fallback)
 
+@dataclass(frozen=True)
+class GoveeDeviceCapability:
+    is_rgbic: bool
+    segment_count: int     # 0 for non-RGBIC
+```
+
+### GoveeTransport
+
+Shared UDP socket manager — one instance owns all Govee network I/O.
+
+```python
 class GoveeTransport:
     async def open(self) -> None
     async def close(self) -> None
@@ -190,7 +202,7 @@ class GoveeTransport:
 - Sends discovery to multicast `239.255.255.250:4001`. Sends scan 3 times at 1s intervals to handle UDP loss. Deduplicates responses by `device_id`.
 - `send_command()` JSON-serializes and sends UDP to `ip:4003`. Fire-and-forget.
 - `query_status()` sends devStatus and awaits response on 4002 with timeout. Used during connect to verify device is alive.
-- Response routing: incoming JSON on port 4002 is dispatched by `cmd` field — `"scan"` routes to discovery handler, `"devStatus"` routes to status handler (pending query or probe callback).
+- Response routing: incoming JSON on port 4002 is dispatched via a `dict[str, Callable]` handler registry keyed by `cmd` field — `"scan"` routes to discovery handler, `"devStatus"` routes to status handler (pending query or probe callback). This avoids the LIFX transport's handler-swap pattern which is non-reentrant.
 - `register_device()` registers a device for periodic RTT probing. The `rtt_callback` receives measured RTT in milliseconds.
 - `start_probing()` launches an async task that periodically sends `devStatus` to each registered device and measures round-trip time. Mirrors LIFX's EchoRequest probe pattern.
 - All socket ops use `asyncio.DatagramProtocol` — no blocking.
@@ -254,10 +266,7 @@ class GoveeSegmentAdapter(DeviceAdapter):
 ### SKU Registry
 
 ```python
-@dataclass(frozen=True)
-class GoveeDeviceCapability:
-    is_rgbic: bool
-    segment_count: int      # 0 for non-RGBIC
+# GoveeDeviceCapability imported from types.py
 
 SKU_REGISTRY: dict[str, GoveeDeviceCapability] = {
     "H6076": GoveeDeviceCapability(is_rgbic=True, segment_count=15),
@@ -280,6 +289,7 @@ class GoveeBackend(DeviceBackend):
     def is_enabled(self, config: AppConfig) -> bool
     async def discover(self, config: AppConfig) -> list[DiscoveredDevice]
     async def shutdown(self) -> None
+        # Must call transport.stop_probing() before transport.close()
 ```
 
 Discovery flow:
@@ -307,7 +317,7 @@ govee_latency_ms: float = 100.0
 govee_manual_offset_ms: float = 0.0
 govee_max_fps: int = 40
 govee_latency_window_size: int = 60
-govee_probe_interval_s: float = 10.0
+govee_probe_interval_s: float = 5.0
 govee_segment_override: int | None = None
 ```
 
