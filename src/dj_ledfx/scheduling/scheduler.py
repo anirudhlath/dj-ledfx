@@ -5,6 +5,7 @@ import time
 
 from loguru import logger
 
+from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.engine import RingBuffer
 from dj_ledfx.types import DeviceStats
@@ -88,6 +89,9 @@ class LookaheadScheduler:
                             "Frame overwritten for '{}' — device draining slower than engine",
                             device.adapter.device_info.name,
                         )
+                        metrics.FRAMES_DROPPED.labels(
+                            device=device.adapter.device_info.name
+                        ).inc()
                     target_time = now + device.tracker.effective_latency_s
                     slot.put(target_time)
 
@@ -110,6 +114,7 @@ class LookaheadScheduler:
     async def _send_loop(self, device: ManagedDevice, slot: FrameSlot, index: int) -> None:
         was_connected = device.adapter.is_connected
         last_send_time = time.monotonic()
+        device_name = device.adapter.device_info.name
 
         while self._running:
             # Step 1: Check connection
@@ -159,8 +164,15 @@ class LookaheadScheduler:
                 )
                 continue
 
+            send_elapsed = time.monotonic() - send_start
+            metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(send_elapsed)
+
             # Step 6: Increment send count
             self._send_counts[index] += 1
+            metrics.DEVICE_LATENCY.labels(device=device_name).set(
+                device.tracker.effective_latency_s
+            )
+            metrics.DEVICE_FPS.labels(device=device_name).set(device.max_fps)
 
             # Step 7: RTT update (only if adapter supports probing)
             if device.adapter.supports_latency_probing:
