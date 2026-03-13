@@ -412,9 +412,9 @@ class TestRadialMapping:
         result = mapping.map_positions(positions)
         assert result[0] == 0.0
 
-    def test_all_same_position_returns_zeros(self) -> None:
+    def test_all_at_center_returns_zeros(self) -> None:
         mapping = RadialMapping(center=(0.0, 0.0, 0.0))
-        positions = np.array([[3.0, 4.0, 0.0]] * 5)
+        positions = np.array([[0.0, 0.0, 0.0]] * 5)
         result = mapping.map_positions(positions)
         np.testing.assert_array_almost_equal(result, 0.0)
 
@@ -1248,10 +1248,10 @@ Expected: FAIL — `AppConfig` has no `scene_config`
 
 In `src/dj_ledfx/config.py`:
 
-Add field to `AppConfig`:
+Add `from typing import Any` to imports, then add field to `AppConfig`:
 ```python
     # Scene (raw dict, validated later by SceneModel.from_config)
-    scene_config: dict | None = None
+    scene_config: dict[str, Any] | None = None
 ```
 
 Add to `load_config()` before `return AppConfig(**kwargs)`:
@@ -1325,7 +1325,7 @@ In `_send_loop`, replace lines 151-154:
                     colors = mapped
             send_start = time.monotonic()
             try:
-                await device.adapter.send_frame(colors[:device.adapter.led_count])
+                await device.adapter.send_frame(colors)
 ```
 
 - [ ] **Step 4: Run full test suite**
@@ -1373,18 +1373,18 @@ In `_run()`, after line 70 (`device_manager.add_device(...)` loop) and before `l
             mapping_name = config.scene_config.get("mapping", "linear")
             mapping_params = config.scene_config.get("mapping_params", {})
             if mapping_name == "radial":
-                center = tuple(mapping_params.get("center", [0.0, 0.0, 0.0]))
+                center = mapping_params.get("center", [0.0, 0.0, 0.0])
                 max_radius = mapping_params.get("max_radius")
                 mapping = RadialMapping(
-                    center=(center[0], center[1], center[2]),
-                    max_radius=max_radius,
+                    center=(float(center[0]), float(center[1]), float(center[2])),
+                    max_radius=float(max_radius) if max_radius is not None else None,
                 )
             else:
-                direction = tuple(mapping_params.get("direction", [1.0, 0.0, 0.0]))
+                direction = mapping_params.get("direction", [1.0, 0.0, 0.0])
                 origin = mapping_params.get("origin")
                 mapping = LinearMapping(
-                    direction=(direction[0], direction[1], direction[2]),
-                    origin=(origin[0], origin[1], origin[2]) if origin else None,
+                    direction=(float(direction[0]), float(direction[1]), float(direction[2])),
+                    origin=(float(origin[0]), float(origin[1]), float(origin[2])) if origin else None,
                 )
             compositor = SpatialCompositor(scene, mapping)
             logger.info(
@@ -1444,7 +1444,7 @@ import pytest
 
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
-from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
+from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import EventBus

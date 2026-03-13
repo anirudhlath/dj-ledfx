@@ -52,8 +52,8 @@ if compositor is not None:
     mapped = compositor.composite(frame.colors, device_id)
     if mapped is not None:
         colors = mapped
-# truncate/pad to device LED count as before
-await device.adapter.send_frame(colors[:device.adapter.led_count])
+# send_frame as before — adapters handle their own LED count
+await device.adapter.send_frame(colors)
 ```
 
 ### New Module: `src/dj_ledfx/spatial/`
