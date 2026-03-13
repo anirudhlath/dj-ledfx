@@ -55,14 +55,19 @@ from granian.constants import Interfaces
 async def _run(args):
     # ... existing component creation (BeatClock, EffectEngine, etc.) ...
 
+    # Create EffectDeck wrapping the active effect
+    deck = EffectDeck(effect)
+    engine = EffectEngine(clock=clock, deck=deck, ...)
+
     if args.web:
         from dj_ledfx.web.app import create_app
         app = create_app(
             beat_clock=clock,
+            effect_deck=deck,           # For effect switching + param control
             effect_engine=engine,
             device_manager=device_manager,
             scheduler=scheduler,
-            scene_model=scene_model,  # None if no [scene] config
+            scene_model=scene_model,    # None if no [scene] config
             compositor=compositor,      # None if no scene
         )
         web_server = Server(
@@ -80,6 +85,8 @@ async def _run(args):
         web_server.stop()
 ```
 
+**Note on Granian embedded API:** The `granian.server.embed.Server` class provides `async serve()`, `stop()`, and `reload()` methods. It runs on the existing event loop as a single worker (no process spawning). Requires `granian>=1.7`. If the embedded API changes in a future Granian release, `uvicorn` can serve as a drop-in fallback with `install_signal_handlers=False`.
+
 **Key properties:**
 - Embedded mode runs on the existing event loop — no separate process/thread
 - No signal handler installation — existing `stop_event` mechanism handles SIGINT/SIGTERM
@@ -93,6 +100,10 @@ FastAPI and Granian are optional dependencies. The headless CLI mode works witho
 ```toml
 [project.optional-dependencies]
 web = ["fastapi>=0.115", "granian>=1.7", "pydantic>=2.10"]
+
+[project.dependencies]
+# ... existing deps ...
+tomli_w = ">=1.0"  # Core dependency — needed for preset/config persistence even without web UI
 ```
 
 - `uv run -m dj_ledfx` — headless mode, no web deps required
@@ -115,12 +126,18 @@ A single WebSocket connection at `ws://host:port/ws` with multiplexed channels.
 
 **JSON messages (server → client):**
 ```json
-{ "ch": "beat", "d": { "bpm": 128.0, "pitch": 2.3, "phase": 0.73, "bar_phase": 0.43, "beat_pos": 3, "playing": true, "deck": 1, "deck_name": "XDJ-AZ" }}
-{ "ch": "stats", "d": { "devices": [{ "id": "shelf_strip", "fps": 42.1, "latency_ms": 52.3, "dropped": 0, "connected": true }] }}
+{ "ch": "beat", "d": { "bpm": 128.0, "beat_phase": 0.73, "bar_phase": 0.43, "is_playing": true, "beat_pos": 3, "pitch_percent": 2.3, "deck_number": 1, "deck_name": "XDJ-AZ" }}
+{ "ch": "stats", "d": { "devices": [{ "device_name": "shelf_strip", "send_fps": 42.1, "effective_latency_ms": 52.3, "frames_dropped": 0, "connected": true }] }}
 { "ch": "status", "d": { "buffer_fill": 0.95, "render_ms": 0.3, "player_count": 1, "engine_fps": 60 }}
 { "ch": "ack", "id": "cmd-123", "ok": true }
 { "ch": "error", "id": "cmd-123", "msg": "Unknown effect: foo" }
 ```
+
+**Beat channel field mapping:** `BeatState` provides `beat_phase`, `bar_phase`, `bpm`, `is_playing`. Additional fields require expanding `BeatClock`:
+- `beat_pos` (1-4): Derived from `bar_phase` as `floor(bar_phase * 4) + 1`, clamped to [1,4].
+- `pitch_percent`, `deck_number`, `deck_name`: Stored on `BeatClock` from the last `BeatEvent` received via `on_beat()`. Added as optional properties on `BeatClock` (default `None` when no beat received yet).
+
+**Stats channel field mapping:** Field names match `DeviceStats` dataclass (`device_name`, `send_fps`, `effective_latency_ms`, `frames_dropped`). The `connected` field is added to `DeviceStats`.
 
 **JSON messages (client → server):**
 ```json
@@ -131,10 +148,14 @@ A single WebSocket connection at `ws://host:port/ws` with multiplexed channels.
 
 **Binary messages (server → client, frame data):**
 ```
-[2 bytes device_id_len][N bytes device_id UTF-8][4 bytes timestamp float32][LED_count * 3 bytes RGB]
+[2 bytes device_name_len (little-endian uint16)][N bytes device_name UTF-8][4 bytes timestamp (little-endian float32)][LED_count * 3 bytes RGB]
 ```
 
-Using device ID strings (not position-based indices) ensures stability across device reconnections and runtime discovery. The 2-byte length prefix allows parsing without knowing LED count in advance (compute from `msg_len - 2 - device_id_len - 4`).
+All multi-byte values use **little-endian** byte order (native for x86/ARM, which covers all realistic deployment targets).
+
+Using device name strings (not position-based indices) ensures stability across device reconnections and runtime discovery. The 2-byte length prefix allows parsing without knowing LED count in advance (compute from `msg_len - 2 - device_name_len - 4`).
+
+**Device identity:** Devices are identified by `DeviceInfo.name` throughout the system — this is the existing unique identifier used by `DeviceManager`, `SceneModel`, and `LookaheadScheduler`. Device names are used directly in REST URL paths (URL-encoded where necessary). No separate `id` field is introduced to avoid a parallel identity system.
 
 ### 2.2 Channel Rates and Drivers
 
@@ -280,7 +301,11 @@ class Effect(ABC):
         ...
 
     def set_params(self, **kwargs: Any) -> None:
-        """Update parameters at runtime. Only accepts keys from parameters()."""
+        """Update parameters at runtime. Only accepts keys from parameters().
+        Validates against EffectParam constraints and raises ValueError for
+        unknown keys or out-of-range values. Clamping is NOT done — the caller
+        (REST layer) should validate before calling, but set_params is the
+        authoritative validation point."""
         ...
 
     @abstractmethod
@@ -311,21 +336,40 @@ class BeatPulse(Effect):
 
 ### 4.4 Effect Registry
 
-At startup, discover all `Effect` subclasses via `__init_subclass__` (same pattern as `DeviceBackend`):
+At startup, discover all `Effect` subclasses via `__init_subclass__` (same pattern as `DeviceBackend` in `devices/backend.py`):
 
 ```python
-# effects/registry.py
+# effects/base.py — add __init_subclass__ to Effect ABC
 
-_registry: dict[str, type[Effect]] = {}
+class Effect(ABC):
+    _registry: ClassVar[dict[str, type[Effect]]] = {}
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if not inspect.isabstract(cls):
+            # Name derived from class: BeatPulse → "beat_pulse" (snake_case)
+            name = _to_snake_case(cls.__name__)
+            Effect._registry[name] = cls
+```
+
+```python
+# effects/registry.py — convenience functions
 
 def get_effect_classes() -> dict[str, type[Effect]]:
     """Return all registered effect classes."""
-    return dict(_registry)
+    return dict(Effect._registry)
 
 def get_effect_schemas() -> dict[str, dict[str, EffectParam]]:
     """Return parameter schemas for all registered effects."""
-    return {name: cls.parameters() for name, cls in _registry.items()}
+    return {name: cls.parameters() for name, cls in Effect._registry.items()}
+
+def create_effect(name: str, **params: Any) -> Effect:
+    """Instantiate an effect by registered name with given parameters."""
+    cls = Effect._registry[name]
+    return cls(**params)
 ```
+
+Effect names are derived by converting the class name to snake_case: `BeatPulse` → `"beat_pulse"`, `RainbowWave` → `"rainbow_wave"`. This matches the existing `active_effect` config key convention.
 
 The REST API `/api/effects` returns the full schema for all effects, enabling the frontend to auto-generate parameter controls (sliders for floats, color pickers for colors, etc.).
 
@@ -574,6 +618,7 @@ src/dj_ledfx/web/
 ```python
 def create_app(
     beat_clock: BeatClock,
+    effect_deck: EffectDeck,
     effect_engine: EffectEngine,
     device_manager: DeviceManager,
     scheduler: LookaheadScheduler,
@@ -660,7 +705,19 @@ export default defineConfig({
 })
 ```
 
-**Production serving:** FastAPI mounts `StaticFiles(directory=...)` pointing to the built frontend assets. The path is configurable via `--web-static-dir` flag (defaults to `frontend/build/` relative to the project root). Built assets are NOT committed to git — they are built in CI or by the developer before running in production mode.
+**Production serving:** FastAPI mounts `StaticFiles(directory=...)` pointing to the built frontend assets. The path is configurable via `--web-static-dir` flag. Resolution order:
+1. Explicit `--web-static-dir` argument (absolute or relative path)
+2. `web.static_dir` in TOML config
+3. `frontend/build/` relative to the project root (for development checkouts)
+4. `importlib.resources.files("dj_ledfx") / "web" / "static"` (for installed packages)
+
+Built assets are NOT committed to git — they are built in CI or by the developer before running in production mode. For distribution as a Python package, the built assets would be included via `package_data` in `pyproject.toml`.
+
+**SvelteKit adapter:** The frontend uses `@sveltejs/adapter-static` for pure client-side SPA rendering (no SSR). This outputs a fully static site that FastAPI can serve directly. Configure in `svelte.config.js`:
+```javascript
+import adapter from '@sveltejs/adapter-static';
+export default { kit: { adapter: adapter({ fallback: 'index.html' }) } };
+```
 
 ### 13.2 Design Tokens
 
@@ -720,13 +777,16 @@ Scene editor and config views redirect to a "use a larger screen" message on mob
 
 | File | Change |
 |------|--------|
-| `main.py` | Add `--web`, `--web-port`, `--web-host`, `--web-static-dir` args. Conditionally import and start web server. |
-| `config.py` | Add `[web]` config section: `enabled`, `host`, `port`, `static_dir`, `cors_origins`. Add `scene_config` mutation support. |
-| `effects/base.py` | Add `parameters()` classmethod, `get_params()`, `set_params()` to Effect ABC. |
+| `main.py` | Add `--web`, `--web-port`, `--web-host`, `--web-static-dir` args. Conditionally import and start web server. Create `EffectDeck` and pass to both `EffectEngine` and `create_app()`. |
+| `config.py` | Add `[web]` config section: `enabled`, `host`, `port`, `static_dir`, `cors_origins`. Add `save_config()` function with atomic write. |
+| `beat/clock.py` | Add `pitch_percent`, `last_deck_number`, `last_deck_name` properties. Store from last `BeatEvent` in `on_beat()`. |
+| `types.py` | Add `connected: bool` field to `DeviceStats`. |
+| `effects/base.py` | Add `_registry` classvar, `__init_subclass__`, `parameters()` classmethod, `get_params()`, `set_params()` to Effect ABC. |
 | `effects/beat_pulse.py` | Implement `parameters()`, `get_params()`, `set_params()`. |
 | `effects/engine.py` | Accept `EffectDeck` instead of raw `Effect`. Call `deck.render()`. |
+| `devices/manager.py` | Add `rediscover()`, `identify_device()`, group management methods. |
 | `scheduling/scheduler.py` | Add `_frame_snapshots` dict. Write snapshot after each device send. Add `compositor` property with setter for runtime swap. |
-| `pyproject.toml` | Add `[project.optional-dependencies]` web group. Add `tomli_w` for config write-back. |
+| `pyproject.toml` | Add `[project.optional-dependencies]` web group. Add `tomli_w` as core dependency. |
 
 ### 15.2 Files Added (Backend)
 
@@ -752,9 +812,48 @@ The entire `frontend/` directory as described in Section 13.
 
 ### 15.4 Spatial Mapping Branch Integration
 
-This design assumes the `feature/3d-spatial-mapping` branch is merged to master before web UI implementation begins. The web UI depends on:
+**Prerequisite:** The `feature/3d-spatial-mapping` branch must be merged to master before **Phase 2** (3D Scene Editor) begins. **Phase 1** (core web UI: transport, effect deck, device management) can be built without it.
+
+**Phase 1 (no spatial dependency):**
+- Live performance view (transport, effect deck, presets, device monitors)
+- Device management view (discovery, groups, latency tuning)
+- Config view
+- WebSocket protocol (beat, frames, stats)
+- Effect parameter introspection + deck system
+- Scene endpoints return `null`/empty when no spatial module is available
+
+**Phase 2 (requires spatial mapping merge):**
+- 3D scene editor (Section 8)
+- Scene REST endpoints (Section 3.4)
+- Runtime compositor rebuild (Section 7)
+- Live LED colors in 3D viewport
+
+The web UI depends on these spatial mapping types:
 - `spatial/scene.py` — `SceneModel` with new mutation methods (Section 7.1)
 - `spatial/compositor.py` — `SpatialCompositor` (rebuilt on scene change, Section 7.2)
 - `spatial/geometry.py` — `PointGeometry`, `StripGeometry`, `MatrixGeometry` (serialized to JSON for frontend)
 - `spatial/mapping.py` — `LinearMapping`, `RadialMapping` (configured via REST API)
 - `devices/adapter.py` — `geometry` property on DeviceAdapter (used for auto-detection in scene editor)
+
+### 15.5 DeviceManager Additions
+
+The existing `DeviceManager` needs these methods for the web UI:
+
+```python
+class DeviceManager:
+    # Existing methods...
+
+    async def rediscover(self) -> list[DiscoveredDevice]:
+        """Trigger a fresh discovery scan across all backends."""
+        ...
+
+    async def identify_device(self, device_name: str, duration_s: float = 3.0) -> None:
+        """Flash a device to identify it physically. Sends white frames for duration_s."""
+        ...
+
+    # Group management (in-memory state, persisted to config)
+    def get_groups(self) -> dict[str, DeviceGroup]: ...
+    def create_group(self, name: str, color: str) -> DeviceGroup: ...
+    def delete_group(self, name: str) -> None: ...
+    def assign_to_group(self, device_name: str, group_name: str) -> None: ...
+```
