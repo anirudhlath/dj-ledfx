@@ -89,9 +89,7 @@ class LookaheadScheduler:
                             "Frame overwritten for '{}' — device draining slower than engine",
                             device.adapter.device_info.name,
                         )
-                        metrics.FRAMES_DROPPED.labels(
-                            device=device.adapter.device_info.name
-                        ).inc()
+                        metrics.FRAMES_DROPPED.labels(device=device.adapter.device_info.name).inc()
                     target_time = now + device.tracker.effective_latency_s
                     slot.put(target_time)
 

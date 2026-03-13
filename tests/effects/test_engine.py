@@ -72,10 +72,11 @@ async def test_engine_tick_observes_render_duration() -> None:
     metrics_mod.RENDER_DURATION = mock_duration
     metrics_mod.FRAMES_RENDERED = mock_rendered
     try:
-        from dj_ledfx.effects.engine import EffectEngine
+        import time as time_mod
+
         from dj_ledfx.beat.clock import BeatClock
         from dj_ledfx.effects.beat_pulse import BeatPulse
-        import time as time_mod
+        from dj_ledfx.effects.engine import EffectEngine
 
         clock = BeatClock()
         now = time_mod.monotonic()
