@@ -13,13 +13,16 @@ from dj_ledfx.spatial.mapping import (
     RadialMapping,
     SpatialMapping,
 )
+from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
 
 __all__ = [
     "DeviceGeometry",
+    "DevicePlacement",
     "LinearMapping",
     "MatrixGeometry",
     "PointGeometry",
     "RadialMapping",
+    "SceneModel",
     "SpatialMapping",
     "StripGeometry",
     "TileLayout",
