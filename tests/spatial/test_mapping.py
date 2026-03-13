@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from dj_ledfx.spatial.mapping import LinearMapping, RadialMapping
 
@@ -52,6 +53,10 @@ class TestLinearMapping:
         ])
         result = mapping.map_positions(positions)
         assert np.all(np.diff(result) > 0)
+
+    def test_zero_direction_raises(self) -> None:
+        with pytest.raises(ValueError, match="non-zero"):
+            LinearMapping(direction=(0.0, 0.0, 0.0))
 
     def test_all_same_position_returns_zeros(self) -> None:
         mapping = LinearMapping(direction=(1.0, 0.0, 0.0))
