@@ -29,6 +29,8 @@ class _NoOpMetric:
 FAST_DURATION_BUCKETS = (0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.0166, 0.05, 0.1)
 LAG_BUCKETS = (0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0)
 
+_initialized = False
+
 # Module-level metric references — start as no-ops
 RENDER_DURATION: Any = _NoOpMetric()
 RENDER_FPS: Any = _NoOpMetric()
@@ -46,8 +48,10 @@ EVENT_LOOP_LAG: Any = _NoOpMetric()
 
 def init(enabled: bool, port: int = 9091) -> None:
     """Initialize metrics. When enabled, replaces no-ops with real Prometheus metrics."""
-    if not enabled:
+    global _initialized
+    if not enabled or _initialized:
         return
+    _initialized = True
 
     global RENDER_DURATION, RENDER_FPS, FRAMES_RENDERED, FRAMES_DROPPED
     global DEVICE_SEND_DURATION, DEVICE_FPS, DEVICE_LATENCY
