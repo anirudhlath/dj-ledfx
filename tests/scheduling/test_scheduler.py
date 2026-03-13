@@ -17,10 +17,11 @@ def _make_device(
     name: str = "TestDevice",
     latency_ms: float = 10.0,
     connected: bool = True,
+    max_fps: int = 60,
 ) -> ManagedDevice:
     adapter = MockDeviceAdapter(name=name, connected=connected)
     tracker = LatencyTracker(strategy=StaticLatency(latency_ms))
-    return ManagedDevice(adapter=adapter, tracker=tracker)
+    return ManagedDevice(adapter=adapter, tracker=tracker, max_fps=max_fps)
 
 
 def _fill_buffer(buf: RingBuffer, base_time: float, count: int = 60) -> None:
@@ -122,7 +123,7 @@ async def test_distributor_writes_to_all_devices() -> None:
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[dev1, dev2], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[dev1, dev2], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -140,7 +141,7 @@ async def test_distributor_computes_correct_target_time() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(
-        ring_buffer=buf, devices=[dev_fast, dev_slow], fps=60, max_fps=60
+        ring_buffer=buf, devices=[dev_fast, dev_slow], fps=60
     )
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
@@ -161,7 +162,7 @@ async def test_send_loop_disconnected_backoff() -> None:
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -180,7 +181,6 @@ async def test_send_loop_reconnection_sends_frames() -> None:
         ring_buffer=buf,
         devices=[device],
         fps=60,
-        max_fps=60,
         disconnect_backoff_s=0.01,
     )
     task = asyncio.create_task(scheduler.run())
@@ -199,7 +199,7 @@ async def test_send_loop_reconnection_resets_tracker() -> None:
     """When is_connected flips False->True, tracker.reset() must be called."""
     adapter = MockDeviceAdapter(name="Reconnect", connected=False, supports_probing=False)
     strategy = WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
-    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy))
+    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy), max_fps=60)
     # Pre-fill strategy with stale samples
     strategy.update(200.0)
     strategy.update(300.0)
@@ -212,7 +212,6 @@ async def test_send_loop_reconnection_resets_tracker() -> None:
         ring_buffer=buf,
         devices=[device],
         fps=60,
-        max_fps=60,
         disconnect_backoff_s=0.01,
     )
     task = asyncio.create_task(scheduler.run())
@@ -232,11 +231,11 @@ async def test_send_loop_rtt_not_updated_when_probing_disabled() -> None:
     """When supports_latency_probing=False, tracker should not get RTT updates."""
     adapter = MockDeviceAdapter(name="NoProbe", supports_probing=False)
     strategy = WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
-    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy))
+    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy), max_fps=60)
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -250,12 +249,12 @@ async def test_send_loop_rtt_updated_when_probing_enabled() -> None:
     """When supports_latency_probing=True, tracker should receive RTT updates."""
     adapter = MockDeviceAdapter(name="WithProbe", supports_probing=True)
     strategy = WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
-    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy))
+    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy), max_fps=60)
 
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -271,7 +270,7 @@ async def test_send_loop_buffer_not_ready() -> None:
     buf = RingBuffer(capacity=60, led_count=10)
     # Don't fill buffer
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.1)
     scheduler.stop()
@@ -298,7 +297,7 @@ async def test_send_loop_continues_after_send_exception() -> None:
 
     device.adapter.send_frame = flaky_send  # type: ignore[assignment]
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.2)
     scheduler.stop()
@@ -310,11 +309,11 @@ async def test_send_loop_continues_after_send_exception() -> None:
 
 async def test_fps_cap_limits_send_rate() -> None:
     """max_fps should throttle the device send rate."""
-    device = _make_device()
+    device = _make_device(max_fps=10)
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=10)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(1.0)
     scheduler.stop()
@@ -326,11 +325,11 @@ async def test_fps_cap_limits_send_rate() -> None:
 
 async def test_fps_cap_no_accumulated_drift() -> None:
     """Over many iterations, total elapsed should match expected (no drift)."""
-    device = _make_device()
+    device = _make_device(max_fps=20)
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=20)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     start = time.monotonic()
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(2.0)
@@ -356,7 +355,7 @@ async def test_graceful_stop() -> None:
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.1)
     scheduler.stop()
@@ -369,7 +368,7 @@ async def test_external_cancellation() -> None:
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.1)
     task.cancel()
@@ -391,7 +390,7 @@ async def test_shutdown_during_active_send() -> None:
 
     device.adapter.send_frame = slow_send  # type: ignore[assignment]
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
 
     # Wait until send_frame is actually in progress
@@ -414,7 +413,7 @@ async def test_get_device_stats() -> None:
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.2)
 
@@ -431,11 +430,11 @@ async def test_get_device_stats() -> None:
 
 async def test_get_device_stats_fps_accuracy() -> None:
     """send_fps should approximate the actual send rate."""
-    device = _make_device("FpsDevice")
+    device = _make_device("FpsDevice", max_fps=20)
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60, max_fps=20)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(1.0)
 
@@ -445,3 +444,32 @@ async def test_get_device_stats_fps_accuracy() -> None:
 
     scheduler.stop()
     await task
+
+
+async def test_mixed_fps_per_device() -> None:
+    """Devices with different max_fps send at different rates."""
+    import contextlib
+    fast_device = _make_device("fast", max_fps=60)
+    slow_device = _make_device("slow", max_fps=30)
+    buf = RingBuffer(capacity=60, led_count=10)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = LookaheadScheduler(
+        ring_buffer=buf,
+        devices=[fast_device, slow_device],
+        fps=60,
+    )
+
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.sleep(0.5)
+    scheduler.stop()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    fast_count = len(fast_device.adapter.send_frame_calls)
+    slow_count = len(slow_device.adapter.send_frame_calls)
+    # Fast device (60fps) should send roughly 2x as many frames as slow (30fps)
+    assert fast_count > 0
+    assert slow_count > 0
+    ratio = fast_count / slow_count
+    assert 1.5 < ratio < 3.0, f"Expected ~2:1 ratio, got {ratio:.1f}:1"

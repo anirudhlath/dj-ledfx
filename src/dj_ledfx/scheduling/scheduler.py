@@ -49,13 +49,11 @@ class LookaheadScheduler:
         ring_buffer: RingBuffer,
         devices: list[ManagedDevice],
         fps: int = 60,
-        max_fps: int = 60,
         disconnect_backoff_s: float = 1.0,
     ) -> None:
         self._ring_buffer = ring_buffer
         self._devices = devices
         self._frame_period = 1.0 / fps
-        self._min_frame_interval = 1.0 / max_fps
         self._disconnect_backoff_s = disconnect_backoff_s
         self._running = False
         self._slots = [FrameSlot() for _ in devices]
@@ -160,8 +158,9 @@ class LookaheadScheduler:
                 device.tracker.update(rtt_ms)
 
             # Step 8: FPS cap
+            min_frame_interval = 1.0 / device.max_fps
             now = time.monotonic()
-            remaining = last_send_time + self._min_frame_interval - now
+            remaining = last_send_time + min_frame_interval - now
             if remaining > 0:
                 await asyncio.sleep(remaining)
             last_send_time = time.monotonic()

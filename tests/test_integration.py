@@ -46,7 +46,6 @@ def _setup_pipeline(
         ring_buffer=engine.ring_buffer,
         devices=devices,
         fps=60,
-        max_fps=60,
     )
 
     simulator = BeatSimulator(event_bus=event_bus, bpm=bpm)
@@ -57,7 +56,7 @@ async def test_full_pipeline_simulator_to_mock_device() -> None:
     """Integration: BeatSimulator -> BeatClock -> EffectEngine -> Scheduler -> MockDevice."""
     adapter = MockDeviceAdapter(name="MockLED", led_count=10)
     tracker = LatencyTracker(strategy=StaticLatency(10.0))
-    managed = ManagedDevice(adapter=adapter, tracker=tracker)
+    managed = ManagedDevice(adapter=adapter, tracker=tracker, max_fps=60)
 
     simulator, engine, scheduler, _ = _setup_pipeline([managed])
 
@@ -82,13 +81,13 @@ async def test_mixed_latency_devices() -> None:
     """Two devices with different latencies both receive frames."""
     fast_adapter = MockDeviceAdapter(name="USB Device", led_count=10)
     fast_tracker = LatencyTracker(strategy=StaticLatency(5.0))
-    fast_device = ManagedDevice(adapter=fast_adapter, tracker=fast_tracker)
+    fast_device = ManagedDevice(adapter=fast_adapter, tracker=fast_tracker, max_fps=60)
 
     slow_adapter = MockDeviceAdapter(name="Govee WiFi", led_count=10)
     slow_tracker = LatencyTracker(
         strategy=WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
     )
-    slow_device = ManagedDevice(adapter=slow_adapter, tracker=slow_tracker)
+    slow_device = ManagedDevice(adapter=slow_adapter, tracker=slow_tracker, max_fps=60)
 
     simulator, engine, scheduler, _ = _setup_pipeline([fast_device, slow_device])
 
