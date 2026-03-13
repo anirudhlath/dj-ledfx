@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.spatial.geometry import (
     DeviceGeometry,
     MatrixGeometry,
@@ -23,6 +24,7 @@ __all__ = [
     "PointGeometry",
     "RadialMapping",
     "SceneModel",
+    "SpatialCompositor",
     "SpatialMapping",
     "StripGeometry",
     "TileLayout",
