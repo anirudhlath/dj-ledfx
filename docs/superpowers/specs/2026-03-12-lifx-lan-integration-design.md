@@ -99,19 +99,21 @@ Owns the single asyncio UDP socket for all LIFX communication.
 - Discovery: broadcast GetService(2), collect responses, query GetVersion(32)
 - RTT probing: periodic EchoRequest(58) per registered device, correlate EchoResponse(59), feed RTT samples to device callbacks
 - Source ID management (random uint32 at startup)
-- Per-device sequence counters (uint8, wraps at 255)
+- Per-device sequence management: global `int` counter incremented per send, `seq % 256` used on the wire (uint8). Full `int` used as pending-response map key to prevent collisions across counter wraps.
 - Receive loop: single async task demuxes incoming packets by (source_ip, port) tuple to identify the device, then matches sequence number to correlate with outstanding requests
+- All LIFX adapter `send_frame()` calls are pure asyncio UDP (no `asyncio.to_thread` — unlike OpenRGB). Single event loop, no cross-thread state.
 
 **Receive loop demux strategy:**
 - Maintains a `dict[tuple[str, int], LifxDeviceRecord]` mapping (IP, port) to registered devices
 - When a packet arrives, looks up the sender's (IP, port) to identify which device sent it
-- For EchoResponse correlation: the transport maintains a `dict[int, tuple[str, float]]` mapping sequence number to (device_ip, send_time). On EchoResponse, looks up the sequence to find the original send_time and compute RTT. Sequence numbers are allocated from a global counter (not per-device) to avoid collisions in the pending response map.
-- Stale entries in the pending map are cleaned on each probe cycle (any entry older than probe_interval is dropped)
+- For EchoResponse correlation: the transport maintains a `dict[int, tuple[str, float]]` mapping the full `int` sequence counter to (device_ip, send_time). On EchoResponse, looks up `seq % 256` against outstanding requests to find the original send_time and compute RTT. Stale entries are cleaned on each probe cycle (any entry older than probe_interval is dropped).
 
 **RTT probe design:**
+- Probe task starts only after all adapters have registered their callbacks (at the end of `LifxBackend.discover()`, not during discovery broadcast). This prevents EchoResponses arriving before any callback is registered.
 - Runs as async task at configurable interval (default 2s)
 - Iterates registered devices, sends EchoRequest with unique sequence per device
 - On EchoResponse: computes `rtt_ms = (now - send_time) * 1000`, calls registered callback
+- RTT callbacks must be synchronous and non-blocking (<1ms), consistent with EventBus callback policy. The `tracker.update()` call is pure arithmetic — sub-microsecond.
 - Callbacks registered by adapters on connect, forward to their LatencyTracker
 
 ### Layer 2: LifxPacket (encoding/decoding)
@@ -150,7 +152,7 @@ All inherit from `DeviceAdapter` ABC, receive shared `LifxTransport` instance.
 **File:** `src/dj_ledfx/devices/lifx/bulb.py`
 
 - `led_count` -> 1
-- `send_frame(colors)` -> `colors[0]` -> RGB->HSBK -> one SetColor(102) packet
+- `send_frame(colors)` -> `colors[0]` -> RGB->HSBK -> one SetColor(102) packet. Uses index 0 (first pixel) for simplicity. Future logical bulb grouping may use mean-color or dominant-color strategies at the effect layer.
 - `supports_latency_probing = False` (RTT managed by transport's echo probes, not scheduler)
 - `connect()` -> no-op beyond power check
 - `disconnect()` -> clears internal state
@@ -160,7 +162,7 @@ All inherit from `DeviceAdapter` ABC, receive shared `LifxTransport` instance.
 **File:** `src/dj_ledfx/devices/lifx/strip.py`
 
 - `led_count` -> actual zone count (queried on connect via GetExtendedColorZones)
-- `send_frame(colors)` -> RGB array -> HSBK array -> SetExtendedColorZones(510), up to 82 zones per packet
+- `send_frame(colors)` -> RGB array -> HSBK array -> SetExtendedColorZones(510). If `led_count > 82`, chunks into multiple packets with incrementing `zone_index` (e.g., zones 0-81 in first packet, 82-163 in second).
 - `supports_latency_probing = False` (RTT via transport echo probes)
 - `connect()` -> queries zone count from device
 
@@ -169,7 +171,7 @@ All inherit from `DeviceAdapter` ABC, receive shared `LifxTransport` instance.
 **File:** `src/dj_ledfx/devices/lifx/tile_chain.py`
 
 - `led_count` -> `tiles_in_chain * 64` (e.g., 5 * 64 = 320)
-- `send_frame(colors)` -> splits 320-LED array into 5x 64-pixel chunks -> RGB->HSBK each -> 5x SetTileState64(715) packets
+- `send_frame(colors)` -> splits 320-LED array into 5x 64-pixel chunks -> RGB->HSBK each -> 5x SetTileState64(715) packets sent sequentially. At WiFi speeds (~1-2ms per packet), tiles in the chain see the new frame within ~10ms of each other. This is below visual perception threshold and acceptable.
 - `supports_latency_probing = False` (RTT via transport echo probes)
 - `connect()` -> queries StateDeviceChain(702), stores TileInfo metadata
 - TileInfo stored but not used yet — available for future spatial mapping and Taichi matrix effects
@@ -210,11 +212,21 @@ Note: `supports_latency_probing = False` on all LIFX adapters prevents the sched
 
 **File:** `src/dj_ledfx/devices/backend.py`
 
-Auto-registering ABC for vendor backends:
+Auto-registering ABC for vendor backends.
+
+**DiscoveredDevice** (defined in `src/dj_ledfx/devices/backend.py`):
+```python
+@dataclass(frozen=True, slots=True)
+class DiscoveredDevice:
+    adapter: DeviceAdapter
+    tracker: LatencyTracker
+    max_fps: int
+```
 
 ```python
 class DeviceBackend(ABC):
     _registry: ClassVar[list[type[DeviceBackend]]] = []
+    _instances: ClassVar[list[DeviceBackend]] = []
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -222,8 +234,12 @@ class DeviceBackend(ABC):
             DeviceBackend._registry.append(cls)
 
     @abstractmethod
-    async def discover(self, config: AppConfig) -> list[tuple[DeviceAdapter, LatencyTracker, int]]:
-        """Returns list of (adapter, tracker, max_fps) tuples."""
+    async def discover(self, config: AppConfig) -> list[DiscoveredDevice]:
+        """Discover, connect, and return all devices for this backend.
+
+        Post-condition: all returned adapters are connected (is_connected=True).
+        Each backend handles its own connection semantics internally.
+        """
         ...
 
     @abstractmethod
@@ -235,8 +251,10 @@ class DeviceBackend(ABC):
         pass
 
     @classmethod
-    async def discover_all(cls, config: AppConfig) -> list[tuple[DeviceAdapter, LatencyTracker, int]]:
-        results = []
+    async def discover_all(cls, config: AppConfig) -> list[DiscoveredDevice]:
+        # Note: single-call assumption — calling again overwrites _instances
+        # without shutting down previous backends. This is startup-only code.
+        results: list[DiscoveredDevice] = []
         cls._instances = []
         for backend_cls in cls._registry:
             backend = backend_cls()
@@ -248,22 +266,29 @@ class DeviceBackend(ABC):
     @classmethod
     async def shutdown_all(cls) -> None:
         """Shut down all backend instances. Called from main.py after device_manager.disconnect_all()."""
-        for backend in getattr(cls, '_instances', []):
+        for backend in cls._instances:
             await backend.shutdown()
         cls._instances = []
 ```
 
+**Auto-registration import trigger:** Backend subclasses register via `__init_subclass__` on import. To ensure all backends are registered before `discover_all()` is called, `src/dj_ledfx/devices/__init__.py` imports all backend modules:
+```python
+from dj_ledfx.devices import openrgb_backend  # noqa: F401
+from dj_ledfx.devices import lifx             # noqa: F401
+```
+This is explicit and maintainable for a small, closed set of backends.
+
 Each backend creates its own LatencyTracker instances inside `discover()` using the config fields prefixed for that backend (e.g., `config.lifx_latency_strategy`, `config.openrgb_latency_strategy`). This is explicit coupling — each backend knows its config prefix.
 
 **Implementations:**
-- `LifxBackend` in `src/dj_ledfx/devices/lifx/discovery.py` — overrides `shutdown()` to call `LifxTransport.close()`
-- `OpenRGBBackend` in `src/dj_ledfx/devices/openrgb_backend.py` (refactored from main.py) — `shutdown()` is no-op (adapters own their TCP connections)
+- `LifxBackend` in `src/dj_ledfx/devices/lifx/discovery.py` — overrides `shutdown()` to call `LifxTransport.close()`. Calls `adapter.connect()` inside `discover()` to query device metadata (tile chain layout, strip zone count).
+- `OpenRGBBackend` in `src/dj_ledfx/devices/openrgb_backend.py` (refactored from main.py) — calls `adapter.connect()` inside `discover()` because it needs device name for heuristic latency seeding. `shutdown()` is no-op (adapters own their TCP connections).
 
-**Note on connect() timing:** The "unconnected adapters" contract applies to LIFX (UDP, connectionless — connect() queries device metadata but doesn't establish a persistent connection). OpenRGB is different: `OpenRGBBackend.discover()` must call `adapter.connect()` internally during discovery because it needs the connected device's name for heuristic latency seeding and actual LED count. The integration loop in main.py should call `connect()` only on adapters where `not adapter.is_connected`. This is consistent — each backend handles its own connection semantics.
+Both backends return only connected adapters — the `discover()` post-condition is uniform.
 
 ### LIFX Discovery Flow
 
-**LifxDeviceRecord** (defined in `src/dj_ledfx/devices/lifx/discovery.py`):
+**LifxDeviceRecord** (defined in `src/dj_ledfx/devices/lifx/types.py` — shared across transport and discovery to avoid circular imports):
 ```python
 @dataclass(frozen=True, slots=True)
 class LifxDeviceRecord:
@@ -290,23 +315,31 @@ Discovery collapses to:
 ```python
 # Startup
 devices = await DeviceBackend.discover_all(config)
-for adapter, tracker, max_fps in devices:
-    if not adapter.is_connected:
-        await adapter.connect()
-    device_manager.add_device(adapter, tracker, max_fps)
+for device in devices:
+    device_manager.add_device(device.adapter, device.tracker, device.max_fps)
 
 # Shutdown (after device_manager.disconnect_all())
 await DeviceBackend.shutdown_all()  # closes shared resources like LifxTransport
 ```
 
-Existing OpenRGB discovery moves from main.py to OpenRGBBackend. No changes to scheduler, effect engine, or ring buffer.
+All adapters are already connected when returned from `discover_all()` — each backend handles connection internally during discovery.
+
+Existing OpenRGB discovery moves from main.py to OpenRGBBackend. No changes to effect engine or ring buffer.
 
 **Scheduler note:** The existing `LookaheadScheduler` takes a single `max_fps` parameter. With LIFX at 30fps and OpenRGB at 60fps, the per-device send loop's `_min_frame_interval` must become per-device. This requires two small changes:
 
 1. **`ManagedDevice`** (in `devices/manager.py`) — add a `max_fps: int` field alongside `adapter` and `tracker`. Update `DeviceManager.add_device()` signature to accept `(adapter, tracker, max_fps)`.
 2. **`LookaheadScheduler`** — remove the `max_fps` constructor parameter. In `_send_loop()`, compute `min_frame_interval = 1.0 / device.max_fps` per-device instead of using the current `self._min_frame_interval` scheduler-level field.
 
-Each backend sets `max_fps` from its config (e.g., `config.lifx_max_fps`, `config.openrgb_max_fps`) when creating device tuples in `discover()`.
+Each backend sets `max_fps` from its config (e.g., `config.lifx_max_fps`, `config.openrgb_max_fps`) when creating `DiscoveredDevice` instances in `discover()`.
+
+**Migration blast radius for per-device max_fps:**
+- `ManagedDevice` dataclass: add `max_fps: int = 60` field
+- `DeviceManager.add_device()`: add `max_fps: int` parameter
+- `LookaheadScheduler.__init__()`: remove `max_fps` parameter and `self._min_frame_interval` field
+- `LookaheadScheduler._send_loop()`: compute `min_frame_interval = 1.0 / device.max_fps` per-device
+- `main.py`: remove `max_fps=config.openrgb_max_fps` from scheduler constructor
+- Tests: update all `ManagedDevice()` constructions in `test_scheduler.py` (including `_make_device` helper), `test_integration.py`, and `test_manager.py` to include `max_fps`. Update `test_fps_cap_limits_send_rate` to test per-device rather than scheduler-level cap. Add new test for mixed max_fps (e.g., 60fps + 30fps devices produce ~2:1 send count ratio).
 
 ## Configuration
 
@@ -339,7 +372,9 @@ lifx_latency_window_size: int = 60
 
 **max_fps defaults to 30:** WiFi RTT for SetTileState64 (558B) is ~10-20ms. At 60fps (16.6ms/frame) there's no headroom. 30fps (33ms) is smooth and sustainable.
 
-**Validation rules** (enforced in `AppConfig.__post_init__`):
+**TOML parsing:** `load_config()` needs a new block to parse `raw["devices"]["lifx"]`, mirroring the existing `raw["devices"]["openrgb"]` block at `config.py:91`. Each `lifx_*` field needs an explicit `if "field_name" in lifx: kwargs["lifx_field"] = lifx["field_name"]` line.
+
+**Validation rules** (enforced in `AppConfig.__post_init__`, `lifx_manual_offset_ms` is intentionally unvalidated — negative values allow manual compensation):
 - `lifx_discovery_timeout_s > 0`
 - `lifx_default_kelvin` in range 2500-9000
 - `lifx_echo_probe_interval_s > 0`
@@ -361,6 +396,7 @@ src/dj_ledfx/devices/
 ├── openrgb_backend.py      # OpenRGBBackend (NEW — wraps existing discovery)
 └── lifx/
     ├── __init__.py          # exports LifxBackend
+    ├── types.py             # LifxDeviceRecord dataclass (shared by transport + discovery)
     ├── transport.py         # LifxTransport
     ├── packet.py            # LifxPacket + RGB->HSBK conversion
     ├── discovery.py         # LifxBackend (DeviceBackend subclass)
@@ -408,10 +444,15 @@ tests/devices/
 - Black (0,0,0) -> bri=0
 - Round-trip accuracy: RGB->HSBK->RGB within +/-1 per channel
 
-### Integration Test
+### Unit Tests — Scheduler Migration
 
-- BeatSimulator -> EffectEngine -> RingBuffer -> Scheduler -> mock LifxTransport
-- Verify packets arrive at correct timing with correct content across all three adapter types simultaneously
+- **test_scheduler.py** — update all `ManagedDevice` constructions to include `max_fps`, remove `max_fps` from scheduler constructor calls
+- **test_fps_cap** — verify per-device FPS: device A at `max_fps=60` and device B at `max_fps=30` produce ~2:1 send count ratio over fixed interval
+
+### Integration Tests
+
+- **Full pipeline:** BeatSimulator -> EffectEngine -> RingBuffer -> Scheduler -> mock LifxTransport. Verify packets arrive at correct timing with correct content across all three adapter types simultaneously.
+- **RTT feedback loop:** mock transport fires RTT callback -> adapter updates tracker -> scheduler reads updated latency -> frame selection shifts to newer/older ring buffer position. This is the core behavioral invariant of the probing system.
 
 ## Performance Analysis
 
