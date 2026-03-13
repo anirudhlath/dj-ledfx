@@ -168,7 +168,6 @@ def main() -> None:
 
     if args.profile == "deep":
         from datetime import datetime
-        from pathlib import Path
 
         try:
             from viztracer import VizTracer
