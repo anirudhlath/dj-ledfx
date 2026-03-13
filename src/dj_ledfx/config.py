@@ -38,13 +38,13 @@ class AppConfig:
 
     # LIFX
     lifx_enabled: bool = True
-    lifx_discovery_timeout_s: float = 1.0
+    lifx_discovery_timeout_s: float = 10.0
     lifx_default_kelvin: int = 3500
     lifx_echo_probe_interval_s: float = 2.0
     lifx_latency_strategy: str = "ema"
     lifx_latency_ms: float = 50.0
     lifx_manual_offset_ms: float = 0.0
-    lifx_max_fps: int = 30
+    lifx_max_fps: int = 60
     lifx_latency_window_size: int = 60
 
     def __post_init__(self) -> None:

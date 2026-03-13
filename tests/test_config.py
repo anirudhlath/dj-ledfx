@@ -105,7 +105,7 @@ def test_lifx_config_defaults() -> None:
     config = AppConfig()
     assert config.lifx_enabled is True
     assert config.lifx_default_kelvin == 3500
-    assert config.lifx_max_fps == 30
+    assert config.lifx_max_fps == 60
     assert config.lifx_latency_strategy == "ema"
     assert config.lifx_echo_probe_interval_s == 2.0
 

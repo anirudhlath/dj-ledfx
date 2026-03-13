@@ -22,3 +22,13 @@ port = 6742
 latency_strategy = "static"
 latency_ms = 10
 manual_offset_ms = 0
+
+[devices.lifx]
+enabled = true
+discovery_timeout_s = 10.0
+default_kelvin = 3500
+max_fps = 60
+latency_strategy = "ema"
+latency_ms = 50
+manual_offset_ms = 0
+echo_probe_interval_s = 2.0

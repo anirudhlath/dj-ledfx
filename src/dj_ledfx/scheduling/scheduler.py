@@ -83,6 +83,11 @@ class LookaheadScheduler:
             while self._running:
                 now = time.monotonic()
                 for device, slot in zip(self._devices, self._slots, strict=True):
+                    if slot.has_pending:
+                        logger.trace(
+                            "Frame overwritten for '{}' — device draining slower than engine",
+                            device.adapter.device_info.name,
+                        )
                     target_time = now + device.tracker.effective_latency_s
                     slot.put(target_time)
 
@@ -136,6 +141,11 @@ class LookaheadScheduler:
             # Step 3: Find nearest frame (numpy copy happens here)
             frame = self._ring_buffer.find_nearest(target_time)
             if frame is None:
+                logger.warning(
+                    "No frame in ring buffer for '{}' (target_time={:.3f})",
+                    device.adapter.device_info.name,
+                    target_time,
+                )
                 continue
 
             # Steps 4-5: Send frame
@@ -157,13 +167,15 @@ class LookaheadScheduler:
                 rtt_ms = (time.monotonic() - send_start) * 1000.0
                 device.tracker.update(rtt_ms)
 
-            # Step 8: FPS cap
+            # Step 8: FPS cap — advance by fixed interval to absorb sleep overshoot
             min_frame_interval = 1.0 / device.max_fps
-            now = time.monotonic()
-            remaining = last_send_time + min_frame_interval - now
+            last_send_time += min_frame_interval
+            remaining = last_send_time - time.monotonic()
             if remaining > 0:
                 await asyncio.sleep(remaining)
-            last_send_time = time.monotonic()
+            else:
+                # Fell behind — snap to now to avoid burst catch-up
+                last_send_time = time.monotonic()
 
     def get_device_stats(self) -> list[DeviceStats]:
         """Snapshot of per-device send statistics."""

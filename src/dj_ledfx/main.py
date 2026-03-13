@@ -116,7 +116,8 @@ async def _run(args: argparse.Namespace) -> None:
                 avg_frame_render_time_ms=engine.avg_render_time_ms,
                 device_stats=scheduler.get_device_stats(),
             )
-            logger.info("Status: {}", status.summary())
+            summary = status.summary()
+            await asyncio.to_thread(logger.info, "Status: {}", summary)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=10.0)
             except TimeoutError:
