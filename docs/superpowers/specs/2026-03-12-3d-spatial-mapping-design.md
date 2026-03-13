@@ -69,13 +69,14 @@ spatial/
 
 ### Modified Existing Files
 
-- `types.py` — Add geometry types (PointGeometry, StripGeometry, MatrixGeometry, TileLayout)
-- `devices/adapter.py` — Add optional `geometry` property to DeviceAdapter ABC
-- `scheduling/scheduler.py` — Call compositor in per-device send loop
-- `config.py` — Add `scene_config: dict | None` field to `AppConfig`, parsed from `[scene]` TOML section (raw dict, not a dataclass — scene validation happens in `SceneModel.from_config` which needs adapter info)
-- `main.py` — Wire SceneModel + Compositor into startup
+- `devices/adapter.py` — Add optional `geometry` property to DeviceAdapter ABC, importing `DeviceGeometry` from `spatial.geometry`
+- `scheduling/scheduler.py` — Add `compositor: SpatialCompositor | None = None` to `__init__`, call compositor in per-device send loop
+- `config.py` — Add `scene_config: dict | None = None` field to `AppConfig`, parsed via `raw.get("scene")` (raw dict passthrough — scene validation happens in `SceneModel.from_config` which needs adapter info)
+- `main.py` — Wire SceneModel + Compositor into startup after device discovery
 
 ## Device Geometry Types
+
+Defined in `spatial/geometry.py` (not `types.py` — these are spatial-domain types, not cross-cutting primitives). Re-exported from `spatial/__init__.py`.
 
 Three geometry types cover all current and planned hardware:
 
@@ -87,9 +88,10 @@ class PointGeometry:
 
 @dataclass(frozen=True, slots=True)
 class StripGeometry:
-    """N LEDs along a direction vector. LIFX strips, OpenRGB LED strips.
-    Direction is auto-normalized at construction; zero vector raises ValueError."""
-    led_count: int
+    """LEDs along a direction vector. LIFX strips, OpenRGB LED strips.
+    Direction is auto-normalized at construction; zero vector raises ValueError.
+    Note: led_count is NOT stored here — it comes from adapter.led_count
+    and is passed to SceneModel.get_led_positions() at expansion time."""
     direction: tuple[float, float, float]  # unit vector along strip (auto-normalized)
     length: float  # meters
 
@@ -109,7 +111,10 @@ class MatrixGeometry:
 
 @dataclass(frozen=True, slots=True)
 class TileLayout:
-    """Single tile's position and dimensions within a matrix."""
+    """Single tile's position and dimensions within a matrix.
+    Offsets are in meters relative to device position.
+    Note: LIFX TileInfo uses raw user_x/user_y values — the adapter's
+    geometry property must convert: offset = user_x * pixel_pitch."""
     offset_x: float  # relative to device position (meters)
     offset_y: float
     width: int   # 8 for LIFX tiles
@@ -117,6 +122,8 @@ class TileLayout:
 
 DeviceGeometry = PointGeometry | StripGeometry | MatrixGeometry
 ```
+
+**Dependency graph** (no cycles): `spatial.geometry` → (no deps), `devices.adapter` → `spatial.geometry`, `spatial.scene` → `devices.adapter`.
 
 ### World-Space LED Position Expansion
 
@@ -128,7 +135,7 @@ Each geometry type expands to per-LED world coordinates:
 
 Positions computed once at scene load, cached as numpy `(N, 3)` float64 arrays.
 
-**LED count source**: `from_config` populates `StripGeometry.led_count` from `adapter.led_count`, ensuring the compositor always produces exactly the right number of colors. For MatrixGeometry, led_count = `sum(tile.width * tile.height for tile in tiles)`.
+**LED count source**: `led_count` is not stored on geometry types. Instead, `DevicePlacement` carries `led_count: int` sourced from `adapter.led_count` at `from_config` time. `SceneModel.get_led_positions()` uses this to expand strip positions. For MatrixGeometry, led_count = `sum(tile.width * tile.height for tile in tiles)` (validated against adapter at construction). This ensures the compositor always produces exactly the right number of colors for the adapter.
 
 **Strip position convention**: LEDs are placed at segment centers — `position + direction * ((i + 0.5) / N) * length`. This avoids placing a LED at exactly the device origin or strip endpoint, distributes N LEDs evenly across the full strip length, and is well-defined for N=1 (single LED at strip midpoint).
 
@@ -143,20 +150,21 @@ class SceneModel:
     def get_led_positions(self, device_id: str) -> NDArray[np.float64]:
         """Returns (N, 3) world-space positions for all LEDs.
         Expands geometry → per-LED coords, cached after first call.
-        LED count comes from adapter.led_count — geometry types that need
-        led_count (StripGeometry) get it from the adapter at from_config time.
-        This ensures compositor output always matches adapter expectations."""
+        Uses placement.led_count (sourced from adapter at from_config time)
+        for strip position expansion."""
 
     def get_bounds(self) -> tuple[NDArray, NDArray]:
         """Returns (min_xyz, max_xyz) bounding box of entire scene.
         Used by mappings for auto-normalization."""
 
     @staticmethod
-    def from_config(scene_config: dict, device_manager: DeviceManager) -> SceneModel:
+    def from_config(scene_config: dict, adapters: list[DeviceAdapter]) -> SceneModel:
         """Merges TOML placements with adapter-reported geometry.
         Config provides: position, geometry type.
         Adapter provides: led_count, tile layout (for matrix).
-        Called after device discovery — see Startup Sequence."""
+        Called after device discovery — see Startup Sequence.
+        Accepts list[DeviceAdapter] (not DeviceManager) to keep
+        spatial/ decoupled from the scheduling layer."""
 ```
 
 ### DevicePlacement
@@ -167,6 +175,7 @@ class DevicePlacement:
     device_id: str  # matches DeviceInfo.name (unique within a backend)
     position: tuple[float, float, float]  # (x, y, z) meters
     geometry: DeviceGeometry
+    led_count: int  # from adapter.led_count — ensures compositor output matches adapter
 ```
 
 ### Device Identity
@@ -175,7 +184,7 @@ class DevicePlacement:
 
 The user writes the `name` exactly as the adapter reports it. If two backends happen to have a device with the same name, the user disambiguates in config by prefixing with backend name (e.g., `"openrgb:Motherboard"`, `"lifx:DJ Booth"`). `from_config` first tries an exact match on `DeviceInfo.name`, then tries stripping a `"backend:"` prefix. Unmatched names log WARNING and are skipped.
 
-The scheduler passes `device.adapter.device_info.name` to `compositor.composite()`. The compositor uses the same name as the key in its `_strip_indices` cache, which was built by `from_config` using the same resolution logic.
+The scheduler passes `device.adapter.device_info.name` to `compositor.composite()`. The compositor's `_strip_indices` cache is keyed by the raw `DeviceInfo.name` (not the user's config name). During `from_config`, after resolving a config entry to an adapter, the cache is keyed by `adapter.device_info.name`. This means the scheduler never needs to know about backend prefixes — it just passes the adapter's name directly.
 
 ### Startup Sequence
 
@@ -186,9 +195,14 @@ SceneModel construction happens after device discovery in `main.py`:
 2. Create DeviceManager                     (existing)
 3. Discover devices via backends            (existing)
 4. Add devices to manager                   (existing)
-5. NEW: Build SceneModel from config + device_manager
+5. NEW: Build SceneModel from config + [d.adapter for d in device_manager.devices]
 6. NEW: Create SpatialCompositor (if scene exists)
 7. Create EffectEngine and Scheduler        (existing, compositor passed to scheduler)
+```
+
+`LookaheadScheduler.__init__` gains a new optional parameter:
+```python
+compositor: SpatialCompositor | None = None
 ```
 
 ### Adapter Geometry Reporting
@@ -204,13 +218,22 @@ def geometry(self) -> DeviceGeometry | None:
 Adapter implementations:
 - **OpenRGBAdapter** → returns `None` (geometry from config only)
 - **LIFXBulbAdapter** → returns `PointGeometry()`
-- **LIFXStripAdapter** → returns `StripGeometry(led_count, ...)`
-- **LIFXTileChainAdapter** → returns `MatrixGeometry(tiles=...)` from discovery
+- **LIFXStripAdapter** → returns `StripGeometry(direction, length)` from zone data
+- **LIFXTileChainAdapter** → returns `MatrixGeometry(tiles=...)` from discovery, converting LIFX `TileInfo` → spatial `TileLayout`:
+  ```python
+  TileLayout(
+      offset_x=tile.user_x * pixel_pitch,
+      offset_y=tile.user_y * pixel_pitch,
+      width=tile.width,
+      height=tile.height,
+  )
+  ```
+  This conversion lives in the adapter's `geometry` property, not in `SceneModel`.
 
 Geometry resolution order:
 1. TOML config explicit geometry → wins
 2. Adapter-reported geometry → auto-discovered
-3. Fallback → `PointGeometry()` if 1 LED, `StripGeometry(direction=(1,0,0))` otherwise
+3. Fallback → `PointGeometry()` if 1 LED, `StripGeometry(direction=(1,0,0), length=1.0)` otherwise
 
 ## Spatial Mapping Protocol
 
