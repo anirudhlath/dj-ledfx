@@ -58,6 +58,12 @@ def _parse_args() -> argparse.Namespace:
         default=9091,
         help="Prometheus metrics port (default: 9091)",
     )
+    parser.add_argument("--web", action="store_true", help="Enable web UI")
+    parser.add_argument("--web-port", type=int, default=None, help="Web UI port")
+    parser.add_argument("--web-host", type=str, default=None, help="Web UI host")
+    parser.add_argument(
+        "--web-static-dir", type=str, default=None, help="Web UI static files directory"
+    )
     return parser.parse_args()
 
 
@@ -154,6 +160,51 @@ async def _run(args: argparse.Namespace) -> None:
     )
 
     stop_event = asyncio.Event()
+    web_server_task: asyncio.Task[None] | None = None
+
+    if args.web or config.web.enabled:
+        from dj_ledfx.effects.presets import PresetStore
+        from dj_ledfx.web.app import create_app
+
+        host = args.web_host or config.web.host
+        port = args.web_port or config.web.port
+
+        preset_store = PresetStore(args.config.parent / "presets.toml")
+        web_app = create_app(
+            beat_clock=clock,
+            effect_deck=deck,
+            effect_engine=engine,
+            device_manager=device_manager,
+            scheduler=scheduler,
+            preset_store=preset_store,
+            scene_model=None,
+            compositor=compositor,
+            config=config,
+            config_path=args.config,
+            web_static_dir=args.web_static_dir,
+        )
+
+        try:
+            from granian.constants import Interfaces
+            from granian.server.embed import Server as GranianServer
+
+            granian_server = GranianServer(
+                target=web_app,
+                address=host,
+                port=port,
+                interface=Interfaces.ASGI,
+                websockets=True,
+            )
+            web_server_task = asyncio.create_task(granian_server.serve())
+        except (ImportError, Exception) as e:
+            logger.warning("Granian unavailable ({}), falling back to uvicorn", e)
+            import uvicorn  # type: ignore[import-not-found]
+
+            uvi_config = uvicorn.Config(web_app, host=host, port=port, loop="none")
+            uvi_server = uvicorn.Server(uvi_config)
+            web_server_task = asyncio.create_task(uvi_server.serve())
+
+        logger.info("Web UI available at http://{}:{}", host, port)
 
     async def _event_loop_lag_loop() -> None:
         interval = 0.1
@@ -203,6 +254,11 @@ async def _run(args: argparse.Namespace) -> None:
     await stop_event.wait()
 
     logger.info("Shutting down...")
+
+    if web_server_task is not None:
+        web_server_task.cancel()
+        await asyncio.gather(web_server_task, return_exceptions=True)
+
     scheduler.stop()
     engine.stop()
     if simulator is not None:
