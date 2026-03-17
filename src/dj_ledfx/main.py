@@ -17,6 +17,7 @@ from dj_ledfx.config import load_config
 from dj_ledfx.devices.backend import DeviceBackend
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.beat_pulse import BeatPulse
+from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import EventBus
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
@@ -74,6 +75,9 @@ async def _run(args: argparse.Namespace) -> None:
             beat_number=event.beat_position,
             next_beat_ms=event.next_beat_ms,
             timestamp=event.timestamp,
+            pitch_percent=event.pitch_percent,
+            device_number=event.device_number,
+            device_name=event.device_name,
         )
 
     event_bus.subscribe(BeatEvent, on_beat)
@@ -132,10 +136,11 @@ async def _run(args: argparse.Namespace) -> None:
         palette=config.effect.beat_pulse_palette,
         gamma=config.effect.beat_pulse_gamma,
     )
+    deck = EffectDeck(effect)
 
     engine = EffectEngine(
         clock=clock,
-        effect=effect,
+        deck=deck,
         led_count=led_count,
         fps=config.engine.fps,
         max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
