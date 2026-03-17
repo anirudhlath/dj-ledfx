@@ -74,7 +74,7 @@
       "type": "gauge",
       "title": "Render FPS",
       "description": "Current render loop frames per second",
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "" },
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 1 },
       "options": {
         "reduceOptions": {
@@ -105,7 +105,7 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "ledfx_render_fps",
           "legendFormat": "FPS",
           "refId": "A"
@@ -117,7 +117,7 @@
       "type": "timeseries",
       "title": "Event Loop Lag",
       "description": "Asyncio event loop scheduling lag histogram quantiles",
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "" },
       "gridPos": { "h": 8, "w": 10, "x": 6, "y": 1 },
       "options": {
         "tooltip": { "mode": "multi", "sort": "none" },
@@ -137,19 +137,19 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "histogram_quantile(0.50, rate(ledfx_event_loop_lag_seconds_bucket[1m]))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "histogram_quantile(0.95, rate(ledfx_event_loop_lag_seconds_bucket[1m]))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "histogram_quantile(0.99, rate(ledfx_event_loop_lag_seconds_bucket[1m]))",
           "legendFormat": "p99",
           "refId": "C"
@@ -161,7 +161,7 @@
       "type": "stat",
       "title": "BPM",
       "description": "Current BPM from beat clock",
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "" },
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
       "options": {
         "reduceOptions": {
@@ -191,7 +191,7 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "ledfx_beat_bpm",
           "legendFormat": "BPM",
           "refId": "A"
@@ -210,7 +210,7 @@
       "type": "heatmap",
       "title": "Render Duration",
       "description": "Heatmap of per-frame render duration distribution over time",
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
       "options": {
         "calculate": false,
@@ -245,7 +245,7 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "sum(rate(ledfx_render_duration_seconds_bucket[1m])) by (le)",
           "legendFormat": "{{le}}",
           "refId": "A",
@@ -258,7 +258,7 @@
       "type": "timeseries",
       "title": "Frame Drop Rate",
       "description": "Rate of dropped frames per device (frames/s)",
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
       "options": {
         "tooltip": { "mode": "multi", "sort": "none" },
@@ -278,7 +278,7 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "rate(ledfx_frames_dropped_total[1m])",
           "legendFormat": "{{device}}",
           "refId": "A"
@@ -297,7 +297,7 @@
       "type": "timeseries",
       "title": "Device Send Duration",
       "description": "Time to send a frame to each device (histogram quantiles)",
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "" },
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
       "options": {
         "tooltip": { "mode": "multi", "sort": "none" },
@@ -317,19 +317,19 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "histogram_quantile(0.50, sum(rate(ledfx_device_send_duration_seconds_bucket[1m])) by (le, device))",
           "legendFormat": "p50 {{device}}",
           "refId": "A"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "histogram_quantile(0.95, sum(rate(ledfx_device_send_duration_seconds_bucket[1m])) by (le, device))",
           "legendFormat": "p95 {{device}}",
           "refId": "B"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "histogram_quantile(0.99, sum(rate(ledfx_device_send_duration_seconds_bucket[1m])) by (le, device))",
           "legendFormat": "p99 {{device}}",
           "refId": "C"
@@ -341,7 +341,7 @@
       "type": "timeseries",
       "title": "Device FPS",
       "description": "Effective send FPS per device",
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "" },
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 19 },
       "options": {
         "tooltip": { "mode": "multi", "sort": "none" },
@@ -361,7 +361,7 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "ledfx_device_fps",
           "legendFormat": "{{device}}",
           "refId": "A"
@@ -373,7 +373,7 @@
       "type": "timeseries",
       "title": "Device Latency",
       "description": "Effective latency per device in seconds",
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "" },
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 19 },
       "options": {
         "tooltip": { "mode": "multi", "sort": "none" },
@@ -393,7 +393,7 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "" },
           "expr": "ledfx_device_latency_seconds",
           "legendFormat": "{{device}}",
           "refId": "A"
