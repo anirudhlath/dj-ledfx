@@ -8,16 +8,23 @@ Real-time performance monitoring with Prometheus and Grafana.
 # One-time setup (macOS)
 ./scripts/setup-monitoring.sh
 
-# Start the stack
-prometheus --config.file=monitoring/prometheus.yml &
-brew services start grafana
-uv run -m dj_ledfx --metrics --demo
+# Start Prometheus (suppress verbose logging)
+prometheus --config.file=monitoring/prometheus.yml --log.level=warn &>/dev/null &
 
-# Open Grafana
-open http://localhost:3000
-# Default credentials: admin / admin
-# Import monitoring/grafana-dashboard.json
+# Start Grafana
+brew services start grafana
+
+# Start dj-ledfx with metrics
+uv run -m dj_ledfx --metrics --demo
 ```
+
+### Grafana Setup
+
+1. Open http://localhost:3000 (default credentials: admin / admin)
+2. **Add Prometheus datasource:** Connections → Data sources → Add data source → Prometheus, set URL to `http://localhost:9090`, click Save & test
+3. **Import dashboard:** Dashboards → Import → Upload JSON file, select `monitoring/grafana-dashboard.json`
+
+> **Note:** Device discovery takes ~15s (Govee 5s + LIFX 10s). Dashboard panels will populate after discovery completes and Prometheus scrapes a few times.
 
 ## Ports
 
@@ -27,13 +34,32 @@ open http://localhost:3000
 | Prometheus | :9090 |
 | Grafana | :3000 |
 
-## Custom Metrics Port
+## Port Conflicts
+
+If port 9091 is already in use by another process:
 
 ```bash
-uv run -m dj_ledfx --metrics --metrics-port 8080
+# Check what's using the port
+lsof -i :9091 -P
+
+# Use a different port
+uv run -m dj_ledfx --metrics --metrics-port 19091 --demo
 ```
 
-Update `prometheus.yml` targets accordingly.
+Then update `prometheus.yml` targets to match:
+
+```yaml
+      - targets: ["localhost:19091"]
+```
+
+And restart Prometheus: `pkill prometheus && prometheus --config.file=monitoring/prometheus.yml --log.level=warn &>/dev/null &`
+
+## Stopping
+
+```bash
+brew services stop grafana
+pkill prometheus
+```
 
 ## Metrics Reference
 

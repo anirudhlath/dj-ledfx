@@ -16,11 +16,15 @@ uv run -m dj_ledfx                  # Pro DJ Link listener mode
 Captures a low-overhead CPU profile viewable in [Speedscope](https://www.speedscope.app/):
 
 ```bash
+# Install py-spy first (optional dependency)
+uv pip install py-spy
+
+# Requires root on macOS (SIP restriction)
 sudo uv run -m dj_ledfx --profile --demo
 # Ctrl-C to stop — profile saved to profiles/profile-<timestamp>.json
 ```
 
-`--profile` defaults to `sampling` mode. py-spy requires elevated permissions on macOS (SIP).
+`--profile` defaults to `sampling` mode.
 
 ### Deep profiler (VizTracer)
 
@@ -43,6 +47,8 @@ Real-time Prometheus metrics and Grafana dashboard.
 uv run -m dj_ledfx --metrics --demo        # Metrics on default port 9091
 uv run -m dj_ledfx --metrics --metrics-port 8080 --demo  # Custom port
 ```
+
+> **Note:** If port 9091 is already in use by another process, use `--metrics-port` to pick a different port and update `monitoring/prometheus.yml` targets to match.
 
 Exposes a `/metrics` endpoint with:
 
@@ -68,12 +74,17 @@ Exposes a `/metrics` endpoint with:
 ./scripts/setup-monitoring.sh
 
 # Start the stack
-prometheus --config.file=monitoring/prometheus.yml &
+prometheus --config.file=monitoring/prometheus.yml --log.level=warn &>/dev/null &
 brew services start grafana
 uv run -m dj_ledfx --metrics --demo
-
-# Open Grafana at http://localhost:3000 (admin/admin)
-# Import monitoring/grafana-dashboard.json
 ```
+
+Then in Grafana:
+
+1. Open http://localhost:3000 (default credentials: admin / admin)
+2. Add Prometheus datasource: **Connections → Data sources → Add → Prometheus**, set URL to `http://localhost:9090`, click **Save & test**
+3. Import dashboard: **Dashboards → Import → Upload JSON file**, select `monitoring/grafana-dashboard.json`
+
+> **Note:** Device discovery takes ~15s (Govee 5s + LIFX 10s). Grafana panels will populate after discovery completes and Prometheus scrapes a few times.
 
 See [monitoring/README.md](monitoring/README.md) for details.
