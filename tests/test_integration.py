@@ -7,6 +7,7 @@ from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.beat_pulse import BeatPulse
+from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency, WindowedMeanLatency
@@ -34,9 +35,10 @@ def _setup_pipeline(
     event_bus.subscribe(BeatEvent, on_beat)
 
     effect = BeatPulse()
+    deck = EffectDeck(effect)
     engine = EffectEngine(
         clock=clock,
-        effect=effect,
+        deck=deck,
         led_count=10,
         fps=60,
         max_lookahead_s=1.0,
