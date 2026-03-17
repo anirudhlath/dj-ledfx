@@ -64,3 +64,26 @@ def test_constructor_validation():
             def render(self, beat_phase, bar_phase, dt, led_count):
                 import numpy as np
                 return np.zeros((led_count, 3), dtype=np.uint8)
+
+
+from dj_ledfx.effects.registry import get_effect_classes, get_effect_schemas, create_effect  # noqa: E402
+
+
+def test_get_effect_classes_includes_beat_pulse():
+    classes = get_effect_classes()
+    assert "beat_pulse" in classes
+
+
+def test_get_effect_schemas():
+    schemas = get_effect_schemas()
+    assert "beat_pulse" in schemas
+
+
+def test_create_effect():
+    effect = create_effect("beat_pulse")
+    assert effect is not None
+
+
+def test_create_effect_unknown():
+    with pytest.raises(KeyError):
+        create_effect("nonexistent_effect")
