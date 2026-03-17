@@ -129,22 +129,22 @@ async def _run(args: argparse.Namespace) -> None:
     logger.info("Using {} LEDs", led_count)
 
     effect = BeatPulse(
-        palette=config.beat_pulse_palette,
-        gamma=config.beat_pulse_gamma,
+        palette=config.effect.beat_pulse_palette,
+        gamma=config.effect.beat_pulse_gamma,
     )
 
     engine = EffectEngine(
         clock=clock,
         effect=effect,
         led_count=led_count,
-        fps=config.engine_fps,
-        max_lookahead_s=config.max_lookahead_ms / 1000.0,
+        fps=config.engine.fps,
+        max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
     )
 
     scheduler = LookaheadScheduler(
         ring_buffer=engine.ring_buffer,
         devices=device_manager.devices,
-        fps=config.engine_fps,
+        fps=config.engine.fps,
         compositor=compositor,
     )
 

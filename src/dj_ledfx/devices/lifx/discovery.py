@@ -25,13 +25,14 @@ class LifxBackend(DeviceBackend):
         self._transport: LifxTransport | None = None
 
     def is_enabled(self, config: AppConfig) -> bool:
-        return config.lifx_enabled
+        return config.devices.lifx.enabled
 
     async def discover(self, config: AppConfig) -> list[DiscoveredDevice]:
+        lifx = config.devices.lifx
         self._transport = LifxTransport()
         await self._transport.open()
 
-        records = await self._transport.discover(timeout_s=config.lifx_discovery_timeout_s)
+        records = await self._transport.discover(timeout_s=lifx.discovery_timeout_s)
         logger.info("LIFX discovery found {} devices", len(records))
 
         results: list[DiscoveredDevice] = []
@@ -58,13 +59,13 @@ class LifxBackend(DeviceBackend):
                 DiscoveredDevice(
                     adapter=adapter,
                     tracker=tracker,
-                    max_fps=config.lifx_max_fps,
+                    max_fps=lifx.max_fps,
                 )
             )
 
         # Start probing after all devices registered
         if results:
-            self._transport.start_probing(interval_s=config.lifx_echo_probe_interval_s)
+            self._transport.start_probing(interval_s=lifx.echo_probe_interval_s)
 
         return results
 
@@ -89,6 +90,7 @@ class LifxBackend(DeviceBackend):
         target = record.mac + b"\x00\x00"
         str_addr = f"{record.ip}:{record.port}"
 
+        lifx = config.devices.lifx
         if record.product in MATRIX_PRODUCTS:
             pkt = LifxPacket(
                 tagged=False,
@@ -113,7 +115,7 @@ class LifxBackend(DeviceBackend):
                 info,
                 record.mac,
                 tile_count=tile_count,
-                kelvin=config.lifx_default_kelvin,
+                kelvin=lifx.default_kelvin,
             )
             adapter._tiles = tiles
             return adapter
@@ -139,7 +141,7 @@ class LifxBackend(DeviceBackend):
                 info,
                 record.mac,
                 zone_count=zone_count,
-                kelvin=config.lifx_default_kelvin,
+                kelvin=lifx.default_kelvin,
             )
 
         else:
@@ -148,18 +150,19 @@ class LifxBackend(DeviceBackend):
                 self._transport,
                 info,
                 record.mac,
-                kelvin=config.lifx_default_kelvin,
+                kelvin=lifx.default_kelvin,
             )
 
     def _create_tracker(self, config: AppConfig) -> LatencyTracker:
+        lifx = config.devices.lifx
         strategy: StaticLatency | EMALatency | WindowedMeanLatency
-        if config.lifx_latency_strategy == "static":
-            strategy = StaticLatency(config.lifx_latency_ms)
-        elif config.lifx_latency_strategy == "ema":
-            strategy = EMALatency(initial_value_ms=config.lifx_latency_ms)
+        if lifx.latency_strategy == "static":
+            strategy = StaticLatency(lifx.latency_ms)
+        elif lifx.latency_strategy == "ema":
+            strategy = EMALatency(initial_value_ms=lifx.latency_ms)
         else:
             strategy = WindowedMeanLatency(
-                window_size=config.lifx_latency_window_size,
-                initial_value_ms=config.lifx_latency_ms,
+                window_size=lifx.latency_window_size,
+                initial_value_ms=lifx.latency_ms,
             )
-        return LatencyTracker(strategy=strategy, manual_offset_ms=config.lifx_manual_offset_ms)
+        return LatencyTracker(strategy=strategy, manual_offset_ms=lifx.manual_offset_ms)

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from dj_ledfx.config import AppConfig
+from dj_ledfx.config import AppConfig, DevicesConfig, LIFXConfig
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.discovery import (
     LifxBackend,
@@ -17,8 +17,13 @@ from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
 def test_is_enabled_checks_config() -> None:
     backend = LifxBackend()
-    assert backend.is_enabled(AppConfig(lifx_enabled=True)) is True
-    assert backend.is_enabled(AppConfig(lifx_enabled=False)) is False
+    assert (
+        backend.is_enabled(AppConfig(devices=DevicesConfig(lifx=LIFXConfig(enabled=True)))) is True
+    )
+    assert (
+        backend.is_enabled(AppConfig(devices=DevicesConfig(lifx=LIFXConfig(enabled=False))))
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -86,6 +91,6 @@ async def test_discover_returns_discovered_devices() -> None:
 
     assert len(devices) == 1
     assert isinstance(devices[0].adapter, LifxBulbAdapter)
-    assert devices[0].max_fps == config.lifx_max_fps
+    assert devices[0].max_fps == config.devices.lifx.max_fps
     mock_transport.register_device.assert_called_once()
     mock_transport.start_probing.assert_called_once()

@@ -6,11 +6,9 @@ import pytest
 from dj_ledfx.config import (
     AppConfig,
     DevicesConfig,
-    EffectConfig,
     EngineConfig,
     GoveeConfig,
     LIFXConfig,
-    NetworkConfig,
     OpenRGBConfig,
     WebConfig,
     load_config,
