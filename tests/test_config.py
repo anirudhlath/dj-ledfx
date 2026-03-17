@@ -132,3 +132,46 @@ def test_lifx_config_from_toml(tmp_path: Path) -> None:
     assert config.lifx_enabled is False
     assert config.lifx_max_fps == 20
     assert config.lifx_default_kelvin == 4000
+
+
+class TestGoveeConfigValidation:
+    def test_govee_defaults(self) -> None:
+        config = AppConfig()
+        assert config.govee_enabled is True
+        assert config.govee_max_fps == 40
+        assert config.govee_latency_strategy == "ema"
+        assert config.govee_latency_ms == 100.0
+        assert config.govee_segment_override is None
+
+    def test_govee_max_fps_must_be_positive(self) -> None:
+        with pytest.raises(ValueError, match="govee_max_fps"):
+            AppConfig(govee_max_fps=0)
+
+    def test_govee_invalid_strategy(self) -> None:
+        with pytest.raises(ValueError, match="govee_latency_strategy"):
+            AppConfig(govee_latency_strategy="invalid")
+
+    def test_govee_discovery_timeout_must_be_positive(self) -> None:
+        with pytest.raises(ValueError, match="govee_discovery_timeout_s"):
+            AppConfig(govee_discovery_timeout_s=0)
+
+    def test_govee_probe_interval_must_be_positive(self) -> None:
+        with pytest.raises(ValueError, match="govee_probe_interval_s"):
+            AppConfig(govee_probe_interval_s=0)
+
+    def test_govee_latency_ms_must_be_non_negative(self) -> None:
+        with pytest.raises(ValueError, match="govee_latency_ms"):
+            AppConfig(govee_latency_ms=-1)
+
+    def test_govee_config_from_toml(self, tmp_path: Path) -> None:
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text(
+            "[devices.govee]\n"
+            "enabled = false\nmax_fps = 30\n"
+            "latency_ms = 80\nprobe_interval_s = 10.0\n"
+        )
+        config = load_config(toml_file)
+        assert config.govee_enabled is False
+        assert config.govee_max_fps == 30
+        assert config.govee_latency_ms == 80.0
+        assert config.govee_probe_interval_s == 10.0
