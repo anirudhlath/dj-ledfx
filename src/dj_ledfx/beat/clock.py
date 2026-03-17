@@ -19,6 +19,21 @@ class BeatClock:
         self._last_beat_number: int = 1  # 1-4
         self._is_playing: bool = False
         self._last_packet_time: float = 0.0
+        self._pitch_percent: float | None = None
+        self._last_deck_number: int | None = None
+        self._last_deck_name: str | None = None
+
+    @property
+    def pitch_percent(self) -> float | None:
+        return self._pitch_percent
+
+    @property
+    def last_deck_number(self) -> int | None:
+        return self._last_deck_number
+
+    @property
+    def last_deck_name(self) -> str | None:
+        return self._last_deck_name
 
     def on_beat(
         self,
@@ -26,6 +41,10 @@ class BeatClock:
         beat_number: int,
         next_beat_ms: int,
         timestamp: float,
+        *,
+        pitch_percent: float | None = None,
+        device_number: int | None = None,
+        device_name: str | None = None,
     ) -> None:
         if bpm <= 0:
             return
@@ -52,6 +71,12 @@ class BeatClock:
         self._last_beat_number = beat_number
         self._last_packet_time = timestamp
         self._is_playing = True
+        if pitch_percent is not None:
+            self._pitch_percent = pitch_percent
+        if device_number is not None:
+            self._last_deck_number = device_number
+        if device_name is not None:
+            self._last_deck_name = device_name
         metrics.BEAT_BPM.set(bpm)
         metrics.BEAT_PHASE.set((self._last_beat_number - 1) / 4.0)
 

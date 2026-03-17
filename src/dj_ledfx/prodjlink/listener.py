@@ -36,6 +36,7 @@ class ProDJLinkListener(asyncio.DatagramProtocol):
             device_number=packet.device_number,
             device_name=packet.device_name,
             timestamp=time.monotonic(),
+            pitch_percent=packet.pitch_percent,
         )
         logger.debug(
             "Beat: {} BPM={:.1f} beat={}/4 from {}",
