@@ -77,11 +77,12 @@ def test_get_effect_classes_includes_beat_pulse():
 def test_get_effect_schemas():
     schemas = get_effect_schemas()
     assert "beat_pulse" in schemas
+    assert "gamma" in schemas["beat_pulse"]
 
 
 def test_create_effect():
-    effect = create_effect("beat_pulse")
-    assert effect is not None
+    effect = create_effect("beat_pulse", gamma=3.0)
+    assert effect.get_params()["gamma"] == 3.0
 
 
 def test_create_effect_unknown():
