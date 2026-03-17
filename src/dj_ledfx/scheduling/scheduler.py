@@ -157,9 +157,7 @@ class LookaheadScheduler:
             # Steps 4-5: Send frame (with optional spatial compositing)
             colors = frame.colors
             if self._compositor is not None:
-                mapped = self._compositor.composite(
-                    frame.colors, device.adapter.device_info.name
-                )
+                mapped = self._compositor.composite(frame.colors, device.adapter.device_info.name)
                 if mapped is not None:
                     colors = mapped
             send_start = time.monotonic()

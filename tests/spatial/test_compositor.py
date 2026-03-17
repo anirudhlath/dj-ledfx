@@ -16,9 +16,11 @@ def _gradient_strip(n: int) -> np.ndarray:
 
 class TestSpatialCompositor:
     def test_point_device_gets_single_color(self) -> None:
-        scene = SceneModel(placements={
-            "bulb": DevicePlacement("bulb", (0.5, 0.0, 0.0), PointGeometry(), 1),
-        })
+        scene = SceneModel(
+            placements={
+                "bulb": DevicePlacement("bulb", (0.5, 0.0, 0.0), PointGeometry(), 1),
+            }
+        )
         mapping = LinearMapping(direction=(1.0, 0.0, 0.0))
         comp = SpatialCompositor(scene, mapping)
         strip = _gradient_strip(256)
@@ -27,10 +29,12 @@ class TestSpatialCompositor:
         assert result.shape == (1, 3)
 
     def test_devices_at_different_positions_get_different_colors(self) -> None:
-        scene = SceneModel(placements={
-            "left": DevicePlacement("left", (0.0, 0.0, 0.0), PointGeometry(), 1),
-            "right": DevicePlacement("right", (10.0, 0.0, 0.0), PointGeometry(), 1),
-        })
+        scene = SceneModel(
+            placements={
+                "left": DevicePlacement("left", (0.0, 0.0, 0.0), PointGeometry(), 1),
+                "right": DevicePlacement("right", (10.0, 0.0, 0.0), PointGeometry(), 1),
+            }
+        )
         mapping = LinearMapping(direction=(1.0, 0.0, 0.0))
         comp = SpatialCompositor(scene, mapping)
         strip = _gradient_strip(256)
@@ -43,9 +47,11 @@ class TestSpatialCompositor:
 
     def test_strip_device_gets_gradient(self) -> None:
         geo = StripGeometry(direction=(1.0, 0.0, 0.0), length=10.0)
-        scene = SceneModel(placements={
-            "strip": DevicePlacement("strip", (0.0, 0.0, 0.0), geo, 10),
-        })
+        scene = SceneModel(
+            placements={
+                "strip": DevicePlacement("strip", (0.0, 0.0, 0.0), geo, 10),
+            }
+        )
         mapping = LinearMapping(direction=(1.0, 0.0, 0.0))
         comp = SpatialCompositor(scene, mapping)
         strip = _gradient_strip(256)
@@ -58,9 +64,11 @@ class TestSpatialCompositor:
     def test_matrix_device(self) -> None:
         tile = TileLayout(offset_x=0.0, offset_y=0.0, width=4, height=4)
         geo = MatrixGeometry(tiles=(tile,), pixel_pitch=1.0)
-        scene = SceneModel(placements={
-            "tiles": DevicePlacement("tiles", (0.0, 0.0, 0.0), geo, 16),
-        })
+        scene = SceneModel(
+            placements={
+                "tiles": DevicePlacement("tiles", (0.0, 0.0, 0.0), geo, 16),
+            }
+        )
         mapping = LinearMapping(direction=(1.0, 0.0, 0.0))
         comp = SpatialCompositor(scene, mapping)
         strip = _gradient_strip(256)
@@ -77,10 +85,12 @@ class TestSpatialCompositor:
         assert result is None
 
     def test_radial_mapping_integration(self) -> None:
-        scene = SceneModel(placements={
-            "center": DevicePlacement("center", (0.0, 0.0, 0.0), PointGeometry(), 1),
-            "edge": DevicePlacement("edge", (5.0, 0.0, 0.0), PointGeometry(), 1),
-        })
+        scene = SceneModel(
+            placements={
+                "center": DevicePlacement("center", (0.0, 0.0, 0.0), PointGeometry(), 1),
+                "edge": DevicePlacement("edge", (5.0, 0.0, 0.0), PointGeometry(), 1),
+            }
+        )
         mapping = RadialMapping(center=(0.0, 0.0, 0.0))
         comp = SpatialCompositor(scene, mapping)
         strip = _gradient_strip(256)

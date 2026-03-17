@@ -41,9 +41,7 @@ class SceneModel:
         if device_id in self._position_cache:
             return self._position_cache[device_id]
         placement = self.placements[device_id]
-        positions = expand_positions(
-            placement.geometry, placement.position, placement.led_count
-        )
+        positions = expand_positions(placement.geometry, placement.position, placement.led_count)
         self._position_cache[device_id] = positions
         return positions
 
@@ -78,9 +76,7 @@ class SceneModel:
                 raw_name = name.split(":", 1)[1]
                 resolved = adapter_lookup.get(raw_name)
             if resolved is None:
-                logger.warning(
-                    "Scene device '{}' not found in discovered devices, skipping", name
-                )
+                logger.warning("Scene device '{}' not found in discovered devices, skipping", name)
                 continue
             adapter = resolved
 
@@ -155,7 +151,5 @@ def _resolve_geometry(
             return PointGeometry()
         return StripGeometry(direction=(1.0, 0.0, 0.0), length=1.0)
 
-    logger.warning(
-        "Scene device '{}': unknown geometry type '{}'", entry.get("name"), geo_type
-    )
+    logger.warning("Scene device '{}': unknown geometry type '{}'", entry.get("name"), geo_type)
     return None
