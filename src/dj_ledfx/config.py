@@ -3,6 +3,7 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -57,6 +58,9 @@ class AppConfig:
     govee_latency_window_size: int = 60
     govee_probe_interval_s: float = 5.0
     govee_segment_override: int | None = None
+
+    # Scene (raw dict, validated later by SceneModel.from_config)
+    scene_config: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         errors: list[str] = []
@@ -196,5 +200,8 @@ def load_config(path: Path) -> AppConfig:
             kwargs["govee_probe_interval_s"] = govee["probe_interval_s"]
         if "segment_override" in govee:
             kwargs["govee_segment_override"] = govee["segment_override"]
+
+    if "scene" in raw:
+        kwargs["scene_config"] = raw["scene"]
 
     return AppConfig(**kwargs)  # type: ignore[arg-type]

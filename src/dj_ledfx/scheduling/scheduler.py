@@ -8,6 +8,7 @@ from loguru import logger
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.engine import RingBuffer
+from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.types import DeviceStats
 
 
@@ -51,6 +52,7 @@ class LookaheadScheduler:
         devices: list[ManagedDevice],
         fps: int = 60,
         disconnect_backoff_s: float = 1.0,
+        compositor: SpatialCompositor | None = None,
     ) -> None:
         self._ring_buffer = ring_buffer
         self._devices = devices
@@ -61,6 +63,7 @@ class LookaheadScheduler:
         self._send_tasks: list[asyncio.Task[None]] = []
         self._send_counts: list[int] = [0] * len(devices)
         self._start_time: float = 0.0
+        self._compositor = compositor
 
     def stop(self) -> None:
         self._running = False
@@ -151,10 +154,15 @@ class LookaheadScheduler:
                 )
                 continue
 
-            # Steps 4-5: Send frame
+            # Steps 4-5: Send frame (with optional spatial compositing)
+            colors = frame.colors
+            if self._compositor is not None:
+                mapped = self._compositor.composite(frame.colors, device.adapter.device_info.name)
+                if mapped is not None:
+                    colors = mapped
             send_start = time.monotonic()
             try:
-                await device.adapter.send_frame(frame.colors)
+                await device.adapter.send_frame(colors)
             except Exception:
                 logger.warning(
                     "Send failed for '{}'",

@@ -175,3 +175,37 @@ class TestGoveeConfigValidation:
         assert config.govee_max_fps == 30
         assert config.govee_latency_ms == 80.0
         assert config.govee_probe_interval_s == 10.0
+
+
+def test_load_config_with_scene(tmp_path: Path) -> None:
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text(
+        textwrap.dedent("""\
+        [scene]
+        mapping = "linear"
+
+        [scene.mapping_params]
+        direction = [1.0, 0.0, 0.0]
+
+        [[scene.devices]]
+        name = "lamp"
+        position = [1.0, 2.0, 0.0]
+        geometry = "point"
+    """)
+    )
+    config = load_config(toml_file)
+    assert config.scene_config is not None
+    assert config.scene_config["mapping"] == "linear"
+    assert len(config.scene_config["devices"]) == 1
+
+
+def test_load_config_without_scene(tmp_path: Path) -> None:
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text("[engine]\nfps = 30\n")
+    config = load_config(toml_file)
+    assert config.scene_config is None
+
+
+def test_default_config_no_scene() -> None:
+    config = AppConfig()
+    assert config.scene_config is None

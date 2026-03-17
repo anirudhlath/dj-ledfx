@@ -4,6 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
+from dj_ledfx.spatial.geometry import DeviceGeometry
 from dj_ledfx.types import DeviceInfo
 
 
@@ -16,11 +17,13 @@ class MockDeviceAdapter(DeviceAdapter):
         led_count: int = 10,
         connected: bool = True,
         supports_probing: bool = True,
+        geometry: DeviceGeometry | None = None,
     ) -> None:
         self._name = name
         self._led_count = led_count
         self._connected = connected
         self.supports_latency_probing = supports_probing
+        self._geometry = geometry
         self.send_frame_calls: list[NDArray[np.uint8]] = []
         self.connect_count = 0
         self.disconnect_count = 0
@@ -45,6 +48,10 @@ class MockDeviceAdapter(DeviceAdapter):
     @property
     def led_count(self) -> int:
         return self._led_count
+
+    @property
+    def geometry(self) -> DeviceGeometry | None:
+        return self._geometry
 
     async def connect(self) -> None:
         self.connect_count += 1
