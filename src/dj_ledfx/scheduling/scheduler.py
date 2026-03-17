@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import time
 
+import numpy as np
 from loguru import logger
+from numpy.typing import NDArray
 
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
@@ -64,6 +66,12 @@ class LookaheadScheduler:
         self._send_counts: list[int] = [0] * len(devices)
         self._start_time: float = 0.0
         self._compositor = compositor
+        self._frame_snapshots: dict[str, tuple[NDArray[np.uint8], int]] = {}
+        self._frame_seq: dict[str, int] = {}
+
+    @property
+    def frame_snapshots(self) -> dict[str, tuple[NDArray[np.uint8], int]]:
+        return self._frame_snapshots
 
     def stop(self) -> None:
         self._running = False
@@ -173,8 +181,11 @@ class LookaheadScheduler:
             send_elapsed = time.monotonic() - send_start
             metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(send_elapsed)
 
-            # Step 6: Increment send count
+            # Step 6: Increment send count and store snapshot
             self._send_counts[index] += 1
+            seq = self._frame_seq.get(device_name, 0) + 1
+            self._frame_seq[device_name] = seq
+            self._frame_snapshots[device_name] = (colors, seq)
             metrics.DEVICE_LATENCY.labels(device=device_name).set(
                 device.tracker.effective_latency_s
             )
@@ -209,6 +220,7 @@ class LookaheadScheduler:
                     effective_latency_ms=device.tracker.effective_latency_ms,
                     send_fps=send_fps,
                     frames_dropped=max(0, frames_dropped),
+                    connected=device.adapter.is_connected,
                 )
             )
         return stats

@@ -41,3 +41,10 @@ class DeviceStats:
     effective_latency_ms: float
     send_fps: float
     frames_dropped: int
+    connected: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceGroup:
+    name: str
+    color: str  # hex color for UI display
