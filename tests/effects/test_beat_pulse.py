@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from dj_ledfx.effects.beat_pulse import BeatPulse
-from dj_ledfx.effects.params import EffectParam
 
 
 def test_beat_pulse_on_beat_is_bright() -> None:

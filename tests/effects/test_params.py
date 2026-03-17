@@ -1,4 +1,5 @@
 import pytest
+
 from dj_ledfx.effects.params import EffectParam
 
 

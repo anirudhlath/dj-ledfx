@@ -1,4 +1,5 @@
 """Effect parameter descriptor for runtime introspection."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,4 +1,5 @@
 """Named effect presets with TOML persistence."""
+
 from __future__ import annotations
 
 import os

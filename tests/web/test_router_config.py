@@ -1,6 +1,8 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from fastapi.testclient import TestClient
+
 from dj_ledfx.config import AppConfig
 from dj_ledfx.web.app import create_app
 
@@ -9,11 +11,16 @@ from dj_ledfx.web.app import create_app
 def client(tmp_path):
     config = AppConfig()
     app = create_app(
-        beat_clock=MagicMock(), effect_deck=MagicMock(),
-        effect_engine=MagicMock(), device_manager=MagicMock(),
-        scheduler=MagicMock(), preset_store=MagicMock(),
-        scene_model=None, compositor=None,
-        config=config, config_path=tmp_path / "config.toml",
+        beat_clock=MagicMock(),
+        effect_deck=MagicMock(),
+        effect_engine=MagicMock(),
+        device_manager=MagicMock(),
+        scheduler=MagicMock(),
+        preset_store=MagicMock(),
+        scene_model=None,
+        compositor=None,
+        config=config,
+        config_path=tmp_path / "config.toml",
     )
     return TestClient(app)
 
@@ -38,7 +45,7 @@ def test_export_config(client):
 
 
 def test_import_config(client):
-    toml_str = '[engine]\nfps = 120\n'
+    toml_str = "[engine]\nfps = 120\n"
     resp = client.post("/api/config/import", content=toml_str)
     assert resp.status_code == 200
     assert resp.json()["engine"]["fps"] == 120

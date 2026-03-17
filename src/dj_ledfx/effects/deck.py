@@ -1,4 +1,5 @@
 """EffectDeck — thin wrapper for active effect with hot-swap."""
+
 from __future__ import annotations
 
 import numpy as np

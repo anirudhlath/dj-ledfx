@@ -1,10 +1,10 @@
 """Multiplexed WebSocket hub with beat, stats, status, and frame channels."""
+
 from __future__ import annotations
 
 import asyncio
 import json
 import struct
-import time
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -73,10 +73,10 @@ async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
         except AttributeError:
             beat_data = {
                 "channel": "beat",
-                "bpm": getattr(clock, 'bpm', 0),
-                "beat_phase": getattr(clock, 'beat_phase', 0),
-                "bar_phase": getattr(clock, 'bar_phase', 0),
-                "is_playing": getattr(clock, 'is_playing', False),
+                "bpm": getattr(clock, "bpm", 0),
+                "beat_phase": getattr(clock, "beat_phase", 0),
+                "bar_phase": getattr(clock, "bar_phase", 0),
+                "is_playing": getattr(clock, "is_playing", False),
             }
         await _send_json(ws, beat_data)
 
@@ -136,8 +136,11 @@ async def _frame_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
 
 
 async def _handle_command(
-    ws: WebSocket, app: Any, sub: ClientSubscription,
-    tasks: list[asyncio.Task], msg: dict[str, Any]
+    ws: WebSocket,
+    app: Any,
+    sub: ClientSubscription,
+    tasks: list[asyncio.Task],
+    msg: dict[str, Any],
 ) -> None:
     """Handle incoming WS command."""
     action = msg.get("action")
@@ -152,9 +155,7 @@ async def _handle_command(
         sub.frame_fps = min(float(msg.get("fps", 10)), 30.0)
         sub.frame_devices = msg.get("devices", [])
         # Start frame polling if not already running
-        has_frame_task = any(
-            not t.done() and t.get_name() == "frame_poll" for t in tasks
-        )
+        has_frame_task = any(not t.done() and t.get_name() == "frame_poll" for t in tasks)
         if not has_frame_task and sub.frame_fps > 0:
             task = asyncio.create_task(_frame_poll(ws, app, sub))
             task.set_name("frame_poll")
@@ -167,6 +168,7 @@ async def _handle_command(
         try:
             if "effect" in msg and msg["effect"] != deck.effect_name:
                 from dj_ledfx.effects.registry import create_effect
+
                 new_effect = create_effect(msg["effect"], **params)
                 deck.swap_effect(new_effect)
             elif params:
@@ -176,4 +178,6 @@ async def _handle_command(
             await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(e)})
 
     else:
-        await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": f"Unknown action: {action}"})
+        await _send_json(
+            ws, {"channel": "error", "id": cmd_id, "detail": f"Unknown action: {action}"}
+        )

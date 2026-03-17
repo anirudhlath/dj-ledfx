@@ -1,4 +1,5 @@
 import pytest
+
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.params import EffectParam
 
@@ -20,6 +21,7 @@ class DummyEffect(Effect):
 
     def render(self, beat_phase, bar_phase, dt, led_count):
         import numpy as np
+
         return np.zeros((led_count, 3), dtype=np.uint8)
 
 
@@ -55,18 +57,26 @@ def test_set_params_applies():
 
 def test_constructor_validation():
     with pytest.raises(TypeError, match="does not accept"):
+
         class _BadEffect(Effect):
             @classmethod
             def parameters(cls):
                 return {"foo": EffectParam(type="float", default=1.0)}
+
             def __init__(self):
                 pass
+
             def render(self, beat_phase, bar_phase, dt, led_count):
                 import numpy as np
+
                 return np.zeros((led_count, 3), dtype=np.uint8)
 
 
-from dj_ledfx.effects.registry import get_effect_classes, get_effect_schemas, create_effect  # noqa: E402
+from dj_ledfx.effects.registry import (  # noqa: E402
+    create_effect,
+    get_effect_classes,
+    get_effect_schemas,
+)
 
 
 def test_get_effect_classes_includes_beat_pulse():

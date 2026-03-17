@@ -1,6 +1,8 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from fastapi.testclient import TestClient
+
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.presets import PresetStore
@@ -12,10 +14,14 @@ def client(tmp_path):
     deck = EffectDeck(BeatPulse())
     store = PresetStore(tmp_path / "presets.toml")
     app = create_app(
-        beat_clock=MagicMock(), effect_deck=deck,
-        effect_engine=MagicMock(), device_manager=MagicMock(),
-        scheduler=MagicMock(), preset_store=store,
-        scene_model=None, compositor=None,
+        beat_clock=MagicMock(),
+        effect_deck=deck,
+        effect_engine=MagicMock(),
+        device_manager=MagicMock(),
+        scheduler=MagicMock(),
+        preset_store=store,
+        scene_model=None,
+        compositor=None,
         config=MagicMock(web=MagicMock(cors_origins=["*"])),
         config_path=None,
     )

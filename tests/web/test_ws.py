@@ -1,7 +1,9 @@
 import json
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from fastapi.testclient import TestClient
+
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.web.app import create_app
@@ -25,10 +27,14 @@ def ws_app():
     scheduler.get_device_stats.return_value = []
 
     app = create_app(
-        beat_clock=clock, effect_deck=deck,
-        effect_engine=MagicMock(), device_manager=MagicMock(),
-        scheduler=scheduler, preset_store=MagicMock(),
-        scene_model=None, compositor=None,
+        beat_clock=clock,
+        effect_deck=deck,
+        effect_engine=MagicMock(),
+        device_manager=MagicMock(),
+        scheduler=scheduler,
+        preset_store=MagicMock(),
+        scene_model=None,
+        compositor=None,
         config=MagicMock(web=MagicMock(cors_origins=["*"])),
         config_path=None,
     )

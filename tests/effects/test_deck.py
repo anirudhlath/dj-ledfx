@@ -1,7 +1,5 @@
-import numpy as np
-import pytest
-from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.beat_pulse import BeatPulse
+from dj_ledfx.effects.deck import EffectDeck
 
 
 def test_deck_delegates_render():

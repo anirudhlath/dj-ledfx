@@ -1,12 +1,13 @@
 """Effects and presets REST endpoints."""
+
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from dj_ledfx.effects.registry import create_effect, get_effect_classes, get_effect_schemas
 from dj_ledfx.effects.presets import Preset
+from dj_ledfx.effects.registry import create_effect, get_effect_schemas
 from dj_ledfx.web.schemas import (
     ActiveEffectResponse,
     CreatePresetRequest,
@@ -55,13 +56,13 @@ def set_active_effect(request: Request, body: SetEffectRequest) -> ActiveEffectR
             params = body.params or {}
             new_effect = create_effect(body.effect, **params)
             deck.swap_effect(new_effect)
-        except KeyError:
-            raise HTTPException(status_code=404, detail=f"Unknown effect: {body.effect}")
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"Unknown effect: {body.effect}") from exc
     elif body.params:
         try:
             deck.effect.set_params(**body.params)
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
     return ActiveEffectResponse(
         effect=deck.effect_name,
         params=deck.effect.get_params(),
@@ -95,14 +96,16 @@ def update_preset(request: Request, name: str, body: SetEffectRequest) -> Preset
     store = request.app.state.preset_store
     try:
         existing = store.load(name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Preset not found: {name}")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Preset not found: {name}") from exc
     params = dict(existing.params)
     if body.params:
         params.update(body.params)
     updated = Preset(name=name, effect_class=body.effect or existing.effect_class, params=params)
     store.save(updated)
-    return PresetResponse(name=updated.name, effect_class=updated.effect_class, params=updated.params)
+    return PresetResponse(
+        name=updated.name, effect_class=updated.effect_class, params=updated.params
+    )
 
 
 @router.post("/presets/{name}/load")
@@ -111,13 +114,15 @@ def load_preset(request: Request, name: str) -> ActiveEffectResponse:
     store = request.app.state.preset_store
     try:
         preset = store.load(name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Preset not found: {name}")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Preset not found: {name}") from exc
     try:
         new_effect = create_effect(preset.effect_class, **preset.params)
         deck.swap_effect(new_effect)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown effect: {preset.effect_class}")
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown effect: {preset.effect_class}"
+        ) from exc
     return ActiveEffectResponse(
         effect=deck.effect_name,
         params=deck.effect.get_params(),
@@ -129,6 +134,6 @@ def delete_preset(request: Request, name: str) -> dict[str, str]:
     store = request.app.state.preset_store
     try:
         store.delete(name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Preset not found: {name}")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Preset not found: {name}") from exc
     return {"status": "deleted"}

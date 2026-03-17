@@ -1,4 +1,5 @@
 """Effect abstract base class with parameter introspection and auto-registry."""
+
 from __future__ import annotations
 
 import inspect
@@ -61,7 +62,7 @@ class Effect(ABC):
                 raise ValueError(f"{key}={value} not in {param.choices}")
         self._apply_params(**kwargs)
 
-    def _apply_params(self, **kwargs: Any) -> None:
+    def _apply_params(self, **kwargs: Any) -> None:  # noqa: B027
         pass
 
     @abstractmethod

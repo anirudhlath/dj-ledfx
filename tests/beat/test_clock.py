@@ -88,8 +88,9 @@ def test_extrapolate_future_phase() -> None:
 
 def test_clock_stores_deck_info() -> None:
     clock = BeatClock()
-    clock.on_beat(128.0, 1, 469, time.monotonic(),
-                  pitch_percent=2.3, device_number=1, device_name="XDJ-AZ")
+    clock.on_beat(
+        128.0, 1, 469, time.monotonic(), pitch_percent=2.3, device_number=1, device_name="XDJ-AZ"
+    )
     assert clock.pitch_percent == 2.3
     assert clock.last_deck_number == 1
     assert clock.last_deck_name == "XDJ-AZ"

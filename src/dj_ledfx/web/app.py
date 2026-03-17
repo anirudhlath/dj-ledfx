@@ -1,4 +1,5 @@
 """FastAPI application factory."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -51,9 +52,9 @@ def create_app(
     app.state.config = config
     app.state.config_path = config_path
 
-    from dj_ledfx.web.router_effects import router as effects_router
-    from dj_ledfx.web.router_devices import router as devices_router
     from dj_ledfx.web.router_config import router as config_router
+    from dj_ledfx.web.router_devices import router as devices_router
+    from dj_ledfx.web.router_effects import router as effects_router
 
     app.include_router(effects_router, prefix="/api")
     app.include_router(devices_router, prefix="/api")

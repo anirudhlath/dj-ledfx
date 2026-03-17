@@ -1,4 +1,5 @@
 """Effect class registry and schema discovery."""
+
 from __future__ import annotations
 
 from typing import Any

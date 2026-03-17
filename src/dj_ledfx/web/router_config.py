@@ -1,14 +1,14 @@
 """Configuration REST endpoints."""
+
 from __future__ import annotations
 
 import dataclasses
 import tomllib
 from typing import Any
 
+import tomli_w
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import PlainTextResponse
-
-import tomli_w
 
 from dj_ledfx.config import (
     AppConfig,
@@ -80,9 +80,11 @@ def _merge_config(existing: AppConfig, updates: dict[str, Any]) -> AppConfig:
 def get_config(request: Request) -> dict[str, Any]:
     config = request.app.state.config
     data = dataclasses.asdict(config)
+
     # Remove None values for cleaner output
     def _clean(d: dict) -> dict:
         return {k: _clean(v) if isinstance(v, dict) else v for k, v in d.items() if v is not None}
+
     return _clean(data)
 
 
@@ -92,7 +94,7 @@ def update_config(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     try:
         new_config = _merge_config(config, body)
     except (ValueError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     request.app.state.config = new_config
     if request.app.state.config_path:
         save_config(new_config, request.app.state.config_path)
@@ -103,6 +105,7 @@ def update_config(request: Request, body: dict[str, Any]) -> dict[str, Any]:
 def export_config(request: Request) -> PlainTextResponse:
     config = request.app.state.config
     data = dataclasses.asdict(config)
+
     # Strip None values
     def _strip(d: dict) -> None:
         for key in list(d.keys()):
@@ -110,6 +113,7 @@ def export_config(request: Request) -> PlainTextResponse:
                 _strip(d[key])
             elif d[key] is None:
                 del d[key]
+
     _strip(data)
     dumped = tomli_w.dumps(data)
     return PlainTextResponse(dumped if isinstance(dumped, str) else dumped.decode())
@@ -121,12 +125,12 @@ async def import_config(request: Request) -> dict[str, Any]:
     try:
         data = tomllib.loads(body.decode())
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid TOML: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid TOML: {e}") from e
     config = request.app.state.config
     try:
         new_config = _merge_config(config, data)
     except (ValueError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     request.app.state.config = new_config
     if request.app.state.config_path:
         save_config(new_config, request.app.state.config_path)

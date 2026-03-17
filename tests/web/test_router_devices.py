@@ -1,6 +1,8 @@
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 from fastapi.testclient import TestClient
+
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.events import EventBus
 from dj_ledfx.web.app import create_app
@@ -12,10 +14,14 @@ def client():
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
     app = create_app(
-        beat_clock=MagicMock(), effect_deck=MagicMock(),
-        effect_engine=MagicMock(), device_manager=manager,
-        scheduler=scheduler, preset_store=MagicMock(),
-        scene_model=None, compositor=None,
+        beat_clock=MagicMock(),
+        effect_deck=MagicMock(),
+        effect_engine=MagicMock(),
+        device_manager=manager,
+        scheduler=scheduler,
+        preset_store=MagicMock(),
+        scene_model=None,
+        compositor=None,
         config=MagicMock(web=MagicMock(cors_origins=["*"])),
         config_path=None,
     )

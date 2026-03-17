@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
+
+import pytest
 
 from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
 from dj_ledfx.events import EventBus

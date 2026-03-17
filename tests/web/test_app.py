@@ -1,5 +1,5 @@
-import pytest
 from unittest.mock import MagicMock
+
 from dj_ledfx.web.app import create_app
 
 
