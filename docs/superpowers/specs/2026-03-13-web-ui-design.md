@@ -30,7 +30,7 @@ A fully featured web UI for dj-ledfx providing live performance control and deep
 │               FastAPI Backend (src/dj_ledfx/web/)         │
 │  ┌───────────────┐  ┌────────────────────────────────┐   │
 │  │ REST API      │  │ WebSocket Hub                  │   │
-│  │ /api/effects  │  │  - beat state (30fps poll)     │   │
+│  │ /api/effects  │  │  - beat state (10fps poll)     │   │
 │  │ /api/devices  │  │  - frame snapshots (pull)      │   │
 │  │ /api/scene    │  │  - device stats (1fps)         │   │
 │  │ /api/presets  │  │  - commands (bidirectional)     │   │
@@ -87,6 +87,8 @@ async def _run(args):
 
 **Note on Granian embedded API:** The `granian.server.embed.Server` class provides `async serve()`, `stop()`, and `reload()` methods. It runs on the existing event loop as a single worker (no process spawning). Requires `granian>=1.7`. If the embedded API changes in a future Granian release, `uvicorn` can serve as a drop-in fallback with `install_signal_handlers=False`.
 
+**Implementation prerequisite:** Before building the web layer, write a 10-line spike confirming the Granian `>=1.7` embedded API works as described. Granian's embedded mode has historically been unstable across releases. If the spike fails, fall back to uvicorn immediately.
+
 **Key properties:**
 - Embedded mode runs on the existing event loop — no separate process/thread
 - No signal handler installation — existing `stop_event` mechanism handles SIGINT/SIGTERM
@@ -135,7 +137,7 @@ A single WebSocket connection at `ws://host:port/ws` with multiplexed channels.
 
 **Beat channel field mapping:** `BeatState` provides `beat_phase`, `bar_phase`, `bpm`, `is_playing`. The `next_beat_time` field from `BeatState` is intentionally omitted from the WS beat channel — it's a monotonic clock timestamp meaningful only to the server, not the browser. The client derives timing from `beat_phase` interpolation instead. Additional fields require expanding both `BeatEvent` and `BeatClock`:
 - `beat_pos` (1-4): Derived from `bar_phase` as `floor(bar_phase * 4) + 1`, clamped to [1,4].
-- `pitch_percent`: Must be added to `BeatEvent` (extracted from beat packet in `parse_beat_packet()`). CDJ-3000 beat packets carry raw pitch data. In passive mode (port 50001 only), this is the pitch value as reported in the beat packet — no separate track-BPM vs adjusted-BPM calculation is available without status packets on port 50002.
+- `pitch_percent`: Must be added to `BeatEvent` (extracted from beat packet in `parse_beat_packet()`). CDJ-3000 beat packets carry raw pitch data. In passive mode (port 50001 only), this is the pitch value as reported in the beat packet — no separate track-BPM vs adjusted-BPM calculation is available without status packets on port 50002. Note: `pitch_percent` on `BeatClock` is purely for UI display — it does NOT affect timing logic. `BeatClock.on_beat()` already receives pitch-adjusted BPM (`BeatPacket.pitch_adjusted_bpm`), which is the value used for all phase interpolation.
 - `deck_number`, `deck_name`: Mapped from `BeatEvent.device_number` and `BeatEvent.device_name` respectively.
 - All three are stored on `BeatClock` via an extended `on_beat()` signature (see Section 15.1). Added as optional properties on `BeatClock` (default `None` when no beat received yet).
 
@@ -152,20 +154,24 @@ A single WebSocket connection at `ws://host:port/ws` with multiplexed channels.
 
 **Binary messages (server → client, frame data):**
 ```
-[2 bytes device_name_len (little-endian uint16)][N bytes device_name UTF-8][4 bytes timestamp (little-endian float32)][LED_count * 3 bytes RGB]
+[2 bytes device_name_len (little-endian uint16)][N bytes device_name UTF-8][4 bytes seq (little-endian uint32)][LED_count * 3 bytes RGB]
 ```
 
 All multi-byte values use **little-endian** byte order (native for x86/ARM, which covers all realistic deployment targets).
 
+The `seq` field is a monotonically incrementing `uint32` per device (wraps at ~4 billion — effectively infinite). The client uses it solely for change detection: if `seq` matches the last received value, the frame is unchanged. A sequence number is preferred over a `float32` timestamp because `float32` has only ~7 significant digits — insufficient precision for 60fps change detection (16.7ms intervals) when `time.monotonic()` values are typically 5-6 digits of seconds since boot.
+
 Using device name strings (not position-based indices) ensures stability across device reconnections and runtime discovery. The 2-byte length prefix allows parsing without knowing LED count in advance (compute from `msg_len - 2 - device_name_len - 4`).
 
-**Device identity:** Devices are identified by `DeviceInfo.name` throughout the system — this is the existing unique identifier used by `DeviceManager`, `SceneModel`, and `LookaheadScheduler`. Device names are used directly in REST URL paths (URL-encoded where necessary). No separate `id` field is introduced to avoid a parallel identity system.
+**Device identity:** Devices are identified by `DeviceInfo.name` throughout the system — this is the existing unique identifier used by `DeviceManager`, `SceneModel`, and `LookaheadScheduler`. Device names are used directly in REST URL paths. No separate `id` field is introduced to avoid a parallel identity system.
+
+**URL safety:** Device names from Pro DJ Link (`BeatPacket.device_name`) and OpenRGB (`DeviceInfo.name`) may contain spaces, slashes, and non-ASCII characters. The REST API uses FastAPI path parameters with URL-encoded names (e.g., `/api/devices/shelf%20strip`). The client must URL-encode device names when constructing paths. `DeviceManager` validates at registration that device names are non-empty and unique but does NOT restrict characters — the URL encoding layer handles special characters.
 
 ### 2.2 Channel Rates and Drivers
 
 | Channel | Rate | Driver | Notes |
 |---------|------|--------|-------|
-| `beat` | ~30fps | Polling loop (asyncio task) | `BeatClock.get_state()` is lock-free. Not event-driven — EventBus beats arrive at BPM rate (~2Hz), not 30fps. Client interpolates between samples. |
+| `beat` | Configurable (default 10fps) | Polling loop (asyncio task) | `BeatClock.get_state()` is lock-free. At 128 BPM, beats occur at ~2Hz and phase interpolates linearly between beats — the client interpolates locally using BPM, so high server-side poll rates are unnecessary. Default 10fps provides sufficient phase sync. The rate is configurable via `subscribe_beat` command (max 30fps) to allow tuning for different connection qualities. Immediate updates are sent on BPM changes or drift corrections via EventBus subscription. |
 | `frames` | Client-requested | Pull from snapshot slots | Server caps at 60fps max. Client sends `subscribe_frames` with desired FPS and device filter. |
 | `stats` | ~1fps | Polling loop | `scheduler.get_device_stats()` |
 | `status` | ~0.1fps | Polling loop | `SystemStatus.summary()` |
@@ -177,12 +183,14 @@ Per-device "last sent" snapshot slots replace push-based frame streaming. Zero h
 
 **Mechanism:**
 1. `LookaheadScheduler._send_loop` already copies the frame before calling `adapter.send_frame(colors)`.
-2. After a successful send, the send loop writes: `self._frame_snapshots[device_name] = (colors, time.monotonic())`
-3. The WebSocket handler runs a separate polling loop at the client's requested FPS. Each tick: read all subscribed device snapshot slots, compare timestamps to last-sent, serialize and send only changed frames.
+2. After a successful send, the send loop writes: `self._frame_snapshots[device_name] = (colors, self._frame_seq[device_name])` and increments `self._frame_seq[device_name]` (uint32, wrapping).
+3. The WebSocket handler runs a separate polling loop at the client's requested FPS. Each tick: read all subscribed device snapshot slots, compare sequence numbers to last-sent, serialize and send only changed frames.
 
-**Safety:** Python reference assignment is atomic under the GIL. The WS handler either reads the old or new reference, never a torn state. The colors array is already copied (for the device thread), so no mutation risk.
+**Safety:** Both `_send_loop` and the WS polling loop are coroutines on the same asyncio event loop. Between `await` points there is no interleaving — the snapshot write is a single Python statement between two `await` points, so it is safe via cooperative multitasking. The WS handler may read a snapshot from just before the latest `await send_frame()` returned, meaning it lags by at most one send cycle — this is eventual consistency within one frame period. The colors array is already copied (for the device thread), so no mutation risk.
 
 **Bandwidth:** At 100 LEDs/device, 10 devices, 60fps: `10 × 300 × 60 = 180KB/s`. Manageable on localhost. For remote connections, the client can request a lower FPS via `subscribe_frames`.
+
+**Backpressure:** If the WebSocket send buffer fills faster than the browser can consume (e.g., user switches tabs, browser throttles), `send_bytes()` calls will silently queue. The frame polling loop must track whether the previous send completed before the next tick fires. If the previous send is still pending, skip that tick and log at TRACE level. This prevents unbounded memory growth from buffered frames. FastAPI/Starlette WebSocket does not raise on slow consumers — the server must self-regulate.
 
 ### 2.4 Reconnection Protocol
 
@@ -370,6 +378,14 @@ class Effect(ABC):
             # Name derived from class: BeatPulse → "beat_pulse" (snake_case)
             name = _to_snake_case(cls.__name__)
             Effect._registry[name] = cls
+            # Validate constructor args match parameters() keys
+            if cls.parameters():
+                sig = inspect.signature(cls.__init__)
+                init_params = {p for p in sig.parameters if p != "self"}
+                param_keys = set(cls.parameters().keys())
+                missing = param_keys - init_params
+                if missing:
+                    raise TypeError(f"{cls.__name__} parameters() declares {missing} but __init__ does not accept them")
 ```
 
 ```python
@@ -417,7 +433,7 @@ class EffectDeck:
     def effect(self) -> Effect: ...
 
     def swap_effect(self, new_effect: Effect) -> None:
-        """Hot-swap the active effect. Thread-safe on the event loop."""
+        """Hot-swap the active effect. Safe when called from the event loop."""
         self._effect = new_effect
 
     def render(self, beat_phase: float, bar_phase: float, dt: float, led_count: int) -> NDArray[np.uint8]:
@@ -800,7 +816,7 @@ Scene editor and config views redirect to a "use a larger screen" message on mob
 | File | Change |
 |------|--------|
 | `main.py` | Add `--web`, `--web-port`, `--web-host`, `--web-static-dir` args. Conditionally import and start web server. Create `EffectDeck` and pass to both `EffectEngine` and `create_app()`. |
-| `config.py` | Refactor `AppConfig` from flat fields to nested dataclasses: `EngineConfig` (`engine_fps`, `max_lookahead_s`), `EffectConfig` (`active_effect`, `led_count`), `NetworkConfig` (`interface`, `passive_mode`), `WebConfig` (`enabled`, `host`, `port`, `static_dir`, `cors_origins`), `DevicesConfig` (per-backend settings). Each maps to a TOML section (`[engine]`, `[effect]`, `[network]`, `[web]`, `[devices]`). The REST config PUT body mirrors this nested structure. Add `save_config()` function with atomic write via `tomli_w`. |
+| `config.py` | **Prerequisite PR (before Phase 1):** Refactor `AppConfig` from flat fields to nested dataclasses: `EngineConfig` (`engine_fps`, `max_lookahead_s`), `EffectConfig` (`active_effect`, `led_count`), `NetworkConfig` (`interface`, `passive_mode`), `WebConfig` (`enabled`, `host`, `port`, `static_dir`, `cors_origins`), `DevicesConfig` (per-backend settings). Each maps to a TOML section (`[engine]`, `[effect]`, `[network]`, `[web]`, `[devices]`). This is a cross-cutting refactor — every consumer of `AppConfig` must update field access (e.g., `config.engine_fps` → `config.engine.fps`). All `DeviceBackend.discover()` and `is_enabled()` callers must update. Rewrite `load_config()` to populate nested dataclasses. Add `save_config()` function with atomic write via `tomli_w`. Ship as standalone PR before Phase 1 begins. |
 | `events.py` | Add `pitch_percent: float` field to `BeatEvent` dataclass. |
 | `prodjlink/listener.py` | Pass `BeatPacket.pitch_percent` through to `BeatEvent` in `datagram_received()` (the packet parser already extracts it into `BeatPacket`). |
 | `beat/clock.py` | Extend `on_beat()` signature to accept `pitch_percent: float | None = None`, `device_number: int | None = None`, `device_name: str | None = None`. Add corresponding read-only properties. Update `main.py`'s `on_beat` wrapper to forward these fields from `BeatEvent`. |
@@ -845,6 +861,13 @@ The entire `frontend/` directory as described in Section 13.
 - WebSocket protocol (beat, frames, stats)
 - Effect parameter introspection + deck system
 - Scene endpoints return `null`/empty when no spatial module is available
+
+**Phase 1.5 (static build pipeline integration):**
+- SvelteKit `adapter-static` production build wired to `frontend/build/`
+- FastAPI `StaticFiles` mount with 4-tier resolution order (Section 13.1)
+- `importlib.resources` fallback for installed packages
+- End-to-end test: `npm run build` → `uv run -m dj_ledfx --web` serves SPA correctly
+- This is a non-trivial integration milestone — build tooling, static file resolution, and the SPA fallback (`index.html`) must all work together before Phase 2 adds 3D complexity
 
 **Phase 2 (requires spatial mapping merge):**
 - 3D scene editor (Section 8)
