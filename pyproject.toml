@@ -16,6 +16,10 @@ dependencies = [
 [project.scripts]
 dj-ledfx = "dj_ledfx.main:main"
 
+[project.optional-dependencies]
+metrics = ["prometheus-client>=0.20"]
+profiling = ["py-spy>=0.4", "viztracer>=1.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -40,6 +44,14 @@ packages = ["dj_ledfx"]
 module = ["openrgb.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["prometheus_client.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["viztracer.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
@@ -48,6 +60,7 @@ pythonpath = ["tests"]
 [dependency-groups]
 dev = [
     "mypy>=1.19.1",
+    "prometheus-client>=0.20",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "ruff>=0.15.5",

@@ -4,11 +4,13 @@ import argparse
 import asyncio
 import signal
 import sys
+import time
 from pathlib import Path
 
 from loguru import logger
 
 import dj_ledfx.devices  # noqa: F401  # triggers backend auto-registration
+from dj_ledfx import metrics
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
 from dj_ledfx.config import load_config
@@ -35,16 +37,35 @@ def _parse_args() -> argparse.Namespace:
         help="Log level",
     )
     parser.add_argument("--bpm", type=float, default=128.0, help="Demo mode BPM")
+    parser.add_argument(
+        "--profile",
+        nargs="?",
+        const="sampling",
+        default=None,
+        choices=["sampling", "deep"],
+        help="Enable profiling: 'sampling' (default, py-spy) or 'deep' (VizTracer)",
+    )
+    parser.add_argument(
+        "--metrics", action="store_true", help="Enable Prometheus metrics endpoint"
+    )
+    parser.add_argument(
+        "--metrics-port",
+        type=int,
+        default=9091,
+        help="Prometheus metrics port (default: 9091)",
+    )
     return parser.parse_args()
 
 
 async def _run(args: argparse.Namespace) -> None:
     config = load_config(args.config)
+    metrics.init(enabled=args.metrics, port=args.metrics_port)
 
     event_bus = EventBus()
     clock = BeatClock()
 
     def on_beat(event: BeatEvent) -> None:
+        metrics.BEATS_RECEIVED.inc()
         clock.on_beat(
             bpm=event.bpm,
             beat_number=event.beat_position,
@@ -92,6 +113,14 @@ async def _run(args: argparse.Namespace) -> None:
 
     stop_event = asyncio.Event()
 
+    async def _event_loop_lag_loop() -> None:
+        interval = 0.1
+        while not stop_event.is_set():
+            t0 = time.monotonic()
+            await asyncio.sleep(interval)
+            lag = time.monotonic() - t0 - interval
+            metrics.EVENT_LOOP_LAG.observe(max(0.0, lag))
+
     def _signal_handler() -> None:
         logger.info("Shutdown signal received")
         stop_event.set()
@@ -116,6 +145,7 @@ async def _run(args: argparse.Namespace) -> None:
                 avg_frame_render_time_ms=engine.avg_render_time_ms,
                 device_stats=scheduler.get_device_stats(),
             )
+            metrics.RING_BUFFER_DEPTH.set(engine.ring_buffer.fill_level)
             summary = status.summary()
             await asyncio.to_thread(logger.info, "Status: {}", summary)
             try:
@@ -124,6 +154,8 @@ async def _run(args: argparse.Namespace) -> None:
                 pass
 
     tasks.append(asyncio.create_task(_status_loop()))
+    if args.metrics:
+        tasks.append(asyncio.create_task(_event_loop_lag_loop()))
 
     logger.info("dj-ledfx started")
     await stop_event.wait()
@@ -149,10 +181,42 @@ def main() -> None:
     logger.remove()
     logger.add(sys.stderr, level=args.log_level)
 
-    try:
-        asyncio.run(_run(args))
-    except KeyboardInterrupt:
-        pass
+    if args.profile == "deep":
+        from datetime import datetime
+
+        try:
+            from viztracer import VizTracer
+        except ImportError:
+            logger.error("VizTracer not installed. Install with: uv pip install viztracer")
+            sys.exit(1)
+
+        profiles_dir = Path("profiles")
+        profiles_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        output_path = profiles_dir / f"profile-{timestamp}.json"
+
+        tracer = VizTracer(
+            tracer_entries=1_000_000,
+            include_files=["*/dj_ledfx/*"],
+            min_duration=50,
+            log_async=True,
+        )
+        tracer.start()
+        try:
+            asyncio.run(_run(args))
+        except KeyboardInterrupt:
+            pass
+        finally:
+            tracer.stop()
+            tracer.save(str(output_path))
+            logger.info("VizTracer profile saved to {}", output_path)
+            print(f"\nProfile saved to: {output_path}")
+            print("Open at: https://ui.perfetto.dev/ (load local file)")
+    else:
+        try:
+            asyncio.run(_run(args))
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":
