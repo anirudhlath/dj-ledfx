@@ -8,9 +8,11 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "granian>=2.7.2",
     "loguru",
     "numpy",
     "openrgb-python",
+    "tomli_w>=1.0",
 ]
 
 [project.scripts]
@@ -19,6 +21,7 @@ dj-ledfx = "dj_ledfx.main:main"
 [project.optional-dependencies]
 metrics = ["prometheus-client>=0.20"]
 profiling = ["py-spy>=0.4", "viztracer>=1.0"]
+web = ["fastapi>=0.115", "granian>=1.7", "pydantic>=2.10"]
 
 [build-system]
 requires = ["hatchling"]
@@ -50,6 +53,14 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["viztracer.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["granian.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["fastapi.*", "starlette.*", "pydantic.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
