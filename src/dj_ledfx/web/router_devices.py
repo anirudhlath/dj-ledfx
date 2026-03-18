@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 @router.get("/devices")
-def list_devices(request: Request) -> list[DeviceResponse]:
+async def list_devices(request: Request) -> list[DeviceResponse]:
     manager = request.app.state.device_manager
     scheduler = request.app.state.scheduler
     stats_list = scheduler.get_device_stats() if hasattr(scheduler, "get_device_stats") else []
@@ -63,7 +63,9 @@ async def identify_device(request: Request, name: str) -> dict[str, str]:
 
 
 @router.put("/devices/{name}/latency")
-def update_device_latency(request: Request, name: str, body: dict[str, Any]) -> dict[str, str]:
+async def update_device_latency(
+    request: Request, name: str, body: dict[str, Any]
+) -> dict[str, str]:
     manager = request.app.state.device_manager
     device = manager.get_device(name)
     if device is None:
@@ -75,7 +77,9 @@ def update_device_latency(request: Request, name: str, body: dict[str, Any]) -> 
 
 
 @router.put("/devices/{name}/group")
-def assign_device_group(request: Request, name: str, body: AssignGroupRequest) -> dict[str, str]:
+async def assign_device_group(
+    request: Request, name: str, body: AssignGroupRequest
+) -> dict[str, str]:
     manager = request.app.state.device_manager
     try:
         manager.assign_to_group(name, body.group)
@@ -85,20 +89,20 @@ def assign_device_group(request: Request, name: str, body: AssignGroupRequest) -
 
 
 @router.get("/devices/groups")
-def list_groups(request: Request) -> dict[str, Any]:
+async def list_groups(request: Request) -> dict[str, Any]:
     manager = request.app.state.device_manager
     return {name: {"name": g.name, "color": g.color} for name, g in manager.get_groups().items()}
 
 
 @router.post("/devices/groups")
-def create_group(request: Request, body: GroupRequest) -> dict[str, Any]:
+async def create_group(request: Request, body: GroupRequest) -> dict[str, Any]:
     manager = request.app.state.device_manager
     group = manager.create_group(body.name, body.color)
     return {"name": group.name, "color": group.color}
 
 
 @router.delete("/devices/groups/{name}")
-def delete_group(request: Request, name: str) -> dict[str, str]:
+async def delete_group(request: Request, name: str) -> dict[str, str]:
     manager = request.app.state.device_manager
     manager.delete_group(name)
     return {"status": "deleted"}

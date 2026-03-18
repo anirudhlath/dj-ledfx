@@ -94,9 +94,22 @@ def test_device_manager_assign_group() -> None:
     assert manager.get_device_group("Dev2") is None
 
 
+def test_device_manager_assign_group_missing_device() -> None:
+    bus = EventBus()
+    manager = DeviceManager(event_bus=bus)
+
+    manager.create_group("Stage", "#ff0000")
+    with pytest.raises(KeyError, match="Device not found"):
+        manager.assign_to_group("Ghost", "Stage")
+
+
 def test_device_manager_assign_group_missing_group() -> None:
     bus = EventBus()
     manager = DeviceManager(event_bus=bus)
+
+    adapter = _make_mock_adapter("Dev1")
+    tracker = LatencyTracker(strategy=StaticLatency(10.0))
+    manager.add_device(adapter, tracker, max_fps=60)  # type: ignore[arg-type]
 
     with pytest.raises(KeyError, match="Group not found"):
         manager.assign_to_group("Dev1", "NonExistent")

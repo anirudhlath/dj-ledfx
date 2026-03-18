@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import tomllib
 from typing import Any
@@ -77,7 +78,7 @@ def _merge_config(existing: AppConfig, updates: dict[str, Any]) -> AppConfig:
 
 
 @router.get("/config")
-def get_config(request: Request) -> dict[str, Any]:
+async def get_config(request: Request) -> dict[str, Any]:
     config = request.app.state.config
     data = dataclasses.asdict(config)
 
@@ -89,7 +90,7 @@ def get_config(request: Request) -> dict[str, Any]:
 
 
 @router.put("/config")
-def update_config(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+async def update_config(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     config = request.app.state.config
     try:
         new_config = _merge_config(config, body)
@@ -97,12 +98,12 @@ def update_config(request: Request, body: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
     request.app.state.config = new_config
     if request.app.state.config_path:
-        save_config(new_config, request.app.state.config_path)
+        await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
     return dataclasses.asdict(new_config)
 
 
 @router.get("/config/export")
-def export_config(request: Request) -> PlainTextResponse:
+async def export_config(request: Request) -> PlainTextResponse:
     config = request.app.state.config
     data = dataclasses.asdict(config)
 
@@ -133,5 +134,5 @@ async def import_config(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
     request.app.state.config = new_config
     if request.app.state.config_path:
-        save_config(new_config, request.app.state.config_path)
+        await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
     return dataclasses.asdict(new_config)

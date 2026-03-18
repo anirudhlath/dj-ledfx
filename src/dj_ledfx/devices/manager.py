@@ -7,7 +7,9 @@ from dataclasses import dataclass
 import numpy as np
 from loguru import logger
 
+from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.adapter import DeviceAdapter
+from dj_ledfx.devices.backend import DeviceBackend
 from dj_ledfx.events import EventBus
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.types import DeviceGroup
@@ -84,12 +86,26 @@ class DeviceManager:
         return dict(self._groups)
 
     def assign_to_group(self, device_name: str, group_name: str) -> None:
+        if self.get_device(device_name) is None:
+            raise KeyError(f"Device not found: {device_name}")
         if group_name not in self._groups:
             raise KeyError(f"Group not found: {group_name}")
         self._device_groups[device_name] = group_name
 
     def get_device_group(self, device_name: str) -> str | None:
         return self._device_groups.get(device_name)
+
+    async def rediscover(self, config: AppConfig) -> list[str]:
+        """Re-run device discovery, adding only newly found devices."""
+        existing_names = {d.adapter.device_info.name for d in self._devices}
+        discovered = await DeviceBackend.discover_all(config)
+        new_names: list[str] = []
+        for d in discovered:
+            name = d.adapter.device_info.name
+            if name not in existing_names:
+                self.add_device(d.adapter, d.tracker, d.max_fps)
+                new_names.append(name)
+        return new_names
 
     async def identify_device(self, device_name: str, duration_s: float = 3.0) -> None:
         device = self.get_device(device_name)

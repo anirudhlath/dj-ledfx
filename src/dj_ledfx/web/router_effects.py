@@ -40,7 +40,7 @@ def list_effects() -> dict[str, Any]:
 
 
 @router.get("/effects/active")
-def get_active_effect(request: Request) -> ActiveEffectResponse:
+async def get_active_effect(request: Request) -> ActiveEffectResponse:
     deck = request.app.state.effect_deck
     return ActiveEffectResponse(
         effect=deck.effect_name,
@@ -49,7 +49,7 @@ def get_active_effect(request: Request) -> ActiveEffectResponse:
 
 
 @router.put("/effects/active")
-def set_active_effect(request: Request, body: SetEffectRequest) -> ActiveEffectResponse:
+async def set_active_effect(request: Request, body: SetEffectRequest) -> ActiveEffectResponse:
     deck = request.app.state.effect_deck
     if body.effect and body.effect != deck.effect_name:
         try:
@@ -70,7 +70,7 @@ def set_active_effect(request: Request, body: SetEffectRequest) -> ActiveEffectR
 
 
 @router.get("/presets")
-def list_presets(request: Request) -> list[PresetResponse]:
+async def list_presets(request: Request) -> list[PresetResponse]:
     store = request.app.state.preset_store
     return [
         PresetResponse(name=p.name, effect_class=p.effect_class, params=p.params)
@@ -79,7 +79,7 @@ def list_presets(request: Request) -> list[PresetResponse]:
 
 
 @router.post("/presets")
-def save_preset(request: Request, body: CreatePresetRequest) -> PresetResponse:
+async def save_preset(request: Request, body: CreatePresetRequest) -> PresetResponse:
     deck = request.app.state.effect_deck
     store = request.app.state.preset_store
     preset = Preset(
@@ -92,7 +92,7 @@ def save_preset(request: Request, body: CreatePresetRequest) -> PresetResponse:
 
 
 @router.put("/presets/{name}")
-def update_preset(request: Request, name: str, body: SetEffectRequest) -> PresetResponse:
+async def update_preset(request: Request, name: str, body: SetEffectRequest) -> PresetResponse:
     store = request.app.state.preset_store
     try:
         existing = store.load(name)
@@ -109,7 +109,7 @@ def update_preset(request: Request, name: str, body: SetEffectRequest) -> Preset
 
 
 @router.post("/presets/{name}/load")
-def load_preset(request: Request, name: str) -> ActiveEffectResponse:
+async def load_preset(request: Request, name: str) -> ActiveEffectResponse:
     deck = request.app.state.effect_deck
     store = request.app.state.preset_store
     try:
@@ -130,7 +130,7 @@ def load_preset(request: Request, name: str) -> ActiveEffectResponse:
 
 
 @router.delete("/presets/{name}")
-def delete_preset(request: Request, name: str) -> dict[str, str]:
+async def delete_preset(request: Request, name: str) -> dict[str, str]:
     store = request.app.state.preset_store
     try:
         store.delete(name)

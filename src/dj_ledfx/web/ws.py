@@ -114,7 +114,7 @@ async def _frame_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
         interval = 1.0 / sub.frame_fps
         await asyncio.sleep(interval)
         scheduler = app.state.scheduler
-        snapshots = scheduler.frame_snapshots
+        snapshots = dict(scheduler.frame_snapshots)
         for name, (colors, seq) in snapshots.items():
             if sub.frame_devices and name not in sub.frame_devices:
                 continue
