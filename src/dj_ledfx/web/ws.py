@@ -58,26 +58,18 @@ async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
         interval = 1.0 / max(sub.beat_fps, 1.0)
         await asyncio.sleep(interval)
         clock = app.state.beat_clock
-        try:
-            beat_data = {
-                "channel": "beat",
-                "bpm": clock.bpm,
-                "beat_phase": clock.beat_phase,
-                "bar_phase": clock.bar_phase,
-                "is_playing": clock.is_playing,
-                "beat_pos": clock.beat_position,
-                "pitch_percent": clock.pitch_percent,
-                "deck_number": clock.last_deck_number,
-                "deck_name": clock.last_deck_name,
-            }
-        except AttributeError:
-            beat_data = {
-                "channel": "beat",
-                "bpm": getattr(clock, "bpm", 0),
-                "beat_phase": getattr(clock, "beat_phase", 0),
-                "bar_phase": getattr(clock, "bar_phase", 0),
-                "is_playing": getattr(clock, "is_playing", False),
-            }
+        state = clock.get_state()
+        beat_data = {
+            "channel": "beat",
+            "bpm": state.bpm,
+            "beat_phase": state.beat_phase,
+            "bar_phase": state.bar_phase,
+            "is_playing": state.is_playing,
+            "beat_pos": int(state.bar_phase * 4) % 4 + 1,
+            "pitch_percent": clock.pitch_percent,
+            "deck_number": clock.last_deck_number,
+            "deck_name": clock.last_deck_name,
+        }
         await _send_json(ws, beat_data)
 
 

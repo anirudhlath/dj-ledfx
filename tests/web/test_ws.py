@@ -6,17 +6,20 @@ from fastapi.testclient import TestClient
 
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
+from dj_ledfx.types import BeatState
 from dj_ledfx.web.app import create_app
 
 
 @pytest.fixture
 def ws_app():
     clock = MagicMock()
-    clock.bpm = 128.0
-    clock.beat_phase = 0.5
-    clock.bar_phase = 0.25
-    clock.is_playing = True
-    clock.beat_position = 1
+    clock.get_state.return_value = BeatState(
+        bpm=128.0,
+        beat_phase=0.5,
+        bar_phase=0.25,
+        is_playing=True,
+        next_beat_time=0.0,
+    )
     clock.pitch_percent = 0.0
     clock.last_deck_number = 1
     clock.last_deck_name = "CDJ-3000"
