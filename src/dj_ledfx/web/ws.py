@@ -18,7 +18,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     app = websocket.app
     sub = ClientSubscription()
-    tasks: list[asyncio.Task] = []
+    tasks: list[asyncio.Task[None]] = []
 
     try:
         # Start polling tasks
@@ -139,7 +139,7 @@ async def _handle_command(
     ws: WebSocket,
     app: Any,
     sub: ClientSubscription,
-    tasks: list[asyncio.Task],
+    tasks: list[asyncio.Task[None]],
     msg: dict[str, Any],
 ) -> None:
     """Handle incoming WS command."""

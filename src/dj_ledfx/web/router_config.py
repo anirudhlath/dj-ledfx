@@ -82,7 +82,7 @@ def get_config(request: Request) -> dict[str, Any]:
     data = dataclasses.asdict(config)
 
     # Remove None values for cleaner output
-    def _clean(d: dict) -> dict:
+    def _clean(d: dict[str, Any]) -> dict[str, Any]:
         return {k: _clean(v) if isinstance(v, dict) else v for k, v in d.items() if v is not None}
 
     return _clean(data)
@@ -107,7 +107,7 @@ def export_config(request: Request) -> PlainTextResponse:
     data = dataclasses.asdict(config)
 
     # Strip None values
-    def _strip(d: dict) -> None:
+    def _strip(d: dict[str, Any]) -> None:
         for key in list(d.keys()):
             if isinstance(d[key], dict):
                 _strip(d[key])
