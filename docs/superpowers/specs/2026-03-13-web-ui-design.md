@@ -4,9 +4,9 @@
 
 A fully featured web UI for dj-ledfx providing live performance control and deep device/scene configuration. The UI serves as both a real-time control surface during DJ sets and a comprehensive setup tool for device placement, spatial mapping, and effect management.
 
-**Tech stack:** FastAPI + Granian (embedded ASGI) backend, Svelte 5 + Threlte + shadcn-svelte + Tailwind frontend.
+**Tech stack:** FastAPI + Granian (embedded ASGI) backend, Svelte 5 + SvelteKit + shadcn-svelte + Tailwind CSS v4 frontend. Threlte for 3D scene editor (phase 2).
 
-**Design language:** "Studio Hardware" — matte-black recessed panels inspired by Pioneer DJM mixers and modular synth racks. Unified JetBrains Mono typography. Electric cyan (#00e5ff) as sole accent color.
+**Design language:** shadcn-svelte default dark theme with cyan (#00e5ff) primary color. Orbitron font for BPM display only; all other typography uses shadcn-svelte defaults. No custom design tokens, no glow effects. All UI components use shadcn-svelte defaults (Button, Card, Input, Slider, Table, Badge, etc.). Domain-specific components (BpmDisplay, BeatGrid, PhaseMeter, DeviceMonitor) are styled to match shadcn conventions using its CSS variables.
 
 ---
 
@@ -538,14 +538,14 @@ Three-panel layout with toolbar and mapping preview bar:
 - **Top toolbar** — Camera view presets (Perspective/Top/Front/Side), transform tools (Move/Rotate), grid snap settings
 - **Left panel (240px)** — Device list grouped by zone with connection status LEDs. "Unplaced" section for discovered-but-not-positioned devices. Drag to add to scene.
 - **Center** — Threlte 3D viewport with `<OrbitControls>`, `<TransformControls>`, `<Grid>`. Devices rendered as geometry-appropriate meshes with live LED colors.
-- **Right panel (260px)** — Properties for selected device: position XYZ inputs, geometry info, group assignment, latency tuning (strategy + manual offset fader), spatial mapping config.
+- **Right panel (260px)** — Properties for selected device: position XYZ inputs, geometry info, group assignment, latency tuning (strategy + manual offset slider), spatial mapping config.
 - **Bottom bar (44px)** — Mapping preview: 1D gradient strip showing effect→3D mapping result with device position markers.
 
 ### 8.2 Device Rendering in 3D
 
 | Geometry | 3D Representation |
 |----------|-------------------|
-| `PointGeometry` | Glowing sphere, color = device's current LED color |
+| `PointGeometry` | Emissive sphere, color = device's current LED color |
 | `StripGeometry` | Line of small spheres along direction vector, each colored per LED |
 | `MatrixGeometry` | Grid of small spheres matching tile layout, each colored per LED |
 
@@ -564,30 +564,37 @@ LED colors come from the frame snapshot WebSocket channel. The scene editor subs
 
 ### 9.1 Layout (top to bottom)
 
-1. **Navigation bar (38px)** — Logo, tab navigation (LIVE / SCENE / DEVICES / CONFIG), system status indicators (Pro DJ Link connection, device count, buffer health)
-2. **Transport display (120px)** — Three columns:
-   - *Left:* BPM (48px JetBrains Mono, largest element on screen), pitch %, track BPM, deck info
-   - *Center:* Beat position indicators (1-2-3-4, 48x48px, active beat has aggressive glow: `box-shadow: 0 0 30px, 0 0 60px`), beat phase meter, bar phase meter
-   - *Right:* Play state indicator, render time, buffer fill bar, engine FPS, drift measurement
+1. **Navigation bar** — `bg-card` bar with logo, tab links (LIVE / SCENE / DEVICES / CONFIG) styled with `text-muted-foreground` inactive / `text-primary` active, system status indicators (WS connection dot, play state)
+2. **Transport display** — shadcn `Card` containing:
+   - *Left:* BPM (Orbitron font, largest element on screen), source label in `text-muted-foreground`
+   - *Center:* Beat position indicators (1-2-3-4 small boxes, `bg-muted` inactive / `bg-primary text-primary-foreground` active with `beat-hit` animation), beat phase bar, bar phase bar
+   - *Right:* Play state icon (`text-muted-foreground` stopped / `text-primary` playing)
 3. **Main area (flex)** — Split `1fr 320px`:
-   - *Left:* 3D scene preview with live LED colors, vignette effect, recessed bezel shadow
-   - *Right:* Effect deck panel — presets grid (top, most accessible), then parameters (larger faders: 10px track, 18x24px thumb)
-4. **Device monitors (bottom)** — Horizontal strip of per-device monitors in recessed display windows (inset shadow), each showing: LED indicator, device name, actual FPS, latency ms, color strip of last-sent frame
+   - *Left:* Scene preview placeholder `Card` with `bg-muted` interior and centered `text-muted-foreground` text "Scene Preview" (replaced by Threlte 3D viewport in phase 2)
+   - *Right:* Effect deck `Card` — effect `Select`, parameter `Slider`s, palette color inputs, preset save/load with `Input` + `Button`
+4. **Device monitors (bottom)** — Horizontal strip of per-device cards showing: status dot, device name, FPS, latency, LED color data strip
 
-### 9.2 Preset-First Effect Deck
+### 9.2 Effect Deck
 
-Presets are positioned above parameters in the deck panel because switching presets is the most frequent live action. The preset grid uses 2-column layout with hardware-style buttons showing preset name and metadata (effect type, key parameter).
+The effect deck sidebar uses shadcn components throughout:
+- Effect selector: shadcn `Select` or `Button` group for switching effects
+- Parameters: shadcn `Slider` + `Label` for numeric params, `Switch` for booleans
+- Palette: row of native `<input type="color">` with `rounded border-input` styling
+- Presets: shadcn `Button` for each preset, `Input` + `Button` for save
+
+Sections separated by shadcn `Separator`. Order: Effect → Parameters → Presets (most-to-least frequent).
 
 ### 9.3 Visual Feedback for State Changes
 
 | Event | Visual |
 |-------|--------|
-| Preset switch | Active button flashes cyan (0.3s ease-out), color strip cross-dissolves |
-| Parameter change | Value text highlights cyan then fades back (0.5s) |
-| Device connect | LED fades in green with expanded glow |
-| Device disconnect | LED pulses red 3x then turns off |
-| Drift warning (>5ms) | Drift value turns amber |
-| Buffer low (<50%) | Buffer bar turns amber, <20% turns red |
+| Beat hit | Active beat box uses `bg-primary` + `beat-hit` scale animation (functional — mirrors LED timing) |
+| Preset switch | Active button uses shadcn `default` variant |
+| Parameter change | Value updates immediately, no decorative animation |
+| Device connect | Status dot turns green |
+| Device disconnect | Status dot turns red |
+| Drift warning (>5ms) | Drift value uses `text-destructive` |
+| Buffer low (<50%) | Buffer bar uses `text-destructive` |
 
 ---
 
@@ -683,41 +690,39 @@ def create_app(
 ```
 frontend/
 ├── package.json
+├── components.json                  # shadcn-svelte CLI config
 ├── svelte.config.js
 ├── vite.config.ts
-├── tailwind.config.ts
 ├── tsconfig.json
 ├── src/
-│   ├── app.html
-│   ├── app.css                    # Tailwind base + CSS variables (studio theme tokens)
+│   ├── app.html                     # Google Fonts link for Orbitron
+│   ├── app.css                      # shadcn-svelte generated theme (dark mode, cyan primary)
 │   ├── lib/
+│   │   ├── utils.ts                 # shadcn-svelte cn() utility
 │   │   ├── stores/
-│   │   │   ├── beat.svelte.ts     # Beat state (from WS, Svelte 5 runes)
-│   │   │   ├── devices.svelte.ts  # Device list + stats + groups
-│   │   │   ├── effects.svelte.ts  # Active effect, params, presets
-│   │   │   └── scene.svelte.ts    # Scene placements, mapping config
+│   │   │   ├── beat.svelte.ts       # Beat state (from WS, Svelte 5 runes)
+│   │   │   ├── devices.svelte.ts    # Device list + stats + groups
+│   │   │   ├── effects.svelte.ts    # Active effect, params, presets
+│   │   │   └── scene.svelte.ts      # Scene placements, mapping config
 │   │   ├── ws/
-│   │   │   └── client.ts          # WebSocket client, multiplexed channels, reconnection
+│   │   │   └── client.ts            # WebSocket client, multiplexed channels, reconnection
 │   │   ├── api/
-│   │   │   └── client.ts          # REST API typed fetch wrapper
+│   │   │   └── client.ts            # REST API typed fetch wrapper
 │   │   ├── components/
-│   │   │   ├── ui/                # shadcn-svelte components (copied, customized)
-│   │   │   ├── transport/         # BpmDisplay, BeatGrid, PhaseMeter, PlayState
-│   │   │   ├── deck/              # EffectDeck, PresetGrid, ParamSlider, PaletteEditor
-│   │   │   ├── scene/             # ThrelteViewport, DeviceMesh, TransformGizmo, MappingPreview
-│   │   │   ├── devices/           # DeviceTable, DeviceRow, GroupManager, DiscoveryPanel
-│   │   │   └── common/            # LedIndicator, HwButton, Fader, Field (design system)
-│   │   └── theme/
-│   │       └── tokens.ts          # Design tokens: colors, shadows, typography, spacing
+│   │   │   ├── ui/                  # shadcn-svelte components (generated via CLI)
+│   │   │   ├── transport/           # BpmDisplay, BeatGrid, PhaseMeter, PlayState
+│   │   │   ├── deck/                # EffectDeckPanel, ParamSlider, PaletteEditor, DeviceMonitor
+│   │   │   └── common/              # LedIndicator (small status dot)
+│   │   └── (no theme/ directory — shadcn CSS variables are the theme)
 │   └── routes/
-│       ├── +layout.svelte         # Nav bar, WS connection init, global stores
-│       ├── +page.svelte           # Live performance view (default route)
+│       ├── +layout.svelte           # Nav bar, WS connection init, global stores
+│       ├── +page.svelte             # Live performance view (default route)
 │       ├── scene/
-│       │   └── +page.svelte       # 3D scene editor
+│       │   └── +page.svelte         # 3D scene editor (phase 2)
 │       ├── devices/
-│       │   └── +page.svelte       # Device management
+│       │   └── +page.svelte         # Device management
 │       └── config/
-│           └── +page.svelte       # App configuration
+│           └── +page.svelte         # App configuration
 ```
 
 ### 13.1 Frontend Build Pipeline
@@ -757,32 +762,11 @@ import adapter from '@sveltejs/adapter-static';
 export default { kit: { adapter: adapter({ fallback: 'index.html' }) } };
 ```
 
-### 13.2 Design Tokens
+### 13.2 Theme
 
-The "Studio Hardware" theme is defined as CSS variables and TypeScript constants:
+The frontend uses shadcn-svelte's standard CSS variable theme system. The only customization is setting `--primary` to cyan (#00e5ff) in the `.dark` block of `app.css`. No custom design tokens file exists — all colors, spacing, and typography are derived from shadcn-svelte's CSS variables (`--background`, `--foreground`, `--card`, `--muted`, `--primary`, `--border`, `--input`, `--ring`, `--destructive`, etc.).
 
-```typescript
-// theme/tokens.ts
-export const colors = {
-    accent: '#00e5ff',
-    surface: '#0c0c0e',
-    surfaceDeep: '#060608',
-    surfaceRaised: '#141416',
-    panelHeader: '#09090b',
-    border: '#1a1a1e',
-    borderActive: '#00e5ff44',
-    textPrimary: '#eeeeee',
-    textSecondary: '#888888',
-    textDim: '#444444',
-    textMuted: '#333333',
-    statusGreen: '#22c55e',
-    statusAmber: '#f59e0b',
-    statusRed: '#ef4444',
-    axisX: '#ef4444',
-    axisY: '#22c55e',
-    axisZ: '#3b82f6',
-} as const;
-```
+Custom domain-specific components (BpmDisplay, BeatGrid, PhaseMeter, DeviceMonitor, LedIndicator) use these same CSS variables for consistency. The only additional CSS is the `beat-hit` keyframe animation for the active beat indicator.
 
 ---
 
