@@ -233,121 +233,17 @@ Create `frontend/components.json`:
 }
 ```
 
-- [ ] **Step 3: Create app.css with default shadcn zinc dark theme**
+- [ ] **Step 3: Run shadcn-svelte init**
 
-Create `frontend/src/app.css`:
+Run the shadcn-svelte CLI to generate `app.css`, `app.html`, and theme config. Use zinc base color, default style, dark mode via class. Accept all defaults — do NOT customize the generated theme in any way.
 
-Use the exact default output from `npx shadcn-svelte@latest init` with zinc base color. This is the vanilla shadcn-svelte theme with NO customizations.
-
-```css
-@import "tailwindcss";
-@import "tw-animate-css";
-
-@custom-variant dark (&:is(.dark *));
-
-:root {
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --primary: 240 5.9% 10%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
-  --destructive: 0 72.2% 50.6%;
-  --destructive-foreground: 0 0% 98%;
-  --ring: 240 10% 3.9%;
-  --radius: 0.5rem;
-}
-
-.dark {
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
-  --popover: 240 10% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  --card: 240 10% 3.9%;
-  --card-foreground: 0 0% 98%;
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 240 5.9% 10%;
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-  --ring: 240 4.9% 83.9%;
-}
-
-@theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-popover: hsl(var(--popover));
-  --color-popover-foreground: hsl(var(--popover-foreground));
-  --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--card-foreground));
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
-  --color-ring: hsl(var(--ring));
-}
-
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-}
+```bash
+cd frontend && npx shadcn-svelte@latest init
 ```
 
-- [ ] **Step 4: Create app.html**
+After init completes, add `class="dark"` to the `<html>` tag in `src/app.html` to force dark mode (this is a dark-only app).
 
-Create `frontend/src/app.html`:
-
-```html
-<!doctype html>
-<html lang="en" class="dark">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    %sveltekit.head%
-  </head>
-  <body>
-    <div style="display: contents">%sveltekit.body%</div>
-  </body>
-</html>
-```
-
-Note: `class="dark"` on `<html>` forces dark mode — this is a dark-only app. No custom fonts — uses default shadcn system fonts.
-
-- [ ] **Step 5: Install shadcn-svelte components**
+- [ ] **Step 4: Install shadcn-svelte components**
 
 ```bash
 cd frontend && npx shadcn-svelte@latest add button card input label slider switch table badge separator select scroll-area
@@ -355,7 +251,7 @@ cd frontend && npx shadcn-svelte@latest add button card input label slider switc
 
 Accept all prompts. This generates files into `src/lib/components/ui/`.
 
-- [ ] **Step 6: Verify components installed**
+- [ ] **Step 5: Verify components installed**
 
 ```bash
 ls frontend/src/lib/components/ui/
@@ -363,7 +259,7 @@ ls frontend/src/lib/components/ui/
 
 Expected: directories for button, card, input, label, slider, switch, table, badge, separator, select, scroll-area.
 
-- [ ] **Step 7: Verify dev server starts**
+- [ ] **Step 6: Verify dev server starts**
 
 ```bash
 cd frontend && npm run dev -- --port 5173
@@ -371,10 +267,10 @@ cd frontend && npm run dev -- --port 5173
 
 Expected: Vite starts without CSS errors. The app will show a blank page (no routes yet).
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-cd frontend && git add -A && git commit -m "feat: initialize shadcn-svelte with dark theme and cyan primary"
+cd frontend && git add -A && git commit -m "feat: initialize shadcn-svelte with default zinc dark theme"
 ```
 
 ### Task 3: Restore data layer files
