@@ -98,6 +98,7 @@ class DeviceManager:
     async def rediscover(self, config: AppConfig) -> list[str]:
         """Re-run device discovery, adding only newly found devices."""
         existing_names = {d.adapter.device_info.name for d in self._devices}
+        await DeviceBackend.shutdown_all()
         discovered = await DeviceBackend.discover_all(config)
         new_names: list[str] = []
         for d in discovered:

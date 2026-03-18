@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from starlette.responses import JSONResponse
 
 from dj_ledfx.web.schemas import (
     AssignGroupRequest,
@@ -50,16 +52,42 @@ async def discover_devices(request: Request) -> dict[str, Any]:
     return {"discovered": new_names}
 
 
-@router.post("/devices/{name}/identify")
-async def identify_device(request: Request, name: str) -> dict[str, str]:
+# --- Group routes registered before parameterized /devices/{name} routes ---
+
+
+@router.get("/devices/groups")
+async def list_groups(request: Request) -> dict[str, Any]:
     manager = request.app.state.device_manager
-    try:
-        await manager.identify_device(name)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"Device not found: {name}") from exc
-    except ConnectionError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    return {"status": "ok"}
+    return {name: {"name": g.name, "color": g.color} for name, g in manager.get_groups().items()}
+
+
+@router.post("/devices/groups")
+async def create_group(request: Request, body: GroupRequest) -> dict[str, Any]:
+    manager = request.app.state.device_manager
+    group = manager.create_group(body.name, body.color)
+    return {"name": group.name, "color": group.color}
+
+
+@router.delete("/devices/groups/{name}")
+async def delete_group(request: Request, name: str) -> dict[str, str]:
+    manager = request.app.state.device_manager
+    manager.delete_group(name)
+    return {"status": "deleted"}
+
+
+# --- Parameterized /devices/{name} routes ---
+
+
+@router.post("/devices/{name}/identify")
+async def identify_device(request: Request, name: str) -> JSONResponse:
+    manager = request.app.state.device_manager
+    device = manager.get_device(name)
+    if device is None:
+        raise HTTPException(status_code=404, detail=f"Device not found: {name}")
+    if not device.adapter.is_connected:
+        raise HTTPException(status_code=503, detail=f"Device not connected: {name}")
+    asyncio.create_task(manager.identify_device(name))
+    return JSONResponse(status_code=202, content={"status": "identifying"})
 
 
 @router.put("/devices/{name}/latency")
@@ -86,23 +114,3 @@ async def assign_device_group(
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     return {"status": "ok"}
-
-
-@router.get("/devices/groups")
-async def list_groups(request: Request) -> dict[str, Any]:
-    manager = request.app.state.device_manager
-    return {name: {"name": g.name, "color": g.color} for name, g in manager.get_groups().items()}
-
-
-@router.post("/devices/groups")
-async def create_group(request: Request, body: GroupRequest) -> dict[str, Any]:
-    manager = request.app.state.device_manager
-    group = manager.create_group(body.name, body.color)
-    return {"name": group.name, "color": group.color}
-
-
-@router.delete("/devices/groups/{name}")
-async def delete_group(request: Request, name: str) -> dict[str, str]:
-    manager = request.app.state.device_manager
-    manager.delete_group(name)
-    return {"status": "deleted"}

@@ -235,7 +235,7 @@ def test_nested_config_defaults() -> None:
     assert config.web.enabled is False
     assert config.web.host == "127.0.0.1"
     assert config.web.port == 8080
-    assert config.web.cors_origins == ["*"]
+    assert "http://localhost:5173" in config.web.cors_origins
     assert config.devices.openrgb.enabled is True
     assert config.devices.lifx.enabled is True
     assert config.devices.govee.enabled is True

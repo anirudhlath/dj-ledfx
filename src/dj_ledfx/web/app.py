@@ -6,7 +6,7 @@ import importlib.resources
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
@@ -98,6 +98,8 @@ def create_app(
         @app.get("/{full_path:path}")
         async def spa_fallback(full_path: str) -> FileResponse:
             """Serve index.html for all non-API routes (SPA client-side routing)."""
+            if full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not found")
             file_path = static_dir / full_path
             if full_path and file_path.is_file():
                 return FileResponse(str(file_path))

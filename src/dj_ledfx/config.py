@@ -36,7 +36,13 @@ class WebConfig:
     host: str = "127.0.0.1"
     port: int = 8080
     static_dir: str | None = None
-    cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = field(
+        default_factory=lambda: [
+            "http://localhost:5173",  # SvelteKit dev
+            "http://localhost:4173",  # SvelteKit preview
+            "http://localhost:8080",  # production self-serve
+        ]
+    )
 
 
 @dataclass
@@ -194,10 +200,10 @@ def load_config(path: Path) -> AppConfig:
     )
 
 
-def _strip_none(d: dict[str, Any]) -> None:
+def strip_none(d: dict[str, Any]) -> None:
     for key in list(d.keys()):
         if isinstance(d[key], dict):
-            _strip_none(d[key])
+            strip_none(d[key])
         elif d[key] is None:
             del d[key]
 
@@ -208,7 +214,7 @@ def save_config(config: AppConfig, path: Path) -> None:
     import tomli_w
 
     data = dataclasses.asdict(config)
-    _strip_none(data)
+    strip_none(data)
     tmp = path.with_suffix(".tmp")
     tmp.write_bytes(tomli_w.dumps(data).encode())
     os.replace(tmp, path)

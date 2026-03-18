@@ -91,6 +91,9 @@ class BeatClock:
                 bpm=0.0,
                 is_playing=False,
                 next_beat_time=0.0,
+                pitch_percent=self._pitch_percent,
+                deck_number=self._last_deck_number,
+                deck_name=self._last_deck_name,
             )
 
         elapsed_since_packet = at_time - self._last_packet_time
@@ -101,6 +104,9 @@ class BeatClock:
                 bpm=self._bpm,
                 is_playing=False,
                 next_beat_time=0.0,
+                pitch_percent=self._pitch_percent,
+                deck_number=self._last_deck_number,
+                deck_name=self._last_deck_name,
             )
 
         elapsed = at_time - self._last_beat_time
@@ -119,4 +125,7 @@ class BeatClock:
             bpm=self._bpm,
             is_playing=True,
             next_beat_time=next_beat_time,
+            pitch_percent=self._pitch_percent,
+            deck_number=self._last_deck_number,
+            deck_name=self._last_deck_name,
         )

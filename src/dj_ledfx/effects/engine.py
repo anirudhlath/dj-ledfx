@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 
 from loguru import logger
 
@@ -78,7 +79,7 @@ class EffectEngine:
         self.ring_buffer = RingBuffer(capacity=fps, led_count=led_count)
         self._running = False
         self._last_tick_time = 0.0
-        self._render_times: list[float] = []
+        self._render_times: deque[float] = deque(maxlen=fps * 10)
 
     @property
     def avg_render_time_ms(self) -> float:
@@ -102,8 +103,6 @@ class EffectEngine:
         metrics.FRAMES_RENDERED.inc()
 
         self._render_times.append(render_elapsed)
-        if len(self._render_times) > 600:
-            self._render_times.pop(0)
 
         frame = RenderedFrame(
             colors=colors,

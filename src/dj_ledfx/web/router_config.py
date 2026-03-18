@@ -9,7 +9,7 @@ from typing import Any
 
 import tomli_w
 from fastapi import APIRouter, HTTPException, Request
-from starlette.responses import PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 
 from dj_ledfx.config import (
     AppConfig,
@@ -22,6 +22,7 @@ from dj_ledfx.config import (
     OpenRGBConfig,
     WebConfig,
     save_config,
+    strip_none,
 )
 
 router = APIRouter()
@@ -81,41 +82,34 @@ def _merge_config(existing: AppConfig, updates: dict[str, Any]) -> AppConfig:
 async def get_config(request: Request) -> dict[str, Any]:
     config = request.app.state.config
     data = dataclasses.asdict(config)
-
-    # Remove None values for cleaner output
-    def _clean(d: dict[str, Any]) -> dict[str, Any]:
-        return {k: _clean(v) if isinstance(v, dict) else v for k, v in d.items() if v is not None}
-
-    return _clean(data)
+    strip_none(data)
+    return data
 
 
 @router.put("/config")
-async def update_config(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
     config = request.app.state.config
     try:
         new_config = _merge_config(config, body)
-    except (ValueError, TypeError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except TypeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
     request.app.state.config = new_config
     if request.app.state.config_path:
         await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
-    return dataclasses.asdict(new_config)
+    result = dataclasses.asdict(new_config)
+    return JSONResponse(
+        content=result,
+        headers={"X-Requires-Restart": "true"},
+    )
 
 
 @router.get("/config/export")
 async def export_config(request: Request) -> PlainTextResponse:
     config = request.app.state.config
     data = dataclasses.asdict(config)
-
-    # Strip None values
-    def _strip(d: dict[str, Any]) -> None:
-        for key in list(d.keys()):
-            if isinstance(d[key], dict):
-                _strip(d[key])
-            elif d[key] is None:
-                del d[key]
-
-    _strip(data)
+    strip_none(data)
     dumped = tomli_w.dumps(data)
     return PlainTextResponse(dumped if isinstance(dumped, str) else dumped.decode())
 
@@ -130,9 +124,14 @@ async def import_config(request: Request) -> dict[str, Any]:
     config = request.app.state.config
     try:
         new_config = _merge_config(config, data)
-    except (ValueError, TypeError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except TypeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
     request.app.state.config = new_config
     if request.app.state.config_path:
         await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
-    return dataclasses.asdict(new_config)
+    return JSONResponse(
+        content=dataclasses.asdict(new_config),
+        headers={"X-Requires-Restart": "true"},
+    )

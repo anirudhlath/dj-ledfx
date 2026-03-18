@@ -66,9 +66,9 @@ async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
             "bar_phase": state.bar_phase,
             "is_playing": state.is_playing,
             "beat_pos": int(state.bar_phase * 4) % 4 + 1,
-            "pitch_percent": clock.pitch_percent,
-            "deck_number": clock.last_deck_number,
-            "deck_name": clock.last_deck_name,
+            "pitch_percent": state.pitch_percent,
+            "deck_number": state.deck_number,
+            "deck_name": state.deck_name,
         }
         await _send_json(ws, beat_data)
 
@@ -99,10 +99,19 @@ async def _stats_poll(ws: WebSocket, app: Any) -> None:
 
 
 async def _status_poll(ws: WebSocket, app: Any) -> None:
-    """Poll system status at ~0.1fps."""
+    """Poll system status at ~0.1fps — heartbeat with health info."""
     while True:
         await asyncio.sleep(10.0)
-        await _send_json(ws, {"channel": "status", "ok": True})
+        engine = app.state.effect_engine
+        scheduler = app.state.scheduler
+        stats = scheduler.get_device_stats()
+        status_data: dict[str, Any] = {
+            "channel": "status",
+            "ok": True,
+            "device_count": len(stats),
+            "avg_render_ms": engine.avg_render_time_ms,
+        }
+        await _send_json(ws, status_data)
 
 
 async def _frame_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
@@ -166,7 +175,7 @@ async def _handle_command(
             elif params:
                 deck.effect.set_params(**params)
             await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
-        except (KeyError, ValueError) as e:
+        except (KeyError, ValueError, TypeError) as e:
             await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(e)})
 
     else:

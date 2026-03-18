@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -19,7 +20,7 @@ router = APIRouter()
 
 
 @router.get("/effects")
-def list_effects() -> dict[str, Any]:
+async def list_effects() -> dict[str, Any]:
     schemas = get_effect_schemas()
     result = {}
     for name, params in schemas.items():
@@ -58,6 +59,8 @@ async def set_active_effect(request: Request, body: SetEffectRequest) -> ActiveE
             deck.swap_effect(new_effect)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"Unknown effect: {body.effect}") from exc
+        except TypeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid effect params: {exc}") from exc
     elif body.params:
         try:
             deck.effect.set_params(**body.params)
@@ -87,7 +90,7 @@ async def save_preset(request: Request, body: CreatePresetRequest) -> PresetResp
         effect_class=deck.effect_name,
         params=deck.effect.get_params(),
     )
-    store.save(preset)
+    await asyncio.to_thread(store.save, preset)
     return PresetResponse(name=preset.name, effect_class=preset.effect_class, params=preset.params)
 
 
@@ -102,7 +105,7 @@ async def update_preset(request: Request, name: str, body: SetEffectRequest) -> 
     if body.params:
         params.update(body.params)
     updated = Preset(name=name, effect_class=body.effect or existing.effect_class, params=params)
-    store.save(updated)
+    await asyncio.to_thread(store.save, updated)
     return PresetResponse(
         name=updated.name, effect_class=updated.effect_class, params=updated.params
     )
@@ -123,6 +126,8 @@ async def load_preset(request: Request, name: str) -> ActiveEffectResponse:
         raise HTTPException(
             status_code=404, detail=f"Unknown effect: {preset.effect_class}"
         ) from exc
+    except TypeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid preset params: {exc}") from exc
     return ActiveEffectResponse(
         effect=deck.effect_name,
         params=deck.effect.get_params(),
@@ -133,7 +138,7 @@ async def load_preset(request: Request, name: str) -> ActiveEffectResponse:
 async def delete_preset(request: Request, name: str) -> dict[str, str]:
     store = request.app.state.preset_store
     try:
-        store.delete(name)
+        await asyncio.to_thread(store.delete, name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Preset not found: {name}") from exc
     return {"status": "deleted"}
