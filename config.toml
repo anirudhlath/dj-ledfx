@@ -1,0 +1,8 @@
+[devices.openrgb]
+enabled = false
+
+[devices.lifx]
+enabled = false
+
+[devices.govee]
+enabled = false
