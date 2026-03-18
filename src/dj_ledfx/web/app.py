@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.resources
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import FileResponse
+from starlette.staticfiles import StaticFiles
 
 if TYPE_CHECKING:
     from dj_ledfx.beat.clock import BeatClock
@@ -16,6 +19,25 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.engine import EffectEngine
     from dj_ledfx.effects.presets import PresetStore
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
+
+
+def _resolve_static_dir(explicit: str | None, config_dir: str | None) -> Path | None:
+    """4-tier static directory resolution."""
+    for candidate in [
+        Path(explicit) if explicit else None,
+        Path(config_dir) if config_dir else None,
+        Path(__file__).parent.parent.parent.parent / "frontend" / "build",
+    ]:
+        if candidate and candidate.is_dir():
+            return candidate
+    try:
+        pkg_path = importlib.resources.files("dj_ledfx") / "web" / "static"
+        resolved = Path(str(pkg_path))
+        if resolved.is_dir():
+            return resolved
+    except (TypeError, FileNotFoundError):
+        pass
+    return None
 
 
 def create_app(
@@ -63,5 +85,22 @@ def create_app(
     from dj_ledfx.web.ws import ws_endpoint
 
     app.add_api_websocket_route("/ws", ws_endpoint)
+
+    static_dir = _resolve_static_dir(web_static_dir, config.web.static_dir)
+    if static_dir and static_dir.is_dir():
+        index_html = static_dir / "index.html"
+
+        # Mount assets directory for hashed static files
+        assets_dir = static_dir / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+        @app.get("/{full_path:path}")
+        async def spa_fallback(full_path: str) -> FileResponse:
+            """Serve index.html for all non-API routes (SPA client-side routing)."""
+            file_path = static_dir / full_path
+            if full_path and file_path.is_file():
+                return FileResponse(str(file_path))
+            return FileResponse(str(index_html))
 
     return app
