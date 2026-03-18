@@ -12,3 +12,6 @@ build/
 .superpowers/
 .worktrees/
 profiles/
+frontend/node_modules/
+frontend/build/
+frontend/.svelte-kit/
