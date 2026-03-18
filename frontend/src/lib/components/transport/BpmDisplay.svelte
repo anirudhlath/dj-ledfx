@@ -3,7 +3,7 @@
 </script>
 
 <div class="flex flex-col">
-  <span class="text-5xl font-bold font-display tabular-nums tracking-tight text-foreground">
+  <span class="text-5xl font-bold tabular-nums tracking-tight text-foreground">
     {beatStore.bpm > 0 ? beatStore.bpm.toFixed(1) : '---.-'}
   </span>
   <span class="text-xs text-muted-foreground mt-1">

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Progress } from '$lib/components/ui/progress/index.js';
+
   interface Props {
     value: number;
     label: string;
@@ -10,10 +12,5 @@
   <span class="text-[10px] uppercase text-muted-foreground tracking-wider w-8 shrink-0 text-right">
     {label}
   </span>
-  <div class="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-    <div
-      class="h-full rounded-full bg-primary transition-[width] duration-75"
-      style="width: {value * 100}%;"
-    ></div>
-  </div>
+  <Progress value={value * 100} class="h-1.5" />
 </div>

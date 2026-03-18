@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card/index.js';
+  import * as Resizable from '$lib/components/ui/resizable/index.js';
   import BpmDisplay from '$lib/components/transport/BpmDisplay.svelte';
   import BeatGrid from '$lib/components/transport/BeatGrid.svelte';
   import PhaseMeter from '$lib/components/transport/PhaseMeter.svelte';
@@ -11,35 +12,39 @@
 </script>
 
 <div class="h-full flex flex-col">
-  <div class="flex-1 flex min-h-0">
-    <!-- Left: Transport + Scene preview -->
-    <div class="flex-1 flex flex-col min-h-0 p-4 gap-4">
-      <!-- Transport -->
-      <Card.Root>
-        <Card.Content class="flex items-center gap-6 py-4">
-          <BpmDisplay />
-          <div class="flex flex-col gap-2 flex-1 max-w-sm">
-            <BeatGrid />
-            <PhaseMeter value={beatStore.beatPhase} label="BEAT" />
-            <PhaseMeter value={beatStore.barPhase} label="BAR" />
-          </div>
-          <PlayState />
-        </Card.Content>
-      </Card.Root>
+  <Resizable.PaneGroup direction="horizontal" class="flex-1 min-h-0">
+    <Resizable.Pane defaultSize={70} minSize={40}>
+      <!-- Left: Transport + Scene preview -->
+      <div class="flex flex-col h-full p-4 gap-4">
+        <!-- Transport -->
+        <Card.Root>
+          <Card.Content class="flex items-center gap-6 py-4">
+            <BpmDisplay />
+            <div class="flex flex-col gap-2 flex-1 max-w-sm">
+              <BeatGrid />
+              <PhaseMeter value={beatStore.beatPhase} label="BEAT" />
+              <PhaseMeter value={beatStore.barPhase} label="BAR" />
+            </div>
+            <PlayState />
+          </Card.Content>
+        </Card.Root>
 
-      <!-- Scene preview placeholder -->
-      <Card.Root class="flex-1">
-        <Card.Content class="flex items-center justify-center h-full">
-          <p class="text-sm text-muted-foreground">Scene Preview — Phase 2</p>
-        </Card.Content>
-      </Card.Root>
-    </div>
+        <!-- Scene preview placeholder -->
+        <Card.Root class="flex-1">
+          <Card.Content class="flex items-center justify-center h-full">
+            <p class="text-sm text-muted-foreground">Scene Preview — Phase 2</p>
+          </Card.Content>
+        </Card.Root>
+      </div>
+    </Resizable.Pane>
 
-    <!-- Right: Effect deck sidebar -->
-    <div class="w-80 shrink-0">
+    <Resizable.Handle />
+
+    <Resizable.Pane defaultSize={30} minSize={20} maxSize={45}>
+      <!-- Right: Effect deck sidebar -->
       <EffectDeckPanel />
-    </div>
-  </div>
+    </Resizable.Pane>
+  </Resizable.PaneGroup>
 
   <!-- Device monitor strip -->
   {#if devicesStore.devices.length > 0}

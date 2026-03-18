@@ -8,6 +8,8 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import LedIndicator from '$lib/components/common/LedIndicator.svelte';
+  import { Toaster } from '$lib/components/ui/sonner/index.js';
+  import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 
   interface Props {
     children: Snippet;
@@ -36,9 +38,11 @@
   });
 </script>
 
+<Toaster theme="dark" />
+
 <div class="h-screen flex flex-col bg-background overflow-hidden">
   <nav class="h-11 flex items-center px-4 bg-card border-b border-border shrink-0">
-    <span class="font-display text-primary text-sm font-bold mr-6 tracking-widest select-none">
+    <span class="text-primary text-sm font-bold mr-6 tracking-widest select-none">
       dj-ledfx
     </span>
 
@@ -58,14 +62,32 @@
     </div>
 
     <div class="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
-      <span class="flex items-center gap-1.5">
-        <LedIndicator color={beatStore.wsConnected ? 'green' : 'red'} size="sm" />
-        WS
-      </span>
-      <span class="flex items-center gap-1.5">
-        <LedIndicator color={beatStore.isPlaying ? 'cyan' : 'off'} size="sm" />
-        {beatStore.isPlaying ? 'PLAYING' : 'STOPPED'}
-      </span>
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <span class="flex items-center gap-1.5">
+              <LedIndicator color={beatStore.wsConnected ? 'green' : 'red'} size="sm" />
+              WS
+            </span>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>{beatStore.wsConnected ? 'WebSocket connected' : 'WebSocket disconnected'}</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <span class="flex items-center gap-1.5">
+              <LedIndicator color={beatStore.isPlaying ? 'cyan' : 'off'} size="sm" />
+              {beatStore.isPlaying ? 'PLAYING' : 'STOPPED'}
+            </span>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>{beatStore.isPlaying ? `${beatStore.bpm.toFixed(1)} BPM` : 'No active deck'}</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     </div>
   </nav>
 
