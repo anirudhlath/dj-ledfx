@@ -58,7 +58,14 @@ def _parse_args() -> argparse.Namespace:
         default=9091,
         help="Prometheus metrics port (default: 9091)",
     )
-    parser.add_argument("--web", action="store_true", help="Enable web UI")
+    parser.add_argument(
+        "--web",
+        nargs="?",
+        const="prod",
+        default=None,
+        choices=["prod", "dev"],
+        help="Enable web UI ('--web' for production, '--web dev' for hot-reload dev server)",
+    )
     parser.add_argument("--web-port", type=int, default=None, help="Web UI port")
     parser.add_argument("--web-host", type=str, default=None, help="Web UI host")
     parser.add_argument(
@@ -159,10 +166,20 @@ async def _run(args: argparse.Namespace) -> None:
         compositor=compositor,
     )
 
+    async def _forward_vite_output(proc: asyncio.subprocess.Process) -> None:
+        assert proc.stdout is not None
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            logger.info("[vite] {}", line.decode().rstrip())
+
     stop_event = asyncio.Event()
     web_server_task: asyncio.Task[None] | None = None
+    vite_process: asyncio.subprocess.Process | None = None
+    web_mode = args.web or ("prod" if config.web.enabled else None)
 
-    if args.web or config.web.enabled:
+    if web_mode:
         from dj_ledfx.effects.presets import PresetStore
         from dj_ledfx.web.app import create_app
 
@@ -181,7 +198,7 @@ async def _run(args: argparse.Namespace) -> None:
             compositor=compositor,
             config=config,
             config_path=args.config,
-            web_static_dir=args.web_static_dir,
+            web_static_dir=None if web_mode == "dev" else args.web_static_dir,
         )
 
         try:
@@ -204,7 +221,25 @@ async def _run(args: argparse.Namespace) -> None:
             uvi_server = uvicorn.Server(uvi_config)
             web_server_task = asyncio.create_task(uvi_server.serve())
 
-        logger.info("Web UI available at http://{}:{}", host, port)
+        logger.info("API server on http://{}:{}", host, port)
+
+        if web_mode == "dev":
+            frontend_dir = Path(__file__).parent.parent.parent / "frontend"
+            if not (frontend_dir / "package.json").exists():
+                logger.error("frontend/ directory not found at {}", frontend_dir)
+            else:
+                vite_process = await asyncio.create_subprocess_exec(
+                    "npx",
+                    "vite",
+                    "dev",
+                    cwd=str(frontend_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                asyncio.create_task(_forward_vite_output(vite_process))
+                logger.info("Dev UI (hot reload) at http://localhost:5173")
+        else:
+            logger.info("Web UI available at http://{}:{}", host, port)
 
     async def _event_loop_lag_loop() -> None:
         interval = 0.1
@@ -254,6 +289,10 @@ async def _run(args: argparse.Namespace) -> None:
     await stop_event.wait()
 
     logger.info("Shutting down...")
+
+    if vite_process is not None:
+        vite_process.terminate()
+        await vite_process.wait()
 
     if web_server_task is not None:
         web_server_task.cancel()

@@ -16,6 +16,8 @@ Beat-synced LED effect engine driven by Pro DJ Link network data with per-device
 ```bash
 uv run -m dj_ledfx              # Run the app
 uv run -m dj_ledfx --demo       # Run with simulated beats (no DJ hardware)
+uv run -m dj_ledfx --demo --web # Run with web UI (requires: uv sync --extra web)
+uv run -m dj_ledfx --demo --web dev  # Run with hot-reload dev server (frontend + backend)
 uv run pytest                    # Run tests
 uv run pytest -x -v              # Run tests, stop on first failure
 uv run ruff check .              # Lint
