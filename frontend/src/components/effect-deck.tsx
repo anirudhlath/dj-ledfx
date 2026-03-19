@@ -1,5 +1,6 @@
 import { useState } from "react"
 import type { EffectParamSchema, Preset } from "@/lib/types"
+import { sliderValue } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
@@ -64,7 +65,7 @@ function ParamControl({
             step={step}
             value={numVal}
             onValueChange={(v: number | readonly number[]) => {
-              const num = Array.isArray(v) ? (v as readonly number[])[0] : (v as number)
+              const num = sliderValue(v)
               onUpdate(paramKey, schema.type === "int" ? Math.round(num) : num)
             }}
           />

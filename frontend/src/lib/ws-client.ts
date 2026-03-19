@@ -24,8 +24,9 @@ export class WsClient {
   private connectionHandlers = new Set<ConnectionHandler>()
   private pendingAcks = new Map<
     number,
-    { resolve: (v: JsonMessage) => void; reject: (e: Error) => void }
+    { resolve: (v: JsonMessage) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
   >()
+  private decoder = new TextDecoder()
   private lastBeatSub: { fps: number } | null = null
   private lastFrameSub: { fps: number; devices: string[] } | null = null
   private _connected = false
@@ -110,6 +111,7 @@ export class WsClient {
       if ((channel === "ack" || channel === "error") && typeof msg.id === "number") {
         const pending = this.pendingAcks.get(msg.id)
         if (pending) {
+          clearTimeout(pending.timer)
           this.pendingAcks.delete(msg.id)
           if (channel === "error") {
             pending.reject(new Error(msg.detail as string))
@@ -136,7 +138,7 @@ export class WsClient {
     if (data.byteLength < 2 + nameLen + 4) return
 
     const nameBytes = new Uint8Array(data, 2, nameLen)
-    const deviceName = new TextDecoder().decode(nameBytes)
+    const deviceName = this.decoder.decode(nameBytes)
     const seq = view.getUint32(2 + nameLen, true)
     const rgb = new Uint8Array(data, 2 + nameLen + 4)
 
@@ -163,14 +165,14 @@ export class WsClient {
     const msg = { action, id, ...params }
 
     return new Promise((resolve, reject) => {
-      this.pendingAcks.set(id, { resolve, reject })
-      this.ws?.send(JSON.stringify(msg))
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pendingAcks.has(id)) {
           this.pendingAcks.delete(id)
           reject(new Error(`Command ${action} timed out`))
         }
       }, 5000)
+      this.pendingAcks.set(id, { resolve, reject, timer })
+      this.ws?.send(JSON.stringify(msg))
     })
   }
 

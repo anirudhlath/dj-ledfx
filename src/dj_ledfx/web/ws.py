@@ -54,6 +54,7 @@ async def _send_json(ws: WebSocket, data: dict[str, Any]) -> None:
 
 async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
     """Poll beat state at client-requested rate."""
+    last_sent: dict[str, Any] = {}
     while True:
         interval = 1.0 / max(sub.beat_fps, 1.0)
         await asyncio.sleep(interval)
@@ -70,7 +71,9 @@ async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
             "deck_number": state.deck_number,
             "deck_name": state.deck_name,
         }
-        await _send_json(ws, beat_data)
+        if beat_data != last_sent:
+            await _send_json(ws, beat_data)
+            last_sent = beat_data
 
 
 async def _stats_poll(ws: WebSocket, app: Any) -> None:
@@ -165,15 +168,8 @@ async def _handle_command(
 
     elif action == "set_effect":
         deck = app.state.effect_deck
-        params = msg.get("params", {})
         try:
-            if "effect" in msg and msg["effect"] != deck.effect_name:
-                from dj_ledfx.effects.registry import create_effect
-
-                new_effect = create_effect(msg["effect"], **params)
-                deck.swap_effect(new_effect)
-            elif params:
-                deck.effect.set_params(**params)
+            deck.apply_update(msg.get("effect"), msg.get("params", {}))
             await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
         except (KeyError, ValueError, TypeError) as e:
             await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(e)})

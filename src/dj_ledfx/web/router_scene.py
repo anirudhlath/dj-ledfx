@@ -143,7 +143,7 @@ async def get_scene(request: Request) -> SceneResponse:
     compositor: SpatialCompositor | None = request.app.state.compositor
     strip_indices: dict[str, float] = {}
     if compositor is not None:
-        for device_id, indices in compositor._strip_indices.items():
+        for device_id, indices in compositor.get_strip_indices().items():
             strip_indices[device_id] = float(indices.mean())
 
     placements = [
@@ -205,12 +205,11 @@ async def update_scene_device(
         # Look up real LED count from device manager
         led_count = body.led_count or 1
         device_manager = request.app.state.device_manager
-        for managed in device_manager.devices:
-            if managed.adapter.device_info.name == device_name:
-                led_count = managed.adapter.led_count
-                if geometry is None and hasattr(managed.adapter, "geometry") and managed.adapter.geometry is not None:
-                    geometry = managed.adapter.geometry
-                break
+        managed = device_manager.get_device(device_name)
+        if managed is not None:
+            led_count = managed.adapter.led_count
+            if geometry is None and hasattr(managed.adapter, "geometry") and managed.adapter.geometry is not None:
+                geometry = managed.adapter.geometry
 
         scene.add_placement(
             DevicePlacement(

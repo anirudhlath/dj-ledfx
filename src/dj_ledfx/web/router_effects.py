@@ -52,20 +52,12 @@ async def get_active_effect(request: Request) -> ActiveEffectResponse:
 @router.put("/effects/active")
 async def set_active_effect(request: Request, body: SetEffectRequest) -> ActiveEffectResponse:
     deck = request.app.state.effect_deck
-    if body.effect and body.effect != deck.effect_name:
-        try:
-            params = body.params or {}
-            new_effect = create_effect(body.effect, **params)
-            deck.swap_effect(new_effect)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=f"Unknown effect: {body.effect}") from exc
-        except TypeError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid effect params: {exc}") from exc
-    elif body.params:
-        try:
-            deck.effect.set_params(**body.params)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+    try:
+        deck.apply_update(body.effect, body.params or {})
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown effect: {body.effect}") from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ActiveEffectResponse(
         effect=deck.effect_name,
         params=deck.effect.get_params(),

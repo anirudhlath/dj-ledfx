@@ -54,18 +54,26 @@ class DeviceManager:
         )
 
     async def connect_all(self) -> None:
-        for device in self._devices:
-            try:
-                await device.adapter.connect()
-            except Exception:
-                logger.exception("Failed to connect to '{}'", device.adapter.device_info.name)
+        results = await asyncio.gather(
+            *(device.adapter.connect() for device in self._devices),
+            return_exceptions=True,
+        )
+        for device, result in zip(self._devices, results):
+            if isinstance(result, Exception):
+                logger.opt(exception=result).error(
+                    "Failed to connect to '{}'", device.adapter.device_info.name
+                )
 
     async def disconnect_all(self) -> None:
-        for device in self._devices:
-            try:
-                await device.adapter.disconnect()
-            except Exception:
-                logger.exception("Failed to disconnect from '{}'", device.adapter.device_info.name)
+        results = await asyncio.gather(
+            *(device.adapter.disconnect() for device in self._devices),
+            return_exceptions=True,
+        )
+        for device, result in zip(self._devices, results):
+            if isinstance(result, Exception):
+                logger.opt(exception=result).error(
+                    "Failed to disconnect from '{}'", device.adapter.device_info.name
+                )
 
     def get_device(self, name: str) -> ManagedDevice | None:
         for d in self._devices:

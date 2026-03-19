@@ -38,8 +38,8 @@ class WebConfig:
     static_dir: str | None = None
     cors_origins: list[str] = field(
         default_factory=lambda: [
-            "http://localhost:5173",  # SvelteKit dev
-            "http://localhost:4173",  # SvelteKit preview
+            "http://localhost:5173",  # Vite dev
+            "http://localhost:4173",  # Vite preview
             "http://localhost:8080",  # production self-serve
         ]
     )
@@ -208,13 +208,18 @@ def strip_none(d: dict[str, Any]) -> None:
             del d[key]
 
 
-def save_config(config: AppConfig, path: Path) -> None:
-    import dataclasses
-
+def atomic_toml_write(data: dict[str, Any], path: Path) -> None:
+    """Atomically write a dict as TOML via tmp + os.replace."""
     import tomli_w
 
-    data = dataclasses.asdict(config)
-    strip_none(data)
     tmp = path.with_suffix(".tmp")
     tmp.write_bytes(tomli_w.dumps(data).encode())
     os.replace(tmp, path)
+
+
+def save_config(config: AppConfig, path: Path) -> None:
+    import dataclasses
+
+    data = dataclasses.asdict(config)
+    strip_none(data)
+    atomic_toml_write(data, path)

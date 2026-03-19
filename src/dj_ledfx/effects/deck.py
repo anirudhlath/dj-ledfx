@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -22,6 +24,16 @@ class EffectDeck:
 
     def swap_effect(self, new_effect: Effect) -> None:
         self._effect = new_effect
+
+    def apply_update(self, effect_name: str | None, params: dict[str, Any]) -> None:
+        """Swap effect or update params. Shared by REST and WS handlers."""
+        from dj_ledfx.effects.registry import create_effect
+
+        if effect_name and effect_name != self.effect_name:
+            new_effect = create_effect(effect_name, **params)
+            self.swap_effect(new_effect)
+        elif params:
+            self._effect.set_params(**params)
 
     def render(
         self,

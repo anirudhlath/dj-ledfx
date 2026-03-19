@@ -28,38 +28,37 @@ from dj_ledfx.config import (
 router = APIRouter()
 
 
+def _merge_section(cls: type, existing: object, updates: dict[str, Any]) -> object:
+    """Merge partial updates into a dataclass instance."""
+    merged = {**dataclasses.asdict(existing), **updates}  # type: ignore[arg-type]
+    return cls(**merged)
+
+
 def _merge_config(existing: AppConfig, updates: dict[str, Any]) -> AppConfig:
     """Recursively merge partial updates into config, reconstructing dataclasses."""
     kwargs: dict[str, Any] = {}
 
-    if "engine" in updates:
-        merged = {**dataclasses.asdict(existing.engine), **updates["engine"]}
-        kwargs["engine"] = EngineConfig(**merged)
-
-    if "effect" in updates:
-        merged = {**dataclasses.asdict(existing.effect), **updates["effect"]}
-        kwargs["effect"] = EffectConfig(**merged)
-
-    if "network" in updates:
-        merged = {**dataclasses.asdict(existing.network), **updates["network"]}
-        kwargs["network"] = NetworkConfig(**merged)
-
-    if "web" in updates:
-        merged = {**dataclasses.asdict(existing.web), **updates["web"]}
-        kwargs["web"] = WebConfig(**merged)
+    section_map = {
+        "engine": (EngineConfig, existing.engine),
+        "effect": (EffectConfig, existing.effect),
+        "network": (NetworkConfig, existing.network),
+        "web": (WebConfig, existing.web),
+    }
+    for key, (cls, current) in section_map.items():
+        if key in updates:
+            kwargs[key] = _merge_section(cls, current, updates[key])
 
     if "devices" in updates:
         dev_updates = updates["devices"]
+        dev_section_map = {
+            "openrgb": (OpenRGBConfig, existing.devices.openrgb),
+            "lifx": (LIFXConfig, existing.devices.lifx),
+            "govee": (GoveeConfig, existing.devices.govee),
+        }
         dev_kwargs: dict[str, Any] = {}
-        if "openrgb" in dev_updates:
-            merged = {**dataclasses.asdict(existing.devices.openrgb), **dev_updates["openrgb"]}
-            dev_kwargs["openrgb"] = OpenRGBConfig(**merged)
-        if "lifx" in dev_updates:
-            merged = {**dataclasses.asdict(existing.devices.lifx), **dev_updates["lifx"]}
-            dev_kwargs["lifx"] = LIFXConfig(**merged)
-        if "govee" in dev_updates:
-            merged = {**dataclasses.asdict(existing.devices.govee), **dev_updates["govee"]}
-            dev_kwargs["govee"] = GoveeConfig(**merged)
+        for key, (cls, current) in dev_section_map.items():
+            if key in dev_updates:
+                dev_kwargs[key] = _merge_section(cls, current, dev_updates[key])
 
         kwargs["devices"] = DevicesConfig(
             openrgb=dev_kwargs.get("openrgb", existing.devices.openrgb),

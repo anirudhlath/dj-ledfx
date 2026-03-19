@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import tomli_w
+from dj_ledfx.config import atomic_toml_write
 
 
 @dataclass(frozen=True)
@@ -44,9 +43,7 @@ class PresetStore:
                 "effect_class": preset.effect_class,
                 "params": preset.params,
             }
-        tmp = self._path.with_suffix(".tmp")
-        tmp.write_bytes(tomli_w.dumps(data).encode())
-        os.replace(tmp, self._path)
+        atomic_toml_write(data, self._path)
 
     def list(self) -> list[Preset]:
         return list(self._presets.values())

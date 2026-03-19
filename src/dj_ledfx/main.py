@@ -247,9 +247,10 @@ async def _run(args: argparse.Namespace) -> None:
 
     async def _status_loop() -> None:
         while not stop_event.is_set():
+            beat_state = clock.get_state()
             status = SystemStatus(
-                prodjlink_connected=clock.get_state().is_playing,
-                current_bpm=clock.get_state().bpm or None,
+                prodjlink_connected=beat_state.is_playing,
+                current_bpm=beat_state.bpm or None,
                 connected_devices=[d.adapter.device_info.name for d in device_manager.devices],
                 buffer_fill_level=engine.ring_buffer.fill_level,
                 avg_frame_render_time_ms=engine.avg_render_time_ms,

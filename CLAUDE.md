@@ -14,6 +14,8 @@ Beat-synced LED effect engine driven by Pro DJ Link network data with per-device
 ## Commands
 
 ```bash
+uv sync                          # Install dependencies
+uv sync --extra web              # Install with web UI extras
 uv run -m dj_ledfx              # Run the app
 uv run -m dj_ledfx --demo       # Run with simulated beats (no DJ hardware)
 uv run -m dj_ledfx --demo --web # Run with web UI (requires: uv sync --extra web)
@@ -35,7 +37,11 @@ src/dj_ledfx/ layout:
 - `beat/` — BeatClock phase interpolation + BeatSimulator for demo mode
 - `effects/` — Effect ABC + 60fps render engine writing future frames to ring buffer
 - `scheduling/` — LookaheadScheduler: per-device send loops with FrameSlot depth-1 slots, FPS cap, RTT measurement
+- `metrics.py` — Contextmanager-based timing metrics for performance measurement
 - `devices/` — DeviceAdapter ABC + OpenRGB adapter (asyncio.to_thread wrapped) + device-type heuristics
+- `devices/backend.py` — DeviceBackend ABC for protocol-level adapters
+- `devices/govee/` — Govee WiFi LED protocol (UDP segment control, SKU registry, transport)
+- `devices/lifx/` — LIFX LAN protocol (bulb/strip/tile discovery, packet encoding, transport)
 - `latency/` — ProbeStrategy protocol + StaticLatency/EMA/WindowedMean strategies
 - `config.py` — Nested dataclass config (EngineConfig, EffectConfig, NetworkConfig, WebConfig, DevicesConfig) with load/save via tomllib/tomli_w
 - `effects/params.py` — EffectParam descriptor for runtime introspection
@@ -48,6 +54,9 @@ src/dj_ledfx/ layout:
 - `web/state.py` — Shared app state dataclass passed via FastAPI app.state
 - `web/router_scene.py` — Scene REST endpoints (placement CRUD, mapping config, auto-creates SceneModel)
 - `spatial/mapping.py` — mapping_from_config() shared factory for LinearMapping/RadialMapping
+- `spatial/compositor.py` — Spatial compositor for multi-device LED frame distribution
+- `spatial/geometry.py` — 3D geometry utilities for spatial calculations
+- `spatial/scene.py` — SceneModel: device placements, spatial configuration
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
 - `events.py` — Typed callback event bus (sync, non-blocking callbacks only)
 - `status.py` — SystemStatus health tracking
