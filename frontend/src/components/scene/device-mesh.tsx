@@ -4,7 +4,6 @@ import { type ThreeEvent } from "@react-three/fiber"
 import type { GeometryInfo, FrameData } from "@/lib/types"
 
 interface DeviceMeshProps {
-  deviceId: string
   position: [number, number, number]
   geometry: GeometryInfo
   ledCount: number
@@ -32,21 +31,37 @@ const SPHERE_RADIUS = 0.08
 const SELECTED_EMISSIVE = new THREE.Color(0.2, 0.2, 0.5)
 const DEFAULT_EMISSIVE = new THREE.Color(0, 0, 0)
 
-function PointDevice({ rgb, selected }: { rgb?: Uint8Array; selected?: boolean }) {
-  const color = useMemo(() => rgbAt(rgb, 0), [rgb])
-  const hasData = rgb && rgb.length >= 3
+function LedSphere({
+  position,
+  rgb,
+  index,
+  radius,
+  segments,
+  selected,
+}: {
+  position: [number, number, number]
+  rgb?: Uint8Array
+  index: number
+  radius: number
+  segments: number
+  selected?: boolean
+}) {
+  const color = rgbAt(rgb, index)
+  const hasData = rgb && index * 3 + 2 < rgb.length
   const emissive = selected ? SELECTED_EMISSIVE : hasData ? DEFAULT_EMISSIVE : NO_DATA_EMISSIVE
   return (
-    <mesh>
-      <sphereGeometry args={[SPHERE_RADIUS * 3, 16, 16]} />
-      <meshStandardMaterial
-        color={color}
-        emissive={emissive}
-        roughness={0.4}
-      />
+    <mesh position={position}>
+      <sphereGeometry args={[radius, segments, segments]} />
+      <meshStandardMaterial color={color} emissive={emissive} roughness={0.4} />
     </mesh>
   )
 }
+
+function PointDevice({ rgb, selected }: { rgb?: Uint8Array; selected?: boolean }) {
+  return <LedSphere position={[0, 0, 0]} rgb={rgb} index={0} radius={SPHERE_RADIUS * 3} segments={16} selected={selected} />
+}
+
+const DEFAULT_DIRECTION: number[] = [1, 0, 0]
 
 function StripDevice({
   geometry,
@@ -59,7 +74,7 @@ function StripDevice({
   rgb?: Uint8Array
   selected?: boolean
 }) {
-  const direction = geometry.direction ?? [1, 0, 0]
+  const direction = geometry.direction ?? DEFAULT_DIRECTION
   const length = geometry.length ?? 1.0
   const dir = useMemo(() => new THREE.Vector3(...direction).normalize(), [direction])
 
@@ -74,19 +89,9 @@ function StripDevice({
 
   return (
     <group>
-      {positions.map((pos, i) => {
-        const color = rgbAt(rgb, i)
-        return (
-          <mesh key={i} position={pos}>
-            <sphereGeometry args={[SPHERE_RADIUS, 8, 8]} />
-            <meshStandardMaterial
-              color={color}
-              emissive={selected ? SELECTED_EMISSIVE : DEFAULT_EMISSIVE}
-              roughness={0.4}
-            />
-          </mesh>
-        )
-      })}
+      {positions.map((pos, i) => (
+        <LedSphere key={i} position={pos} rgb={rgb} index={i} radius={SPHERE_RADIUS} segments={8} selected={selected} />
+      ))}
     </group>
   )
 }
@@ -129,25 +134,15 @@ function MatrixDevice({
 
   return (
     <group>
-      {positions.map((pos, i) => {
-        const color = rgbAt(rgb, i)
-        return (
-          <mesh key={i} position={pos}>
-            <sphereGeometry args={[SPHERE_RADIUS * 0.8, 6, 6]} />
-            <meshStandardMaterial
-              color={color}
-              emissive={selected ? SELECTED_EMISSIVE : DEFAULT_EMISSIVE}
-              roughness={0.4}
-            />
-          </mesh>
-        )
-      })}
+      {positions.map((pos, i) => (
+        <LedSphere key={i} position={pos} rgb={rgb} index={i} radius={SPHERE_RADIUS * 0.8} segments={6} selected={selected} />
+      ))}
     </group>
   )
 }
 
 const DeviceMesh = forwardRef<THREE.Group, DeviceMeshProps>(function DeviceMesh(
-  { deviceId: _deviceId, position, geometry, ledCount, frameData, selected, onClick, onPointerOver, onPointerOut },
+  { position, geometry, ledCount, frameData, selected, onClick, onPointerOver, onPointerOut },
   ref
 ) {
   const rgb = frameData?.rgb

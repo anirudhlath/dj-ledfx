@@ -3,13 +3,16 @@ import { OrbitControls, Grid, GizmoHelper, GizmoViewport, TransformControls } fr
 import { type ReactNode, Suspense, useEffect } from "react"
 import * as THREE from "three"
 
+type CameraPreset = "Perspective" | "Top" | "Front" | "Side"
+
 interface SceneViewportProps {
   children?: ReactNode
   onPointerMissed?: () => void
   transformTarget?: THREE.Object3D | null
   transformMode?: "translate" | "rotate"
   onTransformEnd?: (position: [number, number, number]) => void
-  cameraPreset?: string | null
+  onTransformChange?: (target: THREE.Object3D) => void
+  cameraPreset?: { name: CameraPreset; key: number } | null
   snapEnabled?: boolean
   snapIncrement?: number
 }
@@ -19,6 +22,7 @@ function SceneContent({
   transformTarget,
   transformMode,
   onTransformEnd,
+  onTransformChange,
   cameraPreset,
   snapEnabled,
   snapIncrement,
@@ -28,7 +32,7 @@ function SceneContent({
   useEffect(() => {
     if (!cameraPreset) return
     const dist = 8
-    switch (cameraPreset) {
+    switch (cameraPreset.name) {
       case "Top":
         camera.position.set(0, dist, 0)
         break
@@ -70,10 +74,19 @@ function SceneContent({
           object={transformTarget}
           mode={transformMode ?? "translate"}
           translationSnap={snapEnabled && snapIncrement ? snapIncrement : null}
+          onChange={() => {
+            if (transformTarget && onTransformChange) {
+              onTransformChange(transformTarget)
+            }
+          }}
           onMouseUp={() => {
-            if (transformTarget && onTransformEnd) {
-              const pos = transformTarget.position
-              onTransformEnd([pos.x, pos.y, pos.z])
+            if (transformTarget) {
+              // Clamp one final time before reading position
+              if (onTransformChange) onTransformChange(transformTarget)
+              if (onTransformEnd) {
+                const pos = transformTarget.position
+                onTransformEnd([pos.x, pos.y, pos.z])
+              }
             }
           }}
         />
@@ -89,6 +102,7 @@ export default function SceneViewport({
   transformTarget,
   transformMode,
   onTransformEnd,
+  onTransformChange,
   cameraPreset,
   snapEnabled,
   snapIncrement,
@@ -105,6 +119,7 @@ export default function SceneViewport({
           transformTarget={transformTarget}
           transformMode={transformMode}
           onTransformEnd={onTransformEnd}
+          onTransformChange={onTransformChange}
           cameraPreset={cameraPreset}
           snapEnabled={snapEnabled}
           snapIncrement={snapIncrement}

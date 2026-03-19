@@ -14,7 +14,7 @@ from dj_ledfx.spatial.geometry import (
     PointGeometry,
     StripGeometry,
 )
-from dj_ledfx.spatial.mapping import LinearMapping, RadialMapping
+from dj_ledfx.spatial.mapping import LinearMapping, mapping_from_config
 from dj_ledfx.web.schemas import (
     GeometrySchema,
     MappingResponse,
@@ -25,7 +25,7 @@ from dj_ledfx.web.schemas import (
 )
 
 if TYPE_CHECKING:
-    from dj_ledfx.spatial.scene import SceneModel
+    from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
 
 router = APIRouter(prefix="/scene", tags=["scene"])
 
@@ -78,7 +78,10 @@ def _ensure_scene(request: Request) -> SceneModel:
     return scene
 
 
-def _placement_to_response(p) -> PlacementResponse:
+def _placement_to_response(
+    p: DevicePlacement,
+    strip_index: float | None = None,
+) -> PlacementResponse:
     geo = p.geometry
     if isinstance(geo, PointGeometry):
         geo_schema = GeometrySchema(type="point")
@@ -110,6 +113,7 @@ def _placement_to_response(p) -> PlacementResponse:
         position=list(p.position),
         geometry=geo_schema,
         led_count=p.led_count,
+        strip_index=strip_index,
     )
 
 
@@ -121,28 +125,9 @@ def _rebuild_compositor(request: Request, scene: SceneModel) -> None:
         request.app.state.compositor = None
         return
 
-    mapping = LinearMapping()
     config = request.app.state.config
-    if config.scene_config is not None:
-        mapping_name = config.scene_config.get("mapping", "linear")
-        mapping_params = config.scene_config.get("mapping_params", {})
-        if mapping_name == "radial":
-            center = mapping_params.get("center", [0.0, 0.0, 0.0])
-            max_radius = mapping_params.get("max_radius")
-            mapping = RadialMapping(
-                center=(float(center[0]), float(center[1]), float(center[2])),
-                max_radius=float(max_radius) if max_radius is not None else None,
-            )
-        else:
-            direction = mapping_params.get("direction", [1.0, 0.0, 0.0])
-            origin = mapping_params.get("origin")
-            origin_tuple = (
-                (float(origin[0]), float(origin[1]), float(origin[2])) if origin else None
-            )
-            mapping = LinearMapping(
-                direction=(float(direction[0]), float(direction[1]), float(direction[2])),
-                origin=origin_tuple,
-            )
+    scene_cfg = config.scene_config or {}
+    mapping = mapping_from_config(scene_cfg)
 
     new_compositor = SpatialCompositor(scene, mapping)
     scheduler.compositor = new_compositor
@@ -155,7 +140,16 @@ async def get_scene(request: Request) -> SceneResponse:
     if scene is None or not scene.placements:
         return SceneResponse(placements=[], mapping=None, bounds=None)
 
-    placements = [_placement_to_response(p) for p in scene.placements.values()]
+    compositor: SpatialCompositor | None = request.app.state.compositor
+    strip_indices: dict[str, float] = {}
+    if compositor is not None:
+        for device_id, indices in compositor._strip_indices.items():
+            strip_indices[device_id] = float(indices.mean())
+
+    placements = [
+        _placement_to_response(p, strip_index=strip_indices.get(p.device_id))
+        for p in scene.placements.values()
+    ]
     bounds_min, bounds_max = scene.get_bounds()
 
     mapping_resp = None

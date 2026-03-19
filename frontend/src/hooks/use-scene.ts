@@ -53,15 +53,19 @@ export function useScene() {
   )
 
   const changeMapping = useCallback(
-    async (type: string, params: Record<string, unknown>) => {
+    async (type: "linear" | "radial", params: Record<string, unknown>) => {
       try {
+        // Optimistically update mapping so handle positions don't jump
+        setScene((prev) =>
+          prev ? { ...prev, mapping: { type, params } } : prev
+        )
         await updateSceneMapping(type, params)
         await refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to update mapping")
       }
     },
-    [refresh]
+    [refresh],
   )
 
   const addPlacement = useCallback(

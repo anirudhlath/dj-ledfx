@@ -188,7 +188,7 @@ def load_config(path: Path) -> AppConfig:
         govee=GoveeConfig(**_filter_fields(GoveeConfig, devices_data.get("govee", {}))),
     )
 
-    scene_config = data.get("scene")
+    scene_config = data.get("scene_config") or data.get("scene")
 
     return AppConfig(
         engine=engine,

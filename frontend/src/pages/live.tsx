@@ -29,7 +29,6 @@ export default function LivePage() {
             {placements.map((p) => (
               <DeviceMesh
                 key={p.device_id}
-                deviceId={p.device_id}
                 position={p.position}
                 geometry={p.geometry}
                 ledCount={p.led_count}

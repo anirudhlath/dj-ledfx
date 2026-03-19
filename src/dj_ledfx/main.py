@@ -23,7 +23,7 @@ from dj_ledfx.events import EventBus
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.spatial.compositor import SpatialCompositor
-from dj_ledfx.spatial.mapping import LinearMapping, RadialMapping
+from dj_ledfx.spatial.mapping import mapping_from_config
 from dj_ledfx.spatial.scene import SceneModel
 from dj_ledfx.status import SystemStatus
 
@@ -116,30 +116,11 @@ async def _run(args: argparse.Namespace) -> None:
         adapters = [d.adapter for d in device_manager.devices]
         scene = SceneModel.from_config(config.scene_config, adapters)
         if scene.placements:
-            mapping_name = config.scene_config.get("mapping", "linear")
-            mapping_params = config.scene_config.get("mapping_params", {})
-            mapping: LinearMapping | RadialMapping
-            if mapping_name == "radial":
-                center = mapping_params.get("center", [0.0, 0.0, 0.0])
-                max_radius = mapping_params.get("max_radius")
-                mapping = RadialMapping(
-                    center=(float(center[0]), float(center[1]), float(center[2])),
-                    max_radius=float(max_radius) if max_radius is not None else None,
-                )
-            else:
-                direction = mapping_params.get("direction", [1.0, 0.0, 0.0])
-                origin = mapping_params.get("origin")
-                origin_tuple = (
-                    (float(origin[0]), float(origin[1]), float(origin[2])) if origin else None
-                )
-                mapping = LinearMapping(
-                    direction=(float(direction[0]), float(direction[1]), float(direction[2])),
-                    origin=origin_tuple,
-                )
+            mapping = mapping_from_config(config.scene_config)
             compositor = SpatialCompositor(scene, mapping)
             logger.info(
                 "Spatial compositor active: {} mapping, {} devices",
-                mapping_name,
+                config.scene_config.get("mapping", "linear"),
                 len(scene.placements),
             )
 

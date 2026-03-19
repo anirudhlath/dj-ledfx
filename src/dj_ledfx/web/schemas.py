@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -60,7 +60,7 @@ class ErrorResponse(BaseModel):
 
 
 class GeometrySchema(BaseModel):
-    type: str
+    type: Literal["point", "strip", "matrix", "unknown"]
     direction: list[float] | None = None
     length: float | None = None
     pixel_pitch: float | None = None
@@ -72,10 +72,11 @@ class PlacementResponse(BaseModel):
     position: list[float]
     geometry: GeometrySchema
     led_count: int
+    strip_index: float | None = None
 
 
 class MappingResponse(BaseModel):
-    type: str
+    type: Literal["linear", "radial"]
     params: dict[str, Any]
 
 
@@ -87,12 +88,12 @@ class SceneResponse(BaseModel):
 
 class UpdatePlacementRequest(BaseModel):
     position: list[float] | None = None
-    geometry: str | None = None
+    geometry: Literal["point", "strip", "matrix"] | None = None
     direction: list[float] | None = None
     length: float | None = None
     led_count: int | None = None
 
 
 class UpdateMappingRequest(BaseModel):
-    type: str
+    type: Literal["linear", "radial"]
     params: dict[str, Any] = {}

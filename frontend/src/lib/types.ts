@@ -88,6 +88,7 @@ export interface Placement {
   position: [number, number, number]
   geometry: GeometryInfo
   led_count: number
+  strip_index: number | null
 }
 
 export interface MappingInfo {

@@ -12,13 +12,15 @@ import { Input } from "@/components/ui/input"
 interface SceneToolbarProps {
   transformMode: "translate" | "rotate"
   onTransformModeChange: (mode: "translate" | "rotate") => void
-  mappingType: string
-  onMappingTypeChange: (type: string) => void
-  onCameraPreset: (preset: string) => void
+  mappingType: "linear" | "radial"
+  onMappingTypeChange: (type: "linear" | "radial") => void
+  onCameraPreset: (preset: "Perspective" | "Top" | "Front" | "Side") => void
   snapEnabled: boolean
   onSnapToggle: (enabled: boolean) => void
   snapIncrement: number
   onSnapIncrementChange: (value: number) => void
+  showBounds: boolean
+  onToggleBounds: () => void
 }
 
 export default function SceneToolbar({
@@ -31,6 +33,8 @@ export default function SceneToolbar({
   onSnapToggle,
   snapIncrement,
   onSnapIncrementChange,
+  showBounds,
+  onToggleBounds,
 }: SceneToolbarProps) {
   return (
     <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border">
@@ -59,7 +63,7 @@ export default function SceneToolbar({
         <Select
           value={mappingType}
           onValueChange={(v) => {
-            if (v !== null) onMappingTypeChange(v)
+            if (v === "linear" || v === "radial") onMappingTypeChange(v)
           }}
         >
           <SelectTrigger className="h-7 w-24 text-xs">
@@ -112,6 +116,18 @@ export default function SceneToolbar({
           />
         )}
       </div>
+
+      <div className="w-px h-5 bg-border" />
+
+      <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+        <input
+          type="checkbox"
+          checked={showBounds}
+          onChange={onToggleBounds}
+          className="size-3"
+        />
+        Bounds
+      </label>
     </div>
   )
 }

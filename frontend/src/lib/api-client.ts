@@ -204,11 +204,12 @@ export async function deleteSceneDevice(deviceId: string): Promise<void> {
 }
 
 export async function updateSceneMapping(
-  type: string,
-  params: Record<string, unknown>
+  type: "linear" | "radial",
+  params: Record<string, unknown>,
 ): Promise<void> {
   await fetchJson("/scene/mapping", {
     method: "PUT",
     body: JSON.stringify({ type, params }),
   })
 }
+
