@@ -26,7 +26,7 @@ def _resolve_static_dir(explicit: str | None, config_dir: str | None) -> Path | 
     for candidate in [
         Path(explicit) if explicit else None,
         Path(config_dir) if config_dir else None,
-        Path(__file__).parent.parent.parent.parent / "frontend" / "build",
+        Path(__file__).parent.parent.parent.parent / "frontend" / "dist",
     ]:
         if candidate and candidate.is_dir():
             return candidate
