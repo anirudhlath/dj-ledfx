@@ -2,31 +2,213 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rebuild the dj-ledfx web UI frontend using shadcn-svelte's default dark theme with cyan primary, replacing all custom-styled components while keeping the working data layer (stores, WS client, API client) untouched.
+**Goal:** Build the dj-ledfx web UI frontend from scratch using SvelteKit 2 + shadcn-svelte dark theme with cyan primary. The old frontend has been deleted. Data layer files (stores, WS client, API client) are preserved at `/tmp/dj-ledfx-data-layer/` and will be restored.
 
-**Architecture:** Delete all custom UI components and CSS theme. Initialize shadcn-svelte with Tailwind v4, install needed components (Button, Card, Input, Label, Slider, Switch, Table, Badge, Separator, Select), then rebuild each view using shadcn components. Domain-specific components (BpmDisplay, BeatGrid, PhaseMeter, PlayState, DeviceMonitor, LedIndicator, PaletteEditor) are rebuilt to match shadcn's visual conventions using its CSS variables.
+**Architecture:** Scaffold a fresh SvelteKit project, initialize shadcn-svelte with Tailwind v4, install UI components, restore the data layer, then create all views and domain-specific components from scratch. Domain-specific components (BpmDisplay, BeatGrid, PhaseMeter, PlayState, DeviceMonitor, LedIndicator, PaletteEditor) are styled to match shadcn's visual conventions using its CSS variables.
 
 **Tech Stack:** SvelteKit 2, Svelte 5 (runes), shadcn-svelte, bits-ui, Tailwind CSS v4, TypeScript
 
 **Spec:** `docs/superpowers/specs/2026-03-13-web-ui-design.md`
 
+**Learnings from first attempt:**
+- shadcn-svelte v1.1.1 requires `baseColor` in `components.json` — use `"zinc"`
+- Generated components import `WithElementRef`, `WithoutChild`, `WithoutChildrenOrChild` from `$lib/utils.ts` — must re-export from `bits-ui` and `svelte-toolbelt`
+- `tailwind-variants` IS used by shadcn badge/button — do not remove
+- shadcn-svelte Slider `type="single"` uses plain `number` value (not array)
+- ParamSlider: no local state needed — pass `value` prop directly, use `onValueChange`/`onCheckedChange` callbacks
+- Config page Import TOML: use programmatic `fileInput.click()`, not `<label>` wrapper (fragile with component libraries)
+- Primary color HSL: `186 100% 50%` (not 187) to match `#00e5ff` exactly
+- Svelte 5 `bind:this` variables need `$state` declaration
+
 ---
 
-## Chunk 1: shadcn-svelte Foundation
+## Chunk 1: Project Scaffold
 
-Set up the shadcn-svelte tooling and theme. After this chunk, the app will have a broken UI (old components deleted, new ones not yet written) but the foundation is in place.
+Create a fresh SvelteKit project from scratch with all tooling.
 
-### Task 1: Install shadcn-svelte dependencies and initialize
+### Task 1: Create SvelteKit project structure
+
+**Files:**
+- Create: `frontend/package.json`
+- Create: `frontend/.npmrc`
+- Create: `frontend/.gitignore`
+- Create: `frontend/svelte.config.js`
+- Create: `frontend/vite.config.ts`
+- Create: `frontend/tsconfig.json`
+- Create: `frontend/src/app.d.ts`
+- Create: `frontend/src/routes/+layout.ts`
+
+- [ ] **Step 1: Create frontend directory**
+
+```bash
+mkdir -p frontend/src/routes frontend/src/lib frontend/static
+```
+
+- [ ] **Step 2: Create package.json**
+
+Create `frontend/package.json`:
+
+```json
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "prepare": "svelte-kit sync || echo ''",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-auto": "^7.0.0",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.50.2",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/three": "^0.183.1",
+    "bits-ui": "^2.16.3",
+    "clsx": "^2.1.1",
+    "svelte": "^5.51.0",
+    "svelte-check": "^4.4.2",
+    "tailwind-merge": "^3.5.0",
+    "tailwind-variants": "^3.2.2",
+    "tailwindcss": "^4.2.1",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "@threlte/core": "^8.5.0",
+    "@threlte/extras": "^9.9.0",
+    "three": "^0.183.2"
+  }
+}
+```
+
+- [ ] **Step 3: Create config files**
+
+Create `frontend/.npmrc`:
+```
+engine-strict=true
+```
+
+Create `frontend/.gitignore`:
+```
+node_modules
+.svelte-kit
+build
+.vite
+```
+
+Create `frontend/svelte.config.js`:
+```javascript
+import adapter from '@sveltejs/adapter-static';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+
+export default {
+	preprocess: vitePreprocess(),
+	kit: { adapter: adapter({ fallback: 'index.html' }) }
+};
+```
+
+Create `frontend/vite.config.ts`:
+```typescript
+import { sveltekit } from '@sveltejs/kit/vite';
+import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+	plugins: [tailwindcss(), sveltekit()],
+	server: {
+		proxy: {
+			'/api': 'http://localhost:8080',
+			'/ws': { target: 'ws://localhost:8080', ws: true }
+		}
+	}
+});
+```
+
+Create `frontend/tsconfig.json`:
+```json
+{
+  "extends": "./.svelte-kit/tsconfig.json",
+  "compilerOptions": {
+    "rewriteRelativeImportExtensions": true,
+    "allowJs": true,
+    "checkJs": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "strict": true,
+    "moduleResolution": "bundler"
+  }
+}
+```
+
+Create `frontend/src/app.d.ts`:
+```typescript
+declare global {
+	namespace App {}
+}
+
+export {};
+```
+
+Create `frontend/src/routes/+layout.ts`:
+```typescript
+export const ssr = false;
+export const prerender = false;
+```
+
+- [ ] **Step 4: Install dependencies**
+
+```bash
+cd frontend && npm install
+```
+
+- [ ] **Step 5: Run svelte-kit sync**
+
+```bash
+cd frontend && npx svelte-kit sync
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd frontend && git add -A && git commit -m "build: scaffold fresh SvelteKit project"
+```
+
+### Task 2: Initialize shadcn-svelte and create theme
 
 **Files:**
 - Create: `frontend/components.json`
-- Modify: `frontend/package.json`
+- Create: `frontend/src/app.css`
+- Create: `frontend/src/app.html`
+- Create: `frontend/src/lib/utils.ts`
+- Create: `frontend/src/lib/components/ui/` (generated)
 
-- [ ] **Step 1: Install tw-animate-css**
+- [ ] **Step 1: Create utils.ts**
 
-```bash
-cd frontend && npm install tw-animate-css
+Create `frontend/src/lib/utils.ts`:
+
+```typescript
+import { type ClassValue, clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+	return twMerge(clsx(inputs));
+}
+
+export type { WithElementRef } from 'bits-ui';
+export type { WithoutChild, WithoutChildrenOrChild } from 'svelte-toolbelt';
 ```
+
+Note: The type re-exports are required by shadcn-svelte generated components.
 
 - [ ] **Step 2: Create components.json**
 
@@ -37,7 +219,8 @@ Create `frontend/components.json`:
   "$schema": "https://shadcn-svelte.com/schema.json",
   "style": "default",
   "tailwind": {
-    "css": "src/app.css"
+    "css": "src/app.css",
+    "baseColor": "zinc"
   },
   "typescript": true,
   "aliases": {
@@ -50,37 +233,9 @@ Create `frontend/components.json`:
 }
 ```
 
-- [ ] **Step 3: Install all needed shadcn-svelte components**
+- [ ] **Step 3: Create app.css with shadcn dark theme**
 
-```bash
-cd frontend && npx shadcn-svelte@latest add button card input label slider switch table badge separator select scroll-area
-```
-
-This generates files into `src/lib/components/ui/`. Accept all prompts.
-
-- [ ] **Step 4: Verify components installed**
-
-```bash
-ls frontend/src/lib/components/ui/
-```
-
-Expected: directories for each component (button, card, input, label, slider, switch, table, badge, separator, select, scroll-area).
-
-- [ ] **Step 5: Commit**
-
-```bash
-cd frontend && git add -A && git commit -m "build: initialize shadcn-svelte and install UI components"
-```
-
-### Task 2: Replace app.css with shadcn dark theme
-
-**Files:**
-- Rewrite: `frontend/src/app.css`
-- Modify: `frontend/src/app.html`
-
-- [ ] **Step 1: Replace app.css**
-
-Replace the entire contents of `frontend/src/app.css` with the shadcn-svelte Tailwind v4 theme. The only customization is `--primary` set to cyan (`187 100% 50%`) in the `.dark` block, and the `beat-hit` keyframe animation retained for functional beat indication:
+Create `frontend/src/app.css`:
 
 ```css
 @import "tailwindcss";
@@ -122,7 +277,7 @@ Replace the entire contents of `frontend/src/app.css` with the shadcn-svelte Tai
   --card-foreground: 0 0% 98%;
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
-  --primary: 187 100% 50%;
+  --primary: 186 100% 50%;
   --primary-foreground: 240 10% 3.9%;
   --secondary: 240 3.7% 15.9%;
   --secondary-foreground: 0 0% 98%;
@@ -130,7 +285,7 @@ Replace the entire contents of `frontend/src/app.css` with the shadcn-svelte Tai
   --accent-foreground: 0 0% 98%;
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 0 0% 98%;
-  --ring: 187 100% 50%;
+  --ring: 186 100% 50%;
 }
 
 @theme inline {
@@ -182,16 +337,15 @@ Replace the entire contents of `frontend/src/app.css` with the shadcn-svelte Tai
 }
 ```
 
-- [ ] **Step 2: Update app.html fonts**
+- [ ] **Step 4: Create app.html**
 
-In `frontend/src/app.html`, remove the Google Fonts `<link>` tags for Exo 2 and JetBrains Mono. Keep only Orbitron. The shadcn-svelte components use the system font stack by default. Update to:
+Create `frontend/src/app.html`:
 
 ```html
 <!doctype html>
 <html lang="en" class="dark">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%sveltekit.assets%/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -204,76 +358,97 @@ In `frontend/src/app.html`, remove the Google Fonts `<link>` tags for Exo 2 and 
 </html>
 ```
 
-Note: `class="dark"` on `<html>` forces dark mode since this is a dark-only app.
+Note: `class="dark"` on `<html>` forces dark mode — this is a dark-only app.
 
-- [ ] **Step 3: Verify the dev server starts**
-
-```bash
-cd frontend && npm run dev
-```
-
-Expected: Vite starts without CSS errors. The app will look broken (old components reference deleted CSS variables) — that's expected at this stage.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Install shadcn-svelte components**
 
 ```bash
-cd frontend && git add -A && git commit -m "feat: replace custom theme with shadcn-svelte dark theme (cyan primary)"
+cd frontend && npx shadcn-svelte@latest add button card input label slider switch table badge separator select scroll-area
 ```
 
-### Task 3: Delete old custom components and theme tokens
+Accept all prompts. This generates files into `src/lib/components/ui/`.
+
+- [ ] **Step 6: Verify components installed**
+
+```bash
+ls frontend/src/lib/components/ui/
+```
+
+Expected: directories for button, card, input, label, slider, switch, table, badge, separator, select, scroll-area.
+
+- [ ] **Step 7: Verify dev server starts**
+
+```bash
+cd frontend && npm run dev -- --port 5173
+```
+
+Expected: Vite starts without CSS errors. The app will show a blank page (no routes yet).
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd frontend && git add -A && git commit -m "feat: initialize shadcn-svelte with dark theme and cyan primary"
+```
+
+### Task 3: Restore data layer files
 
 **Files:**
-- Delete: `frontend/src/lib/components/common/HwButton.svelte`
-- Delete: `frontend/src/lib/components/common/Fader.svelte`
-- Delete: `frontend/src/lib/components/common/Field.svelte`
-- Delete: `frontend/src/lib/components/deck/LedPreview.svelte`
-- Delete: `frontend/src/lib/theme/tokens.ts`
+- Create: `frontend/src/lib/stores/beat.svelte.ts` (from backup)
+- Create: `frontend/src/lib/stores/effects.svelte.ts` (from backup)
+- Create: `frontend/src/lib/stores/devices.svelte.ts` (from backup)
+- Create: `frontend/src/lib/ws/client.ts` (from backup)
+- Create: `frontend/src/lib/api/client.ts` (from backup)
 
-- [ ] **Step 1: Delete files**
+- [ ] **Step 1: Copy data layer files from backup**
 
 ```bash
 cd frontend
-rm src/lib/components/common/HwButton.svelte
-rm src/lib/components/common/Fader.svelte
-rm src/lib/components/common/Field.svelte
-rm src/lib/components/deck/LedPreview.svelte
-rm -rf src/lib/theme/
+mkdir -p src/lib/stores src/lib/ws src/lib/api
+cp /tmp/dj-ledfx-data-layer/stores/*.ts src/lib/stores/
+cp /tmp/dj-ledfx-data-layer/ws/client.ts src/lib/ws/
+cp /tmp/dj-ledfx-data-layer/api/client.ts src/lib/api/
 ```
 
-Files kept (will be rebuilt in-place):
-- `src/lib/components/common/LedIndicator.svelte`
-- All transport components (`BpmDisplay`, `BeatGrid`, `PhaseMeter`, `PlayState`)
-- All deck components (`EffectDeckPanel`, `ParamSlider`, `PaletteEditor`, `DeviceMonitor`)
-- All route files
-
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Verify files restored**
 
 ```bash
-cd frontend && git add -A && git commit -m "chore: delete custom components replaced by shadcn-svelte"
+ls frontend/src/lib/stores/ frontend/src/lib/ws/ frontend/src/lib/api/
+```
+
+Expected: `beat.svelte.ts`, `effects.svelte.ts`, `devices.svelte.ts` in stores; `client.ts` in ws and api.
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd frontend && git add -A && git commit -m "feat: restore data layer (stores, WS client, API client)"
 ```
 
 ---
 
-## Chunk 2: Rebuild Custom Components
+## Chunk 2: Create Custom Components
 
-Rebuild the domain-specific components that have no shadcn equivalent. Each uses shadcn CSS variables and matches shadcn's visual conventions (no glow, no custom shadows, clean minimal styling).
+Domain-specific components that have no shadcn equivalent. Each uses shadcn CSS variables and matches shadcn's visual conventions.
 
-### Task 4: Rebuild LedIndicator
+### Task 4: Create LedIndicator
 
 **Files:**
-- Rewrite: `frontend/src/lib/components/common/LedIndicator.svelte`
+- Create: `frontend/src/lib/components/common/LedIndicator.svelte`
 
-- [ ] **Step 1: Rewrite LedIndicator**
+- [ ] **Step 1: Create LedIndicator**
 
-A small colored dot for device status. Uses standard CSS colors, no glow/pulse effects:
+```bash
+mkdir -p frontend/src/lib/components/common
+```
+
+A small colored dot for device status. No glow/pulse effects:
 
 ```svelte
 <script lang="ts">
   interface Props {
-    color: 'green' | 'red' | 'amber' | 'cyan' | 'off';
+    color?: 'green' | 'red' | 'amber' | 'cyan' | 'off';
     size?: 'sm' | 'md';
   }
-  let { color, size = 'md' }: Props = $props();
+  let { color = 'off', size = 'md' }: Props = $props();
 
   const colorMap: Record<string, string> = {
     green: 'bg-green-500',
@@ -291,31 +466,29 @@ A small colored dot for device status. Uses standard CSS colors, no glow/pulse e
 ></span>
 ```
 
-- [ ] **Step 2: Verify no type errors**
+- [ ] **Step 2: Commit**
 
 ```bash
-cd frontend && npx svelte-check --tsconfig ./tsconfig.json 2>&1 | head -30
+cd frontend && git add src/lib/components/common/ && git commit -m "feat: create LedIndicator component"
 ```
 
-Look for errors in LedIndicator.svelte specifically. Other files will have errors (expected — they reference deleted components).
-
-- [ ] **Step 3: Commit**
-
-```bash
-cd frontend && git add src/lib/components/common/LedIndicator.svelte && git commit -m "feat: rebuild LedIndicator with shadcn styling"
-```
-
-### Task 5: Rebuild transport components (BpmDisplay, BeatGrid, PhaseMeter, PlayState)
+### Task 5: Create transport components (BpmDisplay, BeatGrid, PhaseMeter, PlayState)
 
 **Files:**
-- Rewrite: `frontend/src/lib/components/transport/BpmDisplay.svelte`
-- Rewrite: `frontend/src/lib/components/transport/BeatGrid.svelte`
-- Rewrite: `frontend/src/lib/components/transport/PhaseMeter.svelte`
-- Rewrite: `frontend/src/lib/components/transport/PlayState.svelte`
+- Create: `frontend/src/lib/components/transport/BpmDisplay.svelte`
+- Create: `frontend/src/lib/components/transport/BeatGrid.svelte`
+- Create: `frontend/src/lib/components/transport/PhaseMeter.svelte`
+- Create: `frontend/src/lib/components/transport/PlayState.svelte`
 
-- [ ] **Step 1: Rewrite BpmDisplay**
+- [ ] **Step 1: Create directory**
 
-Large Orbitron BPM number with muted metadata. No glow, no ghost segments:
+```bash
+mkdir -p frontend/src/lib/components/transport
+```
+
+- [ ] **Step 2: Create BpmDisplay**
+
+Large Orbitron BPM number with muted metadata:
 
 ```svelte
 <script lang="ts">
@@ -332,9 +505,9 @@ Large Orbitron BPM number with muted metadata. No glow, no ghost segments:
 </div>
 ```
 
-- [ ] **Step 2: Rewrite BeatGrid**
+- [ ] **Step 3: Create BeatGrid**
 
-Four beat position boxes. Inactive: `bg-muted`. Active: `bg-primary text-primary-foreground` with `beat-hit` animation:
+Four beat position boxes with `beat-hit` animation on active beat:
 
 ```svelte
 <script lang="ts">
@@ -355,9 +528,9 @@ Four beat position boxes. Inactive: `bg-muted`. Active: `bg-primary text-primary
 </div>
 ```
 
-- [ ] **Step 3: Rewrite PhaseMeter**
+- [ ] **Step 4: Create PhaseMeter**
 
-Thin progress bar using shadcn colors:
+Thin progress bar:
 
 ```svelte
 <script lang="ts">
@@ -381,9 +554,9 @@ Thin progress bar using shadcn colors:
 </div>
 ```
 
-- [ ] **Step 4: Rewrite PlayState**
+- [ ] **Step 5: Create PlayState**
 
-Simple play/pause icon:
+Play/pause icon:
 
 ```svelte
 <script lang="ts">
@@ -403,21 +576,27 @@ Simple play/pause icon:
 </div>
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-cd frontend && git add src/lib/components/transport/ && git commit -m "feat: rebuild transport components with shadcn styling"
+cd frontend && git add src/lib/components/transport/ && git commit -m "feat: create transport components (BpmDisplay, BeatGrid, PhaseMeter, PlayState)"
 ```
 
-### Task 6: Rebuild deck helper components (PaletteEditor, ParamSlider)
+### Task 6: Create deck helpers (PaletteEditor, ParamSlider)
 
 **Files:**
-- Rewrite: `frontend/src/lib/components/deck/PaletteEditor.svelte`
-- Rewrite: `frontend/src/lib/components/deck/ParamSlider.svelte`
+- Create: `frontend/src/lib/components/deck/PaletteEditor.svelte`
+- Create: `frontend/src/lib/components/deck/ParamSlider.svelte`
 
-- [ ] **Step 1: Rewrite PaletteEditor**
+- [ ] **Step 1: Create directory**
 
-Row of color inputs with shadcn-consistent borders:
+```bash
+mkdir -p frontend/src/lib/components/deck
+```
+
+- [ ] **Step 2: Create PaletteEditor**
+
+Row of color inputs:
 
 ```svelte
 <script lang="ts">
@@ -451,9 +630,9 @@ Row of color inputs with shadcn-consistent borders:
 </div>
 ```
 
-- [ ] **Step 2: Rewrite ParamSlider**
+- [ ] **Step 3: Create ParamSlider**
 
-Dispatches to shadcn Slider (float/int) or Switch (bool):
+Dispatches to shadcn Slider (float/int) or Switch (bool). Uses callback pattern — no local state needed:
 
 ```svelte
 <script lang="ts">
@@ -469,24 +648,6 @@ Dispatches to shadcn Slider (float/int) or Switch (bool):
     onchange: (value: unknown) => void;
   }
   let { name, schema, value, onchange }: Props = $props();
-
-  // Local state for two-way binding with shadcn components
-  let sliderValue = $state(value as number);
-  let switchValue = $state(value as boolean);
-
-  // Sync prop -> local when parent changes
-  $effect(() => { sliderValue = value as number; });
-  $effect(() => { switchValue = value as boolean; });
-
-  function onSliderChange(v: number) {
-    sliderValue = v;
-    onchange(v);
-  }
-
-  function onSwitchChange(v: boolean) {
-    switchValue = v;
-    onchange(v);
-  }
 </script>
 
 {#if schema.type === 'float' || schema.type === 'int'}
@@ -494,46 +655,46 @@ Dispatches to shadcn Slider (float/int) or Switch (bool):
     <div class="flex items-baseline justify-between">
       <Label class="text-xs">{schema.label || name}</Label>
       <span class="text-xs text-primary tabular-nums font-mono">
-        {sliderValue.toFixed(schema.step && schema.step < 1 ? 1 : 0)}
+        {(value as number).toFixed(schema.step && schema.step < 1 ? 1 : 0)}
       </span>
     </div>
     <Slider
       type="single"
-      value={sliderValue}
+      value={value as number}
       min={schema.min ?? 0}
       max={schema.max ?? 100}
       step={schema.step ?? (schema.type === 'int' ? 1 : 0.1)}
-      onValueChange={onSliderChange}
+      onValueChange={(v) => onchange(v)}
     />
   </div>
 {:else if schema.type === 'bool'}
   <div class="flex items-center gap-3">
     <Switch
-      checked={switchValue}
-      onCheckedChange={onSwitchChange}
+      checked={value as boolean}
+      onCheckedChange={(v) => onchange(v)}
     />
     <Label class="text-xs">{schema.label || name}</Label>
   </div>
 {/if}
 ```
 
-Note: shadcn-svelte wraps bits-ui which supports both `bind:value` and callback props (`onValueChange`, `onCheckedChange`). The callback pattern is used here because ParamSlider dispatches changes to the effects store API.
+Note: shadcn-svelte Slider with `type="single"` accepts a plain `number` (not array). The `value` prop is reactive — no local state + $effect sync needed.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-cd frontend && git add src/lib/components/deck/PaletteEditor.svelte src/lib/components/deck/ParamSlider.svelte && git commit -m "feat: rebuild ParamSlider and PaletteEditor with shadcn components"
+cd frontend && git add src/lib/components/deck/PaletteEditor.svelte src/lib/components/deck/ParamSlider.svelte && git commit -m "feat: create ParamSlider and PaletteEditor"
 ```
 
-### Task 7: Rebuild EffectDeckPanel and DeviceMonitor
+### Task 7: Create EffectDeckPanel and DeviceMonitor
 
 **Files:**
-- Rewrite: `frontend/src/lib/components/deck/EffectDeckPanel.svelte`
-- Rewrite: `frontend/src/lib/components/deck/DeviceMonitor.svelte`
+- Create: `frontend/src/lib/components/deck/EffectDeckPanel.svelte`
+- Create: `frontend/src/lib/components/deck/DeviceMonitor.svelte`
 
-- [ ] **Step 1: Rewrite EffectDeckPanel**
+- [ ] **Step 1: Create EffectDeckPanel**
 
-Right sidebar using shadcn Card, Button, Separator, Input:
+Right sidebar — effect selector, parameters, presets:
 
 ```svelte
 <script lang="ts">
@@ -621,9 +782,9 @@ Right sidebar using shadcn Card, Button, Separator, Input:
 </div>
 ```
 
-- [ ] **Step 2: Rewrite DeviceMonitor**
+- [ ] **Step 2: Create DeviceMonitor**
 
-Compact device tile showing status, name, stats, and LED color data:
+Compact device tile with LED color visualization:
 
 ```svelte
 <script lang="ts">
@@ -701,23 +862,19 @@ Compact device tile showing status, name, stats, and LED color data:
 - [ ] **Step 3: Commit**
 
 ```bash
-cd frontend && git add src/lib/components/deck/ && git commit -m "feat: rebuild EffectDeckPanel and DeviceMonitor with shadcn components"
+cd frontend && git add src/lib/components/deck/ && git commit -m "feat: create EffectDeckPanel and DeviceMonitor"
 ```
 
 ---
 
-## Chunk 3: Rebuild Route Views
+## Chunk 3: Create Route Views
 
-Rebuild each page view using the new shadcn components and rebuilt custom components.
-
-### Task 8: Rebuild layout (navigation)
+### Task 8: Create layout (navigation)
 
 **Files:**
-- Rewrite: `frontend/src/routes/+layout.svelte`
+- Create: `frontend/src/routes/+layout.svelte`
 
-- [ ] **Step 1: Rewrite +layout.svelte**
-
-Navigation bar using shadcn conventions. No custom classes:
+- [ ] **Step 1: Create +layout.svelte**
 
 ```svelte
 <script lang="ts">
@@ -800,17 +957,15 @@ Navigation bar using shadcn conventions. No custom classes:
 - [ ] **Step 2: Commit**
 
 ```bash
-cd frontend && git add src/routes/+layout.svelte && git commit -m "feat: rebuild layout with shadcn navigation"
+cd frontend && git add src/routes/+layout.svelte && git commit -m "feat: create layout with shadcn navigation"
 ```
 
-### Task 9: Rebuild Live view (+page.svelte)
+### Task 9: Create Live view (+page.svelte)
 
 **Files:**
-- Rewrite: `frontend/src/routes/+page.svelte`
+- Create: `frontend/src/routes/+page.svelte`
 
-- [ ] **Step 1: Rewrite +page.svelte**
-
-Live performance view with transport Card, scene placeholder Card, effect deck sidebar, device monitor strip:
+- [ ] **Step 1: Create +page.svelte**
 
 ```svelte
 <script lang="ts">
@@ -870,17 +1025,19 @@ Live performance view with transport Card, scene placeholder Card, effect deck s
 - [ ] **Step 2: Commit**
 
 ```bash
-cd frontend && git add src/routes/+page.svelte && git commit -m "feat: rebuild Live view with shadcn Card layout"
+cd frontend && git add src/routes/+page.svelte && git commit -m "feat: create Live view with shadcn Card layout"
 ```
 
-### Task 10: Rebuild Devices view
+### Task 10: Create Devices view
 
 **Files:**
-- Rewrite: `frontend/src/routes/devices/+page.svelte`
+- Create: `frontend/src/routes/devices/+page.svelte`
 
-- [ ] **Step 1: Rewrite devices/+page.svelte**
+- [ ] **Step 1: Create devices directory and page**
 
-Device table using shadcn Table, Badge, Button, Input:
+```bash
+mkdir -p frontend/src/routes/devices
+```
 
 ```svelte
 <script lang="ts">
@@ -1017,17 +1174,19 @@ Device table using shadcn Table, Badge, Button, Input:
 - [ ] **Step 2: Commit**
 
 ```bash
-cd frontend && git add src/routes/devices/+page.svelte && git commit -m "feat: rebuild Devices view with shadcn Table and Card"
+cd frontend && git add src/routes/devices/ && git commit -m "feat: create Devices view with shadcn Table and Card"
 ```
 
-### Task 11: Rebuild Config view
+### Task 11: Create Config view
 
 **Files:**
-- Rewrite: `frontend/src/routes/config/+page.svelte`
+- Create: `frontend/src/routes/config/+page.svelte`
 
-- [ ] **Step 1: Rewrite config/+page.svelte**
+- [ ] **Step 1: Create config directory and page**
 
-Config page using shadcn Card, Input, Label, Slider, Switch, Button:
+```bash
+mkdir -p frontend/src/routes/config
+```
 
 ```svelte
 <script lang="ts">
@@ -1043,6 +1202,7 @@ Config page using shadcn Card, Input, Label, Slider, Switch, Button:
   let config = $state<api.AppConfig | null>(null);
   let saving = $state(false);
   let message = $state('');
+  let fileInput = $state<HTMLInputElement>(undefined!);
 
   onMount(async () => {
     config = await api.getConfig();
@@ -1170,10 +1330,8 @@ Config page using shadcn Card, Input, Label, Slider, Switch, Button:
         {saving ? 'Saving...' : 'Apply'}
       </Button>
       <Button variant="outline" onclick={handleExport}>Export TOML</Button>
-      <label class="cursor-pointer">
-        <Button variant="outline" onclick={() => {}}>Import TOML</Button>
-        <input type="file" accept=".toml" onchange={handleImport} class="hidden" />
-      </label>
+      <Button variant="outline" onclick={() => fileInput.click()}>Import TOML</Button>
+      <input bind:this={fileInput} type="file" accept=".toml" onchange={handleImport} class="hidden" />
       {#if message}
         <span class="text-xs text-primary">{message}</span>
       {/if}
@@ -1184,20 +1342,24 @@ Config page using shadcn Card, Input, Label, Slider, Switch, Button:
 </div>
 ```
 
+Note: `fileInput` uses `$state` + `bind:this` for programmatic file picker trigger (Svelte 5 requires `$state` for `bind:this` variables). The `<label>` wrapper pattern is fragile with component libraries.
+
 - [ ] **Step 2: Commit**
 
 ```bash
-cd frontend && git add src/routes/config/+page.svelte && git commit -m "feat: rebuild Config view with shadcn Card, Input, Slider, Switch"
+cd frontend && git add src/routes/config/ && git commit -m "feat: create Config view with shadcn Card, Input, Slider, Switch"
 ```
 
-### Task 12: Rebuild Scene placeholder page
+### Task 12: Create Scene placeholder page
 
 **Files:**
-- Rewrite: `frontend/src/routes/scene/+page.svelte`
+- Create: `frontend/src/routes/scene/+page.svelte`
 
-- [ ] **Step 1: Rewrite scene/+page.svelte**
+- [ ] **Step 1: Create scene directory and page**
 
-Simple placeholder using shadcn CSS variables:
+```bash
+mkdir -p frontend/src/routes/scene
+```
 
 ```svelte
 <div class="h-full flex items-center justify-center">
@@ -1208,7 +1370,7 @@ Simple placeholder using shadcn CSS variables:
 - [ ] **Step 2: Commit**
 
 ```bash
-cd frontend && git add src/routes/scene/+page.svelte && git commit -m "feat: rebuild Scene placeholder with shadcn styling"
+cd frontend && git add src/routes/scene/ && git commit -m "feat: create Scene placeholder"
 ```
 
 ---
@@ -1227,52 +1389,51 @@ cd frontend && npx svelte-check --tsconfig ./tsconfig.json 2>&1
 ```
 
 Fix any type errors. Common issues:
-- shadcn-svelte Slider with `type="single"` uses `value: number` (plain number), with `type="multiple"` uses `value: number[]`
-- shadcn-svelte Switch supports both `bind:checked` and `checked` + `onCheckedChange` callback pattern
-- Import paths for shadcn components use `/index.js` suffix (e.g., `$lib/components/ui/button/index.js`)
-- Card.Content may need explicit padding class since shadcn Card.Content has default padding
+- shadcn-svelte Slider with `type="single"` uses `value: number` (plain number)
+- Import paths for shadcn components use `/index.js` suffix
+- Card.Content may need explicit padding class
 
-- [ ] **Step 2: Run dev server and verify pages load**
+- [ ] **Step 2: Verify pages load via dev server**
+
+The backend should be running at localhost:8080. Start the frontend:
 
 ```bash
-cd frontend && npm run dev
+cd frontend && npm run dev -- --port 5173
 ```
 
-Navigate to each page (/, /devices, /config, /scene) and verify they render without console errors.
+Verify each page loads:
+```bash
+curl -s http://localhost:5173/ | head -5
+curl -s http://localhost:5173/devices | head -5
+curl -s http://localhost:5173/config | head -5
+curl -s http://localhost:5173/scene | head -5
+```
 
 - [ ] **Step 3: Fix any issues found**
 
-Address type errors, missing imports, or layout issues discovered in steps 1-2.
+Address type errors, missing imports, or runtime errors.
 
-- [ ] **Step 4: Final commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-cd frontend && git add -A && git commit -m "fix: resolve type errors and verify all views render correctly"
+cd frontend && git add -A && git commit -m "fix: resolve type errors and verify all views render"
 ```
 
-### Task 14: Clean up unused dependencies
+### Task 14: Verify build and clean up
 
 **Files:**
-- Modify: `frontend/package.json`
+- Possibly modify: `frontend/package.json`
 
-- [ ] **Step 1: Check for unused packages**
-
-The following may no longer be needed now that shadcn-svelte is fully set up:
-- `tailwind-variants` — check if any shadcn-svelte generated components use it; if not, remove
-- `@types/three`, `@threlte/core`, `@threlte/extras`, `three` — these are for phase 2 scene editor; keep them
+- [ ] **Step 1: Run production build**
 
 ```bash
-cd frontend && grep -r "tailwind-variants" src/lib/components/ui/ || echo "NOT USED"
+cd frontend && npm run build
 ```
 
-- [ ] **Step 2: Remove unused deps if confirmed**
+Fix any build errors.
+
+- [ ] **Step 2: Commit if changes needed**
 
 ```bash
-cd frontend && npm uninstall tailwind-variants  # only if confirmed unused
-```
-
-- [ ] **Step 3: Commit**
-
-```bash
-cd frontend && git add package.json package-lock.json && git commit -m "chore: remove unused dependencies"
+cd frontend && git add -A && git commit -m "fix: resolve build issues"
 ```

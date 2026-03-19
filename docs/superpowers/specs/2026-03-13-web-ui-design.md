@@ -4,9 +4,7 @@
 
 A fully featured web UI for dj-ledfx providing live performance control and deep device/scene configuration. The UI serves as both a real-time control surface during DJ sets and a comprehensive setup tool for device placement, spatial mapping, and effect management.
 
-**Tech stack:** FastAPI + Granian (embedded ASGI) backend, Svelte 5 + SvelteKit + shadcn-svelte + Tailwind CSS v4 frontend. Threlte for 3D scene editor (phase 2).
-
-**Design language:** shadcn-svelte default dark theme with cyan (#00e5ff) primary color. Orbitron font for BPM display only; all other typography uses shadcn-svelte defaults. No custom design tokens, no glow effects. All UI components use shadcn-svelte defaults (Button, Card, Input, Slider, Table, Badge, etc.). Domain-specific components (BpmDisplay, BeatGrid, PhaseMeter, DeviceMonitor) are styled to match shadcn conventions using its CSS variables.
+**Tech stack:** FastAPI + Granian (embedded ASGI) backend. Vite + React 19 + TypeScript + React Router + shadcn/ui + Tailwind CSS v4 frontend. React Three Fiber for 3D scene editor (phase 2).
 
 ---
 
@@ -16,7 +14,7 @@ A fully featured web UI for dj-ledfx providing live performance control and deep
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Browser (Svelte 5 SPA)                │
+│                    Browser (React SPA)                    │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐  │
 │  │Transport │ │ Effect   │ │ Device   │ │  3D Scene │  │
 │  │Display   │ │ Deck     │ │ Manager  │ │  Editor   │  │
@@ -529,32 +527,32 @@ When the spatial mapping type or parameters change (e.g., switching from linear 
 
 ---
 
-## 8. 3D Scene Editor
+## 8. 3D Scene Editor (Phase 2)
 
 ### 8.1 Layout
 
 Three-panel layout with toolbar and mapping preview bar:
 
 - **Top toolbar** — Camera view presets (Perspective/Top/Front/Side), transform tools (Move/Rotate), grid snap settings
-- **Left panel (240px)** — Device list grouped by zone with connection status LEDs. "Unplaced" section for discovered-but-not-positioned devices. Drag to add to scene.
-- **Center** — Threlte 3D viewport with `<OrbitControls>`, `<TransformControls>`, `<Grid>`. Devices rendered as geometry-appropriate meshes with live LED colors.
-- **Right panel (260px)** — Properties for selected device: position XYZ inputs, geometry info, group assignment, latency tuning (strategy + manual offset slider), spatial mapping config.
-- **Bottom bar (44px)** — Mapping preview: 1D gradient strip showing effect→3D mapping result with device position markers.
+- **Left panel** — Device list grouped by zone with connection status indicators. "Unplaced" section for discovered-but-not-positioned devices.
+- **Center** — React Three Fiber 3D viewport with orbit controls, transform controls, and grid. Devices rendered as geometry-appropriate meshes with live LED colors.
+- **Right panel** — Properties for selected device: position XYZ inputs, geometry info, group assignment, latency tuning, spatial mapping config.
+- **Bottom bar** — Mapping preview: 1D gradient showing effect→3D mapping result with device position markers.
 
 ### 8.2 Device Rendering in 3D
 
 | Geometry | 3D Representation |
 |----------|-------------------|
-| `PointGeometry` | Emissive sphere, color = device's current LED color |
-| `StripGeometry` | Line of small spheres along direction vector, each colored per LED |
-| `MatrixGeometry` | Grid of small spheres matching tile layout, each colored per LED |
+| `PointGeometry` | Single sphere per device, colored by current LED output |
+| `StripGeometry` | Line of spheres along direction vector, each colored per LED |
+| `MatrixGeometry` | Grid of spheres matching tile layout, each colored per LED |
 
 LED colors come from the frame snapshot WebSocket channel. The scene editor subscribes to frames for the selected device at full rate, and all devices at a lower rate for ambient visualization.
 
 ### 8.3 Interactions
 
 - **Click** to select a device in the viewport or the device list (bi-directional selection sync)
-- **Drag** (TransformControls) to reposition devices — updates position in real-time, sends `PUT /api/scene/devices/{name}` on mouse-up
+- **Drag** to reposition devices — updates position in real-time, sends `PUT /api/scene/devices/{name}` on mouse-up
 - **Identify** button flashes the physical device via `POST /api/devices/{name}/identify`
 - **Add to scene** — drag from "Unplaced" list into the viewport, or click "Add" which places at origin
 
@@ -564,37 +562,40 @@ LED colors come from the frame snapshot WebSocket channel. The scene editor subs
 
 ### 9.1 Layout (top to bottom)
 
-1. **Navigation bar** — `bg-card` bar with logo, tab links (LIVE / SCENE / DEVICES / CONFIG) styled with `text-muted-foreground` inactive / `text-primary` active, system status indicators (WS connection dot, play state)
-2. **Transport display** — shadcn `Card` containing:
-   - *Left:* BPM (Orbitron font, largest element on screen), source label in `text-muted-foreground`
-   - *Center:* Beat position indicators (1-2-3-4 small boxes, `bg-muted` inactive / `bg-primary text-primary-foreground` active with `beat-hit` animation), beat phase bar, bar phase bar
-   - *Right:* Play state icon (`text-muted-foreground` stopped / `text-primary` playing)
-3. **Main area (flex)** — Split `1fr 320px`:
-   - *Left:* Scene preview placeholder `Card` with `bg-muted` interior and centered `text-muted-foreground` text "Scene Preview" (replaced by Threlte 3D viewport in phase 2)
-   - *Right:* Effect deck `Card` — effect `Select`, parameter `Slider`s, palette color inputs, preset save/load with `Input` + `Button`
-4. **Device monitors (bottom)** — Horizontal strip of per-device cards showing: status dot, device name, FPS, latency, LED color data strip
+1. **Navigation bar** — App logo, tab navigation (LIVE / SCENE / DEVICES / CONFIG), system status indicators (WebSocket connection state, play state)
+2. **Transport display** — Contains:
+   - BPM readout (prominent — the most important number during a DJ set)
+   - Beat position indicators (1-2-3-4) showing current beat within the bar
+   - Beat phase and bar phase progress indicators
+   - Play/stop state indicator
+   - Source info (deck number/name)
+3. **Main area** — Split between:
+   - Scene preview (placeholder for phase 2 — will become 3D viewport)
+   - Effect deck panel — effect selector, parameter controls, palette editor, preset management
+4. **Device monitors (bottom)** — Per-device status cards showing: connection state, device name, FPS, latency, LED color strip preview
 
 ### 9.2 Effect Deck
 
-The effect deck sidebar uses shadcn components throughout:
-- Effect selector: shadcn `Select` or `Button` group for switching effects
-- Parameters: shadcn `Slider` + `Label` for numeric params, `Switch` for booleans
-- Palette: row of native `<input type="color">` with `rounded border-input` styling
-- Presets: shadcn `Button` for each preset, `Input` + `Button` for save
+The effect deck panel provides real-time control over the active effect:
+- **Effect selector** — Switch between available effects
+- **Parameters** — Sliders for numeric params, toggles for booleans, dropdowns for choice params (auto-generated from effect schema)
+- **Palette** — Color picker inputs for color_list parameters
+- **Presets** — Load saved presets, save current state as a new preset
 
-Sections separated by shadcn `Separator`. Order: Effect → Parameters → Presets (most-to-least frequent).
+Order: Effect → Parameters → Presets (most-to-least frequent interaction).
 
-### 9.3 Visual Feedback for State Changes
+### 9.3 State Feedback
 
-| Event | Visual |
-|-------|--------|
-| Beat hit | Active beat box uses `bg-primary` + `beat-hit` scale animation (functional — mirrors LED timing) |
-| Preset switch | Active button uses shadcn `default` variant |
-| Parameter change | Value updates immediately, no decorative animation |
-| Device connect | Status dot turns green |
-| Device disconnect | Status dot turns red |
-| Drift warning (>5ms) | Drift value uses `text-destructive` |
-| Buffer low (<50%) | Buffer bar uses `text-destructive` |
+The UI should provide clear feedback for these state changes:
+
+| Event | Feedback |
+|-------|----------|
+| Beat hit | Active beat position indicator responds visually |
+| Preset loaded | Active preset is highlighted |
+| Parameter change | Value updates immediately |
+| Device connect/disconnect | Connection indicator updates |
+| Drift warning (>5ms) | Drift value flagged as warning |
+| Buffer low (<50%) | Buffer level flagged as warning |
 
 ---
 
@@ -602,25 +603,25 @@ Sections separated by shadcn `Separator`. Order: Effect → Parameters → Prese
 
 ### 10.1 Layout
 
-Full-width table/list with expandable rows.
+Full-width device table with expandable detail rows.
 
 | Column | Content |
 |--------|---------|
-| Status | LED indicator |
-| Name | Device name + type badge |
-| Group | Color-coded group tag |
+| Status | Connection indicator |
+| Name | Device name + type |
+| Group | Group assignment |
 | LEDs | Count |
 | FPS | Current send rate |
-| Latency | Effective latency + strategy badge |
+| Latency | Effective latency + strategy |
 | Connection | IP/address |
 | Actions | Identify / Disconnect |
 
 ### 10.2 Features
 
-- **Discovery panel** — "Scan for Devices" button at top, shows newly found devices with "Add" action
-- **Group management** — Create/rename/delete groups, assign color, drag devices between groups
+- **Discovery** — Trigger device scan, show newly found devices with "Add" action
+- **Group management** — Create/rename/delete groups, assign devices to groups
 - **Bulk actions** — Multi-select devices, assign group, change latency strategy, set FPS cap
-- **Device detail expand** — Click row to expand: latency history sparkline, FPS over time, packet stats, manual offset slider
+- **Device detail expand** — Click row to expand: latency history, FPS over time, packet stats, manual offset control
 - **Identify** — Flashes physical device for 3 seconds
 
 ---
@@ -689,40 +690,36 @@ def create_app(
 
 ```
 frontend/
+├── index.html                       # Vite entry point
 ├── package.json
-├── components.json                  # shadcn-svelte CLI config
-├── svelte.config.js
+├── components.json                  # shadcn/ui CLI config
 ├── vite.config.ts
 ├── tsconfig.json
+├── tsconfig.app.json
 ├── src/
-│   ├── app.html                     # Google Fonts link for Orbitron
-│   ├── app.css                      # shadcn-svelte generated theme (dark mode, cyan primary)
+│   ├── main.tsx                     # React entry point (createRoot)
+│   ├── App.tsx                      # Root component with React Router
+│   ├── index.css                    # Tailwind CSS + shadcn/ui theme variables
 │   ├── lib/
-│   │   ├── utils.ts                 # shadcn-svelte cn() utility
-│   │   ├── stores/
-│   │   │   ├── beat.svelte.ts       # Beat state (from WS, Svelte 5 runes)
-│   │   │   ├── devices.svelte.ts    # Device list + stats + groups
-│   │   │   ├── effects.svelte.ts    # Active effect, params, presets
-│   │   │   └── scene.svelte.ts      # Scene placements, mapping config
+│   │   ├── utils.ts                 # shadcn cn() utility
+│   │   ├── hooks/
+│   │   │   ├── use-beat.ts          # Beat state hook (from WS)
+│   │   │   ├── use-devices.ts       # Device list + stats + groups
+│   │   │   └── use-effects.ts       # Active effect, params, presets
 │   │   ├── ws/
 │   │   │   └── client.ts            # WebSocket client, multiplexed channels, reconnection
-│   │   ├── api/
-│   │   │   └── client.ts            # REST API typed fetch wrapper
-│   │   ├── components/
-│   │   │   ├── ui/                  # shadcn-svelte components (generated via CLI)
-│   │   │   ├── transport/           # BpmDisplay, BeatGrid, PhaseMeter, PlayState
-│   │   │   ├── deck/                # EffectDeckPanel, ParamSlider, PaletteEditor, DeviceMonitor
-│   │   │   └── common/              # LedIndicator (small status dot)
-│   │   └── (no theme/ directory — shadcn CSS variables are the theme)
-│   └── routes/
-│       ├── +layout.svelte           # Nav bar, WS connection init, global stores
-│       ├── +page.svelte             # Live performance view (default route)
-│       ├── scene/
-│       │   └── +page.svelte         # 3D scene editor (phase 2)
-│       ├── devices/
-│       │   └── +page.svelte         # Device management
-│       └── config/
-│           └── +page.svelte         # App configuration
+│   │   └── api/
+│   │       └── client.ts            # REST API typed fetch wrapper
+│   ├── components/
+│   │   ├── ui/                      # shadcn/ui components (generated via CLI)
+│   │   ├── transport/               # BpmDisplay, BeatGrid, PhaseMeter, PlayState
+│   │   ├── deck/                    # EffectDeckPanel, ParamSlider, PaletteEditor, DeviceMonitor
+│   │   └── layout/                  # AppLayout, Navigation
+│   └── pages/
+│       ├── Live.tsx                  # Live performance view (default route)
+│       ├── Scene.tsx                 # 3D scene editor (phase 2 placeholder)
+│       ├── Devices.tsx              # Device management
+│       └── Config.tsx               # App configuration
 ```
 
 ### 13.1 Frontend Build Pipeline
@@ -733,12 +730,23 @@ cd frontend && npm install
 npm run dev                          # Vite dev server on :5173, proxies /api + /ws to :8080
 
 # Production build
-npm run build                        # Outputs to frontend/build/
+npm run build                        # Outputs to frontend/dist/
 ```
 
 **Vite proxy config** (`vite.config.ts`):
 ```typescript
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
+import tailwindcss from "@tailwindcss/vite"
+import path from "path"
+
 export default defineConfig({
+    plugins: [react(), tailwindcss()],
+    resolve: {
+        alias: {
+            "@": path.resolve(__dirname, "./src"),
+        },
+    },
     server: {
         proxy: {
             '/api': 'http://localhost:8080',
@@ -751,45 +759,21 @@ export default defineConfig({
 **Production serving:** FastAPI mounts `StaticFiles(directory=...)` pointing to the built frontend assets. The path is configurable via `--web-static-dir` flag. Resolution order:
 1. Explicit `--web-static-dir` argument (absolute or relative path)
 2. `web.static_dir` in TOML config
-3. `frontend/build/` relative to the project root (for development checkouts)
+3. `frontend/dist/` relative to the project root (for development checkouts)
 4. `importlib.resources.files("dj_ledfx") / "web" / "static"` (for installed packages)
 
-Built assets are NOT committed to git — they are built in CI or by the developer before running in production mode. For distribution as a Python package, the built assets would be included via `package_data` in `pyproject.toml`.
-
-**SvelteKit adapter:** The frontend uses `@sveltejs/adapter-static` for pure client-side SPA rendering (no SSR). This outputs a fully static site that FastAPI can serve directly. Configure in `svelte.config.js`:
-```javascript
-import adapter from '@sveltejs/adapter-static';
-export default { kit: { adapter: adapter({ fallback: 'index.html' }) } };
-```
-
-### 13.2 Theme
-
-The frontend uses shadcn-svelte's standard CSS variable theme system. The only customization is setting `--primary` to cyan (#00e5ff) in the `.dark` block of `app.css`. No custom design tokens file exists — all colors, spacing, and typography are derived from shadcn-svelte's CSS variables (`--background`, `--foreground`, `--card`, `--muted`, `--primary`, `--border`, `--input`, `--ring`, `--destructive`, etc.).
-
-Custom domain-specific components (BpmDisplay, BeatGrid, PhaseMeter, DeviceMonitor, LedIndicator) use these same CSS variables for consistency. The only additional CSS is the `beat-hit` keyframe animation for the active beat indicator.
+Built assets are NOT committed to git — they are built in CI or by the developer before running in production mode. Vite builds a fully static SPA (`index.html` + JS/CSS bundles) that FastAPI can serve directly. The SPA fallback serves `index.html` for all non-API routes to support client-side routing.
 
 ---
 
 ## 14. Responsive Behavior
 
-### 14.1 Breakpoints
+The UI should be functional at tablet sizes and above. The Live Performance view is the most important to support on smaller screens since it's used during live DJ sets.
 
-| Breakpoint | Layout |
-|------------|--------|
-| Desktop (>1024px) | Full layout as designed |
-| Tablet (768-1024px) | Transport stacks to 2 columns (BPM+beats left, stats right). Effect deck slides in as overlay. |
-| Mobile (<768px) | Performance mode: BPM + beat grid + preset buttons + collapsed 3D preview. Device monitors wrap to rows. |
-
-### 14.2 Mobile Performance Mode
-
-On narrow screens, the live view collapses to essentials:
-- BPM display (full width, large)
-- Beat grid (1-2-3-4 indicators)
-- Preset grid (2 columns, fills available space)
-- 3D preview collapses to a thin strip showing device monitor colors
-- Stats and parameters accessible via expandable drawer
-
-Scene editor and config views redirect to a "use a larger screen" message on mobile — these are setup-time tools, not live-performance tools.
+- **Desktop** — Full layout with all panels visible
+- **Tablet** — Transport and effect deck should remain usable; layout may stack or collapse secondary panels
+- **Mobile** — Live view should show BPM, beat grid, and preset selection at minimum; detail panels accessible via drawer/overlay
+- **Scene editor and config views** — Setup-time tools, only need to work on larger screens
 
 ---
 
@@ -847,7 +831,7 @@ The entire `frontend/` directory as described in Section 13.
 - Scene endpoints return `null`/empty when no spatial module is available
 
 **Phase 1.5 (static build pipeline integration):**
-- SvelteKit `adapter-static` production build wired to `frontend/build/`
+- Vite production build outputs to `frontend/dist/`
 - FastAPI `StaticFiles` mount with 4-tier resolution order (Section 13.1)
 - `importlib.resources` fallback for installed packages
 - End-to-end test: `npm run build` → `uv run -m dj_ledfx --web` serves SPA correctly
