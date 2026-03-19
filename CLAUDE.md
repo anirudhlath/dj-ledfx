@@ -42,7 +42,10 @@ src/dj_ledfx/ layout:
 - `effects/registry.py` — Effect auto-registry via __init_subclass__, get_effect_classes/schemas/create
 - `effects/deck.py` — EffectDeck hot-swap wrapper (shared between engine and web API)
 - `effects/presets.py` — PresetStore with TOML persistence
-- `web/` — FastAPI app factory, REST routers (effects, devices, config), WebSocket hub, Pydantic schemas
+- `devices/manager.py` — DeviceManager: discovery, lifecycle, group management
+- `web/` — FastAPI app factory, REST routers (effects, devices, config, scene), WebSocket hub, Pydantic schemas
+- `web/ws.py` — WebSocket hub: binary LED frame broadcast (2-byte name + 4-byte seq + RGB), beat/status JSON channels
+- `web/state.py` — Shared app state dataclass passed via FastAPI app.state
 - `web/router_scene.py` — Scene REST endpoints (placement CRUD, mapping config, auto-creates SceneModel)
 - `spatial/mapping.py` — mapping_from_config() shared factory for LinearMapping/RadialMapping
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
@@ -55,6 +58,7 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - `src/lib/api-client.ts` — Typed REST client
 - `src/hooks/` — React hooks for beat, effects, devices, scene state
 - `src/pages/` — Views: Live Performance, Devices, Config, Scene (3D editor)
+- `src/components/` — transport-section, effect-deck, device-monitor (Live page); scene/ (3D editor)
 - `src/components/scene/` — R3F scene editor: viewport, device meshes, mapping helpers, bounds box, panels
 
 ## Code Style
@@ -70,6 +74,9 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - All components run on a single asyncio event loop — no cross-thread state access
 - AppConfig uses nested dataclasses: `config.engine.fps`, `config.devices.openrgb.host` (not flat)
 - EffectEngine accepts `deck: EffectDeck` (not raw `effect: Effect`)
+- Frontend uses shadcn/ui components (based on @base-ui/react, NOT Radix — different APIs)
+- Frontend hooks in `src/hooks/`, one per domain (use-beat, use-devices, use-effects, use-scene)
+- WebSocket binary frame protocol: 2-byte name length, UTF-8 name, 4-byte sequence, then RGB bytes
 
 ## Key Design Decisions
 
@@ -103,6 +110,8 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Packet parsing tests use hex dump fixtures from `tests/fixtures/`
 - Mock `openrgb-python` for device tests
 - Integration tests run BeatSimulator → full pipeline → mock DeviceAdapter
+- Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern
+- `tests/web/` covers all REST routers and WebSocket hub
 
 ## Gotchas
 
