@@ -1,6 +1,78 @@
+import { useRef, useState, useLayoutEffect } from "react"
 import type { BeatState } from "@/lib/types"
-import { ProgressTrack, ProgressIndicator, Progress } from "@/components/ui/progress"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+
+function BeatGrid({
+  isPlaying,
+  beatPos,
+  beatPhase,
+  barPhase,
+}: {
+  isPlaying: boolean
+  beatPos: number
+  beatPhase: number
+  barPhase: number
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [boxSize, setBoxSize] = useState(0)
+  const gap = 4 // gap-1 = 0.25rem = 4px
+  const barH = 6 // h-1.5 = 0.375rem = 6px
+  const barGap = 6 // gap-1.5 = 0.375rem = 6px
+
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const obs = new ResizeObserver(([entry]) => {
+      // available height for boxes = container height - bar height - gap between rows
+      const available = entry.contentRect.height - barH - barGap
+      setBoxSize(Math.max(0, Math.floor(available)))
+    })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+
+  return (
+    <div ref={containerRef} className="flex flex-col items-center justify-center gap-1.5 self-stretch py-1">
+      <div className="flex gap-1">
+        {[1, 2, 3, 4].map((n) => {
+          const isActive = isPlaying && beatPos === n
+          const fillPercent = isActive ? beatPhase * 100 : 0
+          return (
+            <div
+              key={n}
+              className="relative rounded overflow-hidden flex items-center justify-center bg-muted shrink-0"
+              style={{ width: boxSize, height: boxSize }}
+            >
+              <div
+                className="absolute top-0 bottom-0 left-0 bg-primary transition-none"
+                style={{ width: `${fillPercent}%` }}
+              />
+              <span
+                className={cn(
+                  "relative z-10 text-xs font-bold",
+                  isActive ? "text-primary-foreground" : "text-muted-foreground",
+                )}
+              >
+                {n}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+      {/* Bar progress — same total width as the 4 boxes + gaps */}
+      <div
+        className="relative h-1.5 rounded-full bg-muted overflow-hidden"
+        style={{ width: boxSize * 4 + gap * 3 }}
+      >
+        <div
+          className="absolute top-0 bottom-0 left-0 bg-sky-500 transition-none rounded-full"
+          style={{ width: `${barPhase * 100}%` }}
+        />
+      </div>
+    </div>
+  )
+}
 
 interface TransportSectionProps {
   beat: BeatState
@@ -23,59 +95,29 @@ export function TransportSection({ beat }: TransportSectionProps) {
 
       <div className="w-px bg-border self-stretch" />
 
-      {/* Beat indicators + phase bars */}
-      <div className="flex flex-col justify-center gap-2 flex-1 min-w-0">
-        {/* Beat position indicators */}
-        <div className="flex items-center gap-2">
-          {[1, 2, 3, 4].map((n) => {
-            const isActive = isPlaying && beatPos === n
-            return (
-              <div
-                key={n}
-                className={[
-                  "h-6 w-6 rounded flex items-center justify-center text-xs font-bold transition-all duration-75",
-                  isActive
-                    ? "bg-primary text-primary-foreground shadow-[0_0_8px_hsl(var(--primary)/0.6)]"
-                    : "bg-muted text-muted-foreground",
-                ].join(" ")}
-              >
-                {n}
-              </div>
-            )
-          })}
-          <div className="flex-1" />
-          <Badge
-            variant={isPlaying ? "default" : "outline"}
-            className={[
-              "text-xs uppercase tracking-widest font-mono",
-              isPlaying
-                ? "bg-green-600 text-white border-green-600"
-                : "text-muted-foreground border-muted",
-            ].join(" ")}
-          >
-            {isPlaying ? "PLAY" : "STOP"}
-          </Badge>
-        </div>
+      {/* Beat grid — centered, square boxes sized to parent height */}
+      <div className="flex-1 flex items-stretch justify-center">
+        <BeatGrid
+          isPlaying={isPlaying}
+          beatPos={beatPos}
+          beatPhase={beatPhase}
+          barPhase={barPhase}
+        />
+      </div>
 
-        {/* Phase progress bars */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground w-7 uppercase tracking-wider">Beat</span>
-            <Progress value={beatPhase * 100} className="flex-1">
-              <ProgressTrack className="h-2">
-                <ProgressIndicator className="transition-none" />
-              </ProgressTrack>
-            </Progress>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground w-7 uppercase tracking-wider">Bar</span>
-            <Progress value={barPhase * 100} className="flex-1">
-              <ProgressTrack className="h-2">
-                <ProgressIndicator className="transition-none bg-sky-500" />
-              </ProgressTrack>
-            </Progress>
-          </div>
-        </div>
+      {/* Play state */}
+      <div className="flex items-center">
+        <Badge
+          variant={isPlaying ? "default" : "outline"}
+          className={cn(
+            "text-xs uppercase tracking-widest font-mono",
+            isPlaying
+              ? "bg-green-600 text-white border-green-600"
+              : "text-muted-foreground border-muted",
+          )}
+        >
+          {isPlaying ? "PLAY" : "STOP"}
+        </Badge>
       </div>
 
       {/* Source info */}
@@ -85,14 +127,14 @@ export function TransportSection({ beat }: TransportSectionProps) {
         )}
         {pitchPercent !== null && (
           <span
-            className={[
+            className={cn(
               "text-xs font-mono",
               pitchPercent > 0
                 ? "text-amber-400"
                 : pitchPercent < 0
                   ? "text-sky-400"
                   : "text-muted-foreground",
-            ].join(" ")}
+            )}
           >
             {pitchPercent > 0 ? "+" : ""}
             {pitchPercent.toFixed(1)}%

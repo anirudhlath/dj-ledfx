@@ -16,10 +16,24 @@ export default function LivePage() {
       {/* Transport */}
       <TransportSection beat={beat} />
 
-      {/* Middle: Effect deck + Scene preview */}
+      {/* Middle: Scene preview + Effect deck */}
       <div className="flex gap-3 flex-1 min-h-0">
-        {/* Effect deck — takes up most space */}
+        {/* Scene preview placeholder */}
         <div className="flex-1 min-w-0 min-h-0">
+          <Card className="h-full">
+            <CardContent className="flex flex-col items-center justify-center h-full text-center px-4">
+              <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Scene Editor
+              </span>
+              <span className="mt-1 text-[10px] text-muted-foreground/60 uppercase tracking-wider">
+                Phase 2
+              </span>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Effect deck */}
+        <div className="w-80 shrink-0 min-h-0">
           <EffectDeck
             schemas={effects.schemas}
             activeEffect={effects.activeEffect}
@@ -31,20 +45,6 @@ export default function LivePage() {
             loadPreset={effects.loadPreset}
             savePreset={effects.savePreset}
           />
-        </div>
-
-        {/* Scene preview placeholder */}
-        <div className="w-56 shrink-0">
-          <Card className="h-full">
-            <CardContent className="flex flex-col items-center justify-center h-full text-center px-4">
-              <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Scene Editor
-              </span>
-              <span className="mt-1 text-[10px] text-muted-foreground/60 uppercase tracking-wider">
-                Phase 2
-              </span>
-            </CardContent>
-          </Card>
         </div>
       </div>
 
