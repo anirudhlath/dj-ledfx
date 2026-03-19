@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from dj_ledfx.effects.beat_pulse import BeatPulse
 
@@ -37,3 +38,32 @@ def test_beat_pulse_custom_palette() -> None:
     assert result[0, 0] == 255
     assert result[0, 1] == 255
     assert result[0, 2] == 255
+
+
+def test_beat_pulse_parameters_schema():
+    schema = BeatPulse.parameters()
+    assert "gamma" in schema
+    assert schema["gamma"].type == "float"
+    assert schema["gamma"].min == 0.5
+    assert schema["gamma"].max == 5.0
+    assert "palette" in schema
+    assert schema["palette"].type == "color_list"
+
+
+def test_beat_pulse_get_params():
+    effect = BeatPulse(gamma=3.0)
+    params = effect.get_params()
+    assert params["gamma"] == 3.0
+    assert isinstance(params["palette"], list)
+
+
+def test_beat_pulse_set_params():
+    effect = BeatPulse()
+    effect.set_params(gamma=4.0)
+    assert effect.get_params()["gamma"] == 4.0
+
+
+def test_beat_pulse_set_params_validates():
+    effect = BeatPulse()
+    with pytest.raises(ValueError):
+        effect.set_params(gamma=0.1)

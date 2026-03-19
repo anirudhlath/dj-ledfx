@@ -53,6 +53,30 @@ class LinearMapping:
         return cast(NDArray[np.float64], np.clip(result, 0.0, 1.0))
 
 
+def mapping_from_config(
+    scene_config: dict[str, object],
+) -> LinearMapping | RadialMapping:
+    """Build a mapping instance from scene config dict."""
+    mapping_name = scene_config.get("mapping", "linear")
+    mapping_params: dict[str, object] = scene_config.get("mapping_params", {})  # type: ignore[assignment]
+    if mapping_name == "radial":
+        center = mapping_params.get("center", [0.0, 0.0, 0.0])
+        max_radius = mapping_params.get("max_radius")
+        return RadialMapping(
+            center=(float(center[0]), float(center[1]), float(center[2])),  # type: ignore[index]
+            max_radius=float(max_radius) if max_radius is not None else None,
+        )
+    direction = mapping_params.get("direction", [1.0, 0.0, 0.0])
+    origin = mapping_params.get("origin")
+    origin_tuple = (
+        (float(origin[0]), float(origin[1]), float(origin[2])) if origin else None  # type: ignore[index]
+    )
+    return LinearMapping(
+        direction=(float(direction[0]), float(direction[1]), float(direction[2])),  # type: ignore[index]
+        origin=origin_tuple,
+    )
+
+
 class RadialMapping:
     """Maps positions by distance from a center point."""
 

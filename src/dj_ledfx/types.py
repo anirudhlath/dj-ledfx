@@ -31,6 +31,9 @@ class BeatState:
     bpm: float
     is_playing: bool
     next_beat_time: float  # monotonic timestamp
+    pitch_percent: float | None = None
+    deck_number: int | None = None
+    deck_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,3 +44,10 @@ class DeviceStats:
     effective_latency_ms: float
     send_fps: float
     frames_dropped: int
+    connected: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceGroup:
+    name: str
+    color: str  # hex color for UI display

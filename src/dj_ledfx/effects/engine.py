@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 
 from loguru import logger
 
 from dj_ledfx import metrics
 from dj_ledfx.beat.clock import BeatClock
-from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.types import RenderedFrame
 
 
@@ -64,13 +65,13 @@ class EffectEngine:
     def __init__(
         self,
         clock: BeatClock,
-        effect: Effect,
+        deck: EffectDeck,
         led_count: int,
         fps: int = 60,
         max_lookahead_s: float = 1.0,
     ) -> None:
         self._clock = clock
-        self._effect = effect
+        self._deck = deck
         self._led_count = led_count
         self._fps = fps
         self._frame_period = 1.0 / fps
@@ -78,7 +79,7 @@ class EffectEngine:
         self.ring_buffer = RingBuffer(capacity=fps, led_count=led_count)
         self._running = False
         self._last_tick_time = 0.0
-        self._render_times: list[float] = []
+        self._render_times: deque[float] = deque(maxlen=fps * 10)
 
     @property
     def avg_render_time_ms(self) -> float:
@@ -91,7 +92,7 @@ class EffectEngine:
         state = self._clock.get_state_at(target_time)
 
         render_start = time.monotonic()
-        colors = self._effect.render(
+        colors = self._deck.render(
             beat_phase=state.beat_phase,
             bar_phase=state.bar_phase,
             dt=self._frame_period,
@@ -102,8 +103,6 @@ class EffectEngine:
         metrics.FRAMES_RENDERED.inc()
 
         self._render_times.append(render_elapsed)
-        if len(self._render_times) > 600:
-            self._render_times.pop(0)
 
         frame = RenderedFrame(
             colors=colors,

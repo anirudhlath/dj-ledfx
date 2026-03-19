@@ -17,12 +17,13 @@ from dj_ledfx.config import load_config
 from dj_ledfx.devices.backend import DeviceBackend
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.beat_pulse import BeatPulse
+from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import EventBus
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.spatial.compositor import SpatialCompositor
-from dj_ledfx.spatial.mapping import LinearMapping, RadialMapping
+from dj_ledfx.spatial.mapping import mapping_from_config
 from dj_ledfx.spatial.scene import SceneModel
 from dj_ledfx.status import SystemStatus
 
@@ -57,6 +58,19 @@ def _parse_args() -> argparse.Namespace:
         default=9091,
         help="Prometheus metrics port (default: 9091)",
     )
+    parser.add_argument(
+        "--web",
+        nargs="?",
+        const="prod",
+        default=None,
+        choices=["prod", "dev"],
+        help="Enable web UI ('--web' for production, '--web dev' for hot-reload dev server)",
+    )
+    parser.add_argument("--web-port", type=int, default=None, help="Web UI port")
+    parser.add_argument("--web-host", type=str, default=None, help="Web UI host")
+    parser.add_argument(
+        "--web-static-dir", type=str, default=None, help="Web UI static files directory"
+    )
     return parser.parse_args()
 
 
@@ -74,6 +88,9 @@ async def _run(args: argparse.Namespace) -> None:
             beat_number=event.beat_position,
             next_beat_ms=event.next_beat_ms,
             timestamp=event.timestamp,
+            pitch_percent=event.pitch_percent,
+            device_number=event.device_number,
+            device_name=event.device_name,
         )
 
     event_bus.subscribe(BeatEvent, on_beat)
@@ -93,35 +110,17 @@ async def _run(args: argparse.Namespace) -> None:
         device_manager.add_device(device.adapter, device.tracker, device.max_fps)
 
     # Build spatial scene if configured
+    scene: SceneModel | None = None
     compositor: SpatialCompositor | None = None
     if config.scene_config is not None:
         adapters = [d.adapter for d in device_manager.devices]
         scene = SceneModel.from_config(config.scene_config, adapters)
         if scene.placements:
-            mapping_name = config.scene_config.get("mapping", "linear")
-            mapping_params = config.scene_config.get("mapping_params", {})
-            mapping: LinearMapping | RadialMapping
-            if mapping_name == "radial":
-                center = mapping_params.get("center", [0.0, 0.0, 0.0])
-                max_radius = mapping_params.get("max_radius")
-                mapping = RadialMapping(
-                    center=(float(center[0]), float(center[1]), float(center[2])),
-                    max_radius=float(max_radius) if max_radius is not None else None,
-                )
-            else:
-                direction = mapping_params.get("direction", [1.0, 0.0, 0.0])
-                origin = mapping_params.get("origin")
-                origin_tuple = (
-                    (float(origin[0]), float(origin[1]), float(origin[2])) if origin else None
-                )
-                mapping = LinearMapping(
-                    direction=(float(direction[0]), float(direction[1]), float(direction[2])),
-                    origin=origin_tuple,
-                )
+            mapping = mapping_from_config(config.scene_config)
             compositor = SpatialCompositor(scene, mapping)
             logger.info(
                 "Spatial compositor active: {} mapping, {} devices",
-                mapping_name,
+                config.scene_config.get("mapping", "linear"),
                 len(scene.placements),
             )
 
@@ -129,26 +128,100 @@ async def _run(args: argparse.Namespace) -> None:
     logger.info("Using {} LEDs", led_count)
 
     effect = BeatPulse(
-        palette=config.beat_pulse_palette,
-        gamma=config.beat_pulse_gamma,
+        palette=config.effect.beat_pulse_palette,
+        gamma=config.effect.beat_pulse_gamma,
     )
+    deck = EffectDeck(effect)
 
     engine = EffectEngine(
         clock=clock,
-        effect=effect,
+        deck=deck,
         led_count=led_count,
-        fps=config.engine_fps,
-        max_lookahead_s=config.max_lookahead_ms / 1000.0,
+        fps=config.engine.fps,
+        max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
     )
 
     scheduler = LookaheadScheduler(
         ring_buffer=engine.ring_buffer,
         devices=device_manager.devices,
-        fps=config.engine_fps,
+        fps=config.engine.fps,
         compositor=compositor,
     )
 
+    async def _forward_vite_output(proc: asyncio.subprocess.Process) -> None:
+        assert proc.stdout is not None
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            logger.info("[vite] {}", line.decode().rstrip())
+
     stop_event = asyncio.Event()
+    web_server_task: asyncio.Task[None] | None = None
+    vite_process: asyncio.subprocess.Process | None = None
+    web_mode = args.web or ("prod" if config.web.enabled else None)
+
+    if web_mode:
+        from dj_ledfx.effects.presets import PresetStore
+        from dj_ledfx.web.app import create_app
+
+        host = args.web_host or config.web.host
+        port = args.web_port or config.web.port
+
+        preset_store = PresetStore(args.config.parent / "presets.toml")
+        web_app = create_app(
+            beat_clock=clock,
+            effect_deck=deck,
+            effect_engine=engine,
+            device_manager=device_manager,
+            scheduler=scheduler,
+            preset_store=preset_store,
+            scene_model=scene,
+            compositor=compositor,
+            config=config,
+            config_path=args.config,
+            web_static_dir=None if web_mode == "dev" else args.web_static_dir,
+        )
+
+        try:
+            from granian.constants import Interfaces
+            from granian.server.embed import Server as GranianServer
+
+            granian_server = GranianServer(
+                target=web_app,
+                address=host,
+                port=port,
+                interface=Interfaces.ASGI,
+                websockets=True,
+            )
+            web_server_task = asyncio.create_task(granian_server.serve())
+        except (ImportError, Exception) as e:
+            logger.warning("Granian unavailable ({}), falling back to uvicorn", e)
+            import uvicorn  # type: ignore[import-not-found]
+
+            uvi_config = uvicorn.Config(web_app, host=host, port=port, loop="none")
+            uvi_server = uvicorn.Server(uvi_config)
+            web_server_task = asyncio.create_task(uvi_server.serve())
+
+        logger.info("API server on http://{}:{}", host, port)
+
+        if web_mode == "dev":
+            frontend_dir = Path(__file__).parent.parent.parent / "frontend"
+            if not (frontend_dir / "package.json").exists():
+                logger.error("frontend/ directory not found at {}", frontend_dir)
+            else:
+                vite_process = await asyncio.create_subprocess_exec(
+                    "npx",
+                    "vite",
+                    "dev",
+                    cwd=str(frontend_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                asyncio.create_task(_forward_vite_output(vite_process))
+                logger.info("Dev UI (hot reload) at http://localhost:5173")
+        else:
+            logger.info("Web UI available at http://{}:{}", host, port)
 
     async def _event_loop_lag_loop() -> None:
         interval = 0.1
@@ -174,9 +247,10 @@ async def _run(args: argparse.Namespace) -> None:
 
     async def _status_loop() -> None:
         while not stop_event.is_set():
+            beat_state = clock.get_state()
             status = SystemStatus(
-                prodjlink_connected=clock.get_state().is_playing,
-                current_bpm=clock.get_state().bpm or None,
+                prodjlink_connected=beat_state.is_playing,
+                current_bpm=beat_state.bpm or None,
                 connected_devices=[d.adapter.device_info.name for d in device_manager.devices],
                 buffer_fill_level=engine.ring_buffer.fill_level,
                 avg_frame_render_time_ms=engine.avg_render_time_ms,
@@ -198,6 +272,15 @@ async def _run(args: argparse.Namespace) -> None:
     await stop_event.wait()
 
     logger.info("Shutting down...")
+
+    if vite_process is not None:
+        vite_process.terminate()
+        await vite_process.wait()
+
+    if web_server_task is not None:
+        web_server_task.cancel()
+        await asyncio.gather(web_server_task, return_exceptions=True)
+
     scheduler.stop()
     engine.stop()
     if simulator is not None:

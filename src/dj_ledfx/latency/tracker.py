@@ -13,6 +13,14 @@ class LatencyTracker:
         self._manual_offset_ms = manual_offset_ms
 
     @property
+    def manual_offset_ms(self) -> float:
+        return self._manual_offset_ms
+
+    @manual_offset_ms.setter
+    def manual_offset_ms(self, value: float) -> None:
+        self._manual_offset_ms = value
+
+    @property
     def effective_latency_ms(self) -> float:
         return self._strategy.get_latency() + self._manual_offset_ms
 

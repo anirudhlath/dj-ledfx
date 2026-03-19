@@ -8,6 +8,7 @@ import pytest
 import dj_ledfx.metrics as metrics_mod
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.effects.beat_pulse import BeatPulse
+from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine, RingBuffer
 from dj_ledfx.types import RenderedFrame
 
@@ -82,7 +83,8 @@ async def test_engine_tick_observes_render_duration() -> None:
         now = time_mod.monotonic()
         clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=now)
         effect = BeatPulse()
-        engine = EffectEngine(clock=clock, effect=effect, led_count=10, fps=60)
+        deck = EffectDeck(effect)
+        engine = EffectEngine(clock=clock, deck=deck, led_count=10, fps=60)
         engine.tick(now)
         mock_duration.observe.assert_called_once()
         mock_rendered.inc.assert_called_once()
@@ -97,9 +99,10 @@ def test_engine_render_tick_populates_buffer() -> None:
     clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=now)
 
     effect = BeatPulse()
+    deck = EffectDeck(effect)
     engine = EffectEngine(
         clock=clock,
-        effect=effect,
+        deck=deck,
         led_count=10,
         fps=60,
         max_lookahead_s=1.0,

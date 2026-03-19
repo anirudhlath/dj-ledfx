@@ -84,3 +84,20 @@ def test_extrapolate_future_phase() -> None:
     clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=now)
     state = clock.get_state_at(now + 1.0)
     assert state.beat_phase < 0.05 or state.beat_phase > 0.95
+
+
+def test_clock_stores_deck_info() -> None:
+    clock = BeatClock()
+    clock.on_beat(
+        128.0, 1, 469, time.monotonic(), pitch_percent=2.3, device_number=1, device_name="XDJ-AZ"
+    )
+    assert clock.pitch_percent == 2.3
+    assert clock.last_deck_number == 1
+    assert clock.last_deck_name == "XDJ-AZ"
+
+
+def test_clock_deck_info_defaults_none() -> None:
+    clock = BeatClock()
+    assert clock.pitch_percent is None
+    assert clock.last_deck_number is None
+    assert clock.last_deck_name is None

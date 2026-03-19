@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { toast } from "sonner"
 import { getConfig, updateConfig, exportConfig, importConfig } from "@/lib/api-client"
 import type { AppConfig } from "@/lib/types"
+import { sliderValue } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
@@ -48,8 +49,7 @@ function SliderField({
             step={step}
             value={value}
             onValueChange={(v: number | readonly number[]) => {
-              const num = Array.isArray(v) ? (v as readonly number[])[0] : (v as number)
-              onChange(num)
+              onChange(sliderValue(v))
             }}
           />
         </div>

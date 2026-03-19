@@ -9,6 +9,7 @@ from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.beat_pulse import BeatPulse
+from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency
@@ -52,7 +53,8 @@ async def test_spatial_pipeline_different_positions_different_colors() -> None:
     event_bus.subscribe(BeatEvent, on_beat)
 
     effect = BeatPulse()
-    engine = EffectEngine(clock=clock, effect=effect, led_count=60, fps=60)
+    deck = EffectDeck(effect)
+    engine = EffectEngine(clock=clock, deck=deck, led_count=60, fps=60)
 
     left_tracker = LatencyTracker(strategy=StaticLatency(latency_ms=5.0))
     right_tracker = LatencyTracker(strategy=StaticLatency(latency_ms=5.0))
@@ -117,7 +119,8 @@ async def test_unmapped_device_gets_broadcast_when_compositor_active() -> None:
     event_bus.subscribe(BeatEvent, on_beat)
 
     effect = BeatPulse()
-    engine = EffectEngine(clock=clock, effect=effect, led_count=60, fps=60)
+    deck = EffectDeck(effect)
+    engine = EffectEngine(clock=clock, deck=deck, led_count=60, fps=60)
 
     mapped_tracker = LatencyTracker(strategy=StaticLatency(latency_ms=5.0))
     unmapped_tracker = LatencyTracker(strategy=StaticLatency(latency_ms=5.0))
@@ -173,7 +176,8 @@ async def test_no_scene_matches_mvp_behavior() -> None:
     event_bus.subscribe(BeatEvent, on_beat)
 
     effect = BeatPulse()
-    engine = EffectEngine(clock=clock, effect=effect, led_count=10, fps=60)
+    deck = EffectDeck(effect)
+    engine = EffectEngine(clock=clock, deck=deck, led_count=10, fps=60)
 
     tracker_a = LatencyTracker(strategy=StaticLatency(latency_ms=5.0))
     tracker_b = LatencyTracker(strategy=StaticLatency(latency_ms=5.0))

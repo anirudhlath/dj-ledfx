@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from dj_ledfx.config import AppConfig
+from dj_ledfx.config import AppConfig, DevicesConfig, GoveeConfig
 from dj_ledfx.devices.govee.backend import GoveeBackend
 from dj_ledfx.devices.govee.segment import GoveeSegmentAdapter
 from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
@@ -45,7 +45,7 @@ class TestGoveeBackend:
         assert backend.is_enabled(config) is True
 
     def test_is_enabled_disabled(self) -> None:
-        config = AppConfig(govee_enabled=False)
+        config = AppConfig(devices=DevicesConfig(govee=GoveeConfig(enabled=False)))
         backend = GoveeBackend()
         assert backend.is_enabled(config) is False
 

@@ -16,6 +16,7 @@ class BeatEvent:
     device_number: int
     device_name: str
     timestamp: float  # time.monotonic()
+    pitch_percent: float = 0.0
 
 
 class EventBus:

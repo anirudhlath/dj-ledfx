@@ -45,6 +45,10 @@ class SpatialCompositor:
             self._strip_indices[device_id] = all_indices[offset : offset + count]
             offset += count
 
+    def get_strip_indices(self) -> dict[str, NDArray[np.float64]]:
+        """Return a copy of the per-device strip index mapping."""
+        return dict(self._strip_indices)
+
     def composite(
         self,
         effect_strip: NDArray[np.uint8],

@@ -14,9 +14,12 @@ Beat-synced LED effect engine driven by Pro DJ Link network data with per-device
 ## Commands
 
 ```bash
+uv sync                          # Install dependencies
+uv sync --extra web              # Install with web UI extras
 uv run -m dj_ledfx              # Run the app
 uv run -m dj_ledfx --demo       # Run with simulated beats (no DJ hardware)
 uv run -m dj_ledfx --demo --web # Run with web UI (requires: uv sync --extra web)
+uv run -m dj_ledfx --demo --web dev  # Run with hot-reload dev server (frontend + backend)
 uv run pytest                    # Run tests
 uv run pytest -x -v              # Run tests, stop on first failure
 uv run ruff check .              # Lint
@@ -34,24 +37,38 @@ src/dj_ledfx/ layout:
 - `beat/` — BeatClock phase interpolation + BeatSimulator for demo mode
 - `effects/` — Effect ABC + 60fps render engine writing future frames to ring buffer
 - `scheduling/` — LookaheadScheduler: per-device send loops with FrameSlot depth-1 slots, FPS cap, RTT measurement
+- `metrics.py` — Contextmanager-based timing metrics for performance measurement
 - `devices/` — DeviceAdapter ABC + OpenRGB adapter (asyncio.to_thread wrapped) + device-type heuristics
+- `devices/backend.py` — DeviceBackend ABC for protocol-level adapters
+- `devices/govee/` — Govee WiFi LED protocol (UDP segment control, SKU registry, transport)
+- `devices/lifx/` — LIFX LAN protocol (bulb/strip/tile discovery, packet encoding, transport)
 - `latency/` — ProbeStrategy protocol + StaticLatency/EMA/WindowedMean strategies
 - `config.py` — Nested dataclass config (EngineConfig, EffectConfig, NetworkConfig, WebConfig, DevicesConfig) with load/save via tomllib/tomli_w
 - `effects/params.py` — EffectParam descriptor for runtime introspection
 - `effects/registry.py` — Effect auto-registry via __init_subclass__, get_effect_classes/schemas/create
 - `effects/deck.py` — EffectDeck hot-swap wrapper (shared between engine and web API)
 - `effects/presets.py` — PresetStore with TOML persistence
-- `web/` — FastAPI app factory, REST routers (effects, devices, config), WebSocket hub, Pydantic schemas
+- `devices/manager.py` — DeviceManager: discovery, lifecycle, group management
+- `web/` — FastAPI app factory, REST routers (effects, devices, config, scene), WebSocket hub, Pydantic schemas
+- `web/ws.py` — WebSocket hub: binary LED frame broadcast (2-byte name + 4-byte seq + RGB), beat/status JSON channels
+- `web/state.py` — Shared app state dataclass passed via FastAPI app.state
+- `web/router_scene.py` — Scene REST endpoints (placement CRUD, mapping config, auto-creates SceneModel)
+- `spatial/mapping.py` — mapping_from_config() shared factory for LinearMapping/RadialMapping
+- `spatial/compositor.py` — Spatial compositor for multi-device LED frame distribution
+- `spatial/geometry.py` — 3D geometry utilities for spatial calculations
+- `spatial/scene.py` — SceneModel: device placements, spatial configuration
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
 - `events.py` — Typed callback event bus (sync, non-blocking callbacks only)
 - `status.py` — SystemStatus health tracking
 - `main.py` — Application coordinator (startup/shutdown orchestration)
 
 frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
-- `src/lib/ws/client.ts` — Multiplexed WS client with reconnection
-- `src/lib/api/client.ts` — Typed REST client
-- `src/lib/hooks/` — React hooks for beat, effects, devices state
-- `src/pages/` — Views: Live Performance, Devices, Config, Scene (placeholder)
+- `src/lib/ws-client.ts` — Multiplexed WS client with reconnection
+- `src/lib/api-client.ts` — Typed REST client
+- `src/hooks/` — React hooks for beat, effects, devices, scene state
+- `src/pages/` — Views: Live Performance, Devices, Config, Scene (3D editor)
+- `src/components/` — transport-section, effect-deck, device-monitor (Live page); scene/ (3D editor)
+- `src/components/scene/` — R3F scene editor: viewport, device meshes, mapping helpers, bounds box, panels
 
 ## Code Style
 
@@ -66,6 +83,9 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - All components run on a single asyncio event loop — no cross-thread state access
 - AppConfig uses nested dataclasses: `config.engine.fps`, `config.devices.openrgb.host` (not flat)
 - EffectEngine accepts `deck: EffectDeck` (not raw `effect: Effect`)
+- Frontend uses shadcn/ui components (based on @base-ui/react, NOT Radix — different APIs)
+- Frontend hooks in `src/hooks/`, one per domain (use-beat, use-devices, use-effects, use-scene)
+- WebSocket binary frame protocol: 2-byte name length, UTF-8 name, 4-byte sequence, then RGB bytes
 
 ## Key Design Decisions
 
@@ -99,6 +119,8 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Packet parsing tests use hex dump fixtures from `tests/fixtures/`
 - Mock `openrgb-python` for device tests
 - Integration tests run BeatSimulator → full pipeline → mock DeviceAdapter
+- Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern
+- `tests/web/` covers all REST routers and WebSocket hub
 
 ## Gotchas
 
@@ -109,3 +131,9 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Pro DJ Link requires binding to the correct network interface (not localhost)
 - Ring buffer needs ~1s to warm up — high-latency devices get no frames until buffer fills to their latency depth
 - Only CDJ-3000 generation packets (0x1F) supported in MVP; older hardware silently ignored
+- R3F: `<threeLine>` is the correct intrinsic for THREE.Line (not `<line_>`) — crashes if wrong
+- R3F: `useFrame` for live-updating geometry; drei `Line` component only updates on prop change via React state
+- R3F: TransformControls `onChange` prop for live drag callbacks (not useEffect + ref — refs don't trigger effects)
+- R3F: optimistic state updates needed when dragging 3D objects to avoid position jumps during API round-trips
+- Config persistence: `dataclasses.asdict()` serializes field names as-is; `load_config` must match (e.g. `scene_config` not `scene`)
+- Device adapter: use `managed.adapter.device_info.name` (not `managed.adapter.name`) to get device name

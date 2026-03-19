@@ -12,45 +12,44 @@ from dj_ledfx.latency.tracker import LatencyTracker
 
 class OpenRGBBackend(DeviceBackend):
     def is_enabled(self, config: AppConfig) -> bool:
-        return config.openrgb_enabled
+        return config.devices.openrgb.enabled
 
     async def discover(self, config: AppConfig) -> list[DiscoveredDevice]:
-        discovered = await OpenRGBAdapter.discover(
-            host=config.openrgb_host, port=config.openrgb_port
-        )
+        orgb = config.devices.openrgb
+        discovered = await OpenRGBAdapter.discover(host=orgb.host, port=orgb.port)
         logger.info("Discovered {} OpenRGB devices", len(discovered))
 
         results: list[DiscoveredDevice] = []
         for i in range(len(discovered)):
             try:
                 adapter = OpenRGBAdapter(
-                    host=config.openrgb_host,
-                    port=config.openrgb_port,
+                    host=orgb.host,
+                    port=orgb.port,
                     device_index=i,
                 )
                 await adapter.connect()
 
                 heuristic_ms = estimate_device_latency_ms(adapter.device_info.name)
                 strategy: StaticLatency | EMALatency | WindowedMeanLatency
-                if config.openrgb_latency_strategy == "static":
-                    strategy = StaticLatency(config.openrgb_latency_ms)
-                elif config.openrgb_latency_strategy == "ema":
+                if orgb.latency_strategy == "static":
+                    strategy = StaticLatency(orgb.latency_ms)
+                elif orgb.latency_strategy == "ema":
                     strategy = EMALatency(initial_value_ms=heuristic_ms)
                 else:
                     strategy = WindowedMeanLatency(
-                        window_size=config.openrgb_latency_window_size,
+                        window_size=orgb.latency_window_size,
                         initial_value_ms=heuristic_ms,
                     )
 
                 tracker = LatencyTracker(
                     strategy=strategy,
-                    manual_offset_ms=config.openrgb_manual_offset_ms,
+                    manual_offset_ms=orgb.manual_offset_ms,
                 )
                 results.append(
                     DiscoveredDevice(
                         adapter=adapter,
                         tracker=tracker,
-                        max_fps=config.openrgb_max_fps,
+                        max_fps=orgb.max_fps,
                     )
                 )
             except Exception:

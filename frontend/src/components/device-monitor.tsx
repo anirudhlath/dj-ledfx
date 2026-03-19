@@ -220,7 +220,6 @@ function DeviceCard({ device, frame }: { device: Device; frame: FrameData | unde
           <span className="text-right text-muted-foreground/30">{stats.avgDropPct.toFixed(1)}%</span>
         </div>
       </div>
-    </div>
   )
 }
 
@@ -256,7 +255,7 @@ export function DeviceMonitor({ devices, frameData }: DeviceMonitorProps) {
           {devices.filter((d) => d.connected).length}/{devices.length} online
         </span>
       </div>
-      <TooltipProvider delayDuration={200}>
+      <TooltipProvider>
         <ScrollArea className="w-full">
           <div className="flex gap-2 p-2">
             {devices.map((device) => (

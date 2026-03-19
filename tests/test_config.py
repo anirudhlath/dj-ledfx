@@ -3,17 +3,27 @@ from pathlib import Path
 
 import pytest
 
-from dj_ledfx.config import AppConfig, load_config
+from dj_ledfx.config import (
+    AppConfig,
+    DevicesConfig,
+    EngineConfig,
+    GoveeConfig,
+    LIFXConfig,
+    OpenRGBConfig,
+    WebConfig,
+    load_config,
+    save_config,
+)
 
 
 def test_default_config() -> None:
     config = AppConfig()
-    assert config.network_interface == "auto"
-    assert config.engine_fps == 60
-    assert config.max_lookahead_ms == 1000
-    assert config.active_effect == "beat_pulse"
-    assert config.openrgb_host == "127.0.0.1"
-    assert config.openrgb_port == 6742
+    assert config.network.interface == "auto"
+    assert config.engine.fps == 60
+    assert config.engine.max_lookahead_ms == 1000
+    assert config.effect.active_effect == "beat_pulse"
+    assert config.devices.openrgb.host == "127.0.0.1"
+    assert config.devices.openrgb.port == 6742
 
 
 def test_load_config_from_toml(tmp_path: Path) -> None:
@@ -40,49 +50,49 @@ def test_load_config_from_toml(tmp_path: Path) -> None:
     """)
     )
     config = load_config(toml_file)
-    assert config.network_interface == "eth0"
-    assert config.engine_fps == 30
-    assert config.max_lookahead_ms == 500
-    assert config.openrgb_host == "192.168.1.100"
-    assert config.beat_pulse_gamma == 3.0
-    assert config.openrgb_latency_ms == 20
+    assert config.network.interface == "eth0"
+    assert config.engine.fps == 30
+    assert config.engine.max_lookahead_ms == 500
+    assert config.devices.openrgb.host == "192.168.1.100"
+    assert config.effect.beat_pulse_gamma == 3.0
+    assert config.devices.openrgb.latency_ms == 20
 
 
 def test_load_config_missing_file_returns_defaults() -> None:
     config = load_config(Path("/nonexistent/config.toml"))
-    assert config.engine_fps == 60
+    assert config.engine.fps == 60
 
 
 def test_config_validation_bad_fps() -> None:
-    with pytest.raises(ValueError, match="fps"):
-        AppConfig(engine_fps=0)
+    with pytest.raises(ValueError, match="engine_fps"):
+        AppConfig(engine=EngineConfig(fps=0))
 
 
 def test_config_validation_bad_lookahead() -> None:
     with pytest.raises(ValueError, match="max_lookahead_ms"):
-        AppConfig(max_lookahead_ms=-1)
+        AppConfig(engine=EngineConfig(max_lookahead_ms=-1))
 
 
 def test_default_config_new_fields() -> None:
     config = AppConfig()
-    assert config.openrgb_max_fps == 60
-    assert config.openrgb_latency_window_size == 60
-    assert config.openrgb_latency_strategy == "windowed_mean"
+    assert config.devices.openrgb.max_fps == 60
+    assert config.devices.openrgb.latency_window_size == 60
+    assert config.devices.openrgb.latency_strategy == "windowed_mean"
 
 
 def test_config_validation_bad_max_fps() -> None:
-    with pytest.raises(ValueError, match="openrgb_max_fps"):
-        AppConfig(openrgb_max_fps=0)
+    with pytest.raises(ValueError, match="openrgb max_fps"):
+        AppConfig(devices=DevicesConfig(openrgb=OpenRGBConfig(max_fps=0)))
 
 
 def test_config_validation_bad_window_size() -> None:
-    with pytest.raises(ValueError, match="openrgb_latency_window_size"):
-        AppConfig(openrgb_latency_window_size=0)
+    with pytest.raises(ValueError, match="openrgb latency_window_size"):
+        AppConfig(devices=DevicesConfig(openrgb=OpenRGBConfig(latency_window_size=0)))
 
 
 def test_config_validation_bad_strategy() -> None:
-    with pytest.raises(ValueError, match="openrgb_latency_strategy"):
-        AppConfig(openrgb_latency_strategy="invalid")
+    with pytest.raises(ValueError, match="openrgb latency_strategy"):
+        AppConfig(devices=DevicesConfig(openrgb=OpenRGBConfig(latency_strategy="invalid")))
 
 
 def test_load_config_new_toml_fields(tmp_path: Path) -> None:
@@ -96,72 +106,72 @@ def test_load_config_new_toml_fields(tmp_path: Path) -> None:
     """)
     )
     config = load_config(toml_file)
-    assert config.openrgb_max_fps == 30
-    assert config.openrgb_latency_window_size == 120
-    assert config.openrgb_latency_strategy == "ema"
+    assert config.devices.openrgb.max_fps == 30
+    assert config.devices.openrgb.latency_window_size == 120
+    assert config.devices.openrgb.latency_strategy == "ema"
 
 
 def test_lifx_config_defaults() -> None:
     config = AppConfig()
-    assert config.lifx_enabled is True
-    assert config.lifx_default_kelvin == 3500
-    assert config.lifx_max_fps == 60
-    assert config.lifx_latency_strategy == "ema"
-    assert config.lifx_echo_probe_interval_s == 2.0
+    assert config.devices.lifx.enabled is True
+    assert config.devices.lifx.default_kelvin == 3500
+    assert config.devices.lifx.max_fps == 60
+    assert config.devices.lifx.latency_strategy == "ema"
+    assert config.devices.lifx.echo_probe_interval_s == 2.0
 
 
 def test_lifx_config_validation_bad_kelvin() -> None:
-    with pytest.raises(ValueError, match="lifx_default_kelvin"):
-        AppConfig(lifx_default_kelvin=1000)
+    with pytest.raises(ValueError, match="lifx default_kelvin"):
+        AppConfig(devices=DevicesConfig(lifx=LIFXConfig(default_kelvin=1000)))
 
 
 def test_lifx_config_validation_bad_strategy() -> None:
-    with pytest.raises(ValueError, match="lifx_latency_strategy"):
-        AppConfig(lifx_latency_strategy="invalid")
+    with pytest.raises(ValueError, match="lifx latency_strategy"):
+        AppConfig(devices=DevicesConfig(lifx=LIFXConfig(latency_strategy="invalid")))
 
 
 def test_lifx_config_negative_offset_allowed() -> None:
-    config = AppConfig(lifx_manual_offset_ms=-10.0)
-    assert config.lifx_manual_offset_ms == -10.0
+    config = AppConfig(devices=DevicesConfig(lifx=LIFXConfig(manual_offset_ms=-10.0)))
+    assert config.devices.lifx.manual_offset_ms == -10.0
 
 
 def test_lifx_config_from_toml(tmp_path: Path) -> None:
     toml_file = tmp_path / "config.toml"
     toml_file.write_text("[devices.lifx]\nenabled = false\nmax_fps = 20\ndefault_kelvin = 4000\n")
     config = load_config(toml_file)
-    assert config.lifx_enabled is False
-    assert config.lifx_max_fps == 20
-    assert config.lifx_default_kelvin == 4000
+    assert config.devices.lifx.enabled is False
+    assert config.devices.lifx.max_fps == 20
+    assert config.devices.lifx.default_kelvin == 4000
 
 
 class TestGoveeConfigValidation:
     def test_govee_defaults(self) -> None:
         config = AppConfig()
-        assert config.govee_enabled is True
-        assert config.govee_max_fps == 40
-        assert config.govee_latency_strategy == "ema"
-        assert config.govee_latency_ms == 100.0
-        assert config.govee_segment_override is None
+        assert config.devices.govee.enabled is True
+        assert config.devices.govee.max_fps == 40
+        assert config.devices.govee.latency_strategy == "ema"
+        assert config.devices.govee.latency_ms == 100.0
+        assert config.devices.govee.segment_override is None
 
     def test_govee_max_fps_must_be_positive(self) -> None:
-        with pytest.raises(ValueError, match="govee_max_fps"):
-            AppConfig(govee_max_fps=0)
+        with pytest.raises(ValueError, match="govee max_fps"):
+            AppConfig(devices=DevicesConfig(govee=GoveeConfig(max_fps=0)))
 
     def test_govee_invalid_strategy(self) -> None:
-        with pytest.raises(ValueError, match="govee_latency_strategy"):
-            AppConfig(govee_latency_strategy="invalid")
+        with pytest.raises(ValueError, match="govee latency_strategy"):
+            AppConfig(devices=DevicesConfig(govee=GoveeConfig(latency_strategy="invalid")))
 
     def test_govee_discovery_timeout_must_be_positive(self) -> None:
-        with pytest.raises(ValueError, match="govee_discovery_timeout_s"):
-            AppConfig(govee_discovery_timeout_s=0)
+        with pytest.raises(ValueError, match="govee discovery_timeout_s"):
+            AppConfig(devices=DevicesConfig(govee=GoveeConfig(discovery_timeout_s=0)))
 
     def test_govee_probe_interval_must_be_positive(self) -> None:
-        with pytest.raises(ValueError, match="govee_probe_interval_s"):
-            AppConfig(govee_probe_interval_s=0)
+        with pytest.raises(ValueError, match="govee probe_interval_s"):
+            AppConfig(devices=DevicesConfig(govee=GoveeConfig(probe_interval_s=0)))
 
     def test_govee_latency_ms_must_be_non_negative(self) -> None:
-        with pytest.raises(ValueError, match="govee_latency_ms"):
-            AppConfig(govee_latency_ms=-1)
+        with pytest.raises(ValueError, match="govee latency_ms"):
+            AppConfig(devices=DevicesConfig(govee=GoveeConfig(latency_ms=-1)))
 
     def test_govee_config_from_toml(self, tmp_path: Path) -> None:
         toml_file = tmp_path / "config.toml"
@@ -171,10 +181,10 @@ class TestGoveeConfigValidation:
             "latency_ms = 80\nprobe_interval_s = 10.0\n"
         )
         config = load_config(toml_file)
-        assert config.govee_enabled is False
-        assert config.govee_max_fps == 30
-        assert config.govee_latency_ms == 80.0
-        assert config.govee_probe_interval_s == 10.0
+        assert config.devices.govee.enabled is False
+        assert config.devices.govee.max_fps == 30
+        assert config.devices.govee.latency_ms == 80.0
+        assert config.devices.govee.probe_interval_s == 10.0
 
 
 def test_load_config_with_scene(tmp_path: Path) -> None:
@@ -209,3 +219,145 @@ def test_load_config_without_scene(tmp_path: Path) -> None:
 def test_default_config_no_scene() -> None:
     config = AppConfig()
     assert config.scene_config is None
+
+
+# New tests for Task 2
+
+
+def test_nested_config_defaults() -> None:
+    """Nested dataclasses have correct defaults."""
+    config = AppConfig()
+    assert config.engine.fps == 60
+    assert config.engine.max_lookahead_ms == 1000
+    assert config.effect.active_effect == "beat_pulse"
+    assert config.network.interface == "auto"
+    assert config.network.passive_mode is True
+    assert config.web.enabled is False
+    assert config.web.host == "127.0.0.1"
+    assert config.web.port == 8080
+    assert "http://localhost:5173" in config.web.cors_origins
+    assert config.devices.openrgb.enabled is True
+    assert config.devices.lifx.enabled is True
+    assert config.devices.govee.enabled is True
+
+
+def test_nested_config_validation() -> None:
+    """Validation still works on nested fields."""
+    with pytest.raises(ValueError, match="engine_fps"):
+        AppConfig(engine=EngineConfig(fps=0))
+    with pytest.raises(ValueError, match="max_lookahead_ms"):
+        AppConfig(engine=EngineConfig(max_lookahead_ms=-1))
+
+
+def test_load_nested_config(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text("""
+[engine]
+fps = 90
+max_lookahead_ms = 500
+
+[effect]
+active_effect = "rainbow_wave"
+
+[network]
+interface = "eth0"
+
+[web]
+enabled = true
+port = 9090
+
+[devices.openrgb]
+enabled = false
+host = "10.0.0.1"
+
+[devices.lifx]
+max_fps = 30
+
+[devices.govee]
+max_fps = 20
+""")
+    config = load_config(p)
+    assert config.engine.fps == 90
+    assert config.engine.max_lookahead_ms == 500
+    assert config.effect.active_effect == "rainbow_wave"
+    assert config.network.interface == "eth0"
+    assert config.web.enabled is True
+    assert config.web.port == 9090
+    assert config.devices.openrgb.enabled is False
+    assert config.devices.openrgb.host == "10.0.0.1"
+    assert config.devices.lifx.max_fps == 30
+    assert config.devices.govee.max_fps == 20
+
+
+def test_load_config_backward_compat_prodjlink(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text("""
+[prodjlink]
+passive_mode = false
+""")
+    config = load_config(p)
+    assert config.network.passive_mode is False
+
+
+def test_load_config_backward_compat_effect_subtable(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text("""
+[effect]
+active_effect = "rainbow_wave"
+
+[effect.beat_pulse]
+gamma = 3.5
+palette = ["#ff0000", "#00ff00"]
+""")
+    config = load_config(p)
+    assert config.effect.beat_pulse_gamma == 3.5
+    assert config.effect.beat_pulse_palette == ["#ff0000", "#00ff00"]
+
+
+def test_load_config_backward_compat_effect_active_key(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text("""
+[effect]
+active = "rainbow_wave"
+""")
+    config = load_config(p)
+    assert config.effect.active_effect == "rainbow_wave"
+
+
+def test_load_config_ignores_unknown_keys(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text("""
+[engine]
+fps = 90
+future_field = true
+""")
+    config = load_config(p)
+    assert config.engine.fps == 90
+
+
+# Task 3 tests
+
+
+def test_save_config_roundtrip(tmp_path: Path) -> None:
+    config = AppConfig(
+        engine=EngineConfig(fps=90),
+        web=WebConfig(enabled=True, port=9090),
+        devices=DevicesConfig(
+            openrgb=OpenRGBConfig(enabled=False),
+        ),
+    )
+    path = tmp_path / "config.toml"
+    save_config(config, path)
+    loaded = load_config(path)
+    assert loaded.engine.fps == 90
+    assert loaded.web.enabled is True
+    assert loaded.web.port == 9090
+    assert loaded.devices.openrgb.enabled is False
+    assert loaded.devices.lifx.enabled is True
+
+
+def test_save_config_atomic(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    save_config(AppConfig(), path)
+    assert path.exists()
+    assert not (tmp_path / "config.tmp").exists()

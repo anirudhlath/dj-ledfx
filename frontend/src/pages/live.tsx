@@ -1,15 +1,20 @@
 import { useBeat } from "@/hooks/use-beat"
 import { useEffects } from "@/hooks/use-effects"
 import { useDevices } from "@/hooks/use-devices"
+import { useScene } from "@/hooks/use-scene"
 import { TransportSection } from "@/components/transport-section"
 import { EffectDeck } from "@/components/effect-deck"
 import { DeviceMonitor } from "@/components/device-monitor"
-import { Card, CardContent } from "@/components/ui/card"
+import SceneViewport from "@/components/scene/scene-viewport"
+import DeviceMesh from "@/components/scene/device-mesh"
 
 export default function LivePage() {
   const beat = useBeat()
   const effects = useEffects()
   const { devices, frameData } = useDevices()
+  const { scene } = useScene()
+
+  const placements = scene?.placements ?? []
 
   return (
     <div className="flex flex-col gap-3 h-full">
@@ -18,18 +23,19 @@ export default function LivePage() {
 
       {/* Middle: Scene preview + Effect deck */}
       <div className="flex gap-3 flex-1 min-h-0">
-        {/* Scene preview placeholder */}
-        <div className="flex-1 min-w-0 min-h-0">
-          <Card className="h-full">
-            <CardContent className="flex flex-col items-center justify-center h-full text-center px-4">
-              <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Scene Editor
-              </span>
-              <span className="mt-1 text-[10px] text-muted-foreground/60 uppercase tracking-wider">
-                Phase 2
-              </span>
-            </CardContent>
-          </Card>
+        {/* Live 3D scene preview */}
+        <div className="flex-1 min-w-0 min-h-0 rounded-lg border border-border overflow-hidden">
+          <SceneViewport>
+            {placements.map((p) => (
+              <DeviceMesh
+                key={p.device_id}
+                position={p.position}
+                geometry={p.geometry}
+                ledCount={p.led_count}
+                frameData={frameData.get(p.device_id) ?? null}
+              />
+            ))}
+          </SceneViewport>
         </div>
 
         {/* Effect deck */}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from dj_ledfx.spatial.geometry import (
     PointGeometry,
@@ -215,3 +216,78 @@ class TestSceneModel:
         geo = scene.placements["strip"].geometry
         assert isinstance(geo, StripGeometry)
         assert geo.length == 1.0
+
+
+class TestSceneModelMutations:
+    def test_add_placement(self) -> None:
+        scene = SceneModel(placements={})
+        placement = DevicePlacement("lamp", (1.0, 2.0, 0.0), PointGeometry(), 1)
+        scene.add_placement(placement)
+        assert "lamp" in scene.placements
+        assert scene.placements["lamp"] is placement
+
+    def test_add_placement_duplicate_raises(self) -> None:
+        p = DevicePlacement("lamp", (1.0, 2.0, 0.0), PointGeometry(), 1)
+        scene = SceneModel(placements={"lamp": p})
+        with pytest.raises(ValueError, match="already exists"):
+            scene.add_placement(p)
+
+    def test_add_placement_invalidates_cache(self) -> None:
+        scene = SceneModel(
+            placements={
+                "a": DevicePlacement("a", (0.0, 0.0, 0.0), PointGeometry(), 1),
+            }
+        )
+        _ = scene.get_led_positions("a")
+        assert "a" in scene._position_cache
+        p = DevicePlacement("b", (5.0, 0.0, 0.0), PointGeometry(), 1)
+        scene.add_placement(p)
+        assert "b" not in scene._position_cache
+
+    def test_update_placement_position(self) -> None:
+        geo = PointGeometry()
+        p = DevicePlacement("lamp", (0.0, 0.0, 0.0), geo, 1)
+        scene = SceneModel(placements={"lamp": p})
+        scene.update_placement("lamp", position=(5.0, 3.0, 1.0))
+        assert scene.placements["lamp"].position == (5.0, 3.0, 1.0)
+        assert scene.placements["lamp"].geometry is geo
+
+    def test_update_placement_geometry(self) -> None:
+        p = DevicePlacement("strip", (0.0, 0.0, 0.0), PointGeometry(), 10)
+        scene = SceneModel(placements={"strip": p})
+        new_geo = StripGeometry(direction=(0.0, 1.0, 0.0), length=2.0)
+        scene.update_placement("strip", geometry=new_geo)
+        assert scene.placements["strip"].geometry is new_geo
+        assert scene.placements["strip"].position == (0.0, 0.0, 0.0)
+
+    def test_update_placement_invalidates_cache(self) -> None:
+        p = DevicePlacement("lamp", (0.0, 0.0, 0.0), PointGeometry(), 1)
+        scene = SceneModel(placements={"lamp": p})
+        _ = scene.get_led_positions("lamp")
+        assert "lamp" in scene._position_cache
+        scene.update_placement("lamp", position=(5.0, 0.0, 0.0))
+        assert "lamp" not in scene._position_cache
+
+    def test_update_placement_unknown_raises(self) -> None:
+        scene = SceneModel(placements={})
+        with pytest.raises(KeyError, match="nonexistent"):
+            scene.update_placement("nonexistent", position=(0.0, 0.0, 0.0))
+
+    def test_remove_placement(self) -> None:
+        p = DevicePlacement("lamp", (0.0, 0.0, 0.0), PointGeometry(), 1)
+        scene = SceneModel(placements={"lamp": p})
+        scene.remove_placement("lamp")
+        assert "lamp" not in scene.placements
+
+    def test_remove_placement_clears_cache(self) -> None:
+        p = DevicePlacement("lamp", (0.0, 0.0, 0.0), PointGeometry(), 1)
+        scene = SceneModel(placements={"lamp": p})
+        _ = scene.get_led_positions("lamp")
+        assert "lamp" in scene._position_cache
+        scene.remove_placement("lamp")
+        assert "lamp" not in scene._position_cache
+
+    def test_remove_placement_unknown_raises(self) -> None:
+        scene = SceneModel(placements={})
+        with pytest.raises(KeyError, match="nonexistent"):
+            scene.remove_placement("nonexistent")

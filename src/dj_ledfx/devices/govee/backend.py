@@ -18,9 +18,10 @@ class GoveeBackend(DeviceBackend):
         self._transport: GoveeTransport | None = None
 
     def is_enabled(self, config: AppConfig) -> bool:
-        return config.govee_enabled
+        return config.devices.govee.enabled
 
     async def discover(self, config: AppConfig) -> list[DiscoveredDevice]:
+        govee = config.devices.govee
         self._transport = GoveeTransport()
         try:
             await self._transport.open()
@@ -29,7 +30,7 @@ class GoveeBackend(DeviceBackend):
             self._transport = None
             return []
 
-        records = await self._transport.discover(timeout_s=config.govee_discovery_timeout_s)
+        records = await self._transport.discover(timeout_s=govee.discovery_timeout_s)
         if not records:
             logger.info("No Govee devices found — ensure LAN control is enabled in Govee app")
 
@@ -38,7 +39,7 @@ class GoveeBackend(DeviceBackend):
             try:
                 capability = get_device_capability(record.sku)
                 segment_count = get_segment_count(
-                    record.sku, config_override=config.govee_segment_override
+                    record.sku, config_override=govee.segment_override
                 )
 
                 if capability.is_rgbic and segment_count > 0:
@@ -71,7 +72,7 @@ class GoveeBackend(DeviceBackend):
                     DiscoveredDevice(
                         adapter=adapter,
                         tracker=tracker,
-                        max_fps=config.govee_max_fps,
+                        max_fps=govee.max_fps,
                     )
                 )
             except Exception:
@@ -83,7 +84,7 @@ class GoveeBackend(DeviceBackend):
                 continue
 
         if results:
-            self._transport.start_probing(interval_s=config.govee_probe_interval_s)
+            self._transport.start_probing(interval_s=govee.probe_interval_s)
 
         return results
 
@@ -94,14 +95,15 @@ class GoveeBackend(DeviceBackend):
             self._transport = None
 
     def _create_tracker(self, config: AppConfig) -> LatencyTracker:
+        govee = config.devices.govee
         strategy: StaticLatency | EMALatency | WindowedMeanLatency
-        if config.govee_latency_strategy == "static":
-            strategy = StaticLatency(config.govee_latency_ms)
-        elif config.govee_latency_strategy == "ema":
-            strategy = EMALatency(initial_value_ms=config.govee_latency_ms)
+        if govee.latency_strategy == "static":
+            strategy = StaticLatency(govee.latency_ms)
+        elif govee.latency_strategy == "ema":
+            strategy = EMALatency(initial_value_ms=govee.latency_ms)
         else:
             strategy = WindowedMeanLatency(
-                window_size=config.govee_latency_window_size,
-                initial_value_ms=config.govee_latency_ms,
+                window_size=govee.latency_window_size,
+                initial_value_ms=govee.latency_ms,
             )
-        return LatencyTracker(strategy=strategy, manual_offset_ms=config.govee_manual_offset_ms)
+        return LatencyTracker(strategy=strategy, manual_offset_ms=govee.manual_offset_ms)
