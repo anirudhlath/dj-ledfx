@@ -1,0 +1,204 @@
+[ 1437985ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1438186ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1438588ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1439391ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1441012ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1444611ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1454076ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1460729ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1470464ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1480072ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1486705ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1494186ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1501372ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1508555ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1514864ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1523961ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1532391ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1538679ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1546769ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1552831ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1562673ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1569157ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1575676ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1585623ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1591962ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1599223ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1609015ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1617015ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1625207ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1631470ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1641449ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1648345ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1654999ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1663633ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1671685ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1678126ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1684719ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1690987ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1699154ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1707909ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1714754ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1722862ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1732054ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1741904ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1749583ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1758650ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1765679ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1773943ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1779985ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1786480ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1795152ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1804343ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1813750ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1821943ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1829288ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1838400ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1846034ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1853900ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1861068ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1869305ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1877822ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1884388ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1892650ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1900834ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1906956ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1916612ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1926531ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1932956ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1941839ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1948296ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1957130ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1964018ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1973568ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1981210ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1988838ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 1996956ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2005757ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2013415ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2022022ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2030913ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2039451ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2047272ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2054122ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2060813ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2067773ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2076885ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2083976ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2093973ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2103018ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2111537ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2118805ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2126959ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2133967ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2142158ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2149633ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2157954ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2166170ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2175993ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2184620ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2192083ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2199925ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2208964ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2296228ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2296433ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2296839ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2297645ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2299253ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2302482ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2307548ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2312625ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2352415ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2352617ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2353024ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2353833ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2355450ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2358665ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2363702ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2368752ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2373820ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2378885ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2384049ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2389348ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2394698ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2404381ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2412406ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2419995ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2427640ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2436545ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2446366ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2455977ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2462866ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2471180ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2480416ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2486505ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2493738ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2503429ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2511856ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2521289ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2528220ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2534608ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2544592ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2552990ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2561048ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2568484ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2578123ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2587941ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2596608ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2606106ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2613264ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2623075ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2631700ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2638268ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2646442ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2654304ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2661835ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2668505ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2676330ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2682962ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2692201ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 2701485ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[ 3189742ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5173/favicon.svg:0
+[ 3332251ms] TypeError: Cannot read properties of undefined (reading 'call')
+
+	in <unknown>
+
+
+	in <unknown>
+	in label.svelte
+	in PaletteEditor.svelte
+	in EffectDeckPanel.svelte
+	in +page.svelte
+	in +layout.svelte
+	in root.svelte
+	in undefined
+
+    at get_next_sibling (http://localhost:5173/node_modules/.vite/deps/chunk-WVIMR2I3.js?v=0d28bdf0:4594:25)
+    at remove_effect_dom (http://localhost:5173/node_modules/.vite/deps/chunk-WVIMR2I3.js?v=0d28bdf0:3586:39)
+    at destroy_effect (http://localhost:5173/node_modules/.vite/deps/chunk-WVIMR2I3.js?v=0d28bdf0:3556:5)
+    at create_effect (http://localhost:5173/node_modules/.vite/deps/chunk-WVIMR2I3.js?v=0d28bdf0:3329:7)
+    at branch (http://localhost:5173/node_modules/.vite/deps/chunk-WVIMR2I3.js?v=0d28bdf0:3507:10)
+    at http://localhost:5173/node_modules/.vite/deps/chunk-5AP6J6BB.js?v=0d28bdf0:326:17
+    at update_reaction (http://localhost:5173/node_modules/.vite/deps/chunk-WVIMR2I3.js?v=0d28bdf0:3843:18)
+    at update_effect (http://localhost:5173/node_modules/.vite/deps/chunk-WVIMR2I3.js?v=0d28bdf0:3982:21)
+    at create_effect (http://localhost:5173/node_modules/.vite/deps/chunk-WVIMR2I3.js?v=0d28bdf0:3327:7)
+    at block (http://localhost:5173/node_modules/.vite/deps/chunk-WVIMR2I3.js?v=0d28bdf0:3493:17)
+[ 3332346ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/src/routes/+page.svelte?t=1773815321202:0
+[ 3332380ms] [WARNING] The next HMR update will cause the page to reload @ http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/client.js?v=0d28bdf0:3298
+[ 3332380ms] [ERROR] TypeError: Failed to fetch dynamically imported module: http://localhost:5173/.svelte-kit/generated/client/nodes/2.js?t=1773815321202 @ http://localhost:5173/@fs/Users/anirudhlath/code/private/dj-ledfx/.worktrees/web-ui/frontend/.svelte-kit/generated/client/app.js:21
+[ 3341965ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/src/routes/+page.svelte?t=1773815331810:0
+[ 3341975ms] [WARNING] The next HMR update will cause the page to reload @ http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/client.js?v=0d28bdf0:3298
+[ 3341975ms] [ERROR] TypeError: Failed to fetch dynamically imported module: http://localhost:5173/.svelte-kit/generated/client/nodes/2.js?t=1773815331810 @ http://localhost:5173/@fs/Users/anirudhlath/code/private/dj-ledfx/.worktrees/web-ui/frontend/.svelte-kit/generated/client/app.js:21
+[ 3364586ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/src/routes/+page.svelte?t=1773815354421:0
+[ 3364586ms] [WARNING] The next HMR update will cause the page to reload @ http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/client.js?v=0d28bdf0:3298
+[ 3364586ms] [ERROR] TypeError: Failed to fetch dynamically imported module: http://localhost:5173/.svelte-kit/generated/client/nodes/2.js?t=1773815354421 @ http://localhost:5173/@fs/Users/anirudhlath/code/private/dj-ledfx/.worktrees/web-ui/frontend/.svelte-kit/generated/client/app.js:21
+[ 3365298ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/src/routes/+page.svelte?t=1773815354421:0
+[ 3365329ms] [WARNING] The next HMR update will cause the page to reload @ http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/client.js?v=a2a14705:3298
+[ 3365329ms] [ERROR] TypeError: Failed to fetch dynamically imported module: http://localhost:5173/.svelte-kit/generated/client/nodes/2.js?t=1773815354421 @ http://localhost:5173/@fs/Users/anirudhlath/code/private/dj-ledfx/.worktrees/web-ui/frontend/.svelte-kit/generated/client/app.js:21
+[ 3374840ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/src/routes/+page.svelte?t=1773815364685:0
+[ 3374841ms] [WARNING] The next HMR update will cause the page to reload @ http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/client.js?v=a2a14705:3298
+[ 3374841ms] [ERROR] TypeError: Failed to fetch dynamically imported module: http://localhost:5173/.svelte-kit/generated/client/nodes/2.js?t=1773815364685 @ http://localhost:5173/@fs/Users/anirudhlath/code/private/dj-ledfx/.worktrees/web-ui/frontend/.svelte-kit/generated/client/app.js:21
+[ 3444535ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/src/routes/+page.svelte?t=1773815364685:0
+[ 3444538ms] [WARNING] The next HMR update will cause the page to reload @ http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/client.js?v=a2a14705:3298
+[ 3444539ms] [ERROR] TypeError: Failed to fetch dynamically imported module: http://localhost:5173/.svelte-kit/generated/client/nodes/2.js?t=1773815364685 @ http://localhost:5173/@fs/Users/anirudhlath/code/private/dj-ledfx/.worktrees/web-ui/frontend/.svelte-kit/generated/client/app.js:21
+[ 4206506ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ chrome-error://chromewebdata/:0

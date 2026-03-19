@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the dj-ledfx web UI frontend from scratch using SvelteKit 2 + shadcn-svelte with completely vanilla/default theme (zinc dark). No custom colors, fonts, or theme overrides. The old frontend has been deleted. Data layer files (stores, WS client, API client) are preserved at `/tmp/dj-ledfx-data-layer/` and will be restored.
+**Goal:** Build the dj-ledfx web UI frontend from scratch using SvelteKit 2 + shadcn-svelte dark theme with cyan primary. The old frontend has been deleted. Data layer files (stores, WS client, API client) are preserved at `/tmp/dj-ledfx-data-layer/` and will be restored.
 
-**Architecture:** Scaffold a fresh SvelteKit project, initialize shadcn-svelte with Tailwind v4, install UI components, restore the data layer, then create all views and domain-specific components from scratch. Domain-specific components (BpmDisplay, BeatGrid, PhaseMeter, PlayState, DeviceMonitor, LedIndicator, PaletteEditor) are styled using only default shadcn CSS variables — no custom theme.
+**Architecture:** Scaffold a fresh SvelteKit project, initialize shadcn-svelte with Tailwind v4, install UI components, restore the data layer, then create all views and domain-specific components from scratch. Domain-specific components (BpmDisplay, BeatGrid, PhaseMeter, PlayState, DeviceMonitor, LedIndicator, PaletteEditor) are styled to match shadcn's visual conventions using its CSS variables.
 
 **Tech Stack:** SvelteKit 2, Svelte 5 (runes), shadcn-svelte, bits-ui, Tailwind CSS v4, TypeScript
 
@@ -17,8 +17,8 @@
 - shadcn-svelte Slider `type="single"` uses plain `number` value (not array)
 - ParamSlider: no local state needed — pass `value` prop directly, use `onValueChange`/`onCheckedChange` callbacks
 - Config page Import TOML: use programmatic `fileInput.click()`, not `<label>` wrapper (fragile with component libraries)
+- Primary color HSL: `186 100% 50%` (not 187) to match `#00e5ff` exactly
 - Svelte 5 `bind:this` variables need `$state` declaration
-- Use completely vanilla shadcn-svelte theme — no custom colors, no custom fonts, no overrides
 
 ---
 
@@ -233,17 +233,134 @@ Create `frontend/components.json`:
 }
 ```
 
-- [ ] **Step 3: Run shadcn-svelte init**
+- [ ] **Step 3: Create app.css with shadcn dark theme**
 
-Run the shadcn-svelte CLI to generate `app.css`, `app.html`, and theme config. Use zinc base color, default style, dark mode via class. Accept all defaults — do NOT customize the generated theme in any way.
+Create `frontend/src/app.css`:
 
-```bash
-cd frontend && npx shadcn-svelte@latest init
+```css
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --primary: 240 5.9% 10%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  --destructive: 0 72.2% 50.6%;
+  --destructive-foreground: 0 0% 98%;
+  --ring: 240 10% 3.9%;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --primary: 186 100% 50%;
+  --primary-foreground: 240 10% 3.9%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --ring: 186 100% 50%;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-ring: hsl(var(--ring));
+
+  --font-display: 'Orbitron', monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Functional animation: mirrors LED beat timing */
+@keyframes beat-hit {
+  0% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
 ```
 
-After init completes, add `class="dark"` to the `<html>` tag in `src/app.html` to force dark mode (this is a dark-only app).
+- [ ] **Step 4: Create app.html**
 
-- [ ] **Step 4: Install shadcn-svelte components**
+Create `frontend/src/app.html`:
+
+```html
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet" />
+    %sveltekit.head%
+  </head>
+  <body>
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>
+```
+
+Note: `class="dark"` on `<html>` forces dark mode — this is a dark-only app.
+
+- [ ] **Step 5: Install shadcn-svelte components**
 
 ```bash
 cd frontend && npx shadcn-svelte@latest add button card input label slider switch table badge separator select scroll-area
@@ -251,7 +368,7 @@ cd frontend && npx shadcn-svelte@latest add button card input label slider switc
 
 Accept all prompts. This generates files into `src/lib/components/ui/`.
 
-- [ ] **Step 5: Verify components installed**
+- [ ] **Step 6: Verify components installed**
 
 ```bash
 ls frontend/src/lib/components/ui/
@@ -259,7 +376,7 @@ ls frontend/src/lib/components/ui/
 
 Expected: directories for button, card, input, label, slider, switch, table, badge, separator, select, scroll-area.
 
-- [ ] **Step 6: Verify dev server starts**
+- [ ] **Step 7: Verify dev server starts**
 
 ```bash
 cd frontend && npm run dev -- --port 5173
@@ -267,10 +384,10 @@ cd frontend && npm run dev -- --port 5173
 
 Expected: Vite starts without CSS errors. The app will show a blank page (no routes yet).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-cd frontend && git add -A && git commit -m "feat: initialize shadcn-svelte with default zinc dark theme"
+cd frontend && git add -A && git commit -m "feat: initialize shadcn-svelte with dark theme and cyan primary"
 ```
 
 ### Task 3: Restore data layer files
@@ -328,7 +445,7 @@ A small colored dot for device status. No glow/pulse effects:
 ```svelte
 <script lang="ts">
   interface Props {
-    color?: 'green' | 'red' | 'amber' | 'primary' | 'off';
+    color?: 'green' | 'red' | 'amber' | 'cyan' | 'off';
     size?: 'sm' | 'md';
   }
   let { color = 'off', size = 'md' }: Props = $props();
@@ -337,7 +454,7 @@ A small colored dot for device status. No glow/pulse effects:
     green: 'bg-green-500',
     red: 'bg-red-500',
     amber: 'bg-amber-500',
-    primary: 'bg-primary',
+    cyan: 'bg-primary',
     off: 'bg-muted',
   };
 </script>
@@ -371,7 +488,7 @@ mkdir -p frontend/src/lib/components/transport
 
 - [ ] **Step 2: Create BpmDisplay**
 
-Large BPM number with muted metadata:
+Large Orbitron BPM number with muted metadata:
 
 ```svelte
 <script lang="ts">
@@ -379,7 +496,7 @@ Large BPM number with muted metadata:
 </script>
 
 <div class="flex flex-col">
-  <span class="text-5xl font-bold tabular-nums tracking-tight text-foreground">
+  <span class="text-5xl font-bold font-display tabular-nums tracking-tight text-foreground">
     {beatStore.bpm > 0 ? beatStore.bpm.toFixed(1) : '---.-'}
   </span>
   <span class="text-xs text-muted-foreground mt-1">
@@ -390,7 +507,7 @@ Large BPM number with muted metadata:
 
 - [ ] **Step 3: Create BeatGrid**
 
-Four beat position boxes highlighting the active beat:
+Four beat position boxes with `beat-hit` animation on active beat:
 
 ```svelte
 <script lang="ts">
@@ -403,6 +520,7 @@ Four beat position boxes highlighting the active beat:
     <div
       class="w-9 h-9 rounded-md flex items-center justify-center text-sm font-medium transition-colors
         {active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}"
+      style={active ? 'animation: beat-hit 150ms ease-out;' : ''}
     >
       {beat}
     </div>
@@ -445,9 +563,9 @@ Play/pause icon:
   import { beatStore } from '$lib/stores/beat.svelte';
 </script>
 
-<div class="flex items-center justify-center w-10 h-10 rounded-md {beatStore.isPlaying ? 'bg-accent' : 'bg-muted'}">
+<div class="flex items-center justify-center w-10 h-10 rounded-md {beatStore.isPlaying ? 'bg-primary/10' : 'bg-muted'}">
   {#if beatStore.isPlaying}
-    <svg viewBox="0 0 24 24" class="w-5 h-5 fill-foreground">
+    <svg viewBox="0 0 24 24" class="w-5 h-5 fill-primary">
       <path d="M8 5v14l11-7z"/>
     </svg>
   {:else}
@@ -536,7 +654,7 @@ Dispatches to shadcn Slider (float/int) or Switch (bool). Uses callback pattern 
   <div class="flex flex-col gap-2">
     <div class="flex items-baseline justify-between">
       <Label class="text-xs">{schema.label || name}</Label>
-      <span class="text-xs text-muted-foreground tabular-nums font-mono">
+      <span class="text-xs text-primary tabular-nums font-mono">
         {(value as number).toFixed(schema.step && schema.step < 1 ? 1 : 0)}
       </span>
     </div>
@@ -799,7 +917,7 @@ cd frontend && git add src/lib/components/deck/ && git commit -m "feat: create E
 
 <div class="h-screen flex flex-col bg-background overflow-hidden">
   <nav class="h-11 flex items-center px-4 bg-card border-b border-border shrink-0">
-    <span class="text-sm font-bold mr-6 tracking-widest select-none">
+    <span class="font-display text-primary text-sm font-bold mr-6 tracking-widest select-none">
       dj-ledfx
     </span>
 
@@ -824,7 +942,7 @@ cd frontend && git add src/lib/components/deck/ && git commit -m "feat: create E
         WS
       </span>
       <span class="flex items-center gap-1.5">
-        <LedIndicator color={beatStore.isPlaying ? 'primary' : 'off'} size="sm" />
+        <LedIndicator color={beatStore.isPlaying ? 'cyan' : 'off'} size="sm" />
         {beatStore.isPlaying ? 'PLAYING' : 'STOPPED'}
       </span>
     </div>
@@ -933,7 +1051,7 @@ mkdir -p frontend/src/routes/devices
 
   let expandedDevice = $state<string | null>(null);
   let newGroupName = $state('');
-  let newGroupColor = $state('#ffffff');
+  let newGroupColor = $state('#00e5ff');
   let discovering = $state(false);
 
   async function handleDiscover() {
@@ -1143,7 +1261,7 @@ mkdir -p frontend/src/routes/config
         <div class="flex flex-col gap-2">
           <div class="flex items-baseline justify-between">
             <Label class="text-xs">FPS</Label>
-            <span class="text-xs text-muted-foreground tabular-nums font-mono">{config.engine.fps}</span>
+            <span class="text-xs text-primary tabular-nums font-mono">{config.engine.fps}</span>
           </div>
           <Slider
             type="single"
@@ -1156,7 +1274,7 @@ mkdir -p frontend/src/routes/config
         <div class="flex flex-col gap-2">
           <div class="flex items-baseline justify-between">
             <Label class="text-xs">Max Lookahead</Label>
-            <span class="text-xs text-muted-foreground tabular-nums font-mono">{config.engine.max_lookahead_ms}ms</span>
+            <span class="text-xs text-primary tabular-nums font-mono">{config.engine.max_lookahead_ms}ms</span>
           </div>
           <Slider
             type="single"
@@ -1215,7 +1333,7 @@ mkdir -p frontend/src/routes/config
       <Button variant="outline" onclick={() => fileInput.click()}>Import TOML</Button>
       <input bind:this={fileInput} type="file" accept=".toml" onchange={handleImport} class="hidden" />
       {#if message}
-        <span class="text-xs text-muted-foreground">{message}</span>
+        <span class="text-xs text-primary">{message}</span>
       {/if}
     </div>
   {:else}

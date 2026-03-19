@@ -23,6 +23,9 @@ uv run pytest -x -v              # Run tests, stop on first failure
 uv run ruff check .              # Lint
 uv run ruff format .             # Format
 uv run mypy src/                 # Type check
+cd frontend && npm run build     # Build frontend static assets
+cd frontend && npx tsc --noEmit  # TypeScript type check
+cd frontend && npm run dev       # Frontend dev server (proxies to :8080)
 ```
 
 ## Architecture
@@ -34,11 +37,22 @@ src/dj_ledfx/ layout:
 - `scheduling/` — LookaheadScheduler: per-device send loops with FrameSlot depth-1 slots, FPS cap, RTT measurement
 - `devices/` — DeviceAdapter ABC + OpenRGB adapter (asyncio.to_thread wrapped) + device-type heuristics
 - `latency/` — ProbeStrategy protocol + StaticLatency/EMA/WindowedMean strategies
-- `config.py` — TOML config loading (stdlib tomllib)
+- `config.py` — Nested dataclass config (EngineConfig, EffectConfig, NetworkConfig, WebConfig, DevicesConfig) with load/save via tomllib/tomli_w
+- `effects/params.py` — EffectParam descriptor for runtime introspection
+- `effects/registry.py` — Effect auto-registry via __init_subclass__, get_effect_classes/schemas/create
+- `effects/deck.py` — EffectDeck hot-swap wrapper (shared between engine and web API)
+- `effects/presets.py` — PresetStore with TOML persistence
+- `web/` — FastAPI app factory, REST routers (effects, devices, config), WebSocket hub, Pydantic schemas
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
 - `events.py` — Typed callback event bus (sync, non-blocking callbacks only)
 - `status.py` — SystemStatus health tracking
 - `main.py` — Application coordinator (startup/shutdown orchestration)
+
+frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
+- `src/lib/ws/client.ts` — Multiplexed WS client with reconnection
+- `src/lib/api/client.ts` — Typed REST client
+- `src/lib/hooks/` — React hooks for beat, effects, devices state
+- `src/pages/` — Views: Live Performance, Devices, Config, Scene (placeholder)
 
 ## Code Style
 
@@ -51,6 +65,8 @@ src/dj_ledfx/ layout:
 - BeatClock read methods are synchronous and lock-free (called from render loop)
 - DeviceAdapter is ABC (abstract base class). ProbeStrategy remains Protocol. Always code to the interface.
 - All components run on a single asyncio event loop — no cross-thread state access
+- AppConfig uses nested dataclasses: `config.engine.fps`, `config.devices.openrgb.host` (not flat)
+- EffectEngine accepts `deck: EffectDeck` (not raw `effect: Effect`)
 
 ## Key Design Decisions
 

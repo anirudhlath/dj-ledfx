@@ -1,0 +1,68 @@
+[      20ms] [ERROR] Failed to initialize effects store: TypeError: Failed to fetch
+    at window.fetch (http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/fetcher.js?v=60d64c1f:66:10)
+    at fetchJson (http://localhost:5173/src/lib/api/client.ts:3:22)
+    at Module.getPresets (http://localhost:5173/src/lib/api/client.ts:26:10)
+    at EffectsStore.init (http://localhost:5173/src/lib/stores/effects.svelte.ts:61:128)
+    at http://localhost:5173/src/routes/+layout.svelte?t=1773808574924:44:16
+    at untrack (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:4152:12)
+    at $effect (http://localhost:5173/node_modules/.vite/deps/chunk-OHLRGFL7.js?v=60d64c1f:4168:23)
+    at update_reaction (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:3843:18)
+    at update_effect (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:3982:21)
+    at flush_queued_effects (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:2968:7) @ http://localhost:5173/src/lib/stores/effects.svelte.ts:67
+[      20ms] [ERROR] Failed to initialize devices store: TypeError: Failed to fetch
+    at window.fetch (http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/fetcher.js?v=60d64c1f:66:10)
+    at fetchJson (http://localhost:5173/src/lib/api/client.ts:3:22)
+    at Module.getDevices (http://localhost:5173/src/lib/api/client.ts:51:10)
+    at DevicesStore.init (http://localhost:5173/src/lib/stores/devices.svelte.ts:82:78)
+    at http://localhost:5173/src/routes/+layout.svelte?t=1773808574924:45:16
+    at untrack (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:4152:12)
+    at $effect (http://localhost:5173/node_modules/.vite/deps/chunk-OHLRGFL7.js?v=60d64c1f:4168:23)
+    at update_reaction (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:3843:18)
+    at update_effect (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:3982:21)
+    at flush_queued_effects (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:2968:7) @ http://localhost:5173/src/lib/stores/devices.svelte.ts:86
+[   31913ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Connection closed before receiving a handshake response @ http://localhost:5173/src/lib/ws/client.ts:32
+[   31915ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/api/effects:0
+[   31915ms] [ERROR] Failed to initialize effects store: TypeError: Failed to fetch
+    at window.fetch (http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/fetcher.js?v=60d64c1f:66:10)
+    at fetchJson (http://localhost:5173/src/lib/api/client.ts:3:22)
+    at Module.getEffects (http://localhost:5173/src/lib/api/client.ts:14:10)
+    at EffectsStore.init (http://localhost:5173/src/lib/stores/effects.svelte.ts:61:87)
+    at http://localhost:5173/src/routes/+layout.svelte?t=1773808574924:44:16
+    at untrack (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:4152:12)
+    at $effect (http://localhost:5173/node_modules/.vite/deps/chunk-OHLRGFL7.js?v=60d64c1f:4168:23)
+    at update_reaction (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:3843:18)
+    at update_effect (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:3982:21)
+    at flush_queued_effects (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:2968:7) @ http://localhost:5173/src/lib/stores/effects.svelte.ts:67
+[   31915ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/api/devices/groups:0
+[   31915ms] [ERROR] Failed to initialize devices store: TypeError: Failed to fetch
+    at window.fetch (http://localhost:5173/node_modules/@sveltejs/kit/src/runtime/client/fetcher.js?v=60d64c1f:66:10)
+    at fetchJson (http://localhost:5173/src/lib/api/client.ts:3:22)
+    at Module.getGroups (http://localhost:5173/src/lib/api/client.ts:74:10)
+    at DevicesStore.init (http://localhost:5173/src/lib/stores/devices.svelte.ts:82:96)
+    at http://localhost:5173/src/routes/+layout.svelte?t=1773808574924:45:16
+    at untrack (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:4152:12)
+    at $effect (http://localhost:5173/node_modules/.vite/deps/chunk-OHLRGFL7.js?v=60d64c1f:4168:23)
+    at update_reaction (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:3843:18)
+    at update_effect (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:3982:21)
+    at flush_queued_effects (http://localhost:5173/node_modules/.vite/deps/chunk-WEZQVNQE.js?v=60d64c1f:2968:7) @ http://localhost:5173/src/lib/stores/devices.svelte.ts:86
+[   31915ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/api/effects/active:0
+[   31915ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/api/devices:0
+[   31915ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/api/presets:0
+[   32017ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   32219ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   32621ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   33423ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   35027ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   38229ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   43241ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   48275ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   53404ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   58903ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   64242ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   69942ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   78535ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   87893ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[   96293ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[  105835ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[  114568ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
+[  124215ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/lib/ws/client.ts:32
