@@ -18,3 +18,4 @@ profiles/
 *.sln
 *.sw?
 frontend/.vite/
+.playwright-mcp/
