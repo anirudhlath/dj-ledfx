@@ -43,16 +43,19 @@ src/dj_ledfx/ layout:
 - `effects/deck.py` — EffectDeck hot-swap wrapper (shared between engine and web API)
 - `effects/presets.py` — PresetStore with TOML persistence
 - `web/` — FastAPI app factory, REST routers (effects, devices, config), WebSocket hub, Pydantic schemas
+- `web/router_scene.py` — Scene REST endpoints (placement CRUD, mapping config, auto-creates SceneModel)
+- `spatial/mapping.py` — mapping_from_config() shared factory for LinearMapping/RadialMapping
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
 - `events.py` — Typed callback event bus (sync, non-blocking callbacks only)
 - `status.py` — SystemStatus health tracking
 - `main.py` — Application coordinator (startup/shutdown orchestration)
 
 frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
-- `src/lib/ws/client.ts` — Multiplexed WS client with reconnection
-- `src/lib/api/client.ts` — Typed REST client
-- `src/lib/hooks/` — React hooks for beat, effects, devices state
-- `src/pages/` — Views: Live Performance, Devices, Config, Scene (placeholder)
+- `src/lib/ws-client.ts` — Multiplexed WS client with reconnection
+- `src/lib/api-client.ts` — Typed REST client
+- `src/hooks/` — React hooks for beat, effects, devices, scene state
+- `src/pages/` — Views: Live Performance, Devices, Config, Scene (3D editor)
+- `src/components/scene/` — R3F scene editor: viewport, device meshes, mapping helpers, bounds box, panels
 
 ## Code Style
 
@@ -110,3 +113,9 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Pro DJ Link requires binding to the correct network interface (not localhost)
 - Ring buffer needs ~1s to warm up — high-latency devices get no frames until buffer fills to their latency depth
 - Only CDJ-3000 generation packets (0x1F) supported in MVP; older hardware silently ignored
+- R3F: `<threeLine>` is the correct intrinsic for THREE.Line (not `<line_>`) — crashes if wrong
+- R3F: `useFrame` for live-updating geometry; drei `Line` component only updates on prop change via React state
+- R3F: TransformControls `onChange` prop for live drag callbacks (not useEffect + ref — refs don't trigger effects)
+- R3F: optimistic state updates needed when dragging 3D objects to avoid position jumps during API round-trips
+- Config persistence: `dataclasses.asdict()` serializes field names as-is; `load_config` must match (e.g. `scene_config` not `scene`)
+- Device adapter: use `managed.adapter.device_info.name` (not `managed.adapter.name`) to get device name
