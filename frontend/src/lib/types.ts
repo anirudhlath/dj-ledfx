@@ -72,3 +72,31 @@ export interface FrameData {
   seq: number
   rgb: Uint8Array
 }
+
+// Scene types
+
+export interface GeometryInfo {
+  type: "point" | "strip" | "matrix"
+  direction?: number[] // strip only
+  length?: number // strip only
+  pixel_pitch?: number // matrix only
+  tiles?: { offset_x: number; offset_y: number; width: number; height: number }[] // matrix only
+}
+
+export interface Placement {
+  device_id: string
+  position: [number, number, number]
+  geometry: GeometryInfo
+  led_count: number
+}
+
+export interface MappingInfo {
+  type: "linear" | "radial"
+  params: Record<string, unknown>
+}
+
+export interface SceneData {
+  placements: Placement[]
+  mapping: MappingInfo | null
+  bounds: [[number, number, number], [number, number, number]] | null
+}

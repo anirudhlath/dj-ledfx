@@ -77,10 +77,12 @@ def create_app(
     from dj_ledfx.web.router_config import router as config_router
     from dj_ledfx.web.router_devices import router as devices_router
     from dj_ledfx.web.router_effects import router as effects_router
+    from dj_ledfx.web.router_scene import router as scene_router
 
     app.include_router(effects_router, prefix="/api")
     app.include_router(devices_router, prefix="/api")
     app.include_router(config_router, prefix="/api")
+    app.include_router(scene_router, prefix="/api")
 
     from dj_ledfx.web.ws import ws_endpoint
 

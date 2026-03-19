@@ -472,3 +472,24 @@ async def test_mixed_fps_per_device() -> None:
     assert slow_count > 0
     ratio = fast_count / slow_count
     assert 1.5 < ratio < 3.0, f"Expected ~2:1 ratio, got {ratio:.1f}:1"
+
+
+def test_compositor_property_setter():
+    """Compositor can be swapped at runtime via property setter."""
+    from dj_ledfx.spatial.compositor import SpatialCompositor
+    from dj_ledfx.spatial.geometry import PointGeometry
+    from dj_ledfx.spatial.mapping import LinearMapping
+    from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
+
+    buf = RingBuffer(capacity=60, led_count=10)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[])
+    assert scheduler.compositor is None
+
+    scene = SceneModel(
+        placements={
+            "a": DevicePlacement("a", (0.0, 0.0, 0.0), PointGeometry(), 1),
+        }
+    )
+    new_comp = SpatialCompositor(scene, LinearMapping())
+    scheduler.compositor = new_comp
+    assert scheduler.compositor is new_comp

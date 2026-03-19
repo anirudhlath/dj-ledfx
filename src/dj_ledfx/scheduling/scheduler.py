@@ -73,6 +73,14 @@ class LookaheadScheduler:
     def frame_snapshots(self) -> dict[str, tuple[NDArray[np.uint8], int]]:
         return self._frame_snapshots
 
+    @property
+    def compositor(self) -> SpatialCompositor | None:
+        return self._compositor
+
+    @compositor.setter
+    def compositor(self, value: SpatialCompositor | None) -> None:
+        self._compositor = value
+
     def stop(self) -> None:
         self._running = False
 

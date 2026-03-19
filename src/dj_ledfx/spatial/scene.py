@@ -45,6 +45,33 @@ class SceneModel:
         self._position_cache[device_id] = positions
         return positions
 
+    def add_placement(self, placement: DevicePlacement) -> None:
+        """Add a device to the scene. Raises ValueError if device_id already exists."""
+        if placement.device_id in self.placements:
+            raise ValueError(f"Device '{placement.device_id}' already exists in scene")
+        self.placements[placement.device_id] = placement
+
+    def update_placement(
+        self,
+        device_id: str,
+        position: tuple[float, float, float] | None = None,
+        geometry: DeviceGeometry | None = None,
+    ) -> None:
+        """Update an existing placement. Raises KeyError if device_id not found."""
+        old = self.placements[device_id]  # raises KeyError if missing
+        self.placements[device_id] = DevicePlacement(
+            device_id=device_id,
+            position=position if position is not None else old.position,
+            geometry=geometry if geometry is not None else old.geometry,
+            led_count=old.led_count,
+        )
+        self._position_cache.pop(device_id, None)
+
+    def remove_placement(self, device_id: str) -> None:
+        """Remove a device from the scene. Raises KeyError if device_id not found."""
+        del self.placements[device_id]  # raises KeyError if missing
+        self._position_cache.pop(device_id, None)
+
     def get_bounds(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Returns (min_xyz, max_xyz) bounding box of all LED positions."""
         all_positions: list[NDArray[np.float64]] = []

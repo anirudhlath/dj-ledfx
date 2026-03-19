@@ -54,3 +54,45 @@ class AssignGroupRequest(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None
+
+
+# Scene schemas
+
+
+class GeometrySchema(BaseModel):
+    type: str
+    direction: list[float] | None = None
+    length: float | None = None
+    pixel_pitch: float | None = None
+    tiles: list[dict[str, Any]] | None = None
+
+
+class PlacementResponse(BaseModel):
+    device_id: str
+    position: list[float]
+    geometry: GeometrySchema
+    led_count: int
+
+
+class MappingResponse(BaseModel):
+    type: str
+    params: dict[str, Any]
+
+
+class SceneResponse(BaseModel):
+    placements: list[PlacementResponse]
+    mapping: MappingResponse | None = None
+    bounds: list[list[float]] | None = None
+
+
+class UpdatePlacementRequest(BaseModel):
+    position: list[float] | None = None
+    geometry: str | None = None
+    direction: list[float] | None = None
+    length: float | None = None
+    led_count: int | None = None
+
+
+class UpdateMappingRequest(BaseModel):
+    type: str
+    params: dict[str, Any] = {}

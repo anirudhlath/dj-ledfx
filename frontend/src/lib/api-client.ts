@@ -5,6 +5,7 @@ import type {
   DeviceGroup,
   EffectParamSchema,
   Preset,
+  SceneData,
 } from "./types"
 
 const BASE = "/api"
@@ -173,4 +174,41 @@ export async function importConfig(toml: string): Promise<AppConfig> {
     throw new Error((body as { detail?: string }).detail || `HTTP ${resp.status}`)
   }
   return resp.json() as Promise<AppConfig>
+}
+
+// Scene
+export async function getScene(): Promise<SceneData> {
+  return fetchJson("/scene")
+}
+
+export async function updateSceneDevice(
+  deviceId: string,
+  opts: {
+    position?: [number, number, number]
+    geometry?: string
+    direction?: number[]
+    length?: number
+    led_count?: number
+  }
+): Promise<void> {
+  await fetchJson(`/scene/devices/${encodeURIComponent(deviceId)}`, {
+    method: "PUT",
+    body: JSON.stringify(opts),
+  })
+}
+
+export async function deleteSceneDevice(deviceId: string): Promise<void> {
+  await fetchJson(`/scene/devices/${encodeURIComponent(deviceId)}`, {
+    method: "DELETE",
+  })
+}
+
+export async function updateSceneMapping(
+  type: string,
+  params: Record<string, unknown>
+): Promise<void> {
+  await fetchJson("/scene/mapping", {
+    method: "PUT",
+    body: JSON.stringify({ type, params }),
+  })
 }

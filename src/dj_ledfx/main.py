@@ -110,6 +110,7 @@ async def _run(args: argparse.Namespace) -> None:
         device_manager.add_device(device.adapter, device.tracker, device.max_fps)
 
     # Build spatial scene if configured
+    scene: SceneModel | None = None
     compositor: SpatialCompositor | None = None
     if config.scene_config is not None:
         adapters = [d.adapter for d in device_manager.devices]
@@ -194,7 +195,7 @@ async def _run(args: argparse.Namespace) -> None:
             device_manager=device_manager,
             scheduler=scheduler,
             preset_store=preset_store,
-            scene_model=None,
+            scene_model=scene,
             compositor=compositor,
             config=config,
             config_path=args.config,
