@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -393,3 +395,98 @@ class StateDB:
             "VALUES (?, ?, ?)",
             [(k, v[0], v[1]) for k, v in pending.items()],
         )
+
+    # --- First-Launch Migration ---
+
+    async def migrate_from_toml(
+        self,
+        config_path: Path | None = None,
+        presets_path: Path | None = None,
+    ) -> None:
+        """Migrate legacy TOML files into the DB on first launch.
+
+        For each provided path:
+        - If the file exists, parse it, import data into DB, rename to .bak.
+        - If the file does not exist, silently skip.
+
+        config_path format (old config.toml):
+          [engine]           — engine config
+          [network]          — network config
+          [web]              — web config
+          [effect]           — active_effect + per-effect param sub-tables
+          Migrates engine/network/web config keys and creates a "default" scene
+          with the active effect state.
+
+        presets_path format (old presets.toml):
+          [presets."<name>"]
+          effect_class = "..."
+          params = { ... }
+        """
+        if config_path is not None and config_path.exists():
+            await self._migrate_config_toml(config_path)
+            bak = config_path.with_suffix(".toml.bak")
+            config_path.rename(bak)
+            logger.info("migrate_from_toml: migrated config, backed up to {}", bak)
+
+        if presets_path is not None and presets_path.exists():
+            await self._migrate_presets_toml(presets_path)
+            bak = presets_path.with_suffix(".toml.bak")
+            presets_path.rename(bak)
+            logger.info("migrate_from_toml: migrated presets, backed up to {}", bak)
+
+    async def _migrate_config_toml(self, path: Path) -> None:
+        """Parse old config.toml and import into DB."""
+        raw = tomllib.loads(path.read_text())
+
+        # Config sections to migrate directly (key-value only, no nested tables)
+        _PLAIN_SECTIONS = ("engine", "network", "web", "discovery")
+        for section in _PLAIN_SECTIONS:
+            if section in raw and isinstance(raw[section], dict):
+                str_kv = {k: str(v) for k, v in raw[section].items() if not isinstance(v, dict)}
+                if str_kv:
+                    await self.save_config_bulk(section, str_kv)
+
+        # Effect config → "default" scene + scene_effect_state
+        effect_cfg = raw.get("effect", {})
+        if effect_cfg:
+            active_effect = effect_cfg.get("active_effect", "")
+            if active_effect:
+                # Per-effect params are stored as sub-tables: effect.<effect_name> = { ... }
+                params: dict[str, Any] = {}
+                effect_params_table = effect_cfg.get(active_effect, {})
+                if isinstance(effect_params_table, dict):
+                    params = effect_params_table
+
+                # Create the "default" scene if it doesn't already exist
+                existing_scenes = await self.load_scenes()
+                if not any(s["id"] == "default" for s in existing_scenes):
+                    await self.save_scene({
+                        "id": "default",
+                        "name": "Default",
+                        "mapping_type": "linear",
+                        "effect_mode": "independent",
+                        "is_active": 1,
+                    })
+
+                await self.save_scene_effect_state(
+                    "default",
+                    active_effect,
+                    json.dumps(params),
+                )
+                logger.debug(
+                    "migrate_from_toml: created default scene with effect '{}', params={}",
+                    active_effect, params,
+                )
+
+    async def _migrate_presets_toml(self, path: Path) -> None:
+        """Parse old presets.toml and import presets into DB."""
+        raw = tomllib.loads(path.read_text())
+        presets_table = raw.get("presets", {})
+        for preset_name, pinfo in presets_table.items():
+            if not isinstance(pinfo, dict):
+                continue
+            effect_class = pinfo.get("effect_class", "")
+            params = pinfo.get("params", {})
+            params_str = json.dumps(params)
+            await self.save_preset(preset_name, effect_class, params_str)
+            logger.debug("migrate_from_toml: migrated preset '{}'", preset_name)

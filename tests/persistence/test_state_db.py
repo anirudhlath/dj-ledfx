@@ -511,3 +511,85 @@ async def test_schedule_latency_multiple_devices(db):
     by_id = {d["id"]: d for d in devices}
     assert abs(by_id["lifx:aa"]["last_latency_ms"] - 11.1) < 0.001
     assert abs(by_id["lifx:bb"]["last_latency_ms"] - 22.2) < 0.001
+
+
+# --- Task 22: First-Launch TOML Migration ---
+
+
+@pytest.mark.asyncio
+async def test_migrate_from_config_toml(tmp_path):
+    import json
+    import tomli_w
+
+    config_toml = tmp_path / "config.toml"
+    config_data = {
+        "engine": {"fps": 90},
+        "effect": {"active_effect": "beat_pulse", "beat_pulse": {"gamma": 3.0, "palette": ["#ff0000"]}},
+        "network": {"interface": "192.168.1.100"},
+    }
+    config_toml.write_bytes(tomli_w.dumps(config_data).encode())
+
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    await db.migrate_from_toml(config_path=config_toml)
+
+    engine_cfg = await db.load_config("engine")
+    assert engine_cfg.get("fps") == "90"
+
+    network_cfg = await db.load_config("network")
+    assert network_cfg.get("interface") == "192.168.1.100"
+
+    scenes = await db.load_scenes()
+    assert len(scenes) == 1
+    assert scenes[0]["id"] == "default"
+
+    state = await db.load_scene_effect_state("default")
+    assert state is not None
+    assert state["effect_class"] == "beat_pulse"
+    params = json.loads(state["params"])
+    assert params["gamma"] == 3.0
+
+    assert not config_toml.exists()
+    assert (tmp_path / "config.toml.bak").exists()
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_migrate_from_presets_toml(tmp_path):
+    import json
+    import tomli_w
+
+    presets_toml = tmp_path / "presets.toml"
+    presets_data = {
+        "presets": {
+            "My Preset": {"effect_class": "beat_pulse", "params": {"gamma": 2.5}}
+        }
+    }
+    presets_toml.write_bytes(tomli_w.dumps(presets_data).encode())
+
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    await db.migrate_from_toml(presets_path=presets_toml)
+
+    presets = await db.load_presets()
+    preset_by_name = {p["name"]: p for p in presets}
+    assert "My Preset" in preset_by_name
+    params = json.loads(preset_by_name["My Preset"]["params"])
+    assert params["gamma"] == 2.5
+
+    assert not presets_toml.exists()
+    assert (tmp_path / "presets.toml.bak").exists()
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_migrate_skips_if_no_toml(tmp_path):
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    await db.migrate_from_toml(
+        config_path=tmp_path / "config.toml",
+        presets_path=tmp_path / "presets.toml",
+    )
+    engine_cfg = await db.load_config("engine")
+    assert engine_cfg == {}
+    await db.close()
