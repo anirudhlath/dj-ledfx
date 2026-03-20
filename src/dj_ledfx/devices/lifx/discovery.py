@@ -91,6 +91,7 @@ class LifxBackend(DeviceBackend):
         str_addr = f"{record.ip}:{record.port}"
 
         lifx = config.devices.lifx
+        mac_hex = record.mac.hex()
         if record.product in MATRIX_PRODUCTS:
             pkt = LifxPacket(
                 tagged=False,
@@ -109,7 +110,14 @@ class LifxBackend(DeviceBackend):
                 tiles = parse_state_device_chain(resp.payload)
                 tile_count = len(tiles) if tiles else 5
             led_count = tile_count * 64
-            info = DeviceInfo(f"LIFX Tile ({record.ip})", "lifx_tile", led_count, str_addr)
+            info = DeviceInfo(
+                f"LIFX Tile ({record.ip})",
+                "lifx_tile",
+                led_count,
+                str_addr,
+                mac=mac_hex,
+                stable_id=f"lifx:{mac_hex}",
+            )
             adapter = LifxTileChainAdapter(
                 self._transport,
                 info,
@@ -135,7 +143,14 @@ class LifxBackend(DeviceBackend):
             zone_count = 1
             if resp:
                 zone_count, _, _ = parse_state_extended_color_zones(resp.payload)
-            info = DeviceInfo(f"LIFX Strip ({record.ip})", "lifx_strip", zone_count, str_addr)
+            info = DeviceInfo(
+                f"LIFX Strip ({record.ip})",
+                "lifx_strip",
+                zone_count,
+                str_addr,
+                mac=mac_hex,
+                stable_id=f"lifx:{mac_hex}",
+            )
             return LifxStripAdapter(
                 self._transport,
                 info,
@@ -145,7 +160,14 @@ class LifxBackend(DeviceBackend):
             )
 
         else:
-            info = DeviceInfo(f"LIFX Bulb ({record.ip})", "lifx_bulb", 1, str_addr)
+            info = DeviceInfo(
+                f"LIFX Bulb ({record.ip})",
+                "lifx_bulb",
+                1,
+                str_addr,
+                mac=mac_hex,
+                stable_id=f"lifx:{mac_hex}",
+            )
             return LifxBulbAdapter(
                 self._transport,
                 info,
