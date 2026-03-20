@@ -361,3 +361,25 @@ def test_save_config_atomic(tmp_path: Path) -> None:
     save_config(AppConfig(), path)
     assert path.exists()
     assert not (tmp_path / "config.tmp").exists()
+
+
+# Task 3 — DiscoveryConfig tests
+
+
+from dj_ledfx.config import DiscoveryConfig
+
+
+def test_discovery_config_defaults():
+    dc = DiscoveryConfig()
+    assert dc.waves == 3
+    assert dc.wave_interval_s == 5.0
+    assert dc.unicast_concurrency == 50
+    assert dc.unicast_timeout_s == 0.5
+    assert dc.subnet_mask == 24
+    assert dc.reconnect_interval_s == 30.0
+
+
+def test_app_config_has_discovery():
+    config = AppConfig()
+    assert isinstance(config.discovery, DiscoveryConfig)
+    assert config.discovery.waves == 3

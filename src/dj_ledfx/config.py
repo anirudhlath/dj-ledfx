@@ -91,12 +91,23 @@ class DevicesConfig:
 
 
 @dataclass
+class DiscoveryConfig:
+    waves: int = 3
+    wave_interval_s: float = 5.0
+    unicast_concurrency: int = 50
+    unicast_timeout_s: float = 0.5
+    subnet_mask: int = 24
+    reconnect_interval_s: float = 30.0
+
+
+@dataclass
 class AppConfig:
     engine: EngineConfig = field(default_factory=EngineConfig)
     effect: EffectConfig = field(default_factory=EffectConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     web: WebConfig = field(default_factory=WebConfig)
     devices: DevicesConfig = field(default_factory=DevicesConfig)
+    discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     scene_config: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -190,12 +201,17 @@ def load_config(path: Path) -> AppConfig:
 
     scene_config = data.get("scene_config") or data.get("scene")
 
+    discovery = DiscoveryConfig(
+        **_filter_fields(DiscoveryConfig, data.get("discovery", {}))
+    )
+
     return AppConfig(
         engine=engine,
         effect=effect,
         network=network,
         web=web,
         devices=devices,
+        discovery=discovery,
         scene_config=scene_config,
     )
 
