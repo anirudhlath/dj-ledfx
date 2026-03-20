@@ -23,6 +23,9 @@ class StateDB:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._conn: sqlite3.Connection | None = None
+        # Pending debounced writes: keyed by device_id / scene_id
+        self._pending_latency: dict[str, float] = {}
+        self._pending_effect_state: dict[str, tuple[str, str]] = {}
 
     async def open(self) -> None:
         """Open the database, apply migrations, and configure pragmas."""
@@ -90,7 +93,9 @@ class StateDB:
             logger.info("StateDB closed: {}", self._path)
 
     async def flush_pending(self) -> None:
-        """Flush any pending debounced writes. No-op in base implementation."""
+        """Flush all pending debounced writes to the database."""
+        await self._flush_latency()
+        await self._flush_effect_state()
 
     # --- Low-level helpers ---
 
@@ -350,3 +355,38 @@ class StateDB:
     async def delete_preset(self, name: str) -> None:
         """Delete a preset by name."""
         await self._execute_write("DELETE FROM presets WHERE name=?", (name,))
+
+    # --- Debounced Writes ---
+
+    def schedule_latency_update(self, device_id: str, latency_ms: float) -> None:
+        """Coalesce latency updates — last value wins, flushed on flush_pending()/close()."""
+        self._pending_latency[device_id] = latency_ms
+
+    def schedule_effect_state_update(
+        self, scene_id: str, effect_class: str, params: str
+    ) -> None:
+        """Coalesce effect state updates — last value wins, flushed on flush_pending()/close()."""
+        self._pending_effect_state[scene_id] = (effect_class, params)
+
+    async def _flush_latency(self) -> None:
+        """Write all pending latency updates and clear the buffer."""
+        if not self._pending_latency:
+            return
+        pending = self._pending_latency.copy()
+        self._pending_latency.clear()
+        await self._executemany_write(
+            "UPDATE devices SET last_latency_ms=? WHERE id=?",
+            [(v, k) for k, v in pending.items()],
+        )
+
+    async def _flush_effect_state(self) -> None:
+        """Write all pending effect state updates and clear the buffer."""
+        if not self._pending_effect_state:
+            return
+        pending = self._pending_effect_state.copy()
+        self._pending_effect_state.clear()
+        await self._executemany_write(
+            "INSERT OR REPLACE INTO scene_effect_state (scene_id, effect_class, params) "
+            "VALUES (?, ?, ?)",
+            [(k, v[0], v[1]) for k, v in pending.items()],
+        )

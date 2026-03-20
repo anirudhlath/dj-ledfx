@@ -450,3 +450,64 @@ async def test_multiple_presets(db):
     assert len(presets) == 2
     names = {p["name"] for p in presets}
     assert names == {"Pulse 1", "Wave 1"}
+
+
+# --- Task 11: Debounced Writes ---
+
+
+@pytest.mark.asyncio
+async def test_schedule_latency_coalesces(db):
+    """Multiple rapid latency updates coalesce to the last value."""
+    await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
+    db.schedule_latency_update("lifx:aa", 10.0)
+    db.schedule_latency_update("lifx:aa", 20.0)
+    db.schedule_latency_update("lifx:aa", 35.5)
+    await db.flush_pending()
+    devices = await db.load_devices()
+    assert abs(devices[0]["last_latency_ms"] - 35.5) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_schedule_effect_state_coalesces(db):
+    """Multiple rapid effect state updates coalesce to the last value."""
+    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    db.schedule_effect_state_update("s1", "BeatPulse", '{"gamma": 1.0}')
+    db.schedule_effect_state_update("s1", "BeatPulse", '{"gamma": 2.0}')
+    db.schedule_effect_state_update("s1", "RainbowWave", '{"speed": 0.5}')
+    await db.flush_pending()
+    state = await db.load_scene_effect_state("s1")
+    assert state is not None
+    assert state["effect_class"] == "RainbowWave"
+    assert state["params"] == '{"speed": 0.5}'
+
+
+@pytest.mark.asyncio
+async def test_flush_pending_on_close(tmp_path):
+    """Pending writes are flushed when the DB is closed."""
+    db_path = tmp_path / "state.db"
+    state_db = StateDB(db_path)
+    await state_db.open()
+    await state_db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
+    state_db.schedule_latency_update("lifx:aa", 77.7)
+    await state_db.close()
+
+    # Re-open and verify the latency was persisted
+    state_db2 = StateDB(db_path)
+    await state_db2.open()
+    devices = await state_db2.load_devices()
+    await state_db2.close()
+    assert abs(devices[0]["last_latency_ms"] - 77.7) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_schedule_latency_multiple_devices(db):
+    """Pending latency updates track multiple device IDs independently."""
+    await db.upsert_device({"id": "lifx:aa", "name": "A", "backend": "lifx", "led_count": 10})
+    await db.upsert_device({"id": "lifx:bb", "name": "B", "backend": "lifx", "led_count": 10})
+    db.schedule_latency_update("lifx:aa", 11.1)
+    db.schedule_latency_update("lifx:bb", 22.2)
+    await db.flush_pending()
+    devices = await db.load_devices()
+    by_id = {d["id"]: d for d in devices}
+    assert abs(by_id["lifx:aa"]["last_latency_ms"] - 11.1) < 0.001
+    assert abs(by_id["lifx:bb"]["last_latency_ms"] - 22.2) < 0.001
