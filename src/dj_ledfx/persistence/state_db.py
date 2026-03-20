@@ -53,7 +53,10 @@ class StateDB:
             try:
                 version = int(version_str)
             except ValueError:
-                logger.warning("Skipping migration file with non-numeric prefix: {}", migration_file.name)
+                logger.warning(
+                    "Skipping migration file with non-numeric prefix: {}",
+                    migration_file.name,
+                )
                 continue
 
             if version <= current_version:
@@ -168,7 +171,7 @@ class StateDB:
         rows = await self._execute_read(
             f"SELECT {', '.join(self._DEVICE_COLUMNS)} FROM devices"
         )
-        return [dict(zip(self._DEVICE_COLUMNS, row)) for row in rows]
+        return [dict(zip(self._DEVICE_COLUMNS, row, strict=True)) for row in rows]
 
     async def upsert_device(self, data: dict[str, Any]) -> None:
         """Insert or replace a device record. Must include 'id', 'name', 'backend'."""
@@ -262,7 +265,7 @@ class StateDB:
         rows = await self._execute_read(
             f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes"
         )
-        return [dict(zip(self._SCENE_COLUMNS, row)) for row in rows]
+        return [dict(zip(self._SCENE_COLUMNS, row, strict=True)) for row in rows]
 
     async def save_scene(self, data: dict[str, Any]) -> None:
         """Insert or replace a scene record. Must include 'id', 'name'."""
@@ -316,7 +319,7 @@ class StateDB:
             f"SELECT {', '.join(self._PLACEMENT_COLUMNS)} FROM scene_placements WHERE scene_id=?",
             (scene_id,),
         )
-        return [dict(zip(self._PLACEMENT_COLUMNS, row)) for row in rows]
+        return [dict(zip(self._PLACEMENT_COLUMNS, row, strict=True)) for row in rows]
 
     async def save_placement(self, data: dict[str, Any]) -> None:
         """Insert or replace a placement. Must include 'scene_id' and 'device_id'."""
