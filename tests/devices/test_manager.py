@@ -129,3 +129,88 @@ def test_device_manager_delete_group_clears_assignments() -> None:
 
     manager.delete_group("Stage")
     assert manager.get_device_group("Dev1") is None
+
+
+# --- Task 15: ManagedDevice status and promote/demote ---
+
+from dj_ledfx.devices.ghost import GhostAdapter  # noqa: E402
+
+
+def _make_tracker(latency_ms: float = 50.0) -> LatencyTracker:
+    return LatencyTracker(StaticLatency(latency_ms))
+
+
+def _make_info(name: str = "Test", stable_id: str = "lifx:aabb") -> DeviceInfo:
+    return DeviceInfo(
+        name=name,
+        device_type="lifx_strip",
+        led_count=60,
+        address="192.168.1.5:56700",
+        stable_id=stable_id,
+    )
+
+
+def test_managed_device_has_status() -> None:
+    ghost = GhostAdapter(_make_info(), led_count=60)
+    md = ManagedDevice(adapter=ghost, tracker=_make_tracker(), status="offline")
+    assert md.status == "offline"
+
+
+def test_managed_device_status_default() -> None:
+    ghost = GhostAdapter(_make_info(), led_count=60)
+    md = ManagedDevice(adapter=ghost, tracker=_make_tracker())
+    assert md.status == "online"
+
+
+def test_add_device_with_info_creates_ghost() -> None:
+    mgr = DeviceManager(event_bus=EventBus())
+    info = _make_info()
+    mgr.add_device_from_info(info, led_count=60, tracker=_make_tracker(), status="offline")
+    device = mgr.get_by_stable_id("lifx:aabb")
+    assert device is not None
+    assert device.status == "offline"
+    assert isinstance(device.adapter, GhostAdapter)
+    assert device.adapter.is_connected is False
+
+
+def test_promote_device() -> None:
+    mgr = DeviceManager(event_bus=EventBus())
+    info = _make_info()
+    mgr.add_device_from_info(info, led_count=60, tracker=_make_tracker(), status="offline")
+    real_adapter = MagicMock()
+    real_adapter.device_info = info
+    real_adapter.is_connected = True
+    real_adapter.led_count = 60
+    mgr.promote_device("lifx:aabb", real_adapter)
+    device = mgr.get_by_stable_id("lifx:aabb")
+    assert device is not None
+    assert device.status == "online"
+    assert device.adapter is real_adapter
+
+
+def test_demote_device() -> None:
+    mgr = DeviceManager(event_bus=EventBus())
+    real_adapter = MagicMock()
+    info = _make_info()
+    real_adapter.device_info = info
+    real_adapter.is_connected = True
+    real_adapter.led_count = 60
+    mgr.add_device(real_adapter, _make_tracker())  # type: ignore[arg-type]
+    mgr.demote_device("lifx:aabb")
+    device = mgr.get_by_stable_id("lifx:aabb")
+    assert device is not None
+    assert device.status == "offline"
+    assert isinstance(device.adapter, GhostAdapter)
+
+
+def test_remove_device() -> None:
+    mgr = DeviceManager(event_bus=EventBus())
+    info = _make_info()
+    mgr.add_device_from_info(info, led_count=60, tracker=_make_tracker())
+    mgr.remove_device("lifx:aabb")
+    assert mgr.get_by_stable_id("lifx:aabb") is None
+
+
+def test_get_by_stable_id_returns_none() -> None:
+    mgr = DeviceManager(event_bus=EventBus())
+    assert mgr.get_by_stable_id("nonexistent") is None
