@@ -43,6 +43,7 @@ class OpenRGBAdapter(DeviceAdapter):
             device_type="openrgb",
             led_count=self._led_count,
             address=f"{self._host}:{self._port}",
+            stable_id=f"openrgb:{self._host}:{self._port}:{self._device_index}",
         )
 
     @property
@@ -137,6 +138,7 @@ class OpenRGBAdapter(DeviceAdapter):
                             device_type="openrgb",
                             led_count=len(dev.colors),
                             address=f"{host}:{port}",
+                            stable_id=f"openrgb:{host}:{port}:{i}",
                         )
                     )
                 client.disconnect()
