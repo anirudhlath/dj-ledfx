@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 from loguru import logger
@@ -12,6 +14,9 @@ from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.engine import RingBuffer
 from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.types import DeviceStats
+
+if TYPE_CHECKING:
+    from dj_ledfx.spatial.pipeline import ScenePipeline
 
 
 class FrameSlot:
@@ -47,6 +52,17 @@ class FrameSlot:
         return self._put_count
 
 
+@dataclass
+class DeviceSendState:
+    """Per-device send state, keyed by stable_id."""
+
+    managed: ManagedDevice
+    slot: FrameSlot
+    send_count: int = 0
+    send_task: asyncio.Task[None] | None = None
+    pipeline: ScenePipeline | None = None
+
+
 class LookaheadScheduler:
     def __init__(
         self,
@@ -57,17 +73,23 @@ class LookaheadScheduler:
         compositor: SpatialCompositor | None = None,
     ) -> None:
         self._ring_buffer = ring_buffer
-        self._devices = devices
         self._frame_period = 1.0 / fps
         self._disconnect_backoff_s = disconnect_backoff_s
         self._running = False
-        self._slots = [FrameSlot() for _ in devices]
-        self._send_tasks: list[asyncio.Task[None]] = []
-        self._send_counts: list[int] = [0] * len(devices)
         self._start_time: float = 0.0
         self._compositor = compositor
         self._frame_snapshots: dict[str, tuple[NDArray[np.uint8], int]] = {}
         self._frame_seq: dict[str, int] = {}
+
+        # Dict-based device state, keyed by stable_id (or name as fallback)
+        self._device_state: dict[str, DeviceSendState] = {}
+        for device in devices:
+            key = device.adapter.device_info.stable_id or device.adapter.device_info.name
+            self._device_state[key] = DeviceSendState(managed=device, slot=FrameSlot())
+
+    @staticmethod
+    def _device_key(managed: ManagedDevice) -> str:
+        return managed.adapter.device_info.stable_id or managed.adapter.device_info.name
 
     @property
     def frame_snapshots(self) -> dict[str, tuple[NDArray[np.uint8], int]]:
@@ -81,6 +103,30 @@ class LookaheadScheduler:
     def compositor(self, value: SpatialCompositor | None) -> None:
         self._compositor = value
 
+    def add_device(
+        self, managed: ManagedDevice, pipeline: ScenePipeline | None = None
+    ) -> None:
+        """Add a device dynamically. Spawns a send task if the scheduler is running."""
+        key = self._device_key(managed)
+        if key in self._device_state:
+            logger.warning("Device '{}' already in scheduler, skipping add", key)
+            return
+        state = DeviceSendState(managed=managed, slot=FrameSlot(), pipeline=pipeline)
+        self._device_state[key] = state
+        if self._running:
+            state.send_task = asyncio.create_task(self._send_loop(state, key))
+        logger.info("Scheduler: added device '{}'", key)
+
+    def remove_device(self, stable_id: str) -> None:
+        """Remove a device by stable_id (or name). Cancels its send task."""
+        state = self._device_state.pop(stable_id, None)
+        if state is None:
+            logger.warning("Scheduler: remove_device called for unknown key '{}'", stable_id)
+            return
+        if state.send_task is not None and not state.send_task.done():
+            state.send_task.cancel()
+        logger.info("Scheduler: removed device '{}'", stable_id)
+
     def stop(self) -> None:
         self._running = False
 
@@ -89,20 +135,21 @@ class LookaheadScheduler:
         self._start_time = time.monotonic()
         logger.info(
             "LookaheadScheduler started with {} devices",
-            len(self._devices),
+            len(self._device_state),
         )
 
         # Spawn per-device send loops
-        for i, (device, slot) in enumerate(zip(self._devices, self._slots, strict=True)):
-            task = asyncio.create_task(self._send_loop(device, slot, i))
-            self._send_tasks.append(task)
+        for key, state in self._device_state.items():
+            state.send_task = asyncio.create_task(self._send_loop(state, key))
 
         try:
             # Run distributor loop
             last_tick = time.monotonic()
             while self._running:
                 now = time.monotonic()
-                for device, slot in zip(self._devices, self._slots, strict=True):
+                for state in list(self._device_state.values()):
+                    slot = state.slot
+                    device = state.managed
                     if slot.has_pending:
                         logger.trace(
                             "Frame overwritten for '{}' — device draining slower than engine",
@@ -121,19 +168,28 @@ class LookaheadScheduler:
                     await asyncio.sleep(0)
         finally:
             # Clean up child tasks — runs on both normal exit and CancelledError
-            for task in self._send_tasks:
+            all_tasks = [
+                state.send_task
+                for state in self._device_state.values()
+                if state.send_task is not None
+            ]
+            for task in all_tasks:
                 task.cancel()
-            await asyncio.gather(*self._send_tasks, return_exceptions=True)
-            self._send_tasks.clear()
+            await asyncio.gather(*all_tasks, return_exceptions=True)
+            # Clear task refs
+            for state in self._device_state.values():
+                state.send_task = None
 
         logger.info("LookaheadScheduler stopped")
 
-    async def _send_loop(self, device: ManagedDevice, slot: FrameSlot, index: int) -> None:
+    async def _send_loop(self, state: DeviceSendState, key: str) -> None:
+        device = state.managed
+        slot = state.slot
         was_connected = device.adapter.is_connected
         last_send_time = time.monotonic()
         device_name = device.adapter.device_info.name
 
-        while self._running:
+        while self._running and key in self._device_state:
             # Step 1: Check connection
             if not device.adapter.is_connected:
                 if was_connected:
@@ -161,7 +217,9 @@ class LookaheadScheduler:
                 continue
 
             # Step 3: Find nearest frame (numpy copy happens here)
-            frame = self._ring_buffer.find_nearest(target_time)
+            # Use pipeline's ring buffer if available, else scheduler's
+            ring_buf = state.pipeline.ring_buffer if state.pipeline is not None else self._ring_buffer
+            frame = ring_buf.find_nearest(target_time)
             if frame is None:
                 logger.warning(
                     "No frame in ring buffer for '{}' (target_time={:.3f})",
@@ -172,8 +230,12 @@ class LookaheadScheduler:
 
             # Steps 4-5: Send frame (with optional spatial compositing)
             colors = frame.colors
-            if self._compositor is not None:
-                mapped = self._compositor.composite(frame.colors, device.adapter.device_info.name)
+            # Use pipeline's compositor if pipeline set, else scheduler-level compositor
+            compositor = (
+                state.pipeline.compositor if state.pipeline is not None else self._compositor
+            )
+            if compositor is not None:
+                mapped = compositor.composite(frame.colors, device.adapter.device_info.name)
                 if mapped is not None:
                     colors = mapped
             send_start = time.monotonic()
@@ -190,7 +252,7 @@ class LookaheadScheduler:
             metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(send_elapsed)
 
             # Step 6: Increment send count and store snapshot
-            self._send_counts[index] += 1
+            state.send_count += 1
             seq = self._frame_seq.get(device_name, 0) + 1
             self._frame_seq[device_name] = seq
             self._frame_snapshots[device_name] = (colors, seq)
@@ -219,9 +281,10 @@ class LookaheadScheduler:
         now = time.monotonic()
         elapsed = now - self._start_time if self._start_time > 0 else 1.0
         stats: list[DeviceStats] = []
-        for i, (device, slot) in enumerate(zip(self._devices, self._slots, strict=True)):
-            send_fps = self._send_counts[i] / elapsed if elapsed > 0 else 0.0
-            frames_dropped = slot.put_count - self._send_counts[i]
+        for state in self._device_state.values():
+            device = state.managed
+            send_fps = state.send_count / elapsed if elapsed > 0 else 0.0
+            frames_dropped = state.slot.put_count - state.send_count
             stats.append(
                 DeviceStats(
                     device_name=device.adapter.device_info.name,

@@ -493,3 +493,64 @@ def test_compositor_property_setter():
     new_comp = SpatialCompositor(scene, LinearMapping())
     scheduler.compositor = new_comp
     assert scheduler.compositor is new_comp
+
+
+# --- DeviceSendState tests ---
+
+
+def test_device_send_state_creation() -> None:
+    """DeviceSendState bundles per-device send state."""
+    from unittest.mock import MagicMock
+
+    from dj_ledfx.scheduling.scheduler import DeviceSendState, FrameSlot
+
+    managed = MagicMock()
+    managed.adapter.device_info.stable_id = "lifx:aa"
+    slot = FrameSlot()
+    state = DeviceSendState(
+        managed=managed,
+        slot=slot,
+        send_count=0,
+        send_task=None,
+        pipeline=None,
+    )
+    assert state.managed is managed
+    assert state.slot is slot
+    assert state.send_count == 0
+
+
+@pytest.mark.asyncio
+async def test_scheduler_add_device_during_run() -> None:
+    """Devices added after construction get send tasks."""
+    from dj_ledfx.devices.ghost import GhostAdapter
+    from dj_ledfx.devices.manager import ManagedDevice
+    from dj_ledfx.latency.strategies import StaticLatency
+    from dj_ledfx.latency.tracker import LatencyTracker
+    from dj_ledfx.types import DeviceInfo
+
+    buf = RingBuffer(60, 60)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[], fps=60)
+
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.sleep(0.05)
+
+    info = DeviceInfo("Ghost", "test", 10, "1.2.3.4:80", stable_id="test:aa")
+    ghost = GhostAdapter(info, 10)
+    managed = ManagedDevice(
+        adapter=ghost, tracker=LatencyTracker(StaticLatency(50.0)), status="offline"
+    )
+    scheduler.add_device(managed)
+
+    assert "test:aa" in scheduler._device_state
+    await asyncio.sleep(0.05)
+
+    scheduler.remove_device("test:aa")
+    assert "test:aa" not in scheduler._device_state
+
+    scheduler.stop()
+    await asyncio.sleep(0.1)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
