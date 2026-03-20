@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,8 +11,13 @@ from dj_ledfx.effects.base import Effect, _to_snake_case
 
 
 class EffectDeck:
-    def __init__(self, effect: Effect) -> None:
+    def __init__(
+        self,
+        effect: Effect,
+        on_change: Callable[[EffectDeck], None] | None = None,
+    ) -> None:
         self._effect = effect
+        self._on_change = on_change
 
     @property
     def effect_name(self) -> str:
@@ -34,6 +39,9 @@ class EffectDeck:
             self.swap_effect(new_effect)
         elif params:
             self._effect.set_params(**params)
+
+        if self._on_change is not None:
+            self._on_change(self)
 
     def render(
         self,
