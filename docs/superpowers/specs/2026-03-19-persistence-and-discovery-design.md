@@ -130,7 +130,9 @@ Device names are not stable (LIFX names include IP, OpenRGB uses indices). The `
 - `mac: str | None = None` — LIFX populates from `LifxDeviceRecord.mac`
 - `stable_id: str | None = None` — computed stable ID, set at DeviceInfo construction
 
-**Note:** `DeviceInfo` is `frozen=True, slots=True`. New fields use defaults so all existing positional constructors remain valid. However, both Govee adapters (`GoveeSegmentAdapter.device_info`, `GoveeSolidAdapter.device_info`) and LIFX adapters construct `DeviceInfo` as `@property` methods (computed on every access), not stored fields. The `mac`/`stable_id` kwargs must be added to the `DeviceInfo(...)` call inside each adapter's `@property`, not at adapter `__init__` time.
+**Note:** `DeviceInfo` is `frozen=True, slots=True`. New fields use defaults so all existing positional constructors remain valid. The two backend families differ in how they construct `DeviceInfo`:
+- **LIFX adapters** (`LifxBulbAdapter`, `LifxStripAdapter`, `LifxTileChainAdapter`) receive `DeviceInfo` at `__init__` and store it as `self._device_info`. The `mac`/`stable_id` kwargs are added at the construction site in `lifx/discovery.py`.
+- **Govee adapters** (`GoveeSegmentAdapter`, `GoveeSolidAdapter`) construct `DeviceInfo` inside a `@property` method (computed on every access). The `stable_id` kwarg is added to the `DeviceInfo(...)` call inside each `@property`, using `self._record.device_id`.
 
 **Display names vs stable IDs in APIs:** All REST and WebSocket APIs use display names (`DeviceInfo.name`) in responses. Stable IDs are internal only — used for DB keys, device matching, and FK references. The web layer maps between display names and stable IDs. API routes use display names in paths (e.g., `PUT /api/scenes/{scene_id}/devices/{device_name}`).
 
@@ -502,15 +504,17 @@ TOML export/import uses **display names** for devices (human-readable). On impor
 - `devices/backend.py` — `discover_all()` deprecated; individual `discover()` methods retained, called by `DiscoveryOrchestrator`
 - `devices/manager.py` — `ManagedDevice` gains `status` field; add `promote_device()`/`demote_device()`; device list becomes dynamic; `rediscover()` deprecated
 - `devices/lifx/transport.py` — unicast sweep, increased timeouts (100ms→500ms), broadcast retries (3x)
-- `devices/lifx/discovery.py` — all three adapter constructors (`LifxBulbAdapter`, `LifxStripAdapter`, `LifxTileChainAdapter`) pass `mac=record.mac.hex()` to `DeviceInfo`
+- `devices/lifx/discovery.py` — `DeviceInfo(...)` construction calls (at adapter creation time, not @property — LIFX adapters store `device_info` at `__init__`) pass `mac=record.mac.hex()`, `stable_id=f"lifx:{record.mac.hex()}"` for all three adapter types
 - `devices/govee/transport.py` — unicast sweep, port 4002 bind retry with backoff (socket creation), increased window (5s→10s)
-- `devices/govee/backend.py` — pass `stable_id=f"govee:{record.device_id}"` to `DeviceInfo` at adapter construction
+- `devices/govee/backend.py` — discovery orchestration changes to support new transport capabilities
+- `devices/govee/segment.py` — `device_info` @property passes `stable_id=f"govee:{self._record.device_id}"` to `DeviceInfo`
+- `devices/govee/solid.py` — `device_info` @property passes `stable_id=f"govee:{self._record.device_id}"` to `DeviceInfo`
 - `devices/openrgb_backend.py` — connection timeout (5s), retry on failure
 - `effects/deck.py` — auto-save effect state on swap/param change (calls StateDB via callback)
 - `effects/presets.py` — `PresetStore` backed by StateDB instead of TOML file
 - `effects/engine.py` — render loop iterates `pipelines: list[ScenePipeline]` instead of single deck; each pipeline gets its own `deck.render()` call and ring buffer write; `led_count` per-pipeline not global
 - `scheduling/scheduler.py` — replace positional `_devices`/`_slots`/`_send_counts` lists with `_device_state: dict[str, DeviceSendState]`; each `DeviceSendState` holds its pipeline reference (and thus which `RingBuffer` to read from); dynamic `add_device()`/`remove_device()` methods
-- `spatial/scene.py` — `SceneModel` updated to support multiple named scenes; `from_config()` still works for migration
+- `spatial/scene.py` — `SceneModel` unchanged structurally (no name/id field needed — `ScenePipeline` owns scene identity); multiple instances created, one per scene; `from_config()` reused for TOML migration
 - `spatial/compositor.py` — per-scene compositor instances (no structural change, just multiple instances)
 - `web/app.py` — `create_app()` accepts `StateDB` instead of `config_path`; stored on `app.state`
 - `web/router_config.py` — reads/writes config via StateDB
