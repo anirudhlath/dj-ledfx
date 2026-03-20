@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import signal
 import sys
 import time
@@ -13,19 +14,31 @@ import dj_ledfx.devices  # noqa: F401  # triggers backend auto-registration
 from dj_ledfx import metrics
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
-from dj_ledfx.config import load_config
-from dj_ledfx.devices.backend import DeviceBackend
+from dj_ledfx.config import (
+    AppConfig,
+    DiscoveryConfig,
+    EffectConfig,
+    EngineConfig,
+    NetworkConfig,
+    WebConfig,
+    load_config,
+)
+from dj_ledfx.devices.discovery import DiscoveryOrchestrator
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import EventBus
+from dj_ledfx.latency.strategies import StaticLatency
+from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.spatial.mapping import mapping_from_config
 from dj_ledfx.spatial.scene import SceneModel
 from dj_ledfx.status import SystemStatus
+from dj_ledfx.types import DeviceInfo
 
 
 def _parse_args() -> argparse.Namespace:
@@ -33,6 +46,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--demo", action="store_true", help="Run with simulated beats")
     parser.add_argument(
         "--config", type=Path, default=Path("config.toml"), help="Config file path"
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=None,
+        help="SQLite state database path (default: <config-dir>/state.db)",
     )
     parser.add_argument(
         "--log-level",
@@ -74,9 +93,104 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
+    """Build AppConfig from StateDB config table.
+
+    Returns None if the config table is empty (fresh DB with no migrated config).
+    """
+    if await state_db.is_config_empty():
+        return None
+
+    # Load each config section from DB
+    engine_data = await state_db.load_config("engine")
+    effect_data = await state_db.load_config("effect")
+    network_data = await state_db.load_config("network")
+    web_data = await state_db.load_config("web")
+    discovery_data = await state_db.load_config("discovery")
+
+    def _coerce(raw: dict[str, str]) -> dict[str, object]:
+        """Try to parse each string value as JSON (handles int, float, bool)."""
+        import json
+
+        result: dict[str, object] = {}
+        for k, v in raw.items():
+            try:
+                result[k] = json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                result[k] = v
+        return result
+
+    def _filter(cls: type, data: dict[str, object]) -> dict[str, object]:
+        valid = {f.name for f in dataclasses.fields(cls)}  # type: ignore[arg-type]
+        return {k: v for k, v in data.items() if k in valid}
+
+    engine = EngineConfig(**_filter(EngineConfig, _coerce(engine_data)))  # type: ignore[arg-type]
+    network = NetworkConfig(**_filter(NetworkConfig, _coerce(network_data)))  # type: ignore[arg-type]
+    web = WebConfig(**_filter(WebConfig, _coerce(web_data)))  # type: ignore[arg-type]
+    discovery = DiscoveryConfig(**_filter(DiscoveryConfig, _coerce(discovery_data)))  # type: ignore[arg-type]
+
+    # Effect config: keep active_effect only (params come from scene_effect_state)
+    effect_coerced = _coerce(effect_data)
+    effect = EffectConfig(**_filter(EffectConfig, effect_coerced))  # type: ignore[arg-type]
+
+    logger.info("Config loaded from StateDB")
+    return AppConfig(
+        engine=engine,
+        effect=effect,
+        network=network,
+        web=web,
+        discovery=discovery,
+    )
+
+
+async def _save_config_to_db(config: AppConfig, state_db: StateDB) -> None:
+    """Persist AppConfig to StateDB config table.
+
+    Intended for use by the config router when config is updated at runtime.
+    """
+    import json
+
+    def _str_dict(obj: object) -> dict[str, str]:
+        return {k: json.dumps(v) for k, v in dataclasses.asdict(obj).items()}  # type: ignore[call-overload]
+
+    await state_db.save_config_bulk("engine", _str_dict(config.engine))
+    await state_db.save_config_bulk("network", _str_dict(config.network))
+    await state_db.save_config_bulk("web", _str_dict(config.web))
+    await state_db.save_config_bulk("discovery", _str_dict(config.discovery))
+
+    effect_plain = {
+        k: v
+        for k, v in dataclasses.asdict(config.effect).items()
+        if not isinstance(v, (dict, list))
+    }
+    await state_db.save_config_bulk("effect", {k: json.dumps(v) for k, v in effect_plain.items()})
+
+    logger.debug("Config saved to StateDB")
+
+
 async def _run(args: argparse.Namespace) -> None:
-    config = load_config(args.config)
     metrics.init(enabled=args.metrics, port=args.metrics_port)
+
+    # --- Step 1: Open StateDB ---
+    db_path = args.db if args.db else args.config.parent / "state.db"
+    state_db = StateDB(db_path)
+    await state_db.open()
+
+    # --- Step 2: TOML migration (if DB is fresh and TOML files exist) ---
+    presets_toml = args.config.parent / "presets.toml"
+    if await state_db.is_config_empty():
+        if args.config.exists() or presets_toml.exists():
+            logger.info("Fresh DB detected — running TOML migration")
+            await state_db.migrate_from_toml(
+                config_path=args.config if args.config.exists() else None,
+                presets_path=presets_toml if presets_toml.exists() else None,
+            )
+
+    # --- Step 3: Load config (DB first, then TOML fallback) ---
+    config = await _load_config_from_db(state_db)
+    if config is None:
+        logger.info("No config in DB — loading from TOML ({})", args.config)
+        config = load_config(args.config)
 
     event_bus = EventBus()
     clock = BeatClock()
@@ -103,13 +217,31 @@ async def _run(args: argparse.Namespace) -> None:
         logger.info("Starting Pro DJ Link listener")
         await start_listener(event_bus=event_bus)
 
+    # --- Step 4: Load registered devices from DB → GhostAdapter entries ---
     device_manager = DeviceManager(event_bus=event_bus)
+    registered_devices = await state_db.load_devices()
+    for dev_row in registered_devices:
+        dev_info = DeviceInfo(
+            name=dev_row["name"],
+            device_type=dev_row.get("backend") or "",
+            led_count=dev_row.get("led_count") or 0,
+            address=dev_row.get("ip") or "",
+            mac=dev_row.get("mac"),
+            stable_id=dev_row["id"],
+        )
+        led_count = dev_row.get("led_count") or 60
+        last_latency = dev_row.get("last_latency_ms") or 50.0
+        tracker = LatencyTracker(strategy=StaticLatency(last_latency))
+        device_manager.add_device_from_info(
+            device_info=dev_info,
+            led_count=led_count,
+            tracker=tracker,
+            status="offline",
+        )
+    if registered_devices:
+        logger.info("Loaded {} registered device(s) from DB", len(registered_devices))
 
-    devices = await DeviceBackend.discover_all(config)
-    for device in devices:
-        device_manager.add_device(device.adapter, device.tracker, device.max_fps)
-
-    # Build spatial scene if configured
+    # --- Step 5: Build spatial scene if configured ---
     scene: SceneModel | None = None
     compositor: SpatialCompositor | None = None
     if config.scene_config is not None:
@@ -133,6 +265,7 @@ async def _run(args: argparse.Namespace) -> None:
     )
     deck = EffectDeck(effect)
 
+    # --- Step 6: Start engine and scheduler ---
     engine = EffectEngine(
         clock=clock,
         deck=deck,
@@ -148,6 +281,15 @@ async def _run(args: argparse.Namespace) -> None:
         compositor=compositor,
     )
 
+    # --- Step 7: Build DiscoveryOrchestrator ---
+    discovery_orchestrator = DiscoveryOrchestrator(
+        config=config,
+        device_manager=device_manager,
+        event_bus=event_bus,
+        state_db=state_db,
+    )
+
+    # Web setup
     async def _forward_vite_output(proc: asyncio.subprocess.Process) -> None:
         assert proc.stdout is not None
         while True:
@@ -168,7 +310,10 @@ async def _run(args: argparse.Namespace) -> None:
         host = args.web_host or config.web.host
         port = args.web_port or config.web.port
 
-        preset_store = PresetStore(args.config.parent / "presets.toml")
+        # Use DB-backed PresetStore if StateDB is available
+        preset_store = PresetStore(state_db=state_db)
+        await preset_store.load_from_db()
+
         web_app = create_app(
             beat_clock=clock,
             effect_deck=deck,
@@ -181,6 +326,7 @@ async def _run(args: argparse.Namespace) -> None:
             config=config,
             config_path=args.config,
             web_static_dir=None if web_mode == "dev" else args.web_static_dir,
+            state_db=state_db,
         )
 
         try:
@@ -245,6 +391,10 @@ async def _run(args: argparse.Namespace) -> None:
     tasks.append(asyncio.create_task(engine.run()))
     tasks.append(asyncio.create_task(scheduler.run()))
 
+    # --- Step 8: Launch background discovery + reconnect loop ---
+    tasks.append(asyncio.create_task(discovery_orchestrator.run_discovery()))
+    await discovery_orchestrator.start_reconnect_loop()
+
     async def _status_loop() -> None:
         while not stop_event.is_set():
             beat_state = clock.get_state()
@@ -290,8 +440,9 @@ async def _run(args: argparse.Namespace) -> None:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
 
+    await discovery_orchestrator.shutdown()
     await device_manager.disconnect_all()
-    await DeviceBackend.shutdown_all()
+    await state_db.close()
     logger.info("dj-ledfx stopped")
 
 

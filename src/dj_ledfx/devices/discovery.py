@@ -1,7 +1,9 @@
 """DiscoveryOrchestrator — multi-wave device discovery."""
+
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -55,9 +57,7 @@ class DiscoveryOrchestrator:
             logger.info("Discovery wave {}/{}", wave_num, num_waves)
             found = await self._run_wave()
             total_found += found
-            self._event_bus.emit(
-                DiscoveryWaveCompleteEvent(wave=wave_num, devices_found=found)
-            )
+            self._event_bus.emit(DiscoveryWaveCompleteEvent(wave=wave_num, devices_found=found))
             if wave_num < num_waves:
                 await asyncio.sleep(self._config.discovery.wave_interval_s)
 
@@ -98,20 +98,14 @@ class DiscoveryOrchestrator:
                 # Check by name as fallback
                 existing_by_name = self._manager.get_device(name)
                 if existing_by_name is None:
-                    self._manager.add_device(
-                        device.adapter, device.tracker, device.max_fps
-                    )
-                    self._event_bus.emit(
-                        DeviceDiscoveredEvent(stable_id=stable_id, name=name)
-                    )
+                    self._manager.add_device(device.adapter, device.tracker, device.max_fps)
+                    self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
                     new_count += 1
                     if self._state_db:
                         await self._persist_device(device.adapter)
             elif existing.status == "offline":
                 self._manager.promote_device(stable_id, device.adapter)
-                self._event_bus.emit(
-                    DeviceOnlineEvent(stable_id=stable_id, name=name)
-                )
+                self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
                 if self._state_db:
                     await self._persist_device(device.adapter)
 
@@ -120,19 +114,21 @@ class DiscoveryOrchestrator:
     async def _persist_device(self, adapter: DeviceAdapter) -> None:
         if not self._state_db:
             return
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         info = adapter.device_info
         address = info.address or ""
         ip = address.split(":")[0] if ":" in address else address
         await self._state_db.upsert_device(
-            id=info.stable_id or info.name,
-            name=info.name,
-            backend=info.device_type.split("_")[0] if info.device_type else "",
-            led_count=adapter.led_count,
-            ip=ip,
-            mac=getattr(info, "mac", None),
-            last_seen=datetime.now(timezone.utc).isoformat(),
+            {
+                "id": info.stable_id or info.name,
+                "name": info.name,
+                "backend": info.device_type.split("_")[0] if info.device_type else "",
+                "led_count": adapter.led_count,
+                "ip": ip,
+                "mac": getattr(info, "mac", None),
+                "last_seen": datetime.now(UTC).isoformat(),
+            }
         )
 
     async def start_reconnect_loop(self) -> None:
@@ -144,9 +140,7 @@ class DiscoveryOrchestrator:
         interval = self._config.discovery.reconnect_interval_s
         while self._running:
             await asyncio.sleep(interval)
-            offline_count = sum(
-                1 for d in self._manager.devices if d.status == "offline"
-            )
+            offline_count = sum(1 for d in self._manager.devices if d.status == "offline")
             if offline_count > 0:
                 logger.debug("Reconnect loop: {} offline devices", offline_count)
                 await self._run_wave()

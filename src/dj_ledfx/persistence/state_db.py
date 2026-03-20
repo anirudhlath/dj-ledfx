@@ -1,4 +1,5 @@
 """StateDB — SQLite-backed persistence layer for dj-ledfx state."""
+
 from __future__ import annotations
 
 import asyncio
@@ -104,9 +105,7 @@ class StateDB:
 
     # --- Low-level helpers ---
 
-    async def _execute_read(
-        self, sql: str, params: tuple[Any, ...] = ()
-    ) -> list[tuple[Any, ...]]:
+    async def _execute_read(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
         """Execute a read query and return all rows."""
 
         def _run() -> list[tuple[Any, ...]]:
@@ -126,9 +125,7 @@ class StateDB:
 
         await asyncio.to_thread(_run)
 
-    async def _executemany_write(
-        self, sql: str, params_seq: list[tuple[Any, ...]]
-    ) -> None:
+    async def _executemany_write(self, sql: str, params_seq: list[tuple[Any, ...]]) -> None:
         """Execute a write statement for each set of params."""
 
         def _run() -> None:
@@ -147,6 +144,28 @@ class StateDB:
         )
         return {row[0]: row[1] for row in rows}
 
+    async def load_all_config(self) -> dict[tuple[str, str], Any]:
+        """Return all config key-value pairs across all sections (excluding _meta).
+
+        Keys are (section, key) tuples. Values are coerced to Python types
+        via JSON parsing where possible (e.g. '90' -> 90, 'true' -> True).
+        """
+        rows = await self._execute_read(
+            "SELECT section, key, value FROM config WHERE section != '_meta'"
+        )
+        result: dict[tuple[str, str], Any] = {}
+        for section, key, value in rows:
+            try:
+                result[(section, key)] = json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                result[(section, key)] = value
+        return result
+
+    async def is_config_empty(self) -> bool:
+        """Return True if there are no user config entries (only _meta or empty)."""
+        rows = await self._execute_read("SELECT COUNT(*) FROM config WHERE section != '_meta'")
+        return rows[0][0] == 0
+
     async def save_config_key(self, section: str, key: str, value: str) -> None:
         """Upsert a single config key-value in a section."""
         await self._execute_write(
@@ -164,15 +183,22 @@ class StateDB:
     # --- Device CRUD ---
 
     _DEVICE_COLUMNS = (
-        "id", "name", "backend", "led_count", "ip", "mac",
-        "device_id", "sku", "last_latency_ms", "last_seen", "extra",
+        "id",
+        "name",
+        "backend",
+        "led_count",
+        "ip",
+        "mac",
+        "device_id",
+        "sku",
+        "last_latency_ms",
+        "last_seen",
+        "extra",
     )
 
     async def load_devices(self) -> list[dict[str, Any]]:
         """Return all device rows as dicts."""
-        rows = await self._execute_read(
-            f"SELECT {', '.join(self._DEVICE_COLUMNS)} FROM devices"
-        )
+        rows = await self._execute_read(f"SELECT {', '.join(self._DEVICE_COLUMNS)} FROM devices")
         return [dict(zip(self._DEVICE_COLUMNS, row, strict=True)) for row in rows]
 
     async def upsert_device(self, data: dict[str, Any]) -> None:
@@ -251,22 +277,34 @@ class StateDB:
     # --- Scenes CRUD ---
 
     _SCENE_COLUMNS = (
-        "id", "name", "mapping_type", "mapping_params",
-        "effect_mode", "effect_source", "is_active",
+        "id",
+        "name",
+        "mapping_type",
+        "mapping_params",
+        "effect_mode",
+        "effect_source",
+        "is_active",
     )
 
     _PLACEMENT_COLUMNS = (
-        "scene_id", "device_id",
-        "position_x", "position_y", "position_z",
-        "geometry_type", "direction_x", "direction_y", "direction_z",
-        "length", "width", "rows", "cols",
+        "scene_id",
+        "device_id",
+        "position_x",
+        "position_y",
+        "position_z",
+        "geometry_type",
+        "direction_x",
+        "direction_y",
+        "direction_z",
+        "length",
+        "width",
+        "rows",
+        "cols",
     )
 
     async def load_scenes(self) -> list[dict[str, Any]]:
         """Return all scene rows as dicts."""
-        rows = await self._execute_read(
-            f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes"
-        )
+        rows = await self._execute_read(f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes")
         return [dict(zip(self._SCENE_COLUMNS, row, strict=True)) for row in rows]
 
     async def save_scene(self, data: dict[str, Any]) -> None:
@@ -305,9 +343,7 @@ class StateDB:
             return None
         return {"effect_class": rows[0][0], "params": rows[0][1]}
 
-    async def save_scene_effect_state(
-        self, scene_id: str, effect_class: str, params: str
-    ) -> None:
+    async def save_scene_effect_state(self, scene_id: str, effect_class: str, params: str) -> None:
         """Upsert the effect state for a scene."""
         await self._execute_write(
             "INSERT OR REPLACE INTO scene_effect_state (scene_id, effect_class, params) "
@@ -345,9 +381,7 @@ class StateDB:
 
     async def load_presets(self) -> list[dict[str, str]]:
         """Return all presets as dicts."""
-        rows = await self._execute_read(
-            "SELECT name, effect_class, params FROM presets"
-        )
+        rows = await self._execute_read("SELECT name, effect_class, params FROM presets")
         return [{"name": row[0], "effect_class": row[1], "params": row[2]} for row in rows]
 
     async def save_preset(self, name: str, effect_class: str, params: str) -> None:
@@ -367,9 +401,7 @@ class StateDB:
         """Coalesce latency updates — last value wins, flushed on flush_pending()/close()."""
         self._pending_latency[device_id] = latency_ms
 
-    def schedule_effect_state_update(
-        self, scene_id: str, effect_class: str, params: str
-    ) -> None:
+    def schedule_effect_state_update(self, scene_id: str, effect_class: str, params: str) -> None:
         """Coalesce effect state updates — last value wins, flushed on flush_pending()/close()."""
         self._pending_effect_state[scene_id] = (effect_class, params)
 
@@ -460,13 +492,15 @@ class StateDB:
                 # Create the "default" scene if it doesn't already exist
                 existing_scenes = await self.load_scenes()
                 if not any(s["id"] == "default" for s in existing_scenes):
-                    await self.save_scene({
-                        "id": "default",
-                        "name": "Default",
-                        "mapping_type": "linear",
-                        "effect_mode": "independent",
-                        "is_active": 1,
-                    })
+                    await self.save_scene(
+                        {
+                            "id": "default",
+                            "name": "Default",
+                            "mapping_type": "linear",
+                            "effect_mode": "independent",
+                            "is_active": 1,
+                        }
+                    )
 
                 await self.save_scene_effect_state(
                     "default",
@@ -475,7 +509,8 @@ class StateDB:
                 )
                 logger.debug(
                     "migrate_from_toml: created default scene with effect '{}', params={}",
-                    active_effect, params,
+                    active_effect,
+                    params,
                 )
 
     async def _migrate_presets_toml(self, path: Path) -> None:
