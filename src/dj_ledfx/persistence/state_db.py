@@ -237,3 +237,96 @@ class StateDB:
             "DELETE FROM device_groups WHERE group_name=? AND device_id=?",
             (group_name, device_id),
         )
+
+    # --- Scenes CRUD ---
+
+    _SCENE_COLUMNS = (
+        "id", "name", "mapping_type", "mapping_params",
+        "effect_mode", "effect_source", "is_active",
+    )
+
+    _PLACEMENT_COLUMNS = (
+        "scene_id", "device_id",
+        "position_x", "position_y", "position_z",
+        "geometry_type", "direction_x", "direction_y", "direction_z",
+        "length", "width", "rows", "cols",
+    )
+
+    async def load_scenes(self) -> list[dict[str, Any]]:
+        """Return all scene rows as dicts."""
+        rows = await self._execute_read(
+            f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes"
+        )
+        return [dict(zip(self._SCENE_COLUMNS, row)) for row in rows]
+
+    async def save_scene(self, data: dict[str, Any]) -> None:
+        """Insert or replace a scene record. Must include 'id', 'name'."""
+        cols = [c for c in self._SCENE_COLUMNS if c in data]
+        placeholders = ", ".join("?" for _ in cols)
+        col_list = ", ".join(cols)
+        values = tuple(data.get(c) for c in cols)
+        await self._execute_write(
+            f"INSERT OR REPLACE INTO scenes ({col_list}) VALUES ({placeholders})",
+            values,
+        )
+
+    async def delete_scene(self, scene_id: str) -> None:
+        """Delete a scene and cascade to placements and effect state."""
+        await self._execute_write("DELETE FROM scenes WHERE id=?", (scene_id,))
+
+    async def set_scene_active(self, scene_id: str) -> None:
+        """Set a scene as active, deactivating all others."""
+
+        def _run() -> None:
+            assert self._conn is not None
+            self._conn.execute("UPDATE scenes SET is_active=0")
+            self._conn.execute("UPDATE scenes SET is_active=1 WHERE id=?", (scene_id,))
+            self._conn.commit()
+
+        await asyncio.to_thread(_run)
+
+    async def load_scene_effect_state(self, scene_id: str) -> dict[str, str] | None:
+        """Return effect class + params for a scene, or None if unset."""
+        rows = await self._execute_read(
+            "SELECT effect_class, params FROM scene_effect_state WHERE scene_id=?",
+            (scene_id,),
+        )
+        if not rows:
+            return None
+        return {"effect_class": rows[0][0], "params": rows[0][1]}
+
+    async def save_scene_effect_state(
+        self, scene_id: str, effect_class: str, params: str
+    ) -> None:
+        """Upsert the effect state for a scene."""
+        await self._execute_write(
+            "INSERT OR REPLACE INTO scene_effect_state (scene_id, effect_class, params) "
+            "VALUES (?, ?, ?)",
+            (scene_id, effect_class, params),
+        )
+
+    async def load_scene_placements(self, scene_id: str) -> list[dict[str, Any]]:
+        """Return all placements for a scene as dicts."""
+        rows = await self._execute_read(
+            f"SELECT {', '.join(self._PLACEMENT_COLUMNS)} FROM scene_placements WHERE scene_id=?",
+            (scene_id,),
+        )
+        return [dict(zip(self._PLACEMENT_COLUMNS, row)) for row in rows]
+
+    async def save_placement(self, data: dict[str, Any]) -> None:
+        """Insert or replace a placement. Must include 'scene_id' and 'device_id'."""
+        cols = [c for c in self._PLACEMENT_COLUMNS if c in data]
+        placeholders = ", ".join("?" for _ in cols)
+        col_list = ", ".join(cols)
+        values = tuple(data.get(c) for c in cols)
+        await self._execute_write(
+            f"INSERT OR REPLACE INTO scene_placements ({col_list}) VALUES ({placeholders})",
+            values,
+        )
+
+    async def delete_placement(self, scene_id: str, device_id: str) -> None:
+        """Remove a device from a scene's placement list."""
+        await self._execute_write(
+            "DELETE FROM scene_placements WHERE scene_id=? AND device_id=?",
+            (scene_id, device_id),
+        )

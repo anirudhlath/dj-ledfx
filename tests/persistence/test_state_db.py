@@ -273,3 +273,134 @@ async def test_delete_group_cascades_device_groups(db):
     await db.delete_group("main")
     result = await db.load_device_groups()
     assert result == {}
+
+
+# --- Task 9: Scenes CRUD ---
+
+
+@pytest.mark.asyncio
+async def test_load_scenes_empty(db):
+    scenes = await db.load_scenes()
+    assert scenes == []
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_scene(db):
+    await db.save_scene({
+        "id": "dj-booth",
+        "name": "DJ Booth",
+        "mapping_type": "linear",
+        "effect_mode": "independent",
+    })
+    scenes = await db.load_scenes()
+    assert len(scenes) == 1
+    assert scenes[0]["id"] == "dj-booth"
+    assert scenes[0]["name"] == "DJ Booth"
+    assert scenes[0]["mapping_type"] == "linear"
+    assert scenes[0]["is_active"] == 0
+
+
+@pytest.mark.asyncio
+async def test_save_scene_upsert(db):
+    await db.save_scene({"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene({"id": "s1", "name": "Scene Updated", "mapping_type": "radial", "effect_mode": "independent"})
+    scenes = await db.load_scenes()
+    assert len(scenes) == 1
+    assert scenes[0]["name"] == "Scene Updated"
+    assert scenes[0]["mapping_type"] == "radial"
+
+
+@pytest.mark.asyncio
+async def test_delete_scene(db):
+    await db.save_scene({"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.delete_scene("s1")
+    scenes = await db.load_scenes()
+    assert scenes == []
+
+
+@pytest.mark.asyncio
+async def test_set_scene_active(db):
+    await db.save_scene({"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene({"id": "s2", "name": "Scene 2", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.set_scene_active("s1")
+    scenes = await db.load_scenes()
+    by_id = {s["id"]: s for s in scenes}
+    assert by_id["s1"]["is_active"] == 1
+    assert by_id["s2"]["is_active"] == 0
+
+
+@pytest.mark.asyncio
+async def test_set_scene_active_deactivates_others(db):
+    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene({"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.set_scene_active("s1")
+    await db.set_scene_active("s2")
+    scenes = await db.load_scenes()
+    by_id = {s["id"]: s for s in scenes}
+    assert by_id["s1"]["is_active"] == 0
+    assert by_id["s2"]["is_active"] == 1
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_scene_effect_state(db):
+    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene_effect_state("s1", "BeatPulse", '{"gamma": 2.0}')
+    state = await db.load_scene_effect_state("s1")
+    assert state is not None
+    assert state["effect_class"] == "BeatPulse"
+    assert state["params"] == '{"gamma": 2.0}'
+
+
+@pytest.mark.asyncio
+async def test_load_scene_effect_state_missing(db):
+    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    state = await db.load_scene_effect_state("s1")
+    assert state is None
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_placement(db):
+    await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
+    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_placement({
+        "scene_id": "s1",
+        "device_id": "lifx:aa",
+        "position_x": 1.0,
+        "position_y": 2.0,
+        "position_z": 0.0,
+        "geometry_type": "strip",
+    })
+    placements = await db.load_scene_placements("s1")
+    assert len(placements) == 1
+    assert placements[0]["device_id"] == "lifx:aa"
+    assert placements[0]["position_x"] == 1.0
+    assert placements[0]["geometry_type"] == "strip"
+
+
+@pytest.mark.asyncio
+async def test_delete_placement(db):
+    await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
+    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_placement({
+        "scene_id": "s1", "device_id": "lifx:aa",
+        "position_x": 0.0, "position_y": 0.0, "position_z": 0.0,
+        "geometry_type": "point",
+    })
+    await db.delete_placement("s1", "lifx:aa")
+    placements = await db.load_scene_placements("s1")
+    assert placements == []
+
+
+@pytest.mark.asyncio
+async def test_delete_scene_cascades_placements(db):
+    await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
+    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_placement({
+        "scene_id": "s1", "device_id": "lifx:aa",
+        "position_x": 0.0, "position_y": 0.0, "position_z": 0.0,
+        "geometry_type": "point",
+    })
+    await db.delete_scene("s1")
+    # placements table should be empty due to CASCADE
+    rows = await db._execute_read("SELECT COUNT(*) FROM scene_placements")
+    assert rows[0][0] == 0
