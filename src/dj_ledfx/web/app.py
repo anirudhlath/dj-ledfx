@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.deck import EffectDeck
     from dj_ledfx.effects.engine import EffectEngine
     from dj_ledfx.effects.presets import PresetStore
+    from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 
 
@@ -53,6 +54,7 @@ def create_app(
     config: AppConfig,
     config_path: Path | None,
     web_static_dir: str | None = None,
+    state_db: StateDB | None = None,
 ) -> FastAPI:
     app = FastAPI(title="dj-ledfx")
     app.add_middleware(
@@ -73,6 +75,7 @@ def create_app(
     app.state.compositor = compositor
     app.state.config = config
     app.state.config_path = config_path
+    app.state.state_db = state_db
 
     from dj_ledfx.web.router_config import router as config_router
     from dj_ledfx.web.router_devices import router as devices_router
