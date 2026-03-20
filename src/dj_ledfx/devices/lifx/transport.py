@@ -168,19 +168,26 @@ class LifxTransport:
         self._on_packet_received = _discovery_handler  # type: ignore[method-assign]
 
         try:
-            # Broadcast GetService
-            broadcast_pkt = LifxPacket(
-                tagged=True,
-                source=self._source_id,
-                target=b"\x00" * 8,
-                ack_required=False,
-                res_required=False,
-                sequence=self.next_sequence() % 256,
-                msg_type=2,
-                payload=b"",
-            )
-            self.send_packet(broadcast_pkt, ("255.255.255.255", 56700))
-            await asyncio.sleep(timeout_s)
+            # Broadcast GetService 3 times, 1 second apart; dedup by MAC
+            for i in range(3):
+                broadcast_pkt = LifxPacket(
+                    tagged=True,
+                    source=self._source_id,
+                    target=b"\x00" * 8,
+                    ack_required=False,
+                    res_required=False,
+                    sequence=self.next_sequence() % 256,
+                    msg_type=2,
+                    payload=b"",
+                )
+                self.send_packet(broadcast_pkt, ("255.255.255.255", 56700))
+                if i < 2:
+                    await asyncio.sleep(1.0)
+
+            # Wait remaining time for stragglers
+            remaining = timeout_s - 2.0
+            if remaining > 0:
+                await asyncio.sleep(remaining)
         finally:
             self._on_packet_received = original_handler  # type: ignore[method-assign]
 
@@ -214,7 +221,11 @@ class LifxTransport:
                     payload=b"",
                 )
                 self.send_packet(version_pkt, (ip, port))
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5)
+                # Retry once if no response yet
+                if not version_responses:
+                    self.send_packet(version_pkt, (ip, port))
+                    await asyncio.sleep(0.5)
             finally:
                 self._on_packet_received = original_handler  # type: ignore[method-assign]
 
@@ -236,6 +247,114 @@ class LifxTransport:
             )
 
         logger.info("LIFX discovery found {} devices", len(results))
+        return results
+
+    async def unicast_sweep(
+        self,
+        subnet_hosts: list[str],
+        concurrency: int = 50,
+        timeout_s: float = 0.5,
+    ) -> list[LifxDeviceRecord]:
+        """Send GetService to every IP in the list. Rate-limited."""
+        discovered: dict[str, tuple[bytes, str, int]] = {}  # mac_hex → (mac, ip, port)
+        original_handler = self._on_packet_received
+
+        from dj_ledfx.devices.lifx.packet import (
+            parse_state_service,
+            parse_state_version,
+        )
+
+        def _sweep_handler(data: bytes, addr: tuple[str, int]) -> None:
+            try:
+                pkt = LifxPacket.unpack(data)
+            except Exception:
+                return
+            if pkt.msg_type == 3:  # StateService
+                service, port = parse_state_service(pkt.payload)
+                if service == 1:  # UDP
+                    mac = pkt.target[:6]
+                    discovered[mac.hex()] = (mac, addr[0], port)
+
+        self._on_packet_received = _sweep_handler  # type: ignore[method-assign]
+
+        try:
+            sem = asyncio.Semaphore(concurrency)
+
+            async def _probe_host(ip: str) -> None:
+                async with sem:
+                    pkt = LifxPacket(
+                        tagged=True,
+                        source=self._source_id,
+                        target=b"\x00" * 8,
+                        ack_required=False,
+                        res_required=False,
+                        sequence=self.next_sequence() % 256,
+                        msg_type=2,
+                        payload=b"",
+                    )
+                    self.send_packet(pkt, (ip, 56700))
+
+            await asyncio.gather(*[_probe_host(ip) for ip in subnet_hosts])
+            await asyncio.sleep(timeout_s)
+        finally:
+            self._on_packet_received = original_handler  # type: ignore[method-assign]
+
+        # Query version for each responder (reuse discover logic)
+        results: list[LifxDeviceRecord] = []
+        for _mac_hex, (mac, ip, port) in discovered.items():
+            version_responses: list[tuple[int, int, int]] = []
+
+            def _version_handler(
+                data: bytes,
+                addr: tuple[str, int],
+                _responses: list[tuple[int, int, int]] = version_responses,
+            ) -> None:
+                try:
+                    pkt = LifxPacket.unpack(data)
+                except Exception:
+                    return
+                if pkt.msg_type == 33:  # StateVersion
+                    _responses.append(parse_state_version(pkt.payload))
+
+            self._on_packet_received = _version_handler  # type: ignore[method-assign]
+            try:
+                version_pkt = LifxPacket(
+                    tagged=False,
+                    source=self._source_id,
+                    target=mac + b"\x00\x00",
+                    ack_required=False,
+                    res_required=True,
+                    sequence=self.next_sequence() % 256,
+                    msg_type=32,
+                    payload=b"",
+                )
+                self.send_packet(version_pkt, (ip, port))
+                await asyncio.sleep(0.5)
+                if not version_responses:
+                    self.send_packet(version_pkt, (ip, port))
+                    await asyncio.sleep(0.5)
+            finally:
+                self._on_packet_received = original_handler  # type: ignore[method-assign]
+
+            if version_responses:
+                vendor, product, _version = version_responses[0]
+            else:
+                logger.warning(
+                    "LIFX device {} did not respond to GetVersion in unicast sweep, defaulting to bulb",
+                    ip,
+                )
+                vendor, product, _version = 1, 0, 0
+            results.append(
+                LifxDeviceRecord(
+                    mac=mac,
+                    ip=ip,
+                    port=port,
+                    vendor=vendor,
+                    product=product,
+                )
+            )
+
+        logger.info("LIFX unicast sweep found {} devices", len(results))
         return results
 
     def _on_packet_received(self, data: bytes, addr: tuple[str, int]) -> None:
