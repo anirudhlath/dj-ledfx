@@ -1,4 +1,5 @@
 """GhostAdapter — placeholder for offline devices."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -41,6 +42,4 @@ class GhostAdapter(DeviceAdapter):
         pass
 
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
-        raise ConnectionError(
-            f"Device '{self._device_info.name}' is offline — cannot send frames"
-        )
+        raise ConnectionError(f"Device '{self._device_info.name}' is offline — cannot send frames")

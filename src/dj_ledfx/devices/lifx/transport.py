@@ -340,7 +340,8 @@ class LifxTransport:
                 vendor, product, _version = version_responses[0]
             else:
                 logger.warning(
-                    "LIFX device {} did not respond to GetVersion in unicast sweep, defaulting to bulb",
+                    "LIFX device {} did not respond to GetVersion in unicast sweep,"
+                    " defaulting to bulb",
                     ip,
                 )
                 vendor, product, _version = 1, 0, 0

@@ -89,8 +89,9 @@ class OpenRGBAdapter(DeviceAdapter):
                     )
                 else:
                     raise ConnectionError(
-                        f"OpenRGB connection to {self._host}:{self._port} timed out after 2 attempts"
-                    )
+                        f"OpenRGB connection to {self._host}:{self._port}"
+                        " timed out after 2 attempts"
+                    ) from None
         self._is_connected = True
         logger.info(
             "Connected to OpenRGB device '{}' ({} LEDs) at {}:{}",

@@ -1,4 +1,5 @@
 """Test that OpenRGB adapters populate stable_id on DeviceInfo."""
+
 from dj_ledfx.types import DeviceInfo
 
 

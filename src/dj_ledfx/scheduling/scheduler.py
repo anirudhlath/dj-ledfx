@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -103,9 +103,7 @@ class LookaheadScheduler:
     def compositor(self, value: SpatialCompositor | None) -> None:
         self._compositor = value
 
-    def add_device(
-        self, managed: ManagedDevice, pipeline: ScenePipeline | None = None
-    ) -> None:
+    def add_device(self, managed: ManagedDevice, pipeline: ScenePipeline | None = None) -> None:
         """Add a device dynamically. Spawns a send task if the scheduler is running."""
         key = self._device_key(managed)
         if key in self._device_state:
@@ -218,7 +216,9 @@ class LookaheadScheduler:
 
             # Step 3: Find nearest frame (numpy copy happens here)
             # Use pipeline's ring buffer if available, else scheduler's
-            ring_buf = state.pipeline.ring_buffer if state.pipeline is not None else self._ring_buffer
+            ring_buf = (
+                state.pipeline.ring_buffer if state.pipeline is not None else self._ring_buffer
+            )
             frame = ring_buf.find_nearest(target_time)
             if frame is None:
                 logger.warning(

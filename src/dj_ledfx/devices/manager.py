@@ -61,7 +61,7 @@ class DeviceManager:
             *(device.adapter.connect() for device in self._devices),
             return_exceptions=True,
         )
-        for device, result in zip(self._devices, results):
+        for device, result in zip(self._devices, results, strict=False):
             if isinstance(result, Exception):
                 logger.opt(exception=result).error(
                     "Failed to connect to '{}'", device.adapter.device_info.name
@@ -72,7 +72,7 @@ class DeviceManager:
             *(device.adapter.disconnect() for device in self._devices),
             return_exceptions=True,
         )
-        for device, result in zip(self._devices, results):
+        for device, result in zip(self._devices, results, strict=False):
             if isinstance(result, Exception):
                 logger.opt(exception=result).error(
                     "Failed to disconnect from '{}'", device.adapter.device_info.name
@@ -194,6 +194,4 @@ class DeviceManager:
 
     def remove_device(self, stable_id: str) -> None:
         """Remove a device by stable_id."""
-        self._devices = [
-            d for d in self._devices if d.adapter.device_info.stable_id != stable_id
-        ]
+        self._devices = [d for d in self._devices if d.adapter.device_info.stable_id != stable_id]

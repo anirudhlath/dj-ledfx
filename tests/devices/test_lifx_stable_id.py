@@ -1,4 +1,5 @@
 """Test that LIFX discovery populates stable_id and mac on DeviceInfo."""
+
 from dj_ledfx.types import DeviceInfo
 
 

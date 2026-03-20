@@ -1,4 +1,5 @@
 """Test that Govee adapters populate stable_id on DeviceInfo."""
+
 from unittest.mock import MagicMock
 
 from dj_ledfx.devices.govee.segment import GoveeSegmentAdapter

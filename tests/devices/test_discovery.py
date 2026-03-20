@@ -1,13 +1,13 @@
 """Tests for DiscoveryOrchestrator."""
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from dj_ledfx.config import AppConfig, DiscoveryConfig
 from dj_ledfx.devices.discovery import DiscoveryOrchestrator
 from dj_ledfx.devices.manager import DeviceManager
-from dj_ledfx.events import EventBus, DiscoveryWaveCompleteEvent, DiscoveryCompleteEvent
+from dj_ledfx.events import DiscoveryCompleteEvent, DiscoveryWaveCompleteEvent, EventBus
 
 
 @pytest.fixture
@@ -176,9 +176,7 @@ async def test_orchestrator_discovers_new_devices(config, device_manager, event_
     mock_tracker = MagicMock()
     mock_tracker.effective_latency_ms = 100.0
 
-    discovered_device = DiscoveredDevice(
-        adapter=mock_adapter, tracker=mock_tracker, max_fps=40
-    )
+    discovered_device = DiscoveredDevice(adapter=mock_adapter, tracker=mock_tracker, max_fps=40)
 
     mock_backend = MagicMock()
     mock_backend.discover = AsyncMock(return_value=[discovered_device])

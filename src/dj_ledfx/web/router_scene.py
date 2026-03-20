@@ -15,7 +15,7 @@ from dj_ledfx.spatial.geometry import (
     PointGeometry,
     StripGeometry,
 )
-from dj_ledfx.spatial.mapping import LinearMapping, mapping_from_config
+from dj_ledfx.spatial.mapping import mapping_from_config
 from dj_ledfx.web.schemas import (
     CreateSceneRequest,
     GeometrySchema,
@@ -217,7 +217,8 @@ async def update_scene_device(
         managed = device_manager.get_device(device_name)
         if managed is not None:
             led_count = managed.adapter.led_count
-            if geometry is None and hasattr(managed.adapter, "geometry") and managed.adapter.geometry is not None:
+            has_geometry = hasattr(managed.adapter, "geometry")
+            if geometry is None and has_geometry and managed.adapter.geometry is not None:
                 geometry = managed.adapter.geometry
 
         scene.add_placement(
@@ -304,13 +305,15 @@ async def list_scenes(request: Request) -> list[SceneListItem]:
 async def create_scene(request: Request, body: CreateSceneRequest) -> SceneListItem:
     db = _get_db(request)
     scene_id = str(uuid.uuid4())
-    await db.save_scene({
-        "id": scene_id,
-        "name": body.name,
-        "mapping_type": body.mapping_type,
-        "effect_mode": body.effect_mode,
-        "is_active": 0,
-    })
+    await db.save_scene(
+        {
+            "id": scene_id,
+            "name": body.name,
+            "mapping_type": body.mapping_type,
+            "effect_mode": body.effect_mode,
+            "is_active": 0,
+        }
+    )
     return SceneListItem(
         id=scene_id,
         name=body.name,
@@ -337,9 +340,7 @@ async def get_scene_by_id(request: Request, scene_id: str) -> SceneListItem:
 
 
 @router_scenes.put("/{scene_id}", response_model=SceneListItem)
-async def update_scene(
-    request: Request, scene_id: str, body: UpdateSceneRequest
-) -> SceneListItem:
+async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest) -> SceneListItem:
     db = _get_db(request)
     rows = await db.load_scenes()
     existing = next((r for r in rows if r["id"] == scene_id), None)
@@ -348,8 +349,12 @@ async def update_scene(
 
     updated: dict[str, Any] = {"id": scene_id}
     updated["name"] = body.name if body.name is not None else existing["name"]
-    updated["mapping_type"] = body.mapping_type if body.mapping_type is not None else existing.get("mapping_type")
-    updated["effect_mode"] = body.effect_mode if body.effect_mode is not None else existing.get("effect_mode")
+    updated["mapping_type"] = (
+        body.mapping_type if body.mapping_type is not None else existing.get("mapping_type")
+    )
+    updated["effect_mode"] = (
+        body.effect_mode if body.effect_mode is not None else existing.get("effect_mode")
+    )
     updated["is_active"] = existing.get("is_active", 0)
 
     await db.save_scene(updated)
@@ -390,13 +395,15 @@ async def deactivate_scene(request: Request, scene_id: str) -> dict[str, str]:
         raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
     # Deactivate by setting is_active=0 for this scene only
     existing = next(r for r in rows if r["id"] == scene_id)
-    await db.save_scene({
-        "id": scene_id,
-        "name": existing["name"],
-        "mapping_type": existing.get("mapping_type"),
-        "effect_mode": existing.get("effect_mode"),
-        "is_active": 0,
-    })
+    await db.save_scene(
+        {
+            "id": scene_id,
+            "name": existing["name"],
+            "mapping_type": existing.get("mapping_type"),
+            "effect_mode": existing.get("effect_mode"),
+            "is_active": 0,
+        }
+    )
     return {"status": "deactivated", "scene_id": scene_id}
 
 
@@ -424,6 +431,7 @@ async def add_or_update_scene_placement(
         try:
             device_manager = request.app.state.device_manager
             from dj_ledfx.devices.manager import ManagedDevice as _MD
+
             managed = device_manager.get_device(device_name)
             if managed is not None and isinstance(managed, _MD):
                 info = managed.adapter.device_info

@@ -1,6 +1,17 @@
 from dataclasses import dataclass
 
-from dj_ledfx.events import EventBus
+import pytest
+
+from dj_ledfx.events import (
+    DeviceDiscoveredEvent,
+    DeviceOfflineEvent,
+    DeviceOnlineEvent,
+    DiscoveryCompleteEvent,
+    DiscoveryWaveCompleteEvent,
+    EventBus,
+    SceneActivatedEvent,
+    SceneDeactivatedEvent,
+)
 
 
 @dataclass
@@ -56,19 +67,6 @@ def test_unsubscribe() -> None:
 def test_emit_with_no_subscribers_does_not_raise() -> None:
     bus = EventBus()
     bus.emit(FakeEvent(value=1))  # should not raise
-
-
-import pytest
-
-from dj_ledfx.events import (
-    DeviceDiscoveredEvent,
-    DeviceOfflineEvent,
-    DeviceOnlineEvent,
-    DiscoveryCompleteEvent,
-    DiscoveryWaveCompleteEvent,
-    SceneActivatedEvent,
-    SceneDeactivatedEvent,
-)
 
 
 @pytest.fixture

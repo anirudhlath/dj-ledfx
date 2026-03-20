@@ -36,7 +36,13 @@ def client():
 def client_with_device():
     """Client with one real device registered."""
     manager = DeviceManager(EventBus())
-    info = DeviceInfo(name="Strip1", device_type="lifx_strip", led_count=60, address="192.168.1.100", stable_id="lifx:strip1")
+    info = DeviceInfo(
+        name="Strip1",
+        device_type="lifx_strip",
+        led_count=60,
+        address="192.168.1.100",
+        stable_id="lifx:strip1",
+    )
     tracker = LatencyTracker(StaticLatency(50.0))
 
     adapter = MagicMock(spec=DeviceAdapter)

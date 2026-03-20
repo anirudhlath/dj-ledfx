@@ -1,4 +1,5 @@
 """Tests for GhostAdapter — offline device placeholder."""
+
 import numpy as np
 import pytest
 

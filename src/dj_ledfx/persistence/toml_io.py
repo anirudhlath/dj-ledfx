@@ -9,6 +9,7 @@ Export format:
   [groups."<name>"]           — group metadata + members
   [presets."<name>"]          — preset records
 """
+
 from __future__ import annotations
 
 import json
@@ -22,7 +23,11 @@ from dj_ledfx.persistence.state_db import StateDB
 
 # Config sections that belong at the top level (not per-device, not internal)
 _EXPORTABLE_CONFIG_SECTIONS = {
-    "engine", "network", "web", "devices", "discovery",
+    "engine",
+    "network",
+    "web",
+    "devices",
+    "discovery",
 }
 
 # Internal section used for schema version tracking
@@ -85,7 +90,8 @@ async def export_toml(db: StateDB) -> str:
             # Effect state
             effect_state = await db.load_scene_effect_state(scene_id)
             if effect_state:
-                params = json.loads(effect_state["params"]) if isinstance(effect_state["params"], str) else effect_state["params"]
+                raw = effect_state["params"]
+                params = json.loads(raw) if isinstance(raw, str) else raw
                 scene_entry["effect"] = {
                     "effect_class": effect_state["effect_class"],
                     "params": params,
@@ -102,12 +108,18 @@ async def export_toml(db: StateDB) -> str:
                 for p in placements:
                     dev_name = id_to_name.get(p["device_id"], p["device_id"])
                     p_entry: dict[str, Any] = {}
-                    if all(p.get(k) is not None for k in ("position_x", "position_y", "position_z")):
+                    pos_keys = ("position_x", "position_y", "position_z")
+                    if all(p.get(k) is not None for k in pos_keys):
                         p_entry["position"] = [p["position_x"], p["position_y"], p["position_z"]]
                     if p.get("geometry_type"):
                         p_entry["geometry"] = p["geometry_type"]
-                    if all(p.get(k) is not None for k in ("direction_x", "direction_y", "direction_z")):
-                        p_entry["direction"] = [p["direction_x"], p["direction_y"], p["direction_z"]]
+                    dir_keys = ("direction_x", "direction_y", "direction_z")
+                    if all(p.get(k) is not None for k in dir_keys):
+                        p_entry["direction"] = [
+                            p["direction_x"],
+                            p["direction_y"],
+                            p["direction_z"],
+                        ]
                     if p.get("length") is not None:
                         p_entry["length"] = p["length"]
                     if p.get("width") is not None:
@@ -140,7 +152,8 @@ async def export_toml(db: StateDB) -> str:
     if presets:
         presets_doc: dict[str, Any] = {}
         for preset in presets:
-            params = json.loads(preset["params"]) if isinstance(preset["params"], str) else preset["params"]
+            raw_params = preset["params"]
+            params = json.loads(raw_params) if isinstance(raw_params, str) else raw_params
             presets_doc[preset["name"]] = {
                 "effect_class": preset["effect_class"],
                 "params": params,
@@ -161,7 +174,11 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
             # Convert all values to strings for storage
             str_kv = {k: str(v) for k, v in kv.items()}
             await db.save_config_bulk(section, str_kv)
-            logger.debug("import_toml: imported {} config keys for section '{}'", len(str_kv), section)
+            logger.debug(
+                "import_toml: imported {} config keys for section '{}'",
+                len(str_kv),
+                section,
+            )
 
     # --- Devices ---
     devices_data = data.get("devices", {})

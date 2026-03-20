@@ -129,20 +129,34 @@ def test_engine_tick_renders_to_pipelines(clock: BeatClock) -> None:
     deck1 = EffectDeck(BeatPulse())
     buf1 = RingBuffer(60, 30)
     p1 = ScenePipeline(
-        scene_id="s1", deck=deck1, ring_buffer=buf1,
-        compositor=None, mapping=None, devices=[], led_count=30,
+        scene_id="s1",
+        deck=deck1,
+        ring_buffer=buf1,
+        compositor=None,
+        mapping=None,
+        devices=[],
+        led_count=30,
     )
 
     deck2 = EffectDeck(BeatPulse())
     buf2 = RingBuffer(60, 50)
     p2 = ScenePipeline(
-        scene_id="s2", deck=deck2, ring_buffer=buf2,
-        compositor=None, mapping=None, devices=[], led_count=50,
+        scene_id="s2",
+        deck=deck2,
+        ring_buffer=buf2,
+        compositor=None,
+        mapping=None,
+        devices=[],
+        led_count=50,
     )
 
     engine = EffectEngine(
-        clock=clock, deck=deck1, led_count=30, fps=60,
-        max_lookahead_s=1.0, pipelines=[p1, p2],
+        clock=clock,
+        deck=deck1,
+        led_count=30,
+        fps=60,
+        max_lookahead_s=1.0,
+        pipelines=[p1, p2],
     )
     engine.tick(0.0)
     assert buf1.count == 1

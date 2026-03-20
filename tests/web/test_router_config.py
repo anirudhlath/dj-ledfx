@@ -91,7 +91,9 @@ def test_state_export_with_db(client_with_db):
 
 
 def test_state_import_with_db(client_with_db):
-    toml_str = '[presets."My Preset"]\neffect_class = "beat_pulse"\n\n[presets."My Preset".params]\n'
+    toml_str = (
+        '[presets."My Preset"]\neffect_class = "beat_pulse"\n\n[presets."My Preset".params]\n'
+    )
     resp = client_with_db.post("/api/state/import", content=toml_str)
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"

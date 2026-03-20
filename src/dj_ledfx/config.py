@@ -201,9 +201,7 @@ def load_config(path: Path) -> AppConfig:
 
     scene_config = data.get("scene_config") or data.get("scene")
 
-    discovery = DiscoveryConfig(
-        **_filter_fields(DiscoveryConfig, data.get("discovery", {}))
-    )
+    discovery = DiscoveryConfig(**_filter_fields(DiscoveryConfig, data.get("discovery", {})))
 
     return AppConfig(
         engine=engine,

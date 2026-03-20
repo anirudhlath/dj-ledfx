@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from dj_ledfx.types import RGB, BeatState, DeviceInfo, RenderedFrame
 
@@ -68,6 +67,6 @@ def test_device_info_frozen():
     info = DeviceInfo(name="Test", device_type="test", led_count=10, address="1.2.3.4:80")
     try:
         info.name = "Changed"  # type: ignore[misc]
-        assert False, "Should have raised"
+        raise AssertionError("Should have raised")
     except AttributeError:
         pass

@@ -1,6 +1,5 @@
 import pytest
 import pytest_asyncio
-from pathlib import Path
 
 from dj_ledfx.effects.presets import Preset, PresetStore
 from dj_ledfx.persistence.state_db import StateDB

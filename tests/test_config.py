@@ -6,6 +6,7 @@ import pytest
 from dj_ledfx.config import (
     AppConfig,
     DevicesConfig,
+    DiscoveryConfig,
     EngineConfig,
     GoveeConfig,
     LIFXConfig,
@@ -364,9 +365,6 @@ def test_save_config_atomic(tmp_path: Path) -> None:
 
 
 # Task 3 — DiscoveryConfig tests
-
-
-from dj_ledfx.config import DiscoveryConfig
 
 
 def test_discovery_config_defaults():

@@ -1,4 +1,5 @@
 """Tests for StateDB — SQLite persistence layer."""
+
 from pathlib import Path
 
 import pytest
@@ -51,8 +52,14 @@ async def test_tables_created(db):
     )
     table_names = [r[0] for r in rows]
     expected = [
-        "config", "device_groups", "devices", "groups",
-        "presets", "scene_effect_state", "scene_placements", "scenes",
+        "config",
+        "device_groups",
+        "devices",
+        "groups",
+        "presets",
+        "scene_effect_state",
+        "scene_placements",
+        "scenes",
     ]
     assert table_names == expected
 
@@ -131,14 +138,16 @@ async def test_load_devices_empty(db):
 
 @pytest.mark.asyncio
 async def test_upsert_and_load_device(db):
-    await db.upsert_device({
-        "id": "lifx:d073d5aabbcc",
-        "name": "LIFX Strip",
-        "backend": "lifx",
-        "led_count": 60,
-        "ip": "192.168.1.5",
-        "mac": "d073d5aabbcc",
-    })
+    await db.upsert_device(
+        {
+            "id": "lifx:d073d5aabbcc",
+            "name": "LIFX Strip",
+            "backend": "lifx",
+            "led_count": 60,
+            "ip": "192.168.1.5",
+            "mac": "d073d5aabbcc",
+        }
+    )
     devices = await db.load_devices()
     assert len(devices) == 1
     assert devices[0]["id"] == "lifx:d073d5aabbcc"
@@ -150,22 +159,26 @@ async def test_upsert_and_load_device(db):
 
 @pytest.mark.asyncio
 async def test_upsert_device_updates_existing(db):
-    await db.upsert_device({
-        "id": "lifx:d073d5aabbcc",
-        "name": "LIFX Strip",
-        "backend": "lifx",
-        "led_count": 60,
-        "ip": "192.168.1.5",
-        "mac": "d073d5aabbcc",
-    })
-    await db.upsert_device({
-        "id": "lifx:d073d5aabbcc",
-        "name": "LIFX Strip (Updated)",
-        "backend": "lifx",
-        "led_count": 82,
-        "ip": "192.168.1.6",
-        "mac": "d073d5aabbcc",
-    })
+    await db.upsert_device(
+        {
+            "id": "lifx:d073d5aabbcc",
+            "name": "LIFX Strip",
+            "backend": "lifx",
+            "led_count": 60,
+            "ip": "192.168.1.5",
+            "mac": "d073d5aabbcc",
+        }
+    )
+    await db.upsert_device(
+        {
+            "id": "lifx:d073d5aabbcc",
+            "name": "LIFX Strip (Updated)",
+            "backend": "lifx",
+            "led_count": 82,
+            "ip": "192.168.1.6",
+            "mac": "d073d5aabbcc",
+        }
+    )
     devices = await db.load_devices()
     assert len(devices) == 1
     assert devices[0]["name"] == "LIFX Strip (Updated)"
@@ -174,12 +187,14 @@ async def test_upsert_device_updates_existing(db):
 
 @pytest.mark.asyncio
 async def test_delete_device(db):
-    await db.upsert_device({
-        "id": "govee:1234",
-        "name": "Govee Strip",
-        "backend": "govee",
-        "led_count": 50,
-    })
+    await db.upsert_device(
+        {
+            "id": "govee:1234",
+            "name": "Govee Strip",
+            "backend": "govee",
+            "led_count": 50,
+        }
+    )
     await db.delete_device("govee:1234")
     devices = await db.load_devices()
     assert devices == []
@@ -187,12 +202,14 @@ async def test_delete_device(db):
 
 @pytest.mark.asyncio
 async def test_update_device_last_seen(db):
-    await db.upsert_device({
-        "id": "lifx:aabb",
-        "name": "Test",
-        "backend": "lifx",
-        "led_count": 30,
-    })
+    await db.upsert_device(
+        {
+            "id": "lifx:aabb",
+            "name": "Test",
+            "backend": "lifx",
+            "led_count": 30,
+        }
+    )
     await db.update_device_last_seen("lifx:aabb", "2026-03-20T10:00:00")
     devices = await db.load_devices()
     assert devices[0]["last_seen"] == "2026-03-20T10:00:00"
@@ -200,12 +217,14 @@ async def test_update_device_last_seen(db):
 
 @pytest.mark.asyncio
 async def test_update_device_latency(db):
-    await db.upsert_device({
-        "id": "lifx:aabb",
-        "name": "Test",
-        "backend": "lifx",
-        "led_count": 30,
-    })
+    await db.upsert_device(
+        {
+            "id": "lifx:aabb",
+            "name": "Test",
+            "backend": "lifx",
+            "led_count": 30,
+        }
+    )
     await db.update_device_latency("lifx:aabb", 45.2)
     devices = await db.load_devices()
     assert abs(devices[0]["last_latency_ms"] - 45.2) < 0.001
@@ -286,12 +305,14 @@ async def test_load_scenes_empty(db):
 
 @pytest.mark.asyncio
 async def test_save_and_load_scene(db):
-    await db.save_scene({
-        "id": "dj-booth",
-        "name": "DJ Booth",
-        "mapping_type": "linear",
-        "effect_mode": "independent",
-    })
+    await db.save_scene(
+        {
+            "id": "dj-booth",
+            "name": "DJ Booth",
+            "mapping_type": "linear",
+            "effect_mode": "independent",
+        }
+    )
     scenes = await db.load_scenes()
     assert len(scenes) == 1
     assert scenes[0]["id"] == "dj-booth"
@@ -302,8 +323,17 @@ async def test_save_and_load_scene(db):
 
 @pytest.mark.asyncio
 async def test_save_scene_upsert(db):
-    await db.save_scene({"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"})
-    await db.save_scene({"id": "s1", "name": "Scene Updated", "mapping_type": "radial", "effect_mode": "independent"})
+    await db.save_scene(
+        {"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_scene(
+        {
+            "id": "s1",
+            "name": "Scene Updated",
+            "mapping_type": "radial",
+            "effect_mode": "independent",
+        }
+    )
     scenes = await db.load_scenes()
     assert len(scenes) == 1
     assert scenes[0]["name"] == "Scene Updated"
@@ -312,7 +342,9 @@ async def test_save_scene_upsert(db):
 
 @pytest.mark.asyncio
 async def test_delete_scene(db):
-    await db.save_scene({"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene(
+        {"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
     await db.delete_scene("s1")
     scenes = await db.load_scenes()
     assert scenes == []
@@ -320,8 +352,12 @@ async def test_delete_scene(db):
 
 @pytest.mark.asyncio
 async def test_set_scene_active(db):
-    await db.save_scene({"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"})
-    await db.save_scene({"id": "s2", "name": "Scene 2", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene(
+        {"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_scene(
+        {"id": "s2", "name": "Scene 2", "mapping_type": "linear", "effect_mode": "independent"}
+    )
     await db.set_scene_active("s1")
     scenes = await db.load_scenes()
     by_id = {s["id"]: s for s in scenes}
@@ -331,8 +367,12 @@ async def test_set_scene_active(db):
 
 @pytest.mark.asyncio
 async def test_set_scene_active_deactivates_others(db):
-    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
-    await db.save_scene({"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_scene(
+        {"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"}
+    )
     await db.set_scene_active("s1")
     await db.set_scene_active("s2")
     scenes = await db.load_scenes()
@@ -343,7 +383,9 @@ async def test_set_scene_active_deactivates_others(db):
 
 @pytest.mark.asyncio
 async def test_save_and_load_scene_effect_state(db):
-    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
     await db.save_scene_effect_state("s1", "BeatPulse", '{"gamma": 2.0}')
     state = await db.load_scene_effect_state("s1")
     assert state is not None
@@ -353,7 +395,9 @@ async def test_save_and_load_scene_effect_state(db):
 
 @pytest.mark.asyncio
 async def test_load_scene_effect_state_missing(db):
-    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
     state = await db.load_scene_effect_state("s1")
     assert state is None
 
@@ -361,15 +405,19 @@ async def test_load_scene_effect_state_missing(db):
 @pytest.mark.asyncio
 async def test_save_and_load_placement(db):
     await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
-    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
-    await db.save_placement({
-        "scene_id": "s1",
-        "device_id": "lifx:aa",
-        "position_x": 1.0,
-        "position_y": 2.0,
-        "position_z": 0.0,
-        "geometry_type": "strip",
-    })
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_placement(
+        {
+            "scene_id": "s1",
+            "device_id": "lifx:aa",
+            "position_x": 1.0,
+            "position_y": 2.0,
+            "position_z": 0.0,
+            "geometry_type": "strip",
+        }
+    )
     placements = await db.load_scene_placements("s1")
     assert len(placements) == 1
     assert placements[0]["device_id"] == "lifx:aa"
@@ -380,12 +428,19 @@ async def test_save_and_load_placement(db):
 @pytest.mark.asyncio
 async def test_delete_placement(db):
     await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
-    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
-    await db.save_placement({
-        "scene_id": "s1", "device_id": "lifx:aa",
-        "position_x": 0.0, "position_y": 0.0, "position_z": 0.0,
-        "geometry_type": "point",
-    })
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_placement(
+        {
+            "scene_id": "s1",
+            "device_id": "lifx:aa",
+            "position_x": 0.0,
+            "position_y": 0.0,
+            "position_z": 0.0,
+            "geometry_type": "point",
+        }
+    )
     await db.delete_placement("s1", "lifx:aa")
     placements = await db.load_scene_placements("s1")
     assert placements == []
@@ -394,12 +449,19 @@ async def test_delete_placement(db):
 @pytest.mark.asyncio
 async def test_delete_scene_cascades_placements(db):
     await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
-    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
-    await db.save_placement({
-        "scene_id": "s1", "device_id": "lifx:aa",
-        "position_x": 0.0, "position_y": 0.0, "position_z": 0.0,
-        "geometry_type": "point",
-    })
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_placement(
+        {
+            "scene_id": "s1",
+            "device_id": "lifx:aa",
+            "position_x": 0.0,
+            "position_y": 0.0,
+            "position_z": 0.0,
+            "geometry_type": "point",
+        }
+    )
     await db.delete_scene("s1")
     # placements table should be empty due to CASCADE
     rows = await db._execute_read("SELECT COUNT(*) FROM scene_placements")
@@ -470,7 +532,9 @@ async def test_schedule_latency_coalesces(db):
 @pytest.mark.asyncio
 async def test_schedule_effect_state_coalesces(db):
     """Multiple rapid effect state updates coalesce to the last value."""
-    await db.save_scene({"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"})
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
     db.schedule_effect_state_update("s1", "BeatPulse", '{"gamma": 1.0}')
     db.schedule_effect_state_update("s1", "BeatPulse", '{"gamma": 2.0}')
     db.schedule_effect_state_update("s1", "RainbowWave", '{"speed": 0.5}')
@@ -487,7 +551,9 @@ async def test_flush_pending_on_close(tmp_path):
     db_path = tmp_path / "state.db"
     state_db = StateDB(db_path)
     await state_db.open()
-    await state_db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
+    await state_db.upsert_device(
+        {"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30}
+    )
     state_db.schedule_latency_update("lifx:aa", 77.7)
     await state_db.close()
 
@@ -519,12 +585,16 @@ async def test_schedule_latency_multiple_devices(db):
 @pytest.mark.asyncio
 async def test_migrate_from_config_toml(tmp_path):
     import json
+
     import tomli_w
 
     config_toml = tmp_path / "config.toml"
     config_data = {
         "engine": {"fps": 90},
-        "effect": {"active_effect": "beat_pulse", "beat_pulse": {"gamma": 3.0, "palette": ["#ff0000"]}},
+        "effect": {
+            "active_effect": "beat_pulse",
+            "beat_pulse": {"gamma": 3.0, "palette": ["#ff0000"]},
+        },
         "network": {"interface": "192.168.1.100"},
     }
     config_toml.write_bytes(tomli_w.dumps(config_data).encode())
@@ -557,13 +627,12 @@ async def test_migrate_from_config_toml(tmp_path):
 @pytest.mark.asyncio
 async def test_migrate_from_presets_toml(tmp_path):
     import json
+
     import tomli_w
 
     presets_toml = tmp_path / "presets.toml"
     presets_data = {
-        "presets": {
-            "My Preset": {"effect_class": "beat_pulse", "params": {"gamma": 2.5}}
-        }
+        "presets": {"My Preset": {"effect_class": "beat_pulse", "params": {"gamma": 2.5}}}
     }
     presets_toml.write_bytes(tomli_w.dumps(presets_data).encode())
 
