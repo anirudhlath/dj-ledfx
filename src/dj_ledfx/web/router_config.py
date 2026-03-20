@@ -9,7 +9,7 @@ from typing import Any
 
 import tomli_w
 from fastapi import APIRouter, HTTPException, Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from dj_ledfx.config import (
     AppConfig,
@@ -97,6 +97,15 @@ async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
     request.app.state.config = new_config
     if request.app.state.config_path:
         await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
+    # Optionally persist to StateDB when available
+    db = getattr(request.app.state, "state_db", None)
+    if db is not None:
+        result_dict = dataclasses.asdict(new_config)
+        for section, value in result_dict.items():
+            if isinstance(value, dict):
+                str_kv = {k: str(v) for k, v in value.items() if not isinstance(v, dict)}
+                if str_kv:
+                    await db.save_config_bulk(section, str_kv)
     result = dataclasses.asdict(new_config)
     return JSONResponse(
         content=result,
@@ -134,3 +143,26 @@ async def import_config(request: Request) -> dict[str, Any]:
         content=dataclasses.asdict(new_config),
         headers={"X-Requires-Restart": "true"},
     )
+
+
+@router.get("/state/export")
+async def export_state(request: Request) -> Response:
+    from dj_ledfx.persistence.toml_io import export_toml
+
+    db = getattr(request.app.state, "state_db", None)
+    if db is None:
+        raise HTTPException(503, "StateDB not available")
+    toml_str = await export_toml(db)
+    return Response(content=toml_str, media_type="application/toml")
+
+
+@router.post("/state/import")
+async def import_state(request: Request) -> dict[str, str]:
+    from dj_ledfx.persistence.toml_io import import_toml
+
+    db = getattr(request.app.state, "state_db", None)
+    if db is None:
+        raise HTTPException(503, "StateDB not available")
+    body = await request.body()
+    await import_toml(db, body.decode())
+    return {"status": "ok"}
