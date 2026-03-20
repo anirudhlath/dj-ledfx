@@ -209,3 +209,67 @@ async def test_update_device_latency(db):
     await db.update_device_latency("lifx:aabb", 45.2)
     devices = await db.load_devices()
     assert abs(devices[0]["last_latency_ms"] - 45.2) < 0.001
+
+
+# --- Task 8: Groups CRUD ---
+
+
+@pytest.mark.asyncio
+async def test_load_groups_empty(db):
+    groups = await db.load_groups()
+    assert groups == []
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_group(db):
+    await db.save_group("stage-left", "#ff0000")
+    groups = await db.load_groups()
+    assert len(groups) == 1
+    assert groups[0]["name"] == "stage-left"
+    assert groups[0]["color"] == "#ff0000"
+
+
+@pytest.mark.asyncio
+async def test_save_group_upsert(db):
+    await db.save_group("stage-left", "#ff0000")
+    await db.save_group("stage-left", "#00ff00")
+    groups = await db.load_groups()
+    assert len(groups) == 1
+    assert groups[0]["color"] == "#00ff00"
+
+
+@pytest.mark.asyncio
+async def test_delete_group(db):
+    await db.save_group("stage-left", "#ff0000")
+    await db.delete_group("stage-left")
+    groups = await db.load_groups()
+    assert groups == []
+
+
+@pytest.mark.asyncio
+async def test_assign_and_load_device_groups(db):
+    await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 10})
+    await db.save_group("main", "#888888")
+    await db.assign_device_group("main", "lifx:aa")
+    result = await db.load_device_groups()
+    assert result == {"main": ["lifx:aa"]}
+
+
+@pytest.mark.asyncio
+async def test_unassign_device_group(db):
+    await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 10})
+    await db.save_group("main", "#888888")
+    await db.assign_device_group("main", "lifx:aa")
+    await db.unassign_device_group("main", "lifx:aa")
+    result = await db.load_device_groups()
+    assert result == {"main": []}
+
+
+@pytest.mark.asyncio
+async def test_delete_group_cascades_device_groups(db):
+    await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 10})
+    await db.save_group("main", "#888888")
+    await db.assign_device_group("main", "lifx:aa")
+    await db.delete_group("main")
+    result = await db.load_device_groups()
+    assert result == {}

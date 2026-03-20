@@ -191,3 +191,49 @@ class StateDB:
         await self._execute_write(
             "UPDATE devices SET last_latency_ms=? WHERE id=?", (latency_ms, device_id)
         )
+
+    # --- Groups CRUD ---
+
+    async def load_groups(self) -> list[dict[str, str]]:
+        """Return all groups as dicts with 'name' and 'color'."""
+        rows = await self._execute_read("SELECT name, color FROM groups")
+        return [{"name": row[0], "color": row[1]} for row in rows]
+
+    async def save_group(self, name: str, color: str) -> None:
+        """Insert or replace a group."""
+        await self._execute_write(
+            "INSERT OR REPLACE INTO groups (name, color) VALUES (?, ?)", (name, color)
+        )
+
+    async def delete_group(self, name: str) -> None:
+        """Delete a group (cascades to device_groups)."""
+        await self._execute_write("DELETE FROM groups WHERE name=?", (name,))
+
+    async def load_device_groups(self) -> dict[str, list[str]]:
+        """Return mapping of group_name -> list of device_ids."""
+        rows = await self._execute_read(
+            "SELECT dg.group_name, dg.device_id FROM device_groups dg "
+            "JOIN groups g ON g.name = dg.group_name"
+        )
+        result: dict[str, list[str]] = {}
+        for group_name, device_id in rows:
+            result.setdefault(group_name, []).append(device_id)
+        # Also include groups with no members
+        all_groups = await self.load_groups()
+        for g in all_groups:
+            result.setdefault(g["name"], [])
+        return result
+
+    async def assign_device_group(self, group_name: str, device_id: str) -> None:
+        """Add a device to a group (idempotent)."""
+        await self._execute_write(
+            "INSERT OR IGNORE INTO device_groups (group_name, device_id) VALUES (?, ?)",
+            (group_name, device_id),
+        )
+
+    async def unassign_device_group(self, group_name: str, device_id: str) -> None:
+        """Remove a device from a group."""
+        await self._execute_write(
+            "DELETE FROM device_groups WHERE group_name=? AND device_id=?",
+            (group_name, device_id),
+        )
