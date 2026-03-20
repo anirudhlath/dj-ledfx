@@ -30,22 +30,15 @@ _EXPORTABLE_CONFIG_SECTIONS = {
     "discovery",
 }
 
-# Internal section used for schema version tracking
-_META_SECTION = "_meta"
-
 
 async def export_toml(db: StateDB) -> str:
     """Export entire DB state as structured TOML string."""
     doc: dict[str, Any] = {}
 
     # --- Config ---
-    # Load all config rows by querying the raw table directly
-    all_config_rows = await db._execute_read(
-        "SELECT section, key, value FROM config WHERE section != ?",
-        (_META_SECTION,),
-    )
-    config_by_section: dict[str, dict[str, str]] = {}
-    for section, key, value in all_config_rows:
+    all_config = await db.load_all_config()
+    config_by_section: dict[str, dict[str, Any]] = {}
+    for (section, key), value in all_config.items():
         config_by_section.setdefault(section, {})[key] = value
 
     if config_by_section:
@@ -76,6 +69,9 @@ async def export_toml(db: StateDB) -> str:
     # --- Scenes ---
     scenes = await db.load_scenes()
     if scenes:
+        # Build device_id -> name map once for all scene placements
+        id_to_name = {d["id"]: d["name"] for d in devices}
+
         scenes_doc: dict[str, Any] = {}
         for scene in scenes:
             scene_id = scene["id"]
@@ -97,13 +93,9 @@ async def export_toml(db: StateDB) -> str:
                     "params": params,
                 }
 
-            # Placements — build name lookup for devices
+            # Placements
             placements = await db.load_scene_placements(scene_id)
             if placements:
-                # Build device_id -> name map
-                all_devices = await db.load_devices()
-                id_to_name = {d["id"]: d["name"] for d in all_devices}
-
                 placements_doc: dict[str, Any] = {}
                 for p in placements:
                     dev_name = id_to_name.get(p["device_id"], p["device_id"])

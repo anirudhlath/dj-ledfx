@@ -97,8 +97,9 @@ class EffectEngine:
         target_time = now + self._max_lookahead_s
         state = self._clock.get_state_at(target_time)
 
+        render_start = time.monotonic()
+
         if self.pipelines:
-            render_start = time.monotonic()
             for pipeline in self.pipelines:
                 colors = pipeline.deck.render(
                     beat_phase=state.beat_phase,
@@ -113,29 +114,13 @@ class EffectEngine:
                     bar_phase=state.bar_phase,
                 )
                 pipeline.ring_buffer.write(frame)
-            render_elapsed = time.monotonic() - render_start
-            metrics.RENDER_DURATION.observe(render_elapsed)
-            metrics.FRAMES_RENDERED.inc()
-            self._render_times.append(render_elapsed)
-            logger.trace(
-                "Rendered {} pipeline(s) for t+{:.0f}ms",
-                len(self.pipelines),
-                self._max_lookahead_s * 1000,
-            )
         else:
-            render_start = time.monotonic()
             colors = self._deck.render(
                 beat_phase=state.beat_phase,
                 bar_phase=state.bar_phase,
                 dt=self._frame_period,
                 led_count=self._led_count,
             )
-            render_elapsed = time.monotonic() - render_start
-            metrics.RENDER_DURATION.observe(render_elapsed)
-            metrics.FRAMES_RENDERED.inc()
-
-            self._render_times.append(render_elapsed)
-
             frame = RenderedFrame(
                 colors=colors,
                 target_time=target_time,
@@ -143,7 +128,17 @@ class EffectEngine:
                 bar_phase=state.bar_phase,
             )
             self.ring_buffer.write(frame)
-            logger.trace("Rendered frame for t+{:.0f}ms", self._max_lookahead_s * 1000)
+
+        render_elapsed = time.monotonic() - render_start
+        metrics.RENDER_DURATION.observe(render_elapsed)
+        metrics.FRAMES_RENDERED.inc()
+        self._render_times.append(render_elapsed)
+
+        logger.trace(
+            "Rendered {} for t+{:.0f}ms",
+            f"{len(self.pipelines)} pipeline(s)" if self.pipelines else "frame",
+            self._max_lookahead_s * 1000,
+        )
 
     def stop(self) -> None:
         self._running = False

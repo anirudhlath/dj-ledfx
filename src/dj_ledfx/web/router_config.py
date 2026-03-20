@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import tomllib
 from typing import Any
 
@@ -103,7 +104,7 @@ async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
         result_dict = dataclasses.asdict(new_config)
         for section, value in result_dict.items():
             if isinstance(value, dict):
-                str_kv = {k: str(v) for k, v in value.items() if not isinstance(v, dict)}
+                str_kv = {k: json.dumps(v) for k, v in value.items() if not isinstance(v, dict)}
                 if str_kv:
                     await db.save_config_bulk(section, str_kv)
     result = dataclasses.asdict(new_config)

@@ -142,6 +142,6 @@ async def unregister_device(request: Request, name: str) -> dict[str, str]:
     if stable_id:
         manager.remove_device(stable_id)
     else:
-        # Fallback: remove by iterating (device has no stable_id)
-        manager._devices = [d for d in manager._devices if d.adapter.device_info.name != name]
+        # Fallback: remove by name (device has no stable_id)
+        manager.remove_by_name(name)
     return {"status": "removed"}

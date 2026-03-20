@@ -275,6 +275,15 @@ def _get_db(request: Request) -> Any:
     return db
 
 
+async def _get_scene_row(db: Any, scene_id: str) -> dict[str, Any]:
+    """Load a single scene row by ID or raise 404."""
+    rows = await db.load_scenes()
+    for row in rows:
+        if row["id"] == scene_id:
+            return row
+    raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+
+
 router_scenes = APIRouter(prefix="/scenes", tags=["scenes"])
 
 
@@ -326,26 +335,20 @@ async def create_scene(request: Request, body: CreateSceneRequest) -> SceneListI
 @router_scenes.get("/{scene_id}", response_model=SceneListItem)
 async def get_scene_by_id(request: Request, scene_id: str) -> SceneListItem:
     db = _get_db(request)
-    rows = await db.load_scenes()
-    for row in rows:
-        if row["id"] == scene_id:
-            return SceneListItem(
-                id=row["id"],
-                name=row["name"],
-                is_active=bool(row.get("is_active", 0)),
-                mapping_type=row.get("mapping_type"),
-                effect_mode=row.get("effect_mode"),
-            )
-    raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    row = await _get_scene_row(db, scene_id)
+    return SceneListItem(
+        id=row["id"],
+        name=row["name"],
+        is_active=bool(row.get("is_active", 0)),
+        mapping_type=row.get("mapping_type"),
+        effect_mode=row.get("effect_mode"),
+    )
 
 
 @router_scenes.put("/{scene_id}", response_model=SceneListItem)
 async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest) -> SceneListItem:
     db = _get_db(request)
-    rows = await db.load_scenes()
-    existing = next((r for r in rows if r["id"] == scene_id), None)
-    if existing is None:
-        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    existing = await _get_scene_row(db, scene_id)
 
     updated: dict[str, Any] = {"id": scene_id}
     updated["name"] = body.name if body.name is not None else existing["name"]
@@ -370,9 +373,7 @@ async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest
 @router_scenes.delete("/{scene_id}")
 async def delete_scene(request: Request, scene_id: str) -> dict[str, str]:
     db = _get_db(request)
-    rows = await db.load_scenes()
-    if not any(r["id"] == scene_id for r in rows):
-        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    await _get_scene_row(db, scene_id)
     await db.delete_scene(scene_id)
     return {"status": "deleted"}
 
@@ -380,9 +381,7 @@ async def delete_scene(request: Request, scene_id: str) -> dict[str, str]:
 @router_scenes.post("/{scene_id}/activate")
 async def activate_scene(request: Request, scene_id: str) -> dict[str, str]:
     db = _get_db(request)
-    rows = await db.load_scenes()
-    if not any(r["id"] == scene_id for r in rows):
-        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    await _get_scene_row(db, scene_id)
     await db.set_scene_active(scene_id)
     return {"status": "activated", "scene_id": scene_id}
 
@@ -390,11 +389,8 @@ async def activate_scene(request: Request, scene_id: str) -> dict[str, str]:
 @router_scenes.post("/{scene_id}/deactivate")
 async def deactivate_scene(request: Request, scene_id: str) -> dict[str, str]:
     db = _get_db(request)
-    rows = await db.load_scenes()
-    if not any(r["id"] == scene_id for r in rows):
-        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    existing = await _get_scene_row(db, scene_id)
     # Deactivate by setting is_active=0 for this scene only
-    existing = next(r for r in rows if r["id"] == scene_id)
     await db.save_scene(
         {
             "id": scene_id,
@@ -413,9 +409,7 @@ async def add_or_update_scene_placement(
 ) -> PlacementResponse:
     """Add or update a device placement in a scene (stored in DB)."""
     db = _get_db(request)
-    rows = await db.load_scenes()
-    if not any(r["id"] == scene_id for r in rows):
-        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    await _get_scene_row(db, scene_id)
 
     # Ensure the device exists in the DB (required by FK constraint)
     devices_in_db = await db.load_devices()
@@ -498,9 +492,7 @@ async def remove_scene_placement(
 ) -> dict[str, str]:
     """Remove a device placement from a scene."""
     db = _get_db(request)
-    rows = await db.load_scenes()
-    if not any(r["id"] == scene_id for r in rows):
-        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    await _get_scene_row(db, scene_id)
 
     await db.delete_placement(scene_id, device_name)
     return {"status": "removed", "device_name": device_name}

@@ -21,6 +21,7 @@ from dj_ledfx.config import (
     EngineConfig,
     NetworkConfig,
     WebConfig,
+    _filter_fields,
     load_config,
 )
 from dj_ledfx.devices.discovery import DiscoveryOrchestrator
@@ -120,18 +121,14 @@ async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
                 result[k] = v
         return result
 
-    def _filter(cls: type, data: dict[str, object]) -> dict[str, object]:
-        valid = {f.name for f in dataclasses.fields(cls)}  # type: ignore[arg-type]
-        return {k: v for k, v in data.items() if k in valid}
-
-    engine = EngineConfig(**_filter(EngineConfig, _coerce(engine_data)))  # type: ignore[arg-type]
-    network = NetworkConfig(**_filter(NetworkConfig, _coerce(network_data)))  # type: ignore[arg-type]
-    web = WebConfig(**_filter(WebConfig, _coerce(web_data)))  # type: ignore[arg-type]
-    discovery = DiscoveryConfig(**_filter(DiscoveryConfig, _coerce(discovery_data)))  # type: ignore[arg-type]
+    engine = EngineConfig(**_filter_fields(EngineConfig, _coerce(engine_data)))  # type: ignore[arg-type]
+    network = NetworkConfig(**_filter_fields(NetworkConfig, _coerce(network_data)))  # type: ignore[arg-type]
+    web = WebConfig(**_filter_fields(WebConfig, _coerce(web_data)))  # type: ignore[arg-type]
+    discovery = DiscoveryConfig(**_filter_fields(DiscoveryConfig, _coerce(discovery_data)))  # type: ignore[arg-type]
 
     # Effect config: keep active_effect only (params come from scene_effect_state)
     effect_coerced = _coerce(effect_data)
-    effect = EffectConfig(**_filter(EffectConfig, effect_coerced))  # type: ignore[arg-type]
+    effect = EffectConfig(**_filter_fields(EffectConfig, effect_coerced))  # type: ignore[arg-type]
 
     logger.info("Config loaded from StateDB")
     return AppConfig(

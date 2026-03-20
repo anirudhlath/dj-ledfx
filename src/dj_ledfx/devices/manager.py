@@ -195,3 +195,7 @@ class DeviceManager:
     def remove_device(self, stable_id: str) -> None:
         """Remove a device by stable_id."""
         self._devices = [d for d in self._devices if d.adapter.device_info.stable_id != stable_id]
+
+    def remove_by_name(self, name: str) -> None:
+        """Remove a device by name."""
+        self._devices = [d for d in self._devices if d.adapter.device_info.name != name]
