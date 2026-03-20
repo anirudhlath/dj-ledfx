@@ -36,6 +36,7 @@ class GoveeSolidAdapter(DeviceAdapter):
             device_type="govee_solid",
             led_count=1,
             address=f"{self._record.ip}:4003",
+            stable_id=f"govee:{self._record.device_id}",
         )
 
     @property
