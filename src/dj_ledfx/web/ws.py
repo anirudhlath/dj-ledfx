@@ -83,6 +83,14 @@ async def _stats_poll(ws: WebSocket, app: Any) -> None:
         scheduler = app.state.scheduler
         try:
             stats = scheduler.get_device_stats()
+            # Build name -> status map from device manager for status field
+            manager = app.state.device_manager
+            status_by_name: dict[str, str] = {}
+            try:
+                for d in manager.devices:
+                    status_by_name[d.adapter.device_info.name] = d.status
+            except Exception:
+                pass
             stats_data = {
                 "channel": "stats",
                 "devices": [
@@ -92,6 +100,7 @@ async def _stats_poll(ws: WebSocket, app: Any) -> None:
                         "latency_ms": s.effective_latency_ms,
                         "frames_dropped": s.frames_dropped,
                         "connected": s.connected,
+                        "status": status_by_name.get(s.device_name, "online"),
                     }
                     for s in stats
                 ],

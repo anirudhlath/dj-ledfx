@@ -39,6 +39,7 @@ async def list_devices(request: Request) -> list[DeviceResponse]:
                 effective_latency_ms=stats.effective_latency_ms if stats else 0.0,
                 frames_dropped=stats.frames_dropped if stats else 0,
                 connected=d.adapter.is_connected,
+                status=d.status,
             )
         )
     return devices
@@ -50,6 +51,20 @@ async def discover_devices(request: Request) -> dict[str, Any]:
     config = request.app.state.config
     new_names = await manager.rediscover(config)
     return {"discovered": new_names}
+
+
+@router.post("/devices/scan")
+async def scan_devices(request: Request) -> dict[str, Any]:
+    """Trigger device discovery via DiscoveryOrchestrator if available, else fallback."""
+    orchestrator = getattr(request.app.state, "discovery_orchestrator", None)
+    if orchestrator is not None:
+        found = await orchestrator.run_discovery(waves=1)
+        return {"discovered": found}
+    # Fallback to legacy rediscover
+    manager = request.app.state.device_manager
+    config = request.app.state.config
+    new_names = await manager.rediscover(config)
+    return {"discovered": len(new_names)}
 
 
 # --- Group routes registered before parameterized /devices/{name} routes ---
@@ -114,3 +129,19 @@ async def assign_device_group(
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     return {"status": "ok"}
+
+
+@router.delete("/devices/{name}")
+async def unregister_device(request: Request, name: str) -> dict[str, str]:
+    """Unregister (remove) a device by name."""
+    manager = request.app.state.device_manager
+    managed = manager.get_device(name)
+    if managed is None:
+        raise HTTPException(status_code=404, detail=f"Device not found: {name}")
+    stable_id = managed.adapter.device_info.stable_id
+    if stable_id:
+        manager.remove_device(stable_id)
+    else:
+        # Fallback: remove by iterating (device has no stable_id)
+        manager._devices = [d for d in manager._devices if d.adapter.device_info.name != name]
+    return {"status": "removed"}

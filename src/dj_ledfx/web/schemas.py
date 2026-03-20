@@ -40,6 +40,7 @@ class DeviceResponse(BaseModel):
     effective_latency_ms: float = 0.0
     frames_dropped: int = 0
     connected: bool = True
+    status: str = "online"
 
 
 class GroupRequest(BaseModel):
