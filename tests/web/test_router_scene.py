@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import MagicMock
+
 from fastapi.testclient import TestClient
 
+from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 from dj_ledfx.spatial.mapping import LinearMapping
@@ -9,10 +13,8 @@ from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
 from dj_ledfx.web.app import create_app
 
 
-def _make_test_app(scene: SceneModel | None = None) -> TestClient:
+def _make_test_app(scene: SceneModel | None = None, state_db: StateDB | None = None) -> TestClient:
     """Create a test FastAPI app with a scene model."""
-    from unittest.mock import MagicMock
-
     compositor = None
     if scene and scene.placements:
         compositor = SpatialCompositor(scene, LinearMapping())
@@ -33,6 +35,7 @@ def _make_test_app(scene: SceneModel | None = None) -> TestClient:
         compositor=compositor,
         config=mock_config,
         config_path=None,
+        state_db=state_db,
     )
     return TestClient(app)
 
@@ -136,8 +139,6 @@ class TestSceneEndpoints:
         assert data["type"] == "radial"
 
     def test_compositor_rebuilt_after_mutation(self) -> None:
-        from unittest.mock import MagicMock
-
         scene = SceneModel(
             placements={
                 "lamp": DevicePlacement("lamp", (0.0, 0.0, 0.0), PointGeometry(), 1),
@@ -181,3 +182,142 @@ class TestSceneEndpoints:
         )
         assert resp.status_code == 200
         assert resp.json()["device_id"] == "lamp"
+
+
+class TestMultiSceneEndpoints:
+    """Tests for multi-scene CRUD endpoints (require StateDB)."""
+
+    def _make_db_client(self, tmp_path):
+        db = StateDB(tmp_path / "state.db")
+        asyncio.run(db.open())
+        client = _make_test_app(state_db=db)
+        return client, db
+
+    def test_list_scenes_empty(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            resp = client.get("/api/scenes")
+            assert resp.status_code == 200
+            assert resp.json() == []
+        finally:
+            asyncio.run(db.close())
+
+    def test_create_scene(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            resp = client.post("/api/scenes", json={"name": "Main Stage"})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["name"] == "Main Stage"
+            assert "id" in data
+        finally:
+            asyncio.run(db.close())
+
+    def test_get_scene_by_id(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            created = client.post("/api/scenes", json={"name": "Stage"}).json()
+            scene_id = created["id"]
+            resp = client.get(f"/api/scenes/{scene_id}")
+            assert resp.status_code == 200
+            assert resp.json()["name"] == "Stage"
+        finally:
+            asyncio.run(db.close())
+
+    def test_get_scene_not_found(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            resp = client.get("/api/scenes/nonexistent-id")
+            assert resp.status_code == 404
+        finally:
+            asyncio.run(db.close())
+
+    def test_update_scene(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            created = client.post("/api/scenes", json={"name": "Old Name"}).json()
+            scene_id = created["id"]
+            resp = client.put(f"/api/scenes/{scene_id}", json={"name": "New Name"})
+            assert resp.status_code == 200
+            assert resp.json()["name"] == "New Name"
+        finally:
+            asyncio.run(db.close())
+
+    def test_delete_scene(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            created = client.post("/api/scenes", json={"name": "Temp"}).json()
+            scene_id = created["id"]
+            resp = client.delete(f"/api/scenes/{scene_id}")
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "deleted"
+            # Verify gone
+            resp2 = client.get(f"/api/scenes/{scene_id}")
+            assert resp2.status_code == 404
+        finally:
+            asyncio.run(db.close())
+
+    def test_activate_scene(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            created = client.post("/api/scenes", json={"name": "Show"}).json()
+            scene_id = created["id"]
+            resp = client.post(f"/api/scenes/{scene_id}/activate")
+            assert resp.status_code == 200
+            assert resp.json()["scene_id"] == scene_id
+        finally:
+            asyncio.run(db.close())
+
+    def test_deactivate_scene(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            created = client.post("/api/scenes", json={"name": "Show"}).json()
+            scene_id = created["id"]
+            client.post(f"/api/scenes/{scene_id}/activate")
+            resp = client.post(f"/api/scenes/{scene_id}/deactivate")
+            assert resp.status_code == 200
+            assert resp.json()["scene_id"] == scene_id
+        finally:
+            asyncio.run(db.close())
+
+    def test_add_device_to_scene(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            created = client.post("/api/scenes", json={"name": "Stage"}).json()
+            scene_id = created["id"]
+            resp = client.put(
+                f"/api/scenes/{scene_id}/devices/strip1",
+                json={"position": [1.0, 0.0, 0.0], "geometry": "strip", "length": 2.0},
+            )
+            assert resp.status_code == 200
+            assert resp.json()["device_id"] == "strip1"
+        finally:
+            asyncio.run(db.close())
+
+    def test_remove_device_from_scene(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            created = client.post("/api/scenes", json={"name": "Stage"}).json()
+            scene_id = created["id"]
+            client.put(
+                f"/api/scenes/{scene_id}/devices/lamp",
+                json={"position": [0.0, 0.0, 0.0], "geometry": "point"},
+            )
+            resp = client.delete(f"/api/scenes/{scene_id}/devices/lamp")
+            assert resp.status_code == 200
+            assert resp.json()["device_name"] == "lamp"
+        finally:
+            asyncio.run(db.close())
+
+    def test_list_scenes_no_db_fallback(self) -> None:
+        """Without DB, list_scenes returns in-memory scene."""
+        scene = SceneModel(placements={})
+        client = _make_test_app(scene, state_db=None)
+        resp = client.get("/api/scenes")
+        assert resp.status_code == 200
+
+    def test_create_scene_no_db(self) -> None:
+        """Without DB, create_scene returns 503."""
+        client = _make_test_app(None)
+        resp = client.post("/api/scenes", json={"name": "Test"})
+        assert resp.status_code == 503

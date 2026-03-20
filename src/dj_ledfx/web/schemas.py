@@ -98,3 +98,26 @@ class UpdatePlacementRequest(BaseModel):
 class UpdateMappingRequest(BaseModel):
     type: Literal["linear", "radial"]
     params: dict[str, Any] = {}
+
+
+# Multi-scene schemas
+
+
+class SceneListItem(BaseModel):
+    id: str
+    name: str
+    is_active: bool = False
+    mapping_type: str | None = None
+    effect_mode: str | None = None
+
+
+class CreateSceneRequest(BaseModel):
+    name: str
+    mapping_type: str = "linear"
+    effect_mode: str = "independent"
+
+
+class UpdateSceneRequest(BaseModel):
+    name: str | None = None
+    mapping_type: str | None = None
+    effect_mode: str | None = None

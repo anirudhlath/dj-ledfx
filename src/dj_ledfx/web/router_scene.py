@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+import uuid
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -16,12 +17,15 @@ from dj_ledfx.spatial.geometry import (
 )
 from dj_ledfx.spatial.mapping import LinearMapping, mapping_from_config
 from dj_ledfx.web.schemas import (
+    CreateSceneRequest,
     GeometrySchema,
     MappingResponse,
     PlacementResponse,
+    SceneListItem,
     SceneResponse,
     UpdateMappingRequest,
     UpdatePlacementRequest,
+    UpdateSceneRequest,
 )
 
 if TYPE_CHECKING:
@@ -132,6 +136,11 @@ def _rebuild_compositor(request: Request, scene: SceneModel) -> None:
     new_compositor = SpatialCompositor(scene, mapping)
     scheduler.compositor = new_compositor
     request.app.state.compositor = new_compositor
+
+
+# ---------------------------------------------------------------------------
+# Legacy single-scene endpoints (backward-compatible)
+# ---------------------------------------------------------------------------
 
 
 @router.get("", response_model=SceneResponse)
@@ -250,3 +259,240 @@ async def update_mapping(request: Request, body: UpdateMappingRequest) -> Mappin
     await _persist_scene_config(request)
 
     return MappingResponse(type=body.type, params=body.params)
+
+
+# ---------------------------------------------------------------------------
+# Multi-scene CRUD endpoints (requires StateDB on app.state)
+# ---------------------------------------------------------------------------
+
+
+def _get_db(request: Request) -> Any:
+    """Return StateDB or raise 503."""
+    db = getattr(request.app.state, "state_db", None)
+    if db is None:
+        raise HTTPException(503, "StateDB not available")
+    return db
+
+
+router_scenes = APIRouter(prefix="/scenes", tags=["scenes"])
+
+
+@router_scenes.get("", response_model=list[SceneListItem])
+async def list_scenes(request: Request) -> list[SceneListItem]:
+    """List all scenes from DB if available, else return current in-memory scene."""
+    db = getattr(request.app.state, "state_db", None)
+    if db is not None:
+        rows = await db.load_scenes()
+        return [
+            SceneListItem(
+                id=row["id"],
+                name=row["name"],
+                is_active=bool(row.get("is_active", 0)),
+                mapping_type=row.get("mapping_type"),
+                effect_mode=row.get("effect_mode"),
+            )
+            for row in rows
+        ]
+    # Fallback: return in-memory scene as "default"
+    scene = _get_scene(request)
+    if scene is not None:
+        return [SceneListItem(id="default", name="Default", is_active=True)]
+    return []
+
+
+@router_scenes.post("", response_model=SceneListItem)
+async def create_scene(request: Request, body: CreateSceneRequest) -> SceneListItem:
+    db = _get_db(request)
+    scene_id = str(uuid.uuid4())
+    await db.save_scene({
+        "id": scene_id,
+        "name": body.name,
+        "mapping_type": body.mapping_type,
+        "effect_mode": body.effect_mode,
+        "is_active": 0,
+    })
+    return SceneListItem(
+        id=scene_id,
+        name=body.name,
+        is_active=False,
+        mapping_type=body.mapping_type,
+        effect_mode=body.effect_mode,
+    )
+
+
+@router_scenes.get("/{scene_id}", response_model=SceneListItem)
+async def get_scene_by_id(request: Request, scene_id: str) -> SceneListItem:
+    db = _get_db(request)
+    rows = await db.load_scenes()
+    for row in rows:
+        if row["id"] == scene_id:
+            return SceneListItem(
+                id=row["id"],
+                name=row["name"],
+                is_active=bool(row.get("is_active", 0)),
+                mapping_type=row.get("mapping_type"),
+                effect_mode=row.get("effect_mode"),
+            )
+    raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+
+
+@router_scenes.put("/{scene_id}", response_model=SceneListItem)
+async def update_scene(
+    request: Request, scene_id: str, body: UpdateSceneRequest
+) -> SceneListItem:
+    db = _get_db(request)
+    rows = await db.load_scenes()
+    existing = next((r for r in rows if r["id"] == scene_id), None)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+
+    updated: dict[str, Any] = {"id": scene_id}
+    updated["name"] = body.name if body.name is not None else existing["name"]
+    updated["mapping_type"] = body.mapping_type if body.mapping_type is not None else existing.get("mapping_type")
+    updated["effect_mode"] = body.effect_mode if body.effect_mode is not None else existing.get("effect_mode")
+    updated["is_active"] = existing.get("is_active", 0)
+
+    await db.save_scene(updated)
+    return SceneListItem(
+        id=scene_id,
+        name=updated["name"],
+        is_active=bool(updated["is_active"]),
+        mapping_type=updated["mapping_type"],
+        effect_mode=updated["effect_mode"],
+    )
+
+
+@router_scenes.delete("/{scene_id}")
+async def delete_scene(request: Request, scene_id: str) -> dict[str, str]:
+    db = _get_db(request)
+    rows = await db.load_scenes()
+    if not any(r["id"] == scene_id for r in rows):
+        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    await db.delete_scene(scene_id)
+    return {"status": "deleted"}
+
+
+@router_scenes.post("/{scene_id}/activate")
+async def activate_scene(request: Request, scene_id: str) -> dict[str, str]:
+    db = _get_db(request)
+    rows = await db.load_scenes()
+    if not any(r["id"] == scene_id for r in rows):
+        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    await db.set_scene_active(scene_id)
+    return {"status": "activated", "scene_id": scene_id}
+
+
+@router_scenes.post("/{scene_id}/deactivate")
+async def deactivate_scene(request: Request, scene_id: str) -> dict[str, str]:
+    db = _get_db(request)
+    rows = await db.load_scenes()
+    if not any(r["id"] == scene_id for r in rows):
+        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    # Deactivate by setting is_active=0 for this scene only
+    existing = next(r for r in rows if r["id"] == scene_id)
+    await db.save_scene({
+        "id": scene_id,
+        "name": existing["name"],
+        "mapping_type": existing.get("mapping_type"),
+        "effect_mode": existing.get("effect_mode"),
+        "is_active": 0,
+    })
+    return {"status": "deactivated", "scene_id": scene_id}
+
+
+@router_scenes.put("/{scene_id}/devices/{device_name}", response_model=PlacementResponse)
+async def add_or_update_scene_placement(
+    request: Request, scene_id: str, device_name: str, body: UpdatePlacementRequest
+) -> PlacementResponse:
+    """Add or update a device placement in a scene (stored in DB)."""
+    db = _get_db(request)
+    rows = await db.load_scenes()
+    if not any(r["id"] == scene_id for r in rows):
+        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+
+    # Ensure the device exists in the DB (required by FK constraint)
+    devices_in_db = await db.load_devices()
+    device_ids_in_db = {d["id"] for d in devices_in_db}
+    if device_name not in device_ids_in_db:
+        # Auto-register device with a minimal record
+        device_record: dict[str, Any] = {
+            "id": device_name,
+            "name": device_name,
+            "backend": "unknown",
+        }
+        # Try to get more info from device manager
+        try:
+            device_manager = request.app.state.device_manager
+            from dj_ledfx.devices.manager import ManagedDevice as _MD
+            managed = device_manager.get_device(device_name)
+            if managed is not None and isinstance(managed, _MD):
+                info = managed.adapter.device_info
+                device_record["name"] = str(info.name)
+                device_record["backend"] = (
+                    info.device_type.split("_")[0] if info.device_type else "unknown"
+                )
+                device_record["led_count"] = int(managed.adapter.led_count)
+                if info.address:
+                    ip = info.address.split(":")[0] if ":" in info.address else info.address
+                    device_record["ip"] = str(ip)
+        except Exception:
+            pass
+        await db.upsert_device(device_record)
+
+    placement_data: dict[str, Any] = {
+        "scene_id": scene_id,
+        "device_id": device_name,
+    }
+    if body.position is not None:
+        placement_data["position_x"] = body.position[0]
+        placement_data["position_y"] = body.position[1]
+        placement_data["position_z"] = body.position[2]
+    if body.geometry is not None:
+        placement_data["geometry_type"] = body.geometry
+    if body.direction is not None:
+        placement_data["direction_x"] = body.direction[0]
+        placement_data["direction_y"] = body.direction[1]
+        placement_data["direction_z"] = body.direction[2]
+    if body.length is not None:
+        placement_data["length"] = body.length
+
+    await db.save_placement(placement_data)
+
+    # Build a PlacementResponse from the stored data
+    geo: PointGeometry | StripGeometry | MatrixGeometry = PointGeometry()
+    if body.geometry == "strip":
+        direction = tuple(body.direction) if body.direction else (1.0, 0.0, 0.0)
+        length = body.length if body.length is not None else 1.0
+        geo = StripGeometry(direction=direction, length=length)
+    elif body.geometry == "matrix":
+        geo = MatrixGeometry()
+
+    led_count = body.led_count or 1
+    device_manager = request.app.state.device_manager
+    managed = device_manager.get_device(device_name)
+    if managed is not None:
+        led_count = managed.adapter.led_count
+
+    from dj_ledfx.spatial.scene import DevicePlacement as DP
+
+    placement = DP(
+        device_id=device_name,
+        position=tuple(body.position) if body.position else (0.0, 0.0, 0.0),
+        geometry=geo,
+        led_count=led_count,
+    )
+    return _placement_to_response(placement)
+
+
+@router_scenes.delete("/{scene_id}/devices/{device_name}")
+async def remove_scene_placement(
+    request: Request, scene_id: str, device_name: str
+) -> dict[str, str]:
+    """Remove a device placement from a scene."""
+    db = _get_db(request)
+    rows = await db.load_scenes()
+    if not any(r["id"] == scene_id for r in rows):
+        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+
+    await db.delete_placement(scene_id, device_name)
+    return {"status": "removed", "device_name": device_name}
