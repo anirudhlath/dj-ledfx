@@ -14,6 +14,8 @@ class DeviceInfo:
     device_type: str
     led_count: int
     address: str
+    mac: str | None = None
+    stable_id: str | None = None
 
 
 @dataclass(slots=True)
