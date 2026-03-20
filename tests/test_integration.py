@@ -1,6 +1,8 @@
 import asyncio
+from pathlib import Path
 
 import numpy as np
+import pytest
 from conftest import MockDeviceAdapter
 
 from dj_ledfx.beat.clock import BeatClock
@@ -142,3 +144,58 @@ async def test_rtt_feedback_shifts_frame_selection() -> None:
 
     assert low_latency < high_latency
     # This confirms the scheduler would read a different (earlier) ring buffer position
+
+
+@pytest.mark.asyncio
+async def test_startup_with_fresh_db(tmp_path: Path) -> None:
+    """Full startup with empty DB (no TOML migration)."""
+    from dj_ledfx.persistence.state_db import StateDB
+
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    version = await db.get_schema_version()
+    assert version == 1
+    devices = await db.load_devices()
+    assert devices == []
+    scenes = await db.load_scenes()
+    assert scenes == []
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_startup_with_migrated_toml(tmp_path: Path) -> None:
+    """Full startup migrates config.toml into DB."""
+    import tomli_w
+
+    from dj_ledfx.persistence.state_db import StateDB
+
+    config_toml = tmp_path / "config.toml"
+    config_toml.write_bytes(
+        tomli_w.dumps(
+            {
+                "engine": {"fps": 90},
+                "effect": {"active_effect": "beat_pulse", "beat_pulse": {"gamma": 3.0}},
+            }
+        ).encode()
+    )
+
+    presets_toml = tmp_path / "presets.toml"
+    presets_toml.write_bytes(
+        tomli_w.dumps(
+            {"presets": {"Test": {"effect_class": "beat_pulse", "params": {"gamma": 2.0}}}}
+        ).encode()
+    )
+
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    await db.migrate_from_toml(config_path=config_toml, presets_path=presets_toml)
+
+    config = await db.load_all_config()
+    assert config[("engine", "fps")] == 90
+
+    presets = await db.load_presets()
+    assert "Test" in {p["name"] for p in presets}
+
+    assert not config_toml.exists()
+    assert (tmp_path / "config.toml.bak").exists()
+    await db.close()
