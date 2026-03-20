@@ -150,3 +150,44 @@ class StateDB:
             "INSERT OR REPLACE INTO config (section, key, value) VALUES (?, ?, ?)",
             [(section, k, v) for k, v in data.items()],
         )
+
+    # --- Device CRUD ---
+
+    _DEVICE_COLUMNS = (
+        "id", "name", "backend", "led_count", "ip", "mac",
+        "device_id", "sku", "last_latency_ms", "last_seen", "extra",
+    )
+
+    async def load_devices(self) -> list[dict[str, Any]]:
+        """Return all device rows as dicts."""
+        rows = await self._execute_read(
+            f"SELECT {', '.join(self._DEVICE_COLUMNS)} FROM devices"
+        )
+        return [dict(zip(self._DEVICE_COLUMNS, row)) for row in rows]
+
+    async def upsert_device(self, data: dict[str, Any]) -> None:
+        """Insert or replace a device record. Must include 'id', 'name', 'backend'."""
+        cols = [c for c in self._DEVICE_COLUMNS if c in data]
+        placeholders = ", ".join("?" for _ in cols)
+        col_list = ", ".join(cols)
+        values = tuple(data.get(c) for c in cols)
+        await self._execute_write(
+            f"INSERT OR REPLACE INTO devices ({col_list}) VALUES ({placeholders})",
+            values,
+        )
+
+    async def delete_device(self, device_id: str) -> None:
+        """Delete a device by stable ID."""
+        await self._execute_write("DELETE FROM devices WHERE id=?", (device_id,))
+
+    async def update_device_last_seen(self, device_id: str, timestamp: str) -> None:
+        """Update the last_seen timestamp for a device."""
+        await self._execute_write(
+            "UPDATE devices SET last_seen=? WHERE id=?", (timestamp, device_id)
+        )
+
+    async def update_device_latency(self, device_id: str, latency_ms: float) -> None:
+        """Update the last known latency for a device."""
+        await self._execute_write(
+            "UPDATE devices SET last_latency_ms=? WHERE id=?", (latency_ms, device_id)
+        )

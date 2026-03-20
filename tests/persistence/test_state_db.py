@@ -118,3 +118,94 @@ async def test_save_config_bulk_upserts(db):
     result = await db.load_config("effect")
     assert result["active"] == "rainbow_wave"
     assert result["gamma"] == "2.5"
+
+
+# --- Task 7: Device CRUD ---
+
+
+@pytest.mark.asyncio
+async def test_load_devices_empty(db):
+    devices = await db.load_devices()
+    assert devices == []
+
+
+@pytest.mark.asyncio
+async def test_upsert_and_load_device(db):
+    await db.upsert_device({
+        "id": "lifx:d073d5aabbcc",
+        "name": "LIFX Strip",
+        "backend": "lifx",
+        "led_count": 60,
+        "ip": "192.168.1.5",
+        "mac": "d073d5aabbcc",
+    })
+    devices = await db.load_devices()
+    assert len(devices) == 1
+    assert devices[0]["id"] == "lifx:d073d5aabbcc"
+    assert devices[0]["name"] == "LIFX Strip"
+    assert devices[0]["backend"] == "lifx"
+    assert devices[0]["led_count"] == 60
+    assert devices[0]["mac"] == "d073d5aabbcc"
+
+
+@pytest.mark.asyncio
+async def test_upsert_device_updates_existing(db):
+    await db.upsert_device({
+        "id": "lifx:d073d5aabbcc",
+        "name": "LIFX Strip",
+        "backend": "lifx",
+        "led_count": 60,
+        "ip": "192.168.1.5",
+        "mac": "d073d5aabbcc",
+    })
+    await db.upsert_device({
+        "id": "lifx:d073d5aabbcc",
+        "name": "LIFX Strip (Updated)",
+        "backend": "lifx",
+        "led_count": 82,
+        "ip": "192.168.1.6",
+        "mac": "d073d5aabbcc",
+    })
+    devices = await db.load_devices()
+    assert len(devices) == 1
+    assert devices[0]["name"] == "LIFX Strip (Updated)"
+    assert devices[0]["led_count"] == 82
+
+
+@pytest.mark.asyncio
+async def test_delete_device(db):
+    await db.upsert_device({
+        "id": "govee:1234",
+        "name": "Govee Strip",
+        "backend": "govee",
+        "led_count": 50,
+    })
+    await db.delete_device("govee:1234")
+    devices = await db.load_devices()
+    assert devices == []
+
+
+@pytest.mark.asyncio
+async def test_update_device_last_seen(db):
+    await db.upsert_device({
+        "id": "lifx:aabb",
+        "name": "Test",
+        "backend": "lifx",
+        "led_count": 30,
+    })
+    await db.update_device_last_seen("lifx:aabb", "2026-03-20T10:00:00")
+    devices = await db.load_devices()
+    assert devices[0]["last_seen"] == "2026-03-20T10:00:00"
+
+
+@pytest.mark.asyncio
+async def test_update_device_latency(db):
+    await db.upsert_device({
+        "id": "lifx:aabb",
+        "name": "Test",
+        "backend": "lifx",
+        "led_count": 30,
+    })
+    await db.update_device_latency("lifx:aabb", 45.2)
+    devices = await db.load_devices()
+    assert abs(devices[0]["last_latency_ms"] - 45.2) < 0.001
