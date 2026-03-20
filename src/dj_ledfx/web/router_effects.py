@@ -82,7 +82,10 @@ async def save_preset(request: Request, body: CreatePresetRequest) -> PresetResp
         effect_class=deck.effect_name,
         params=deck.effect.get_params(),
     )
-    await asyncio.to_thread(store.save, preset)
+    if hasattr(store, "save_async"):
+        await store.save_async(preset)
+    else:
+        await asyncio.to_thread(store.save, preset)
     return PresetResponse(name=preset.name, effect_class=preset.effect_class, params=preset.params)
 
 
@@ -97,7 +100,10 @@ async def update_preset(request: Request, name: str, body: SetEffectRequest) -> 
     if body.params:
         params.update(body.params)
     updated = Preset(name=name, effect_class=body.effect or existing.effect_class, params=params)
-    await asyncio.to_thread(store.save, updated)
+    if hasattr(store, "save_async"):
+        await store.save_async(updated)
+    else:
+        await asyncio.to_thread(store.save, updated)
     return PresetResponse(
         name=updated.name, effect_class=updated.effect_class, params=updated.params
     )
@@ -130,7 +136,10 @@ async def load_preset(request: Request, name: str) -> ActiveEffectResponse:
 async def delete_preset(request: Request, name: str) -> dict[str, str]:
     store = request.app.state.preset_store
     try:
-        await asyncio.to_thread(store.delete, name)
+        if hasattr(store, "delete_async"):
+            await store.delete_async(name)
+        else:
+            await asyncio.to_thread(store.delete, name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Preset not found: {name}") from exc
     return {"status": "deleted"}
