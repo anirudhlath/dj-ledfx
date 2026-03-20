@@ -330,3 +330,23 @@ class StateDB:
             "DELETE FROM scene_placements WHERE scene_id=? AND device_id=?",
             (scene_id, device_id),
         )
+
+    # --- Presets CRUD ---
+
+    async def load_presets(self) -> list[dict[str, str]]:
+        """Return all presets as dicts."""
+        rows = await self._execute_read(
+            "SELECT name, effect_class, params FROM presets"
+        )
+        return [{"name": row[0], "effect_class": row[1], "params": row[2]} for row in rows]
+
+    async def save_preset(self, name: str, effect_class: str, params: str) -> None:
+        """Insert or replace a preset."""
+        await self._execute_write(
+            "INSERT OR REPLACE INTO presets (name, effect_class, params) VALUES (?, ?, ?)",
+            (name, effect_class, params),
+        )
+
+    async def delete_preset(self, name: str) -> None:
+        """Delete a preset by name."""
+        await self._execute_write("DELETE FROM presets WHERE name=?", (name,))

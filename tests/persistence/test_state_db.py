@@ -404,3 +404,49 @@ async def test_delete_scene_cascades_placements(db):
     # placements table should be empty due to CASCADE
     rows = await db._execute_read("SELECT COUNT(*) FROM scene_placements")
     assert rows[0][0] == 0
+
+
+# --- Task 10: Presets CRUD ---
+
+
+@pytest.mark.asyncio
+async def test_load_presets_empty(db):
+    presets = await db.load_presets()
+    assert presets == []
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_preset(db):
+    await db.save_preset("My Pulse", "BeatPulse", '{"gamma": 2.0}')
+    presets = await db.load_presets()
+    assert len(presets) == 1
+    assert presets[0]["name"] == "My Pulse"
+    assert presets[0]["effect_class"] == "BeatPulse"
+    assert presets[0]["params"] == '{"gamma": 2.0}'
+
+
+@pytest.mark.asyncio
+async def test_save_preset_upsert(db):
+    await db.save_preset("My Pulse", "BeatPulse", '{"gamma": 2.0}')
+    await db.save_preset("My Pulse", "BeatPulse", '{"gamma": 3.5}')
+    presets = await db.load_presets()
+    assert len(presets) == 1
+    assert presets[0]["params"] == '{"gamma": 3.5}'
+
+
+@pytest.mark.asyncio
+async def test_delete_preset(db):
+    await db.save_preset("My Pulse", "BeatPulse", '{"gamma": 2.0}')
+    await db.delete_preset("My Pulse")
+    presets = await db.load_presets()
+    assert presets == []
+
+
+@pytest.mark.asyncio
+async def test_multiple_presets(db):
+    await db.save_preset("Pulse 1", "BeatPulse", '{"gamma": 2.0}')
+    await db.save_preset("Wave 1", "RainbowWave", '{"speed": 1.0}')
+    presets = await db.load_presets()
+    assert len(presets) == 2
+    names = {p["name"] for p in presets}
+    assert names == {"Pulse 1", "Wave 1"}
