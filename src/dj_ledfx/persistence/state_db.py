@@ -127,3 +127,26 @@ class StateDB:
             self._conn.commit()
 
         await asyncio.to_thread(_run)
+
+    # --- Config CRUD ---
+
+    async def load_config(self, section: str) -> dict[str, str]:
+        """Return all key-value pairs for a config section."""
+        rows = await self._execute_read(
+            "SELECT key, value FROM config WHERE section=?", (section,)
+        )
+        return {row[0]: row[1] for row in rows}
+
+    async def save_config_key(self, section: str, key: str, value: str) -> None:
+        """Upsert a single config key-value in a section."""
+        await self._execute_write(
+            "INSERT OR REPLACE INTO config (section, key, value) VALUES (?, ?, ?)",
+            (section, key, value),
+        )
+
+    async def save_config_bulk(self, section: str, data: dict[str, str]) -> None:
+        """Upsert multiple config key-values in a section."""
+        await self._executemany_write(
+            "INSERT OR REPLACE INTO config (section, key, value) VALUES (?, ?, ?)",
+            [(section, k, v) for k, v in data.items()],
+        )

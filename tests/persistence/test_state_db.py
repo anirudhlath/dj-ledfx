@@ -68,3 +68,53 @@ async def test_idempotent_open(tmp_path):
     version = await db2.get_schema_version()
     assert version == 1
     await db2.close()
+
+
+# --- Task 6: Config CRUD ---
+
+
+@pytest.mark.asyncio
+async def test_load_config_empty(db):
+    result = await db.load_config("engine")
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_config_key(db):
+    await db.save_config_key("engine", "fps", "60")
+    result = await db.load_config("engine")
+    assert result == {"fps": "60"}
+
+
+@pytest.mark.asyncio
+async def test_save_config_key_upsert(db):
+    await db.save_config_key("engine", "fps", "60")
+    await db.save_config_key("engine", "fps", "90")
+    result = await db.load_config("engine")
+    assert result == {"fps": "90"}
+
+
+@pytest.mark.asyncio
+async def test_save_config_key_multiple_sections(db):
+    await db.save_config_key("engine", "fps", "60")
+    await db.save_config_key("web", "port", "8080")
+    engine = await db.load_config("engine")
+    web = await db.load_config("web")
+    assert engine == {"fps": "60"}
+    assert web == {"port": "8080"}
+
+
+@pytest.mark.asyncio
+async def test_save_config_bulk(db):
+    await db.save_config_bulk("effect", {"active": "beat_pulse", "gamma": "2.0"})
+    result = await db.load_config("effect")
+    assert result == {"active": "beat_pulse", "gamma": "2.0"}
+
+
+@pytest.mark.asyncio
+async def test_save_config_bulk_upserts(db):
+    await db.save_config_bulk("effect", {"active": "beat_pulse"})
+    await db.save_config_bulk("effect", {"active": "rainbow_wave", "gamma": "2.5"})
+    result = await db.load_config("effect")
+    assert result["active"] == "rainbow_wave"
+    assert result["gamma"] == "2.5"
