@@ -14,6 +14,14 @@ class DeviceInfo:
     device_type: str
     led_count: int
     address: str
+    mac: str | None = None
+    stable_id: str | None = None
+    backend: str = ""
+
+    @property
+    def effective_id(self) -> str:
+        """stable_id if set, otherwise name — used as cross-session device key."""
+        return self.stable_id if self.stable_id else self.name
 
 
 @dataclass(slots=True)

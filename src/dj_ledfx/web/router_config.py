@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import tomllib
 from typing import Any
 
 import tomli_w
 from fastapi import APIRouter, HTTPException, Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from dj_ledfx.config import (
     AppConfig,
@@ -24,6 +25,7 @@ from dj_ledfx.config import (
     save_config,
     strip_none,
 )
+from dj_ledfx.web.state import get_db
 
 router = APIRouter()
 
@@ -98,6 +100,16 @@ async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
     if request.app.state.config_path:
         await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
     result = dataclasses.asdict(new_config)
+    # Persist to StateDB when available
+    try:
+        db = get_db(request)
+        for section, value in result.items():
+            if isinstance(value, dict):
+                str_kv = {k: json.dumps(v) for k, v in value.items() if not isinstance(v, dict)}
+                if str_kv:
+                    await db.save_config_bulk(section, str_kv)
+    except HTTPException:
+        pass
     return JSONResponse(
         content=result,
         headers={"X-Requires-Restart": "true"},
@@ -134,3 +146,22 @@ async def import_config(request: Request) -> dict[str, Any]:
         content=dataclasses.asdict(new_config),
         headers={"X-Requires-Restart": "true"},
     )
+
+
+@router.get("/state/export")
+async def export_state(request: Request) -> Response:
+    from dj_ledfx.persistence.toml_io import export_toml
+
+    db = get_db(request)
+    toml_str = await export_toml(db)
+    return Response(content=toml_str, media_type="application/toml")
+
+
+@router.post("/state/import")
+async def import_state(request: Request) -> dict[str, str]:
+    from dj_ledfx.persistence.toml_io import import_toml
+
+    db = get_db(request)
+    body = await request.body()
+    await import_toml(db, body.decode())
+    return {"status": "ok"}

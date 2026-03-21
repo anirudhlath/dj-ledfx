@@ -13,19 +13,34 @@ import dj_ledfx.devices  # noqa: F401  # triggers backend auto-registration
 from dj_ledfx import metrics
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.beat.simulator import BeatSimulator
-from dj_ledfx.config import load_config
-from dj_ledfx.devices.backend import DeviceBackend
+from dj_ledfx.config import (
+    AppConfig,
+    DiscoveryConfig,
+    EffectConfig,
+    EngineConfig,
+    NetworkConfig,
+    WebConfig,
+    filter_fields,
+    load_config,
+)
+from dj_ledfx.devices.discovery import DiscoveryOrchestrator
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine
-from dj_ledfx.events import EventBus
+from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent, EventBus
+from dj_ledfx.latency.strategies import StaticLatency
+from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.persistence.toml_io import migrate_from_toml
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.spatial.compositor import SpatialCompositor
+from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 from dj_ledfx.spatial.mapping import mapping_from_config
-from dj_ledfx.spatial.scene import SceneModel
+from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
 from dj_ledfx.status import SystemStatus
+from dj_ledfx.types import DeviceInfo
 
 
 def _parse_args() -> argparse.Namespace:
@@ -33,6 +48,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--demo", action="store_true", help="Run with simulated beats")
     parser.add_argument(
         "--config", type=Path, default=Path("config.toml"), help="Config file path"
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=None,
+        help="SQLite state database path (default: <config-dir>/state.db)",
     )
     parser.add_argument(
         "--log-level",
@@ -74,9 +95,58 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
+    """Build AppConfig from StateDB config table.
+
+    Returns None if the config table is empty (fresh DB with no migrated config).
+    """
+    if await state_db.is_config_empty():
+        return None
+
+    all_config = await state_db.load_all_config()
+
+    # Group by section
+    sections: dict[str, dict[str, object]] = {}
+    for (section, key), value in all_config.items():
+        sections.setdefault(section, {})[key] = value
+
+    engine = EngineConfig(**filter_fields(EngineConfig, sections.get("engine", {})))
+    network = NetworkConfig(**filter_fields(NetworkConfig, sections.get("network", {})))
+    web = WebConfig(**filter_fields(WebConfig, sections.get("web", {})))
+    discovery = DiscoveryConfig(**filter_fields(DiscoveryConfig, sections.get("discovery", {})))
+    effect = EffectConfig(**filter_fields(EffectConfig, sections.get("effect", {})))
+
+    logger.info("Config loaded from StateDB")
+    return AppConfig(
+        engine=engine,
+        effect=effect,
+        network=network,
+        web=web,
+        discovery=discovery,
+    )
+
+
 async def _run(args: argparse.Namespace) -> None:
-    config = load_config(args.config)
     metrics.init(enabled=args.metrics, port=args.metrics_port)
+
+    db_path = args.db if args.db else args.config.parent / "state.db"
+    state_db = StateDB(db_path)
+    await state_db.open()
+
+    presets_toml = args.config.parent / "presets.toml"
+    if await state_db.is_config_empty():
+        if args.config.exists() or presets_toml.exists():
+            logger.info("Fresh DB detected — running TOML migration")
+            await migrate_from_toml(
+                state_db,
+                config_path=args.config if args.config.exists() else None,
+                presets_path=presets_toml if presets_toml.exists() else None,
+            )
+
+    config = await _load_config_from_db(state_db)
+    if config is None:
+        logger.info("No config in DB — loading from TOML ({})", args.config)
+        config = load_config(args.config)
 
     event_bus = EventBus()
     clock = BeatClock()
@@ -104,12 +174,37 @@ async def _run(args: argparse.Namespace) -> None:
         await start_listener(event_bus=event_bus)
 
     device_manager = DeviceManager(event_bus=event_bus)
+    registered_devices = await state_db.load_devices()
+    for dev_row in registered_devices:
+        led_count = dev_row.get("led_count") or 60
+        dev_info = DeviceInfo(
+            name=dev_row["name"],
+            device_type=dev_row.get("backend") or "",
+            led_count=led_count,
+            address=dev_row.get("ip") or "",
+            mac=dev_row.get("mac"),
+            stable_id=dev_row["id"],
+        )
+        last_latency = dev_row.get("last_latency_ms") or 50.0
+        tracker = LatencyTracker(strategy=StaticLatency(last_latency))
+        device_manager.add_device_from_info(
+            device_info=dev_info,
+            tracker=tracker,
+            status="offline",
+        )
+    if registered_devices:
+        logger.info("Loaded {} registered device(s) from DB", len(registered_devices))
 
-    devices = await DeviceBackend.discover_all(config)
-    for device in devices:
-        device_manager.add_device(device.adapter, device.tracker, device.max_fps)
+    discovery_orchestrator = DiscoveryOrchestrator(
+        config=config,
+        device_manager=device_manager,
+        event_bus=event_bus,
+        state_db=state_db,
+    )
 
-    # Build spatial scene if configured
+    if registered_devices:
+        await discovery_orchestrator.connect_known_devices(registered_devices)
+
     scene: SceneModel | None = None
     compositor: SpatialCompositor | None = None
     if config.scene_config is not None:
@@ -123,6 +218,66 @@ async def _run(args: argparse.Namespace) -> None:
                 config.scene_config.get("mapping", "linear"),
                 len(scene.placements),
             )
+
+    if compositor is None:
+        db_scenes = await state_db.load_scenes()
+        active_scene_row = next((s for s in db_scenes if s.get("is_active")), None)
+        if active_scene_row is not None:
+            scene_id = active_scene_row["id"]
+            placement_rows = await state_db.load_scene_placements(scene_id)
+            if placement_rows:
+                # Build a device lookup by stable_id
+                managed_by_id = {
+                    d.adapter.device_info.stable_id: d
+                    for d in device_manager.devices
+                    if d.adapter.device_info.stable_id
+                }
+                placements: dict[str, DevicePlacement] = {}
+                for row in placement_rows:
+                    device_id = row["device_id"]
+                    managed = managed_by_id.get(device_id)
+                    led_count = managed.adapter.led_count if managed is not None else 1
+                    geo_type = row.get("geometry_type") or "point"
+                    if geo_type == "strip":
+                        geo: PointGeometry | StripGeometry = StripGeometry(
+                            direction=(
+                                float(row.get("direction_x") or 1.0),
+                                float(row.get("direction_y") or 0.0),
+                                float(row.get("direction_z") or 0.0),
+                            ),
+                            length=float(row.get("length") or 1.0),
+                        )
+                    else:
+                        geo = PointGeometry()
+                    placements[device_id] = DevicePlacement(
+                        device_id=device_id,
+                        position=(
+                            float(row.get("position_x") or 0.0),
+                            float(row.get("position_y") or 0.0),
+                            float(row.get("position_z") or 0.0),
+                        ),
+                        geometry=geo,
+                        led_count=led_count,
+                    )
+                scene = SceneModel(placements=placements)
+                mapping_type = active_scene_row.get("mapping_type") or "linear"
+                scene_cfg_for_mapping: dict[str, object] = {"mapping": mapping_type}
+                raw_params = active_scene_row.get("mapping_params")
+                if raw_params:
+                    import json as _json
+
+                    try:
+                        scene_cfg_for_mapping["mapping_params"] = _json.loads(raw_params)
+                    except (ValueError, TypeError):
+                        pass
+                mapping = mapping_from_config(scene_cfg_for_mapping)
+                compositor = SpatialCompositor(scene, mapping)
+                logger.info(
+                    "Spatial compositor active (from DB scene '{}'): {} mapping, {} devices",
+                    scene_id,
+                    mapping_type,
+                    len(placements),
+                )
 
     led_count = device_manager.max_led_count or 60
     logger.info("Using {} LEDs", led_count)
@@ -146,8 +301,35 @@ async def _run(args: argparse.Namespace) -> None:
         devices=device_manager.devices,
         fps=config.engine.fps,
         compositor=compositor,
+        event_bus=event_bus,
     )
 
+    def _on_device_offline(event: DeviceOfflineEvent) -> None:
+        if event.stable_id:
+            try:
+                device_manager.demote_device(event.stable_id)
+            except KeyError:
+                logger.debug(
+                    "demote_device: stable_id '{}' not found (already removed?)",
+                    event.stable_id,
+                )
+
+    event_bus.subscribe(DeviceOfflineEvent, _on_device_offline)
+
+    def _on_device_discovered(event: DeviceDiscoveredEvent) -> None:
+        """When a new device is discovered, add it to the scheduler so it gets frames."""
+        managed = device_manager.get_by_stable_id(event.stable_id)
+        if managed is not None:
+            scheduler.add_device(managed)
+
+    event_bus.subscribe(DeviceDiscoveredEvent, _on_device_discovered)
+
+    def _on_device_online(event: DeviceOnlineEvent) -> None:
+        logger.info("Device '{}' ({}) came back online", event.name, event.stable_id)
+
+    event_bus.subscribe(DeviceOnlineEvent, _on_device_online)
+
+    # Web setup
     async def _forward_vite_output(proc: asyncio.subprocess.Process) -> None:
         assert proc.stdout is not None
         while True:
@@ -168,7 +350,10 @@ async def _run(args: argparse.Namespace) -> None:
         host = args.web_host or config.web.host
         port = args.web_port or config.web.port
 
-        preset_store = PresetStore(args.config.parent / "presets.toml")
+        # Use DB-backed PresetStore if StateDB is available
+        preset_store = PresetStore(state_db=state_db)
+        await preset_store.load_from_db()
+
         web_app = create_app(
             beat_clock=clock,
             effect_deck=deck,
@@ -181,6 +366,7 @@ async def _run(args: argparse.Namespace) -> None:
             config=config,
             config_path=args.config,
             web_static_dir=None if web_mode == "dev" else args.web_static_dir,
+            state_db=state_db,
         )
 
         try:
@@ -245,6 +431,8 @@ async def _run(args: argparse.Namespace) -> None:
     tasks.append(asyncio.create_task(engine.run()))
     tasks.append(asyncio.create_task(scheduler.run()))
 
+    discovery_orchestrator.start()
+
     async def _status_loop() -> None:
         while not stop_event.is_set():
             beat_state = clock.get_state()
@@ -290,8 +478,9 @@ async def _run(args: argparse.Namespace) -> None:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
 
+    await discovery_orchestrator.shutdown()
     await device_manager.disconnect_all()
-    await DeviceBackend.shutdown_all()
+    await state_db.close()
     logger.info("dj-ledfx stopped")
 
 

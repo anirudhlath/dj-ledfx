@@ -4,6 +4,25 @@ from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 
 
+def test_on_change_callback_fires_on_swap():
+    calls = []
+    deck = EffectDeck(BeatPulse(), on_change=lambda d: calls.append(d.effect_name))
+    deck.apply_update("beat_pulse", {"gamma": 3.0})
+    assert len(calls) == 1
+
+
+def test_on_change_callback_fires_on_param_update():
+    calls = []
+    deck = EffectDeck(BeatPulse(), on_change=lambda d: calls.append("changed"))
+    deck.apply_update(None, {"gamma": 5.0})
+    assert len(calls) == 1
+
+
+def test_no_callback_no_error():
+    deck = EffectDeck(BeatPulse())
+    deck.apply_update(None, {"gamma": 5.0})  # should not raise
+
+
 def test_deck_delegates_render():
     effect = BeatPulse()
     deck = EffectDeck(effect)

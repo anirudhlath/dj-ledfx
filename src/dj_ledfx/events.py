@@ -19,6 +19,34 @@ class BeatEvent:
     pitch_percent: float = 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceDiscoveredEvent:
+    stable_id: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceOnlineEvent:
+    stable_id: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceOfflineEvent:
+    stable_id: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class SceneActivatedEvent:
+    scene_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class SceneDeactivatedEvent:
+    scene_id: str
+
+
 class EventBus:
     def __init__(self) -> None:
         self._subscribers: dict[type, list[Callable[..., Any]]] = defaultdict(list)

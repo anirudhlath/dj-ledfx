@@ -1,6 +1,15 @@
 from dataclasses import dataclass
 
-from dj_ledfx.events import EventBus
+import pytest
+
+from dj_ledfx.events import (
+    DeviceDiscoveredEvent,
+    DeviceOfflineEvent,
+    DeviceOnlineEvent,
+    EventBus,
+    SceneActivatedEvent,
+    SceneDeactivatedEvent,
+)
 
 
 @dataclass
@@ -56,3 +65,42 @@ def test_unsubscribe() -> None:
 def test_emit_with_no_subscribers_does_not_raise() -> None:
     bus = EventBus()
     bus.emit(FakeEvent(value=1))  # should not raise
+
+
+@pytest.fixture
+def event_bus():
+    return EventBus()
+
+
+def test_device_discovered_event():
+    e = DeviceDiscoveredEvent(stable_id="lifx:aabb", name="LIFX Strip")
+    assert e.stable_id == "lifx:aabb"
+    assert e.name == "LIFX Strip"
+
+
+def test_device_online_event():
+    e = DeviceOnlineEvent(stable_id="govee:1234", name="Govee H6159")
+    assert e.stable_id == "govee:1234"
+
+
+def test_device_offline_event():
+    e = DeviceOfflineEvent(stable_id="lifx:aabb", name="LIFX Strip")
+    assert e.stable_id == "lifx:aabb"
+
+
+def test_scene_activated_event():
+    e = SceneActivatedEvent(scene_id="dj-booth")
+    assert e.scene_id == "dj-booth"
+
+
+def test_scene_deactivated_event():
+    e = SceneDeactivatedEvent(scene_id="dj-booth")
+    assert e.scene_id == "dj-booth"
+
+
+def test_event_bus_emits_new_event_types(event_bus):
+    received = []
+    event_bus.subscribe(DeviceDiscoveredEvent, received.append)
+    event_bus.emit(DeviceDiscoveredEvent(stable_id="lifx:aa", name="Test"))
+    assert len(received) == 1
+    assert received[0].stable_id == "lifx:aa"

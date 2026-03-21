@@ -41,3 +41,32 @@ def test_beat_state() -> None:
     )
     assert state.bpm == 128.0
     assert state.is_playing is True
+
+
+def test_device_info_defaults_backward_compatible():
+    """Existing 4-arg construction still works."""
+    info = DeviceInfo(name="Test", device_type="test", led_count=10, address="1.2.3.4:80")
+    assert info.mac is None
+    assert info.stable_id is None
+
+
+def test_device_info_with_mac_and_stable_id():
+    info = DeviceInfo(
+        name="LIFX Strip (192.168.1.5)",
+        device_type="lifx_strip",
+        led_count=60,
+        address="192.168.1.5:56700",
+        mac="d073d5aabbcc",
+        stable_id="lifx:d073d5aabbcc",
+    )
+    assert info.mac == "d073d5aabbcc"
+    assert info.stable_id == "lifx:d073d5aabbcc"
+
+
+def test_device_info_frozen():
+    info = DeviceInfo(name="Test", device_type="test", led_count=10, address="1.2.3.4:80")
+    try:
+        info.name = "Changed"  # type: ignore[misc]
+        raise AssertionError("Should have raised")
+    except AttributeError:
+        pass

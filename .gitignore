@@ -19,3 +19,7 @@ profiles/
 *.sw?
 frontend/.vite/
 .playwright-mcp/
+state.db
+*.db-wal
+*.db-shm
+config.toml.bak

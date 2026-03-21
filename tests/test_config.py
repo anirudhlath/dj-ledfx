@@ -6,6 +6,7 @@ import pytest
 from dj_ledfx.config import (
     AppConfig,
     DevicesConfig,
+    DiscoveryConfig,
     EngineConfig,
     GoveeConfig,
     LIFXConfig,
@@ -361,3 +362,20 @@ def test_save_config_atomic(tmp_path: Path) -> None:
     save_config(AppConfig(), path)
     assert path.exists()
     assert not (tmp_path / "config.tmp").exists()
+
+
+# Task 3 — DiscoveryConfig tests
+
+
+def test_discovery_config_defaults():
+    dc = DiscoveryConfig()
+    assert dc.broadcast_interval_s == 30.0
+    assert dc.unicast_concurrency == 50
+    assert dc.unicast_timeout_s == 0.5
+    assert dc.subnet_mask == 24
+
+
+def test_app_config_has_discovery():
+    config = AppConfig()
+    assert isinstance(config.discovery, DiscoveryConfig)
+    assert config.discovery.broadcast_interval_s == 30.0

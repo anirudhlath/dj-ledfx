@@ -10,7 +10,16 @@ from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine, RingBuffer
+from dj_ledfx.spatial.pipeline import ScenePipeline
 from dj_ledfx.types import RenderedFrame
+
+
+@pytest.fixture
+def clock() -> BeatClock:
+    c = BeatClock()
+    now = time.monotonic()
+    c.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=now)
+    return c
 
 
 def test_ring_buffer_write_and_read() -> None:
@@ -113,3 +122,50 @@ def test_engine_render_tick_populates_buffer() -> None:
     frame = engine.ring_buffer.find_nearest(now + 1.0)
     assert frame is not None
     assert frame.colors.shape == (10, 3)
+
+
+def test_engine_tick_renders_to_pipelines(clock: BeatClock) -> None:
+    """Engine tick renders each pipeline into its own ring buffer."""
+    deck1 = EffectDeck(BeatPulse())
+    buf1 = RingBuffer(60, 30)
+    p1 = ScenePipeline(
+        scene_id="s1",
+        deck=deck1,
+        ring_buffer=buf1,
+        compositor=None,
+        mapping=None,
+        devices=[],
+        led_count=30,
+    )
+
+    deck2 = EffectDeck(BeatPulse())
+    buf2 = RingBuffer(60, 50)
+    p2 = ScenePipeline(
+        scene_id="s2",
+        deck=deck2,
+        ring_buffer=buf2,
+        compositor=None,
+        mapping=None,
+        devices=[],
+        led_count=50,
+    )
+
+    engine = EffectEngine(
+        clock=clock,
+        deck=deck1,
+        led_count=30,
+        fps=60,
+        max_lookahead_s=1.0,
+        pipelines=[p1, p2],
+    )
+    engine.tick(0.0)
+    assert buf1.count == 1
+    assert buf2.count == 1
+
+
+def test_engine_empty_pipelines_uses_legacy_buffer(clock: BeatClock) -> None:
+    """When no pipelines, engine uses legacy single-buffer mode."""
+    deck = EffectDeck(BeatPulse())
+    engine = EffectEngine(clock=clock, deck=deck, led_count=60, fps=60)
+    engine.tick(0.0)
+    assert engine.ring_buffer.count == 1

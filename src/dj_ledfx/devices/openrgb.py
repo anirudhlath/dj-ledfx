@@ -43,6 +43,8 @@ class OpenRGBAdapter(DeviceAdapter):
             device_type="openrgb",
             led_count=self._led_count,
             address=f"{self._host}:{self._port}",
+            stable_id=f"openrgb:{self._host}:{self._port}:{self._device_index}",
+            backend="openrgb",
         )
 
     @property
@@ -75,7 +77,22 @@ class OpenRGBAdapter(DeviceAdapter):
             self._led_count = len(device.colors)
             self._device_name = getattr(device, "name", f"Device {self._device_index}")
 
-        await asyncio.to_thread(_connect)
+        for attempt in range(2):
+            try:
+                await asyncio.wait_for(asyncio.to_thread(_connect), timeout=5.0)
+                break
+            except TimeoutError:
+                if attempt == 0:
+                    logger.warning(
+                        "OpenRGB connection to {}:{} timed out (attempt 1), retrying…",
+                        self._host,
+                        self._port,
+                    )
+                else:
+                    raise ConnectionError(
+                        f"OpenRGB connection to {self._host}:{self._port}"
+                        " timed out after 2 attempts"
+                    ) from None
         self._is_connected = True
         logger.info(
             "Connected to OpenRGB device '{}' ({} LEDs) at {}:{}",
@@ -137,6 +154,8 @@ class OpenRGBAdapter(DeviceAdapter):
                             device_type="openrgb",
                             led_count=len(dev.colors),
                             address=f"{host}:{port}",
+                            stable_id=f"openrgb:{host}:{port}:{i}",
+                            backend="openrgb",
                         )
                     )
                 client.disconnect()

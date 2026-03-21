@@ -1,0 +1,104 @@
+[engine]
+fps = 60
+max_lookahead_ms = 1000
+
+[effect]
+active_effect = "beat_pulse"
+beat_pulse_palette = [
+    "#ff0000",
+    "#00ff00",
+    "#0000ff",
+    "#ffff00",
+]
+beat_pulse_gamma = 2.0
+
+[network]
+interface = "auto"
+passive_mode = true
+
+[web]
+enabled = false
+host = "127.0.0.1"
+port = 8080
+cors_origins = [
+    "http://localhost:5173",
+    "http://localhost:4173",
+    "http://localhost:8080",
+]
+
+[devices.openrgb]
+enabled = false
+host = "127.0.0.1"
+port = 6742
+latency_strategy = "windowed_mean"
+latency_ms = 10.0
+manual_offset_ms = 0.0
+max_fps = 60
+latency_window_size = 60
+
+[devices.lifx]
+enabled = true
+discovery_timeout_s = 10.0
+default_kelvin = 3500
+echo_probe_interval_s = 2.0
+latency_strategy = "ema"
+latency_ms = 50.0
+manual_offset_ms = 0.0
+max_fps = 60
+latency_window_size = 60
+
+[devices.govee]
+enabled = false
+discovery_timeout_s = 5.0
+latency_strategy = "ema"
+latency_ms = 100.0
+manual_offset_ms = 0.0
+max_fps = 40
+latency_window_size = 60
+probe_interval_s = 5.0
+
+[scene_config]
+mapping = "radial"
+
+[[scene_config.devices]]
+name = "LIFX Bulb (192.168.50.90)"
+position = [
+    0.9889120880768596,
+    -1.3018732520021574,
+    0.4979298730146935,
+]
+geometry = "point"
+
+[[scene_config.devices]]
+name = "LIFX Bulb (192.168.50.178)"
+position = [
+    1.1567328870634546,
+    1.8274653761950117,
+    0.0,
+]
+geometry = "point"
+
+[[scene_config.devices]]
+name = "LIFX Bulb (192.168.50.6)"
+position = [
+    -4.51430724181693,
+    -1.1745852185111163,
+    0.0,
+]
+geometry = "point"
+
+[[scene_config.devices]]
+name = "LIFX Bulb (192.168.50.159)"
+position = [
+    0.0,
+    0.0,
+    2.574529541496082,
+]
+geometry = "point"
+
+[scene_config.mapping_params]
+center = [
+    -1.6787871773767375,
+    0.26279606209642714,
+    1.287264770748041,
+]

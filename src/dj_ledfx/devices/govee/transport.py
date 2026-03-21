@@ -51,11 +51,34 @@ class GoveeTransport:
         self._send_transport = send_transport
 
         # Receiver socket (listen on port 4002 for responses)
-        recv_transport, _ = await loop.create_datagram_endpoint(
-            lambda: _GoveeUDPProtocol(self),
-            local_addr=("0.0.0.0", RESPONSE_PORT),
-        )
-        self._recv_transport = recv_transport
+        # Retry with exponential backoff in case port is briefly occupied
+        _backoff_delays = [1.0, 2.0, 4.0]
+        for _attempt, _delay in enumerate(_backoff_delays):
+            try:
+                recv_transport, _ = await loop.create_datagram_endpoint(
+                    lambda: _GoveeUDPProtocol(self),
+                    local_addr=("0.0.0.0", RESPONSE_PORT),
+                )
+                self._recv_transport = recv_transport
+                break
+            except OSError as exc:
+                if _attempt < len(_backoff_delays) - 1:
+                    logger.warning(
+                        "Govee: failed to bind port {} (attempt {}): {}. Retrying in {}s…",
+                        RESPONSE_PORT,
+                        _attempt + 1,
+                        exc,
+                        _delay,
+                    )
+                    await asyncio.sleep(_delay)
+                else:
+                    logger.warning(
+                        "Govee: could not bind port {} after {} attempts: {}. "
+                        "Discovery responses will not be received.",
+                        RESPONSE_PORT,
+                        len(_backoff_delays),
+                        exc,
+                    )
 
         self._is_open = True
         logger.debug("Govee transport opened")
@@ -86,22 +109,14 @@ class GoveeTransport:
         else:
             logger.warning("Govee send_command called but transport is not open")
 
-    async def discover(self, timeout_s: float = 5.0) -> list[GoveeDeviceRecord]:
+    async def discover(
+        self,
+        timeout_s: float = 10.0,
+        on_record: Callable[[GoveeDeviceRecord], None] | None = None,
+    ) -> list[GoveeDeviceRecord]:
         discovered: dict[str, GoveeDeviceRecord] = {}  # device_id → record
 
-        def _scan_handler(msg_data: dict[str, Any], addr: tuple[str, int]) -> None:
-            data = msg_data.get("data", {})
-            device_id = data.get("device", "")
-            if device_id and device_id not in discovered:
-                discovered[device_id] = GoveeDeviceRecord(
-                    ip=data.get("ip", addr[0]),
-                    device_id=device_id,
-                    sku=data.get("sku", ""),
-                    wifi_version=data.get("wifiVersionSoft", ""),
-                    ble_version=data.get("bleVersionSoft", ""),
-                )
-
-        self._cmd_handlers["scan"] = _scan_handler
+        self._cmd_handlers["scan"] = self._make_scan_handler(discovered, on_record)
 
         try:
             scan_msg = build_scan_message()
@@ -122,6 +137,36 @@ class GoveeTransport:
             self._cmd_handlers.pop("scan", None)
 
         logger.info("Govee discovery found {} devices", len(discovered))
+        return list(discovered.values())
+
+    async def unicast_sweep(
+        self,
+        hosts: list[str],
+        concurrency: int = 50,
+        timeout_s: float = 0.5,
+    ) -> list[GoveeDeviceRecord]:
+        """Send scan command to every IP on port 4001."""
+        discovered: dict[str, GoveeDeviceRecord] = {}  # device_id → record
+
+        self._cmd_handlers["scan"] = self._make_scan_handler(discovered)
+
+        try:
+            scan_msg = build_scan_message()
+            scan_data = json.dumps(scan_msg).encode("utf-8")
+
+            sem = asyncio.Semaphore(concurrency)
+
+            async def _probe_host(ip: str) -> None:
+                async with sem:
+                    if self._send_transport:
+                        self._send_transport.sendto(scan_data, (ip, DISCOVERY_PORT))
+
+            await asyncio.gather(*[_probe_host(ip) for ip in hosts])
+            await asyncio.sleep(timeout_s)
+        finally:
+            self._cmd_handlers.pop("scan", None)
+
+        logger.info("Govee unicast sweep found {} devices", len(discovered))
         return list(discovered.values())
 
     async def query_status(self, ip: str, timeout_s: float = 2.0) -> dict[str, Any] | None:
@@ -152,6 +197,28 @@ class GoveeTransport:
     def stop_probing(self) -> None:
         if self._probe_task and not self._probe_task.done():
             self._probe_task.cancel()
+
+    def _make_scan_handler(
+        self,
+        discovered: dict[str, GoveeDeviceRecord],
+        on_record: Callable[[GoveeDeviceRecord], None] | None = None,
+    ) -> Callable[[dict[str, Any], tuple[str, int]], None]:
+        def _handler(msg_data: dict[str, Any], addr: tuple[str, int]) -> None:
+            data = msg_data.get("data", {})
+            device_id = data.get("device", "")
+            if device_id and device_id not in discovered:
+                record = GoveeDeviceRecord(
+                    ip=data.get("ip", addr[0]),
+                    device_id=device_id,
+                    sku=data.get("sku", ""),
+                    wifi_version=data.get("wifiVersionSoft", ""),
+                    ble_version=data.get("bleVersionSoft", ""),
+                )
+                discovered[device_id] = record
+                if on_record is not None:
+                    on_record(record)
+
+        return _handler
 
     async def _probe_loop(self, interval_s: float) -> None:
         while self._is_open:

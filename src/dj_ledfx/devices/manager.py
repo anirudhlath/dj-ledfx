@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from loguru import logger
@@ -10,9 +11,10 @@ from loguru import logger
 from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.backend import DeviceBackend
+from dj_ledfx.devices.ghost import GhostAdapter
 from dj_ledfx.events import EventBus
 from dj_ledfx.latency.tracker import LatencyTracker
-from dj_ledfx.types import DeviceGroup
+from dj_ledfx.types import DeviceGroup, DeviceInfo
 
 
 @dataclass
@@ -20,6 +22,7 @@ class ManagedDevice:
     adapter: DeviceAdapter
     tracker: LatencyTracker
     max_fps: int = 60
+    status: Literal["online", "offline", "reconnecting"] = "online"
 
 
 class DeviceManager:
@@ -58,7 +61,7 @@ class DeviceManager:
             *(device.adapter.connect() for device in self._devices),
             return_exceptions=True,
         )
-        for device, result in zip(self._devices, results):
+        for device, result in zip(self._devices, results, strict=False):
             if isinstance(result, Exception):
                 logger.opt(exception=result).error(
                     "Failed to connect to '{}'", device.adapter.device_info.name
@@ -69,7 +72,7 @@ class DeviceManager:
             *(device.adapter.disconnect() for device in self._devices),
             return_exceptions=True,
         )
-        for device, result in zip(self._devices, results):
+        for device, result in zip(self._devices, results, strict=False):
             if isinstance(result, Exception):
                 logger.opt(exception=result).error(
                     "Failed to disconnect from '{}'", device.adapter.device_info.name
@@ -133,3 +136,98 @@ class DeviceManager:
                 await asyncio.sleep(0.3)
             except Exception:
                 break
+
+    def get_by_stable_id(self, stable_id: str) -> ManagedDevice | None:
+        """Return the ManagedDevice whose adapter has the given stable_id, or None."""
+        for d in self._devices:
+            if d.adapter.device_info.stable_id == stable_id:
+                return d
+        return None
+
+    def add_device_from_info(
+        self,
+        device_info: DeviceInfo,
+        tracker: LatencyTracker,
+        max_fps: int = 60,
+        status: Literal["online", "offline", "reconnecting"] = "online",
+    ) -> None:
+        """Add a device represented only by its DeviceInfo (wraps in GhostAdapter)."""
+        ghost = GhostAdapter(device_info, led_count=device_info.led_count)
+        self._devices.append(
+            ManagedDevice(adapter=ghost, tracker=tracker, max_fps=max_fps, status=status)
+        )
+        logger.info(
+            "Registered device '{}' as {} (stable_id={})",
+            device_info.name,
+            status,
+            device_info.stable_id,
+        )
+
+    def promote_device(
+        self,
+        stable_id: str,
+        adapter: DeviceAdapter,
+        tracker: LatencyTracker | None = None,
+        max_fps: int | None = None,
+    ) -> None:
+        """Swap a GhostAdapter for a real adapter and set status to online.
+
+        Optionally updates the tracker and max_fps — important when promoting
+        from a ghost (StaticLatency placeholder) to a real backend tracker
+        (EMA/windowed) that receives probe callbacks.
+        """
+        managed = self.get_by_stable_id(stable_id)
+        if managed is None:
+            raise KeyError(f"Device not found: {stable_id}")
+        managed.adapter = adapter
+        if tracker is not None:
+            managed.tracker = tracker
+        if max_fps is not None:
+            managed.max_fps = max_fps
+        managed.status = "online"
+        logger.info(
+            "Promoted device '{}' to online (stable_id={})",
+            adapter.device_info.name,
+            stable_id,
+        )
+
+    def demote_device(self, stable_id: str) -> None:
+        """Swap a real adapter for a GhostAdapter and set status to offline."""
+        managed = self.get_by_stable_id(stable_id)
+        if managed is None:
+            raise KeyError(f"Device not found: {stable_id}")
+        info = managed.adapter.device_info
+        led_count = managed.adapter.led_count
+        old_adapter = managed.adapter
+
+        # Fire-and-forget disconnect of the old adapter (disconnect is async).
+        # Guard against being called outside an event loop (e.g. in sync tests).
+        async def _disconnect_old() -> None:
+            try:
+                await old_adapter.disconnect()
+            except Exception:
+                logger.exception(
+                    "Error disconnecting adapter for '{}' during demote", info.name
+                )
+
+        try:
+            asyncio.get_running_loop()
+            asyncio.create_task(_disconnect_old())
+        except RuntimeError:
+            logger.debug("demote_device: no running event loop, skipping async disconnect")
+
+        managed.adapter = GhostAdapter(info, led_count=led_count)
+        managed.status = "offline"
+        logger.info(
+            "Demoted device '{}' to offline (stable_id={})",
+            info.name,
+            stable_id,
+        )
+
+    def remove_device(self, stable_id: str) -> None:
+        """Remove a device by stable_id."""
+        self._devices = [d for d in self._devices if d.adapter.device_info.stable_id != stable_id]
+
+    def remove_by_name(self, name: str) -> None:
+        """Remove a device by name."""
+        self._devices = [d for d in self._devices if d.adapter.device_info.name != name]

@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import inspect
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.adapter import DeviceAdapter
@@ -28,8 +29,20 @@ class DeviceBackend(ABC):
             DeviceBackend._registry.append(cls)
 
     @abstractmethod
-    async def discover(self, config: AppConfig) -> list[DiscoveredDevice]:
+    async def discover(
+        self,
+        config: AppConfig,
+        on_found: Callable[[DiscoveredDevice], Any] | None = None,
+        skip_ids: set[str] | None = None,
+    ) -> list[DiscoveredDevice]:
         """Discover, connect, and return all devices for this backend.
+
+        If *on_found* is provided it is called synchronously for each device
+        as soon as it is ready (before the full scan timeout elapses).  The
+        full list is still returned at the end for logging / counting.
+
+        If *skip_ids* is provided, devices whose stable_id is in the set
+        should be silently skipped (already managed by the orchestrator).
 
         Post-condition: all returned adapters are connected (is_connected=True).
         """
@@ -37,6 +50,16 @@ class DeviceBackend(ABC):
 
     @abstractmethod
     def is_enabled(self, config: AppConfig) -> bool: ...
+
+    async def connect_known(
+        self, device_rows: list[dict[str, Any]], config: AppConfig
+    ) -> list[DiscoveredDevice]:
+        """Directly connect to known devices from DB without network scanning.
+
+        Override per backend to enable fast reconnect on startup.
+        Default implementation returns an empty list.
+        """
+        return []
 
     async def shutdown(self) -> None:
         """Clean up backend resources. Default no-op."""

@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -6,6 +7,7 @@ from fastapi.testclient import TestClient
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.presets import PresetStore
+from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.web.app import create_app
 
 
@@ -64,3 +66,37 @@ def test_preset_update(client):
     client.post("/api/presets", json={"name": "Test"})
     resp = client.put("/api/presets/Test", json={"params": {"gamma": 4.0}})
     assert resp.status_code == 200
+
+
+def test_presets_crud_with_db(tmp_path):
+    """Presets use save_async/delete_async when PresetStore has a StateDB."""
+    db = StateDB(tmp_path / "state.db")
+    asyncio.run(db.open())
+    try:
+        deck = EffectDeck(BeatPulse())
+        store = PresetStore(state_db=db)
+        app = create_app(
+            beat_clock=MagicMock(),
+            effect_deck=deck,
+            effect_engine=MagicMock(),
+            device_manager=MagicMock(),
+            scheduler=MagicMock(),
+            preset_store=store,
+            scene_model=None,
+            compositor=None,
+            config=MagicMock(web=MagicMock(cors_origins=["*"])),
+            config_path=None,
+            state_db=db,
+        )
+        tc = TestClient(app)
+        # Save preset
+        resp = tc.post("/api/presets", json={"name": "DBPreset"})
+        assert resp.status_code == 200
+        # List
+        assert len(tc.get("/api/presets").json()) == 1
+        # Delete
+        resp = tc.delete("/api/presets/DBPreset")
+        assert resp.status_code == 200
+        assert len(tc.get("/api/presets").json()) == 0
+    finally:
+        asyncio.run(db.close())
