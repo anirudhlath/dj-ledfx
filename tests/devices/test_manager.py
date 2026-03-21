@@ -165,7 +165,7 @@ def test_managed_device_status_default() -> None:
 def test_add_device_with_info_creates_ghost() -> None:
     mgr = DeviceManager(event_bus=EventBus())
     info = _make_info()
-    mgr.add_device_from_info(info, led_count=60, tracker=_make_tracker(), status="offline")
+    mgr.add_device_from_info(info, tracker=_make_tracker(), status="offline")
     device = mgr.get_by_stable_id("lifx:aabb")
     assert device is not None
     assert device.status == "offline"
@@ -176,7 +176,7 @@ def test_add_device_with_info_creates_ghost() -> None:
 def test_promote_device() -> None:
     mgr = DeviceManager(event_bus=EventBus())
     info = _make_info()
-    mgr.add_device_from_info(info, led_count=60, tracker=_make_tracker(), status="offline")
+    mgr.add_device_from_info(info, tracker=_make_tracker(), status="offline")
     real_adapter = MagicMock()
     real_adapter.device_info = info
     real_adapter.is_connected = True
@@ -206,7 +206,7 @@ def test_demote_device() -> None:
 def test_remove_device() -> None:
     mgr = DeviceManager(event_bus=EventBus())
     info = _make_info()
-    mgr.add_device_from_info(info, led_count=60, tracker=_make_tracker())
+    mgr.add_device_from_info(info, tracker=_make_tracker())
     mgr.remove_device("lifx:aabb")
     assert mgr.get_by_stable_id("lifx:aabb") is None
 
@@ -214,3 +214,31 @@ def test_remove_device() -> None:
 def test_get_by_stable_id_returns_none() -> None:
     mgr = DeviceManager(event_bus=EventBus())
     assert mgr.get_by_stable_id("nonexistent") is None
+
+
+# ---------------------------------------------------------------------------
+# New tests: demote disconnects old adapter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_demote_device_disconnects_old_adapter() -> None:
+    """demote_device schedules a disconnect() call on the old real adapter."""
+    import asyncio
+
+    mgr = DeviceManager(event_bus=EventBus())
+    info = _make_info()
+
+    real_adapter = AsyncMock()
+    real_adapter.device_info = info
+    real_adapter.is_connected = True
+    real_adapter.led_count = 60
+    mgr.add_device(real_adapter, _make_tracker())  # type: ignore[arg-type]
+
+    # Demote inside a running event loop so asyncio.create_task fires
+    mgr.demote_device("lifx:aabb")
+
+    # Yield control so the fire-and-forget task runs
+    await asyncio.sleep(0)
+
+    real_adapter.disconnect.assert_awaited_once()

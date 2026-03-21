@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -15,20 +14,32 @@ from loguru import logger
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
+def coerce_config_values(raw: dict[str, str]) -> dict[str, object]:
+    """Parse string values as JSON where possible (handles int, float, bool)."""
+    result: dict[str, object] = {}
+    for k, v in raw.items():
+        try:
+            result[k] = json.loads(v)
+        except (json.JSONDecodeError, ValueError):
+            result[k] = v
+    return result
+
+
 class StateDB:
     """Async SQLite persistence layer using asyncio.to_thread for all I/O.
 
     All database operations are executed in a thread pool to avoid blocking
     the asyncio event loop. A single persistent connection is held open for
     the lifetime of the StateDB instance.
+
+    A lock serialises concurrent to_thread calls so two coroutines cannot
+    race on the single sqlite3.Connection.
     """
 
     def __init__(self, path: Path) -> None:
         self._path = path
         self._conn: sqlite3.Connection | None = None
-        # Pending debounced writes: keyed by device_id / scene_id
-        self._pending_latency: dict[str, float] = {}
-        self._pending_effect_state: dict[str, tuple[str, str]] = {}
+        self._lock = asyncio.Lock()
 
     async def open(self) -> None:
         """Open the database, apply migrations, and configure pragmas."""
@@ -36,7 +47,6 @@ class StateDB:
         logger.info("StateDB opened: {}", self._path)
 
     def _open_sync(self) -> None:
-        """Synchronous open — run in thread pool."""
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -44,7 +54,13 @@ class StateDB:
         self._run_migrations()
 
     def _run_migrations(self) -> None:
-        """Apply unapplied SQL migration files in order."""
+        """Apply unapplied SQL migration files in order.
+
+        Each migration runs inside a single transaction: the migration SQL and
+        version bump are committed atomically. executescript() issues an
+        implicit COMMIT before running, so we use a manual BEGIN/COMMIT
+        approach via the connection's isolation_level instead.
+        """
         assert self._conn is not None
         current_version = self._get_schema_version_sync()
 
@@ -67,12 +83,23 @@ class StateDB:
 
             logger.info("Applying migration {} (v{})", migration_file.name, version)
             sql = migration_file.read_text()
-            self._conn.executescript(sql)
-            self._conn.execute(
-                "INSERT OR REPLACE INTO config (section, key, value) VALUES (?, ?, ?)",
-                ("_meta", "schema_version", str(version)),
-            )
-            self._conn.commit()
+            # Run migration SQL and version bump in a single transaction.
+            # executescript() implicitly commits, so we use explicit BEGIN/COMMIT
+            # by temporarily switching to autocommit=False mode.
+            try:
+                self._conn.execute("BEGIN")
+                for statement in sql.split(";"):
+                    statement = statement.strip()
+                    if statement:
+                        self._conn.execute(statement)
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO config (section, key, value) VALUES (?, ?, ?)",
+                    ("_meta", "schema_version", str(version)),
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
 
     def _get_schema_version_sync(self) -> int:
         """Return current schema version, 0 if unset."""
@@ -91,19 +118,18 @@ class StateDB:
         return await asyncio.to_thread(self._get_schema_version_sync)
 
     async def close(self) -> None:
-        """Flush pending writes and close the database connection."""
-        await self.flush_pending()
-        if self._conn is not None:
-            await asyncio.to_thread(self._conn.close)
-            self._conn = None
-            logger.info("StateDB closed: {}", self._path)
+        """Close the database connection.
 
-    async def flush_pending(self) -> None:
-        """Flush all pending debounced writes to the database."""
-        await self._flush_latency()
-        await self._flush_effect_state()
-
-    # --- Low-level helpers ---
+        The connection is always released, even if the caller's pre-flush step
+        raises. Callers should flush any DebouncedWriter before calling this.
+        The lock is acquired to prevent races with in-flight operations.
+        """
+        async with self._lock:
+            conn = self._conn
+            if conn is not None:
+                self._conn = None
+                await asyncio.to_thread(conn.close)
+                logger.info("StateDB closed: {}", self._path)
 
     async def _execute_read(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
         """Execute a read query and return all rows."""
@@ -113,7 +139,8 @@ class StateDB:
             cur = self._conn.execute(sql, params)
             return cur.fetchall()
 
-        return await asyncio.to_thread(_run)
+        async with self._lock:
+            return await asyncio.to_thread(_run)
 
     async def _execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         """Execute a single write statement."""
@@ -123,7 +150,8 @@ class StateDB:
             self._conn.execute(sql, params)
             self._conn.commit()
 
-        await asyncio.to_thread(_run)
+        async with self._lock:
+            await asyncio.to_thread(_run)
 
     async def _executemany_write(self, sql: str, params_seq: list[tuple[Any, ...]]) -> None:
         """Execute a write statement for each set of params."""
@@ -133,9 +161,8 @@ class StateDB:
             self._conn.executemany(sql, params_seq)
             self._conn.commit()
 
-        await asyncio.to_thread(_run)
-
-    # --- Config CRUD ---
+        async with self._lock:
+            await asyncio.to_thread(_run)
 
     async def load_config(self, section: str) -> dict[str, str]:
         """Return all key-value pairs for a config section."""
@@ -180,7 +207,43 @@ class StateDB:
             [(section, k, v) for k, v in data.items()],
         )
 
-    # --- Device CRUD ---
+    async def _upsert(
+        self,
+        table: str,
+        allowed_columns: tuple[str, ...],
+        data: dict[str, Any],
+        pk_columns: tuple[str, ...],
+    ) -> None:
+        """Dynamic-column upsert using INSERT ... ON CONFLICT DO UPDATE SET.
+
+        Uses INSERT ... ON CONFLICT(pk_columns) DO UPDATE SET ... instead of
+        INSERT OR REPLACE to avoid the DELETE + INSERT semantics of OR REPLACE,
+        which would fire FK cascade deletes (e.g. wiping group memberships and
+        scene placements when updating a device's IP address).
+        """
+        cols = [c for c in allowed_columns if c in data]
+        placeholders = ", ".join("?" for _ in cols)
+        col_list = ", ".join(cols)
+        values = tuple(data.get(c) for c in cols)
+        pk_set = set(pk_columns)
+        non_pk_cols = [c for c in cols if c not in pk_set]
+        if non_pk_cols:
+            update_clause = ", ".join(f"{c}=excluded.{c}" for c in non_pk_cols)
+        else:
+            # All columns are PKs — nothing to update; use DO NOTHING
+            update_clause = None
+        pk_col_list = ", ".join(pk_columns)
+        if update_clause:
+            sql = (
+                f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
+                f"ON CONFLICT({pk_col_list}) DO UPDATE SET {update_clause}"
+            )
+        else:
+            sql = (
+                f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
+                f"ON CONFLICT({pk_col_list}) DO NOTHING"
+            )
+        await self._execute_write(sql, values)
 
     _DEVICE_COLUMNS = (
         "id",
@@ -191,6 +254,7 @@ class StateDB:
         "mac",
         "device_id",
         "sku",
+        "device_type",
         "last_latency_ms",
         "last_seen",
         "extra",
@@ -203,14 +267,7 @@ class StateDB:
 
     async def upsert_device(self, data: dict[str, Any]) -> None:
         """Insert or replace a device record. Must include 'id', 'name', 'backend'."""
-        cols = [c for c in self._DEVICE_COLUMNS if c in data]
-        placeholders = ", ".join("?" for _ in cols)
-        col_list = ", ".join(cols)
-        values = tuple(data.get(c) for c in cols)
-        await self._execute_write(
-            f"INSERT OR REPLACE INTO devices ({col_list}) VALUES ({placeholders})",
-            values,
-        )
+        await self._upsert("devices", self._DEVICE_COLUMNS, data, pk_columns=("id",))
 
     async def delete_device(self, device_id: str) -> None:
         """Delete a device by stable ID."""
@@ -227,8 +284,6 @@ class StateDB:
         await self._execute_write(
             "UPDATE devices SET last_latency_ms=? WHERE id=?", (latency_ms, device_id)
         )
-
-    # --- Groups CRUD ---
 
     async def load_groups(self) -> list[dict[str, str]]:
         """Return all groups as dicts with 'name' and 'color'."""
@@ -274,8 +329,6 @@ class StateDB:
             (group_name, device_id),
         )
 
-    # --- Scenes CRUD ---
-
     _SCENE_COLUMNS = (
         "id",
         "name",
@@ -307,31 +360,44 @@ class StateDB:
         rows = await self._execute_read(f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes")
         return [dict(zip(self._SCENE_COLUMNS, row, strict=True)) for row in rows]
 
+    async def load_scene_by_id(self, scene_id: str) -> dict[str, Any] | None:
+        """Return a single scene row by ID, or None if not found."""
+        rows = await self._execute_read(
+            f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes WHERE id=?",
+            (scene_id,),
+        )
+        if not rows:
+            return None
+        return dict(zip(self._SCENE_COLUMNS, rows[0], strict=True))
+
+    async def device_exists(self, device_id: str) -> bool:
+        """Return True if a device with the given ID exists."""
+        rows = await self._execute_read("SELECT 1 FROM devices WHERE id=? LIMIT 1", (device_id,))
+        return bool(rows)
+
     async def save_scene(self, data: dict[str, Any]) -> None:
         """Insert or replace a scene record. Must include 'id', 'name'."""
-        cols = [c for c in self._SCENE_COLUMNS if c in data]
-        placeholders = ", ".join("?" for _ in cols)
-        col_list = ", ".join(cols)
-        values = tuple(data.get(c) for c in cols)
-        await self._execute_write(
-            f"INSERT OR REPLACE INTO scenes ({col_list}) VALUES ({placeholders})",
-            values,
-        )
+        await self._upsert("scenes", self._SCENE_COLUMNS, data, pk_columns=("id",))
 
     async def delete_scene(self, scene_id: str) -> None:
         """Delete a scene and cascade to placements and effect state."""
         await self._execute_write("DELETE FROM scenes WHERE id=?", (scene_id,))
 
     async def set_scene_active(self, scene_id: str) -> None:
-        """Set a scene as active, deactivating all others."""
+        """Set a single scene as active without touching other scenes.
 
-        def _run() -> None:
-            assert self._conn is not None
-            self._conn.execute("UPDATE scenes SET is_active=0")
-            self._conn.execute("UPDATE scenes SET is_active=1 WHERE id=?", (scene_id,))
-            self._conn.commit()
+        Multiple scenes may run concurrently; this method only flips the given
+        scene to is_active=1.  Use set_scene_inactive() to deactivate a scene.
+        """
+        await self._execute_write(
+            "UPDATE scenes SET is_active=1 WHERE id=?", (scene_id,)
+        )
 
-        await asyncio.to_thread(_run)
+    async def set_scene_inactive(self, scene_id: str) -> None:
+        """Deactivate a single scene without affecting other scenes."""
+        await self._execute_write(
+            "UPDATE scenes SET is_active=0 WHERE id=?", (scene_id,)
+        )
 
     async def load_scene_effect_state(self, scene_id: str) -> dict[str, str] | None:
         """Return effect class + params for a scene, or None if unset."""
@@ -361,13 +427,11 @@ class StateDB:
 
     async def save_placement(self, data: dict[str, Any]) -> None:
         """Insert or replace a placement. Must include 'scene_id' and 'device_id'."""
-        cols = [c for c in self._PLACEMENT_COLUMNS if c in data]
-        placeholders = ", ".join("?" for _ in cols)
-        col_list = ", ".join(cols)
-        values = tuple(data.get(c) for c in cols)
-        await self._execute_write(
-            f"INSERT OR REPLACE INTO scene_placements ({col_list}) VALUES ({placeholders})",
-            values,
+        await self._upsert(
+            "scene_placements",
+            self._PLACEMENT_COLUMNS,
+            data,
+            pk_columns=("scene_id", "device_id"),
         )
 
     async def delete_placement(self, scene_id: str, device_id: str) -> None:
@@ -376,8 +440,6 @@ class StateDB:
             "DELETE FROM scene_placements WHERE scene_id=? AND device_id=?",
             (scene_id, device_id),
         )
-
-    # --- Presets CRUD ---
 
     async def load_presets(self) -> list[dict[str, str]]:
         """Return all presets as dicts."""
@@ -394,134 +456,3 @@ class StateDB:
     async def delete_preset(self, name: str) -> None:
         """Delete a preset by name."""
         await self._execute_write("DELETE FROM presets WHERE name=?", (name,))
-
-    # --- Debounced Writes ---
-
-    def schedule_latency_update(self, device_id: str, latency_ms: float) -> None:
-        """Coalesce latency updates — last value wins, flushed on flush_pending()/close()."""
-        self._pending_latency[device_id] = latency_ms
-
-    def schedule_effect_state_update(self, scene_id: str, effect_class: str, params: str) -> None:
-        """Coalesce effect state updates — last value wins, flushed on flush_pending()/close()."""
-        self._pending_effect_state[scene_id] = (effect_class, params)
-
-    async def _flush_latency(self) -> None:
-        """Write all pending latency updates and clear the buffer."""
-        if not self._pending_latency:
-            return
-        pending = self._pending_latency.copy()
-        self._pending_latency.clear()
-        await self._executemany_write(
-            "UPDATE devices SET last_latency_ms=? WHERE id=?",
-            [(v, k) for k, v in pending.items()],
-        )
-
-    async def _flush_effect_state(self) -> None:
-        """Write all pending effect state updates and clear the buffer."""
-        if not self._pending_effect_state:
-            return
-        pending = self._pending_effect_state.copy()
-        self._pending_effect_state.clear()
-        await self._executemany_write(
-            "INSERT OR REPLACE INTO scene_effect_state (scene_id, effect_class, params) "
-            "VALUES (?, ?, ?)",
-            [(k, v[0], v[1]) for k, v in pending.items()],
-        )
-
-    # --- First-Launch Migration ---
-
-    async def migrate_from_toml(
-        self,
-        config_path: Path | None = None,
-        presets_path: Path | None = None,
-    ) -> None:
-        """Migrate legacy TOML files into the DB on first launch.
-
-        For each provided path:
-        - If the file exists, parse it, import data into DB, rename to .bak.
-        - If the file does not exist, silently skip.
-
-        config_path format (old config.toml):
-          [engine]           — engine config
-          [network]          — network config
-          [web]              — web config
-          [effect]           — active_effect + per-effect param sub-tables
-          Migrates engine/network/web config keys and creates a "default" scene
-          with the active effect state.
-
-        presets_path format (old presets.toml):
-          [presets."<name>"]
-          effect_class = "..."
-          params = { ... }
-        """
-        if config_path is not None and config_path.exists():
-            await self._migrate_config_toml(config_path)
-            bak = config_path.with_suffix(".toml.bak")
-            config_path.rename(bak)
-            logger.info("migrate_from_toml: migrated config, backed up to {}", bak)
-
-        if presets_path is not None and presets_path.exists():
-            await self._migrate_presets_toml(presets_path)
-            bak = presets_path.with_suffix(".toml.bak")
-            presets_path.rename(bak)
-            logger.info("migrate_from_toml: migrated presets, backed up to {}", bak)
-
-    async def _migrate_config_toml(self, path: Path) -> None:
-        """Parse old config.toml and import into DB."""
-        raw = tomllib.loads(path.read_text())
-
-        # Config sections to migrate directly (key-value only, no nested tables)
-        _PLAIN_SECTIONS = ("engine", "network", "web", "discovery")
-        for section in _PLAIN_SECTIONS:
-            if section in raw and isinstance(raw[section], dict):
-                str_kv = {k: str(v) for k, v in raw[section].items() if not isinstance(v, dict)}
-                if str_kv:
-                    await self.save_config_bulk(section, str_kv)
-
-        # Effect config → "default" scene + scene_effect_state
-        effect_cfg = raw.get("effect", {})
-        if effect_cfg:
-            active_effect = effect_cfg.get("active_effect", "")
-            if active_effect:
-                # Per-effect params are stored as sub-tables: effect.<effect_name> = { ... }
-                params: dict[str, Any] = {}
-                effect_params_table = effect_cfg.get(active_effect, {})
-                if isinstance(effect_params_table, dict):
-                    params = effect_params_table
-
-                # Create the "default" scene if it doesn't already exist
-                existing_scenes = await self.load_scenes()
-                if not any(s["id"] == "default" for s in existing_scenes):
-                    await self.save_scene(
-                        {
-                            "id": "default",
-                            "name": "Default",
-                            "mapping_type": "linear",
-                            "effect_mode": "independent",
-                            "is_active": 1,
-                        }
-                    )
-
-                await self.save_scene_effect_state(
-                    "default",
-                    active_effect,
-                    json.dumps(params),
-                )
-                logger.debug(
-                    "migrate_from_toml: created default scene with effect '{}', params={}",
-                    active_effect,
-                    params,
-                )
-
-    async def _migrate_presets_toml(self, path: Path) -> None:
-        """Parse old presets.toml and import presets into DB."""
-        raw = tomllib.loads(path.read_text())
-        presets_table = raw.get("presets", {})
-        for preset_name, pinfo in presets_table.items():
-            if not isinstance(pinfo, dict):
-                continue
-            effect_class = pinfo.get("effect_class", "")
-            params = pinfo.get("params", {})
-            params_str = json.dumps(params)
-            await self.save_preset(preset_name, effect_class, params_str)
-            logger.debug("migrate_from_toml: migrated preset '{}'", preset_name)

@@ -12,14 +12,19 @@ Export format:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import tomllib
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import tomli_w
 from loguru import logger
 
 from dj_ledfx.persistence.state_db import StateDB
+
+if TYPE_CHECKING:
+    from dj_ledfx.config import AppConfig
 
 # Config sections that belong at the top level (not per-device, not internal)
 _EXPORTABLE_CONFIG_SECTIONS = {
@@ -45,6 +50,7 @@ async def export_toml(db: StateDB) -> str:
         doc["config"] = config_by_section
 
     # --- Devices ---
+    # Load once and reuse for both the devices section and scene placement name resolution
     devices = await db.load_devices()
     if devices:
         devices_doc: dict[str, Any] = {}
@@ -82,6 +88,10 @@ async def export_toml(db: StateDB) -> str:
                 scene_entry["effect_mode"] = scene["effect_mode"]
             if scene.get("is_active"):
                 scene_entry["is_active"] = bool(scene["is_active"])
+            if scene.get("mapping_params"):
+                scene_entry["mapping_params"] = json.loads(scene["mapping_params"])
+            if scene.get("effect_source"):
+                scene_entry["effect_source"] = scene["effect_source"]
 
             # Effect state
             effect_state = await db.load_scene_effect_state(scene_id)
@@ -163,8 +173,10 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
     config_data = data.get("config", {})
     for section, kv in config_data.items():
         if isinstance(kv, dict):
-            # Convert all values to strings for storage
-            str_kv = {k: str(v) for k, v in kv.items()}
+            # Convert all values to JSON-serialized strings for storage
+            # Using json.dumps preserves type fidelity: booleans -> "true"/"false",
+            # numbers stay numeric strings, strings get quoted then stripped by load_all_config
+            str_kv = {k: json.dumps(v) for k, v in kv.items()}
             await db.save_config_bulk(section, str_kv)
             logger.debug(
                 "import_toml: imported {} config keys for section '{}'",
@@ -228,6 +240,11 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
             scene_record["effect_mode"] = sinfo["effect_mode"]
         if "is_active" in sinfo:
             scene_record["is_active"] = 1 if sinfo["is_active"] else 0
+        if "mapping_params" in sinfo:
+            mp = sinfo["mapping_params"]
+            scene_record["mapping_params"] = json.dumps(mp) if not isinstance(mp, str) else mp
+        if "effect_source" in sinfo:
+            scene_record["effect_source"] = sinfo["effect_source"]
 
         await db.save_scene(scene_record)
         logger.debug("import_toml: saved scene '{}'", scene_id)
@@ -292,3 +309,139 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
         params_str = json.dumps(params)
         await db.save_preset(preset_name, effect_class, params_str)
         logger.debug("import_toml: saved preset '{}'", preset_name)
+
+
+# --- First-Launch Migration ---
+
+
+async def migrate_from_toml(
+    db: StateDB,
+    config_path: Path | None = None,
+    presets_path: Path | None = None,
+) -> None:
+    """Migrate legacy TOML files into the DB on first launch.
+
+    For each provided path:
+    - If the file exists, parse it, import data into DB, rename to .bak.
+    - If the file does not exist, silently skip.
+
+    config_path format (old config.toml):
+      [engine]           — engine config
+      [network]          — network config
+      [web]              — web config
+      [effect]           — active_effect + per-effect param sub-tables
+      Migrates engine/network/web config keys and creates a "default" scene
+      with the active effect state.
+
+    presets_path format (old presets.toml):
+      [presets."<name>"]
+      effect_class = "..."
+      params = { ... }
+    """
+    if config_path is not None and config_path.exists():
+        await _migrate_config_toml(db, config_path)
+        bak = config_path.with_suffix(".toml.bak")
+        config_path.rename(bak)
+        logger.info("migrate_from_toml: migrated config, backed up to {}", bak)
+
+    if presets_path is not None and presets_path.exists():
+        await _migrate_presets_toml(db, presets_path)
+        bak = presets_path.with_suffix(".toml.bak")
+        presets_path.rename(bak)
+        logger.info("migrate_from_toml: migrated presets, backed up to {}", bak)
+
+
+async def _migrate_config_toml(db: StateDB, path: Path) -> None:
+    """Parse old config.toml and import into DB."""
+    raw = tomllib.loads(path.read_text())
+
+    # Config sections to migrate directly (key-value, with nested sub-tables flattened)
+    _PLAIN_SECTIONS = ("engine", "network", "web", "discovery", "devices")
+    for section in _PLAIN_SECTIONS:
+        if section not in raw or not isinstance(raw[section], dict):
+            continue
+        # Top-level keys (non-dict values)
+        str_kv = {k: str(v) for k, v in raw[section].items() if not isinstance(v, dict)}
+        if str_kv:
+            await db.save_config_bulk(section, str_kv)
+        # Nested sub-tables: flatten as dotted section keys, e.g. "devices.lifx"
+        for sub_key, sub_val in raw[section].items():
+            if isinstance(sub_val, dict):
+                nested_section = f"{section}.{sub_key}"
+                nested_kv = {k: str(v) for k, v in sub_val.items() if not isinstance(v, dict)}
+                if nested_kv:
+                    await db.save_config_bulk(nested_section, nested_kv)
+
+    # Effect config → "default" scene + scene_effect_state
+    effect_cfg = raw.get("effect", {})
+    if effect_cfg:
+        active_effect = effect_cfg.get("active_effect", "")
+        if active_effect:
+            # Per-effect params are stored as sub-tables: effect.<effect_name> = { ... }
+            params: dict[str, Any] = {}
+            effect_params_table = effect_cfg.get(active_effect, {})
+            if isinstance(effect_params_table, dict):
+                params = effect_params_table
+
+            # Create the "default" scene if it doesn't already exist
+            existing_scenes = await db.load_scenes()
+            if not any(s["id"] == "default" for s in existing_scenes):
+                await db.save_scene(
+                    {
+                        "id": "default",
+                        "name": "Default",
+                        "mapping_type": "linear",
+                        "effect_mode": "independent",
+                        "is_active": 1,
+                    }
+                )
+
+            await db.save_scene_effect_state(
+                "default",
+                active_effect,
+                json.dumps(params),
+            )
+            logger.debug(
+                "migrate_from_toml: created default scene with effect '{}', params={}",
+                active_effect,
+                params,
+            )
+
+
+async def _migrate_presets_toml(db: StateDB, path: Path) -> None:
+    """Parse old presets.toml and import presets into DB."""
+    raw = tomllib.loads(path.read_text())
+    presets_table = raw.get("presets", {})
+    for preset_name, pinfo in presets_table.items():
+        if not isinstance(pinfo, dict):
+            continue
+        effect_class = pinfo.get("effect_class", "")
+        params = pinfo.get("params", {})
+        params_str = json.dumps(params)
+        await db.save_preset(preset_name, effect_class, params_str)
+        logger.debug("migrate_from_toml: migrated preset '{}'", preset_name)
+
+
+async def save_config_to_db(config: AppConfig, state_db: StateDB) -> None:
+    """Persist AppConfig to StateDB config table.
+
+    Shared helper used by main startup and the config router when config is
+    updated at runtime.
+    """
+
+    def _str_dict(obj: object) -> dict[str, str]:
+        return {k: json.dumps(v) for k, v in dataclasses.asdict(obj).items()}  # type: ignore[call-overload]
+
+    await state_db.save_config_bulk("engine", _str_dict(config.engine))
+    await state_db.save_config_bulk("network", _str_dict(config.network))
+    await state_db.save_config_bulk("web", _str_dict(config.web))
+    await state_db.save_config_bulk("discovery", _str_dict(config.discovery))
+
+    effect_plain = {
+        k: v
+        for k, v in dataclasses.asdict(config.effect).items()
+        if not isinstance(v, (dict, list))
+    }
+    await state_db.save_config_bulk("effect", {k: json.dumps(v) for k, v in effect_plain.items()})
+
+    logger.debug("Config saved to StateDB")

@@ -13,6 +13,7 @@ from dj_ledfx.web.schemas import (
     DeviceResponse,
     GroupRequest,
 )
+from dj_ledfx.web.state import get_db
 
 router = APIRouter()
 
@@ -38,7 +39,6 @@ async def list_devices(request: Request) -> list[DeviceResponse]:
                 send_fps=stats.send_fps if stats else 0.0,
                 effective_latency_ms=stats.effective_latency_ms if stats else 0.0,
                 frames_dropped=stats.frames_dropped if stats else 0,
-                connected=d.adapter.is_connected,
                 status=d.status,
             )
         )
@@ -58,7 +58,7 @@ async def scan_devices(request: Request) -> dict[str, Any]:
     """Trigger device discovery via DiscoveryOrchestrator if available, else fallback."""
     orchestrator = getattr(request.app.state, "discovery_orchestrator", None)
     if orchestrator is not None:
-        found = await orchestrator.run_discovery(waves=1)
+        found = await orchestrator.run_scan()
         return {"discovered": found}
     # Fallback to legacy rediscover
     manager = request.app.state.device_manager
@@ -138,10 +138,16 @@ async def unregister_device(request: Request, name: str) -> dict[str, str]:
     managed = manager.get_device(name)
     if managed is None:
         raise HTTPException(status_code=404, detail=f"Device not found: {name}")
-    stable_id = managed.adapter.device_info.stable_id
-    if stable_id:
-        manager.remove_device(stable_id)
+    stable_id = managed.adapter.device_info.effective_id
+    if managed.adapter.device_info.stable_id:
+        manager.remove_device(managed.adapter.device_info.stable_id)
     else:
         # Fallback: remove by name (device has no stable_id)
         manager.remove_by_name(name)
+    # Persist removal to DB if available
+    try:
+        db = get_db(request)
+        await db.delete_device(stable_id)
+    except HTTPException:
+        pass  # DB not available — skip persistence
     return {"status": "removed"}

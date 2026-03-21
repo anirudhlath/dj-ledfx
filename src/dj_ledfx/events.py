@@ -38,17 +38,6 @@ class DeviceOfflineEvent:
 
 
 @dataclass(frozen=True, slots=True)
-class DiscoveryWaveCompleteEvent:
-    wave: int
-    devices_found: int
-
-
-@dataclass(frozen=True, slots=True)
-class DiscoveryCompleteEvent:
-    total_devices: int
-
-
-@dataclass(frozen=True, slots=True)
 class SceneActivatedEvent:
     scene_id: str
 

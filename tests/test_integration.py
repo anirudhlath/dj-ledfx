@@ -154,7 +154,7 @@ async def test_startup_with_fresh_db(tmp_path: Path) -> None:
     db = StateDB(tmp_path / "state.db")
     await db.open()
     version = await db.get_schema_version()
-    assert version == 1
+    assert version == 2
     devices = await db.load_devices()
     assert devices == []
     scenes = await db.load_scenes()
@@ -168,6 +168,7 @@ async def test_startup_with_migrated_toml(tmp_path: Path) -> None:
     import tomli_w
 
     from dj_ledfx.persistence.state_db import StateDB
+    from dj_ledfx.persistence.toml_io import migrate_from_toml
 
     config_toml = tmp_path / "config.toml"
     config_toml.write_bytes(
@@ -188,7 +189,7 @@ async def test_startup_with_migrated_toml(tmp_path: Path) -> None:
 
     db = StateDB(tmp_path / "state.db")
     await db.open()
-    await db.migrate_from_toml(config_path=config_toml, presets_path=presets_toml)
+    await migrate_from_toml(db, config_path=config_toml, presets_path=presets_toml)
 
     config = await db.load_all_config()
     assert config[("engine", "fps")] == 90

@@ -3,17 +3,14 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
-from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from dj_ledfx import metrics
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.effects.deck import EffectDeck
+from dj_ledfx.spatial.pipeline import ScenePipeline
 from dj_ledfx.types import RenderedFrame
-
-if TYPE_CHECKING:
-    from dj_ledfx.spatial.pipeline import ScenePipeline
 
 
 class RingBuffer:
@@ -82,10 +79,25 @@ class EffectEngine:
         self._frame_period = 1.0 / fps
         self._max_lookahead_s = max_lookahead_s
         self.ring_buffer = RingBuffer(capacity=fps, led_count=led_count)
-        self.pipelines: list[ScenePipeline] = pipelines or []
         self._running = False
         self._last_tick_time = 0.0
         self._render_times: deque[float] = deque(maxlen=fps * 10)
+
+        # Always maintain a non-empty pipelines list: build a default pipeline
+        # from the engine's own deck and ring_buffer when none are provided.
+        if pipelines:
+            self.pipelines: list[ScenePipeline] = pipelines
+        else:
+            default_pipeline = ScenePipeline(
+                scene_id="__default__",
+                deck=deck,
+                ring_buffer=self.ring_buffer,
+                compositor=None,
+                mapping=None,
+                devices=[],
+                led_count=led_count,
+            )
+            self.pipelines = [default_pipeline]
 
     @property
     def avg_render_time_ms(self) -> float:
@@ -99,27 +111,12 @@ class EffectEngine:
 
         render_start = time.monotonic()
 
-        if self.pipelines:
-            for pipeline in self.pipelines:
-                colors = pipeline.deck.render(
-                    beat_phase=state.beat_phase,
-                    bar_phase=state.bar_phase,
-                    dt=self._frame_period,
-                    led_count=pipeline.led_count,
-                )
-                frame = RenderedFrame(
-                    colors=colors,
-                    target_time=target_time,
-                    beat_phase=state.beat_phase,
-                    bar_phase=state.bar_phase,
-                )
-                pipeline.ring_buffer.write(frame)
-        else:
-            colors = self._deck.render(
+        for pipeline in self.pipelines:
+            colors = pipeline.deck.render(
                 beat_phase=state.beat_phase,
                 bar_phase=state.bar_phase,
                 dt=self._frame_period,
-                led_count=self._led_count,
+                led_count=pipeline.led_count,
             )
             frame = RenderedFrame(
                 colors=colors,
@@ -127,7 +124,7 @@ class EffectEngine:
                 beat_phase=state.beat_phase,
                 bar_phase=state.bar_phase,
             )
-            self.ring_buffer.write(frame)
+            pipeline.ring_buffer.write(frame)
 
         render_elapsed = time.monotonic() - render_start
         metrics.RENDER_DURATION.observe(render_elapsed)
@@ -135,8 +132,8 @@ class EffectEngine:
         self._render_times.append(render_elapsed)
 
         logger.trace(
-            "Rendered {} for t+{:.0f}ms",
-            f"{len(self.pipelines)} pipeline(s)" if self.pipelines else "frame",
+            "Rendered {} pipeline(s) for t+{:.0f}ms",
+            len(self.pipelines),
             self._max_lookahead_s * 1000,
         )
 

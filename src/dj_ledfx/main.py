@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import dataclasses
 import signal
 import sys
 import time
@@ -21,7 +20,7 @@ from dj_ledfx.config import (
     EngineConfig,
     NetworkConfig,
     WebConfig,
-    _filter_fields,
+    filter_fields,
     load_config,
 )
 from dj_ledfx.devices.discovery import DiscoveryOrchestrator
@@ -29,15 +28,17 @@ from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine
-from dj_ledfx.events import EventBus
+from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent, EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.persistence.toml_io import migrate_from_toml
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.spatial.compositor import SpatialCompositor
+from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 from dj_ledfx.spatial.mapping import mapping_from_config
-from dj_ledfx.spatial.scene import SceneModel
+from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
 from dj_ledfx.status import SystemStatus
 from dj_ledfx.types import DeviceInfo
 
@@ -102,33 +103,18 @@ async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
     if await state_db.is_config_empty():
         return None
 
-    # Load each config section from DB
-    engine_data = await state_db.load_config("engine")
-    effect_data = await state_db.load_config("effect")
-    network_data = await state_db.load_config("network")
-    web_data = await state_db.load_config("web")
-    discovery_data = await state_db.load_config("discovery")
+    all_config = await state_db.load_all_config()
 
-    def _coerce(raw: dict[str, str]) -> dict[str, object]:
-        """Try to parse each string value as JSON (handles int, float, bool)."""
-        import json
+    # Group by section
+    sections: dict[str, dict[str, object]] = {}
+    for (section, key), value in all_config.items():
+        sections.setdefault(section, {})[key] = value
 
-        result: dict[str, object] = {}
-        for k, v in raw.items():
-            try:
-                result[k] = json.loads(v)
-            except (json.JSONDecodeError, ValueError):
-                result[k] = v
-        return result
-
-    engine = EngineConfig(**_filter_fields(EngineConfig, _coerce(engine_data)))  # type: ignore[arg-type]
-    network = NetworkConfig(**_filter_fields(NetworkConfig, _coerce(network_data)))  # type: ignore[arg-type]
-    web = WebConfig(**_filter_fields(WebConfig, _coerce(web_data)))  # type: ignore[arg-type]
-    discovery = DiscoveryConfig(**_filter_fields(DiscoveryConfig, _coerce(discovery_data)))  # type: ignore[arg-type]
-
-    # Effect config: keep active_effect only (params come from scene_effect_state)
-    effect_coerced = _coerce(effect_data)
-    effect = EffectConfig(**_filter_fields(EffectConfig, effect_coerced))  # type: ignore[arg-type]
+    engine = EngineConfig(**filter_fields(EngineConfig, sections.get("engine", {})))
+    network = NetworkConfig(**filter_fields(NetworkConfig, sections.get("network", {})))
+    web = WebConfig(**filter_fields(WebConfig, sections.get("web", {})))
+    discovery = DiscoveryConfig(**filter_fields(DiscoveryConfig, sections.get("discovery", {})))
+    effect = EffectConfig(**filter_fields(EffectConfig, sections.get("effect", {})))
 
     logger.info("Config loaded from StateDB")
     return AppConfig(
@@ -140,50 +126,23 @@ async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
     )
 
 
-async def _save_config_to_db(config: AppConfig, state_db: StateDB) -> None:
-    """Persist AppConfig to StateDB config table.
-
-    Intended for use by the config router when config is updated at runtime.
-    """
-    import json
-
-    def _str_dict(obj: object) -> dict[str, str]:
-        return {k: json.dumps(v) for k, v in dataclasses.asdict(obj).items()}  # type: ignore[call-overload]
-
-    await state_db.save_config_bulk("engine", _str_dict(config.engine))
-    await state_db.save_config_bulk("network", _str_dict(config.network))
-    await state_db.save_config_bulk("web", _str_dict(config.web))
-    await state_db.save_config_bulk("discovery", _str_dict(config.discovery))
-
-    effect_plain = {
-        k: v
-        for k, v in dataclasses.asdict(config.effect).items()
-        if not isinstance(v, (dict, list))
-    }
-    await state_db.save_config_bulk("effect", {k: json.dumps(v) for k, v in effect_plain.items()})
-
-    logger.debug("Config saved to StateDB")
-
-
 async def _run(args: argparse.Namespace) -> None:
     metrics.init(enabled=args.metrics, port=args.metrics_port)
 
-    # --- Step 1: Open StateDB ---
     db_path = args.db if args.db else args.config.parent / "state.db"
     state_db = StateDB(db_path)
     await state_db.open()
 
-    # --- Step 2: TOML migration (if DB is fresh and TOML files exist) ---
     presets_toml = args.config.parent / "presets.toml"
     if await state_db.is_config_empty():
         if args.config.exists() or presets_toml.exists():
             logger.info("Fresh DB detected — running TOML migration")
-            await state_db.migrate_from_toml(
+            await migrate_from_toml(
+                state_db,
                 config_path=args.config if args.config.exists() else None,
                 presets_path=presets_toml if presets_toml.exists() else None,
             )
 
-    # --- Step 3: Load config (DB first, then TOML fallback) ---
     config = await _load_config_from_db(state_db)
     if config is None:
         logger.info("No config in DB — loading from TOML ({})", args.config)
@@ -214,31 +173,38 @@ async def _run(args: argparse.Namespace) -> None:
         logger.info("Starting Pro DJ Link listener")
         await start_listener(event_bus=event_bus)
 
-    # --- Step 4: Load registered devices from DB → GhostAdapter entries ---
     device_manager = DeviceManager(event_bus=event_bus)
     registered_devices = await state_db.load_devices()
     for dev_row in registered_devices:
+        led_count = dev_row.get("led_count") or 60
         dev_info = DeviceInfo(
             name=dev_row["name"],
             device_type=dev_row.get("backend") or "",
-            led_count=dev_row.get("led_count") or 0,
+            led_count=led_count,
             address=dev_row.get("ip") or "",
             mac=dev_row.get("mac"),
             stable_id=dev_row["id"],
         )
-        led_count = dev_row.get("led_count") or 60
         last_latency = dev_row.get("last_latency_ms") or 50.0
         tracker = LatencyTracker(strategy=StaticLatency(last_latency))
         device_manager.add_device_from_info(
             device_info=dev_info,
-            led_count=led_count,
             tracker=tracker,
             status="offline",
         )
     if registered_devices:
         logger.info("Loaded {} registered device(s) from DB", len(registered_devices))
 
-    # --- Step 5: Build spatial scene if configured ---
+    discovery_orchestrator = DiscoveryOrchestrator(
+        config=config,
+        device_manager=device_manager,
+        event_bus=event_bus,
+        state_db=state_db,
+    )
+
+    if registered_devices:
+        await discovery_orchestrator.connect_known_devices(registered_devices)
+
     scene: SceneModel | None = None
     compositor: SpatialCompositor | None = None
     if config.scene_config is not None:
@@ -253,6 +219,66 @@ async def _run(args: argparse.Namespace) -> None:
                 len(scene.placements),
             )
 
+    if compositor is None:
+        db_scenes = await state_db.load_scenes()
+        active_scene_row = next((s for s in db_scenes if s.get("is_active")), None)
+        if active_scene_row is not None:
+            scene_id = active_scene_row["id"]
+            placement_rows = await state_db.load_scene_placements(scene_id)
+            if placement_rows:
+                # Build a device lookup by stable_id
+                managed_by_id = {
+                    d.adapter.device_info.stable_id: d
+                    for d in device_manager.devices
+                    if d.adapter.device_info.stable_id
+                }
+                placements: dict[str, DevicePlacement] = {}
+                for row in placement_rows:
+                    device_id = row["device_id"]
+                    managed = managed_by_id.get(device_id)
+                    led_count = managed.adapter.led_count if managed is not None else 1
+                    geo_type = row.get("geometry_type") or "point"
+                    if geo_type == "strip":
+                        geo: PointGeometry | StripGeometry = StripGeometry(
+                            direction=(
+                                float(row.get("direction_x") or 1.0),
+                                float(row.get("direction_y") or 0.0),
+                                float(row.get("direction_z") or 0.0),
+                            ),
+                            length=float(row.get("length") or 1.0),
+                        )
+                    else:
+                        geo = PointGeometry()
+                    placements[device_id] = DevicePlacement(
+                        device_id=device_id,
+                        position=(
+                            float(row.get("position_x") or 0.0),
+                            float(row.get("position_y") or 0.0),
+                            float(row.get("position_z") or 0.0),
+                        ),
+                        geometry=geo,
+                        led_count=led_count,
+                    )
+                scene = SceneModel(placements=placements)
+                mapping_type = active_scene_row.get("mapping_type") or "linear"
+                scene_cfg_for_mapping: dict[str, object] = {"mapping": mapping_type}
+                raw_params = active_scene_row.get("mapping_params")
+                if raw_params:
+                    import json as _json
+
+                    try:
+                        scene_cfg_for_mapping["mapping_params"] = _json.loads(raw_params)
+                    except (ValueError, TypeError):
+                        pass
+                mapping = mapping_from_config(scene_cfg_for_mapping)
+                compositor = SpatialCompositor(scene, mapping)
+                logger.info(
+                    "Spatial compositor active (from DB scene '{}'): {} mapping, {} devices",
+                    scene_id,
+                    mapping_type,
+                    len(placements),
+                )
+
     led_count = device_manager.max_led_count or 60
     logger.info("Using {} LEDs", led_count)
 
@@ -262,7 +288,6 @@ async def _run(args: argparse.Namespace) -> None:
     )
     deck = EffectDeck(effect)
 
-    # --- Step 6: Start engine and scheduler ---
     engine = EffectEngine(
         clock=clock,
         deck=deck,
@@ -276,15 +301,33 @@ async def _run(args: argparse.Namespace) -> None:
         devices=device_manager.devices,
         fps=config.engine.fps,
         compositor=compositor,
+        event_bus=event_bus,
     )
 
-    # --- Step 7: Build DiscoveryOrchestrator ---
-    discovery_orchestrator = DiscoveryOrchestrator(
-        config=config,
-        device_manager=device_manager,
-        event_bus=event_bus,
-        state_db=state_db,
-    )
+    def _on_device_offline(event: DeviceOfflineEvent) -> None:
+        if event.stable_id:
+            try:
+                device_manager.demote_device(event.stable_id)
+            except KeyError:
+                logger.debug(
+                    "demote_device: stable_id '{}' not found (already removed?)",
+                    event.stable_id,
+                )
+
+    event_bus.subscribe(DeviceOfflineEvent, _on_device_offline)
+
+    def _on_device_discovered(event: DeviceDiscoveredEvent) -> None:
+        """When a new device is discovered, add it to the scheduler so it gets frames."""
+        managed = device_manager.get_by_stable_id(event.stable_id)
+        if managed is not None:
+            scheduler.add_device(managed)
+
+    event_bus.subscribe(DeviceDiscoveredEvent, _on_device_discovered)
+
+    def _on_device_online(event: DeviceOnlineEvent) -> None:
+        logger.info("Device '{}' ({}) came back online", event.name, event.stable_id)
+
+    event_bus.subscribe(DeviceOnlineEvent, _on_device_online)
 
     # Web setup
     async def _forward_vite_output(proc: asyncio.subprocess.Process) -> None:
@@ -388,9 +431,7 @@ async def _run(args: argparse.Namespace) -> None:
     tasks.append(asyncio.create_task(engine.run()))
     tasks.append(asyncio.create_task(scheduler.run()))
 
-    # --- Step 8: Launch background discovery + reconnect loop ---
-    tasks.append(asyncio.create_task(discovery_orchestrator.run_discovery()))
-    await discovery_orchestrator.start_reconnect_loop()
+    discovery_orchestrator.start()
 
     async def _status_loop() -> None:
         while not stop_event.is_set():

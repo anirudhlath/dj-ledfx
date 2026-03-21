@@ -72,13 +72,19 @@ async def test_classify_bulb_product() -> None:
 
 @pytest.mark.asyncio
 async def test_discover_returns_discovered_devices() -> None:
+    bulb_record = LifxDeviceRecord(mac=b"\xaa" * 6, ip="1.2.3.4", port=56700, vendor=1, product=1)
     mock_transport = MagicMock()
     mock_transport.open = AsyncMock()
-    mock_transport.discover = AsyncMock(
-        return_value=[
-            LifxDeviceRecord(mac=b"\xaa" * 6, ip="1.2.3.4", port=56700, vendor=1, product=1),
-        ]
-    )
+    mock_transport.is_open = True
+
+    async def _fake_discover(
+        timeout_s: float = 1.0, on_record: object = None
+    ) -> list[LifxDeviceRecord]:
+        if callable(on_record):
+            on_record(bulb_record)
+        return [bulb_record]
+
+    mock_transport.discover = _fake_discover
     mock_transport.register_device = MagicMock()
     mock_transport.start_probing = MagicMock()
     mock_transport.source_id = 12345

@@ -27,6 +27,7 @@ from dj_ledfx.web.schemas import (
     UpdatePlacementRequest,
     UpdateSceneRequest,
 )
+from dj_ledfx.web.state import get_db
 
 if TYPE_CHECKING:
     from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
@@ -267,21 +268,12 @@ async def update_mapping(request: Request, body: UpdateMappingRequest) -> Mappin
 # ---------------------------------------------------------------------------
 
 
-def _get_db(request: Request) -> Any:
-    """Return StateDB or raise 503."""
-    db = getattr(request.app.state, "state_db", None)
-    if db is None:
-        raise HTTPException(503, "StateDB not available")
-    return db
-
-
 async def _get_scene_row(db: Any, scene_id: str) -> dict[str, Any]:
     """Load a single scene row by ID or raise 404."""
-    rows = await db.load_scenes()
-    for row in rows:
-        if row["id"] == scene_id:
-            return row
-    raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    row = await db.load_scene_by_id(scene_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Scene not found: {scene_id}")
+    return row
 
 
 router_scenes = APIRouter(prefix="/scenes", tags=["scenes"])
@@ -290,7 +282,10 @@ router_scenes = APIRouter(prefix="/scenes", tags=["scenes"])
 @router_scenes.get("", response_model=list[SceneListItem])
 async def list_scenes(request: Request) -> list[SceneListItem]:
     """List all scenes from DB if available, else return current in-memory scene."""
-    db = getattr(request.app.state, "state_db", None)
+    try:
+        db = get_db(request)
+    except HTTPException:
+        db = None
     if db is not None:
         rows = await db.load_scenes()
         return [
@@ -312,7 +307,7 @@ async def list_scenes(request: Request) -> list[SceneListItem]:
 
 @router_scenes.post("", response_model=SceneListItem)
 async def create_scene(request: Request, body: CreateSceneRequest) -> SceneListItem:
-    db = _get_db(request)
+    db = get_db(request)
     scene_id = str(uuid.uuid4())
     await db.save_scene(
         {
@@ -334,7 +329,7 @@ async def create_scene(request: Request, body: CreateSceneRequest) -> SceneListI
 
 @router_scenes.get("/{scene_id}", response_model=SceneListItem)
 async def get_scene_by_id(request: Request, scene_id: str) -> SceneListItem:
-    db = _get_db(request)
+    db = get_db(request)
     row = await _get_scene_row(db, scene_id)
     return SceneListItem(
         id=row["id"],
@@ -347,7 +342,7 @@ async def get_scene_by_id(request: Request, scene_id: str) -> SceneListItem:
 
 @router_scenes.put("/{scene_id}", response_model=SceneListItem)
 async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest) -> SceneListItem:
-    db = _get_db(request)
+    db = get_db(request)
     existing = await _get_scene_row(db, scene_id)
 
     updated: dict[str, Any] = {"id": scene_id}
@@ -372,7 +367,7 @@ async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest
 
 @router_scenes.delete("/{scene_id}")
 async def delete_scene(request: Request, scene_id: str) -> dict[str, str]:
-    db = _get_db(request)
+    db = get_db(request)
     await _get_scene_row(db, scene_id)
     await db.delete_scene(scene_id)
     return {"status": "deleted"}
@@ -380,26 +375,45 @@ async def delete_scene(request: Request, scene_id: str) -> dict[str, str]:
 
 @router_scenes.post("/{scene_id}/activate")
 async def activate_scene(request: Request, scene_id: str) -> dict[str, str]:
-    db = _get_db(request)
+    db = get_db(request)
     await _get_scene_row(db, scene_id)
+
+    # Conflict detection: check if any device in this scene is already in another active scene.
+    target_placements = await db.load_scene_placements(scene_id)
+    target_device_ids = {p["device_id"] for p in target_placements}
+
+    if target_device_ids:
+        all_scenes = await db.load_scenes()
+        conflicting_devices: list[str] = []
+        for scene_row in all_scenes:
+            other_id = scene_row["id"]
+            if other_id == scene_id:
+                continue
+            if not bool(scene_row.get("is_active", 0)):
+                continue
+            other_placements = await db.load_scene_placements(other_id)
+            for p in other_placements:
+                if p["device_id"] in target_device_ids:
+                    conflicting_devices.append(p["device_id"])
+        if conflicting_devices:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "device_conflict",
+                    "conflicting_devices": sorted(set(conflicting_devices)),
+                },
+            )
+
     await db.set_scene_active(scene_id)
     return {"status": "activated", "scene_id": scene_id}
 
 
 @router_scenes.post("/{scene_id}/deactivate")
 async def deactivate_scene(request: Request, scene_id: str) -> dict[str, str]:
-    db = _get_db(request)
-    existing = await _get_scene_row(db, scene_id)
-    # Deactivate by setting is_active=0 for this scene only
-    await db.save_scene(
-        {
-            "id": scene_id,
-            "name": existing["name"],
-            "mapping_type": existing.get("mapping_type"),
-            "effect_mode": existing.get("effect_mode"),
-            "is_active": 0,
-        }
-    )
+    db = get_db(request)
+    await _get_scene_row(db, scene_id)
+    # Targeted update — only touches is_active, leaves all other columns intact.
+    await db._execute_write("UPDATE scenes SET is_active=0 WHERE id=?", (scene_id,))
     return {"status": "deactivated", "scene_id": scene_id}
 
 
@@ -408,16 +422,26 @@ async def add_or_update_scene_placement(
     request: Request, scene_id: str, device_name: str, body: UpdatePlacementRequest
 ) -> PlacementResponse:
     """Add or update a device placement in a scene (stored in DB)."""
-    db = _get_db(request)
+    db = get_db(request)
     await _get_scene_row(db, scene_id)
 
+    # Resolve display name to stable_id via DeviceManager, falling back to display name.
+    device_stable_id: str = device_name
+    try:
+        device_manager = request.app.state.device_manager
+        from dj_ledfx.devices.manager import ManagedDevice as _MD
+
+        managed_for_id = device_manager.get_device(device_name)
+        if managed_for_id is not None and isinstance(managed_for_id, _MD):
+            device_stable_id = managed_for_id.adapter.device_info.effective_id
+    except Exception:
+        pass
+
     # Ensure the device exists in the DB (required by FK constraint)
-    devices_in_db = await db.load_devices()
-    device_ids_in_db = {d["id"] for d in devices_in_db}
-    if device_name not in device_ids_in_db:
+    if not await db.device_exists(device_stable_id):
         # Auto-register device with a minimal record
         device_record: dict[str, Any] = {
-            "id": device_name,
+            "id": device_stable_id,
             "name": device_name,
             "backend": "unknown",
         }
@@ -443,7 +467,7 @@ async def add_or_update_scene_placement(
 
     placement_data: dict[str, Any] = {
         "scene_id": scene_id,
-        "device_id": device_name,
+        "device_id": device_stable_id,
     }
     if body.position is not None:
         placement_data["position_x"] = body.position[0]
@@ -478,7 +502,7 @@ async def add_or_update_scene_placement(
     from dj_ledfx.spatial.scene import DevicePlacement as DP
 
     placement = DP(
-        device_id=device_name,
+        device_id=device_stable_id,
         position=tuple(body.position) if body.position else (0.0, 0.0, 0.0),
         geometry=geo,
         led_count=led_count,
@@ -491,7 +515,7 @@ async def remove_scene_placement(
     request: Request, scene_id: str, device_name: str
 ) -> dict[str, str]:
     """Remove a device placement from a scene."""
-    db = _get_db(request)
+    db = get_db(request)
     await _get_scene_row(db, scene_id)
 
     await db.delete_placement(scene_id, device_name)

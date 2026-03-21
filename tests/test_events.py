@@ -6,8 +6,6 @@ from dj_ledfx.events import (
     DeviceDiscoveredEvent,
     DeviceOfflineEvent,
     DeviceOnlineEvent,
-    DiscoveryCompleteEvent,
-    DiscoveryWaveCompleteEvent,
     EventBus,
     SceneActivatedEvent,
     SceneDeactivatedEvent,
@@ -88,17 +86,6 @@ def test_device_online_event():
 def test_device_offline_event():
     e = DeviceOfflineEvent(stable_id="lifx:aabb", name="LIFX Strip")
     assert e.stable_id == "lifx:aabb"
-
-
-def test_discovery_wave_complete_event():
-    e = DiscoveryWaveCompleteEvent(wave=2, devices_found=5)
-    assert e.wave == 2
-    assert e.devices_found == 5
-
-
-def test_discovery_complete_event():
-    e = DiscoveryCompleteEvent(total_devices=8)
-    assert e.total_devices == 8
 
 
 def test_scene_activated_event():

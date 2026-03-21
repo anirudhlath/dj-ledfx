@@ -554,3 +554,39 @@ async def test_scheduler_add_device_during_run() -> None:
         await task
     except asyncio.CancelledError:
         pass
+
+
+@pytest.mark.asyncio
+async def test_distributor_handles_concurrent_add_device() -> None:
+    """Device added while distributor is running receives frames without errors.
+
+    This exercises the dict-values iteration path: the distributor must not
+    crash when _device_state is mutated concurrently (e.g. via add_device).
+    We verify the late-joining device still gets frames after it is added.
+    """
+    buf = RingBuffer(capacity=60, led_count=10)
+    _fill_buffer(buf, time.monotonic(), 60)
+
+    # Start with one device so the distributor loop is active immediately
+    initial_device = _make_device("Initial", latency_ms=10.0)
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[initial_device], fps=60)
+    run_task = asyncio.create_task(scheduler.run())
+
+    # Let the distributor run for a few ticks before adding the second device
+    await asyncio.sleep(0.05)
+
+    late_device = _make_device("LateJoiner", latency_ms=10.0)
+    scheduler.add_device(late_device)
+
+    # Give the scheduler time to pick up the new device and send frames to it
+    await asyncio.sleep(0.15)
+    scheduler.stop()
+    await run_task
+
+    # Both the initial device and the late joiner must have received frames
+    assert len(initial_device.adapter.send_frame_calls) > 0, (
+        "Initial device received no frames"
+    )
+    assert len(late_device.adapter.send_frame_calls) > 0, (
+        "Late-joining device received no frames"
+    )

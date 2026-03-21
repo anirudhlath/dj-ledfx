@@ -1,13 +1,13 @@
 -- Initial schema for dj-ledfx state database
 
-CREATE TABLE config (
+CREATE TABLE IF NOT EXISTS config (
     section TEXT NOT NULL,
     key TEXT NOT NULL,
     value TEXT NOT NULL,
     PRIMARY KEY (section, key)
 );
 
-CREATE TABLE devices (
+CREATE TABLE IF NOT EXISTS devices (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     backend TEXT NOT NULL,
@@ -21,18 +21,18 @@ CREATE TABLE devices (
     extra TEXT
 );
 
-CREATE TABLE groups (
+CREATE TABLE IF NOT EXISTS groups (
     name TEXT PRIMARY KEY,
     color TEXT NOT NULL DEFAULT '#888888'
 );
 
-CREATE TABLE device_groups (
+CREATE TABLE IF NOT EXISTS device_groups (
     group_name TEXT NOT NULL REFERENCES groups(name) ON DELETE CASCADE,
     device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     PRIMARY KEY (group_name, device_id)
 );
 
-CREATE TABLE scenes (
+CREATE TABLE IF NOT EXISTS scenes (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     mapping_type TEXT NOT NULL DEFAULT 'linear',
@@ -42,13 +42,13 @@ CREATE TABLE scenes (
     is_active INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE scene_effect_state (
+CREATE TABLE IF NOT EXISTS scene_effect_state (
     scene_id TEXT PRIMARY KEY REFERENCES scenes(id) ON DELETE CASCADE,
     effect_class TEXT NOT NULL,
     params TEXT NOT NULL
 );
 
-CREATE TABLE scene_placements (
+CREATE TABLE IF NOT EXISTS scene_placements (
     scene_id TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
     device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     position_x REAL NOT NULL DEFAULT 0,
@@ -65,8 +65,11 @@ CREATE TABLE scene_placements (
     PRIMARY KEY (scene_id, device_id)
 );
 
-CREATE TABLE presets (
+CREATE TABLE IF NOT EXISTS presets (
     name TEXT PRIMARY KEY,
     effect_class TEXT NOT NULL,
     params TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_scenes_active ON scenes(is_active);
+CREATE INDEX IF NOT EXISTS idx_placements_device ON scene_placements(device_id);

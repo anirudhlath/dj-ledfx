@@ -1,21 +1,19 @@
-"""DiscoveryOrchestrator — multi-wave device discovery."""
+"""DiscoveryOrchestrator — continuous background device discovery."""
 
 from __future__ import annotations
 
 import asyncio
 from datetime import UTC
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from dj_ledfx.config import AppConfig
-from dj_ledfx.devices.backend import DeviceBackend
+from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.events import (
     DeviceDiscoveredEvent,
     DeviceOnlineEvent,
-    DiscoveryCompleteEvent,
-    DiscoveryWaveCompleteEvent,
     EventBus,
 )
 
@@ -25,7 +23,7 @@ if TYPE_CHECKING:
 
 
 class DiscoveryOrchestrator:
-    """Owns backend lifecycle and multi-wave discovery logic."""
+    """Owns backend lifecycle and continuous periodic discovery."""
 
     def __init__(
         self,
@@ -39,7 +37,7 @@ class DiscoveryOrchestrator:
         self._event_bus = event_bus
         self._state_db = state_db
         self._running = False
-        self._reconnect_task: asyncio.Task[None] | None = None
+        self._task: asyncio.Task[None] | None = None
 
         # Instantiate backends once; filter by is_enabled
         self._backends: list[DeviceBackend] = []
@@ -48,25 +46,58 @@ class DiscoveryOrchestrator:
             if backend.is_enabled(config):
                 self._backends.append(backend)
 
-    async def run_discovery(self, waves: int | None = None) -> int:
-        """Run multi-wave discovery. Returns total new devices found."""
-        num_waves = waves if waves is not None else self._config.discovery.waves
-        total_found = 0
+    async def connect_known_devices(self, device_rows: list[dict[str, Any]]) -> int:
+        """Directly connect to known devices from DB without network scanning.
 
-        for wave_num in range(1, num_waves + 1):
-            logger.info("Discovery wave {}/{}", wave_num, num_waves)
-            found = await self._run_wave()
-            total_found += found
-            self._event_bus.emit(DiscoveryWaveCompleteEvent(wave=wave_num, devices_found=found))
-            if wave_num < num_waves:
-                await asyncio.sleep(self._config.discovery.wave_interval_s)
+        Called once at startup before the background discovery loop, so that
+        previously-seen devices come online immediately without waiting for
+        a network broadcast.
 
-        self._event_bus.emit(DiscoveryCompleteEvent(total_devices=total_found))
-        logger.info("Discovery complete: {} total devices", total_found)
-        return total_found
+        Returns the number of devices promoted from offline to online.
+        """
+        promoted = 0
+        for backend in self._backends:
+            try:
+                discovered = await backend.connect_known(device_rows, self._config)
+            except Exception:
+                logger.exception("connect_known failed for {}", type(backend).__name__)
+                continue
 
-    async def _run_wave(self) -> int:
-        """Run one discovery wave across all backends."""
+            for device in discovered:
+                info = device.adapter.device_info
+                stable_id = info.effective_id
+                name = info.name
+
+                existing = self._manager.get_by_stable_id(stable_id)
+                if existing is not None and existing.status == "offline":
+                    self._manager.promote_device(
+                        stable_id,
+                        device.adapter,
+                        tracker=device.tracker,
+                        max_fps=device.max_fps,
+                    )
+                    self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
+                    promoted += 1
+                    if self._state_db:
+                        await self._persist_device(device.adapter)
+                elif existing is None:
+                    # Device not in manager yet — add it directly
+                    self._manager.add_device(device.adapter, device.tracker, device.max_fps)
+                    self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
+                    promoted += 1
+                    if self._state_db:
+                        await self._persist_device(device.adapter)
+
+        if promoted:
+            logger.info("Fast reconnect: {} device(s) online immediately", promoted)
+        return promoted
+
+    async def run_scan(self) -> int:
+        """Run a single discovery scan across all backends.
+
+        Returns total new devices found. Each device fires an event via
+        the on_found callback as soon as it responds — no batching.
+        """
         results = await asyncio.gather(
             *(self._discover_backend(b) for b in self._backends),
             return_exceptions=True,
@@ -79,35 +110,100 @@ class DiscoveryOrchestrator:
             found += result  # type: ignore[operator]
         return found
 
-    async def _discover_backend(self, backend: DeviceBackend) -> int:
-        """Discover devices from a single backend."""
-        try:
-            discovered = await backend.discover(self._config)
-        except Exception:
-            logger.exception("Discovery failed for {}", type(backend).__name__)
-            return 0
+    async def run(self) -> None:
+        """Continuous discovery loop: broadcast every N seconds, process responses instantly."""
+        self._running = True
+        interval = self._config.discovery.broadcast_interval_s
+        logger.info("Discovery loop started (broadcast every {:.0f}s)", interval)
 
+        while self._running:
+            try:
+                found = await self.run_scan()
+                if found:
+                    logger.info("Discovery scan: {} new device(s)", found)
+            except Exception:
+                logger.exception("Discovery scan failed")
+            await asyncio.sleep(interval)
+
+    def start(self) -> None:
+        """Start the continuous discovery loop as a background task."""
+        self._task = asyncio.create_task(self.run())
+
+    async def _discover_backend(self, backend: DeviceBackend) -> int:
+        """Discover devices from a single backend.
+
+        Devices are promoted/added and events emitted via *on_found* as soon
+        as each device is ready, rather than waiting for the full scan timeout.
+        """
         new_count = 0
-        for device in discovered:
+        persist_tasks: list[asyncio.Task[None]] = []
+
+        def _on_found(device: DiscoveredDevice) -> None:
+            nonlocal new_count
             info = device.adapter.device_info
-            stable_id = info.stable_id if info.stable_id else info.name
+            stable_id = info.effective_id
             name = info.name
 
             existing = self._manager.get_by_stable_id(stable_id)
             if existing is None:
-                # Check by name as fallback
+                # Check by name as fallback (device may have had no stable_id before)
                 existing_by_name = self._manager.get_device(name)
                 if existing_by_name is None:
                     self._manager.add_device(device.adapter, device.tracker, device.max_fps)
                     self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
                     new_count += 1
                     if self._state_db:
-                        await self._persist_device(device.adapter)
+                        persist_tasks.append(
+                            asyncio.create_task(self._persist_device(device.adapter))
+                        )
+                elif existing_by_name.status == "offline":
+                    # Promote the offline device using the freshly discovered adapter
+                    self._manager.promote_device(
+                        existing_by_name.adapter.device_info.effective_id,
+                        device.adapter,
+                        tracker=device.tracker,
+                        max_fps=device.max_fps,
+                    )
+                    self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
+                    new_count += 1
+                    if self._state_db:
+                        persist_tasks.append(
+                            asyncio.create_task(self._persist_device(device.adapter))
+                        )
+                else:
+                    logger.debug(
+                        "Device '{}' already managed online under different stable_id, skipping",
+                        name,
+                    )
             elif existing.status == "offline":
-                self._manager.promote_device(stable_id, device.adapter)
+                self._manager.promote_device(
+                    stable_id,
+                    device.adapter,
+                    tracker=device.tracker,
+                    max_fps=device.max_fps,
+                )
                 self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
                 if self._state_db:
-                    await self._persist_device(device.adapter)
+                    persist_tasks.append(asyncio.create_task(self._persist_device(device.adapter)))
+
+        # Collect stable_ids of already-online devices so backends can skip them.
+        # Offline (ghost) devices are intentionally excluded so they can be
+        # rediscovered and promoted back online.
+        skip_ids = {
+            d.adapter.device_info.stable_id
+            for d in self._manager.devices
+            if d.adapter.device_info.stable_id and d.status == "online"
+        }
+
+        try:
+            await backend.discover(self._config, on_found=_on_found, skip_ids=skip_ids)
+        except Exception:
+            logger.exception("Discovery failed for {}", type(backend).__name__)
+            return 0
+
+        # Wait for any still-pending persist writes
+        if persist_tasks:
+            await asyncio.gather(*persist_tasks, return_exceptions=True)
 
         return new_count
 
@@ -119,39 +215,29 @@ class DiscoveryOrchestrator:
         info = adapter.device_info
         address = info.address or ""
         ip = address.split(":")[0] if ":" in address else address
+        _record = getattr(adapter, "_record", None)
         await self._state_db.upsert_device(
             {
-                "id": info.stable_id or info.name,
+                "id": info.effective_id,
                 "name": info.name,
-                "backend": info.device_type.split("_")[0] if info.device_type else "",
+                "backend": info.backend,
                 "led_count": adapter.led_count,
                 "ip": ip,
                 "mac": getattr(info, "mac", None),
                 "last_seen": datetime.now(UTC).isoformat(),
+                "device_type": info.device_type,
+                "device_id": _record.device_id if _record is not None else None,
+                "sku": _record.sku if _record is not None else None,
             }
         )
 
-    async def start_reconnect_loop(self) -> None:
-        """Start background reconnect loop for offline devices."""
-        self._running = True
-        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
-
-    async def _reconnect_loop(self) -> None:
-        interval = self._config.discovery.reconnect_interval_s
-        while self._running:
-            await asyncio.sleep(interval)
-            offline_count = sum(1 for d in self._manager.devices if d.status == "offline")
-            if offline_count > 0:
-                logger.debug("Reconnect loop: {} offline devices", offline_count)
-                await self._run_wave()
-
     async def shutdown(self) -> None:
-        """Cancel reconnect loop and shut down all backends."""
+        """Cancel discovery loop and shut down all backends."""
         self._running = False
-        if self._reconnect_task:
-            self._reconnect_task.cancel()
+        if self._task:
+            self._task.cancel()
             try:
-                await self._reconnect_task
+                await self._task
             except asyncio.CancelledError:
                 pass
         for backend in self._backends:

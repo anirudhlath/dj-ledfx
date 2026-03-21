@@ -48,6 +48,7 @@ class GoveeSegmentAdapter(DeviceAdapter):
             led_count=self._num_segments,
             address=f"{self._record.ip}:4003",
             stable_id=f"govee:{self._record.device_id}",
+            backend="govee",
         )
 
     @property

@@ -92,12 +92,10 @@ class DevicesConfig:
 
 @dataclass
 class DiscoveryConfig:
-    waves: int = 3
-    wave_interval_s: float = 5.0
+    broadcast_interval_s: float = 30.0
     unicast_concurrency: int = 50
     unicast_timeout_s: float = 0.5
     subnet_mask: int = 24
-    reconnect_interval_s: float = 30.0
 
 
 @dataclass
@@ -148,7 +146,7 @@ class AppConfig:
             raise ValueError("web port must be 0-65535")
 
 
-def _filter_fields(cls: type, data: dict[str, Any]) -> dict[str, Any]:
+def filter_fields(cls: type, data: dict[str, Any]) -> dict[str, Any]:
     import dataclasses
 
     valid = {f.name for f in dataclasses.fields(cls)}
@@ -167,7 +165,7 @@ def load_config(path: Path) -> AppConfig:
     with open(path, "rb") as f:
         data = tomllib.load(f)
 
-    engine = EngineConfig(**_filter_fields(EngineConfig, data.get("engine", {})))
+    engine = EngineConfig(**filter_fields(EngineConfig, data.get("engine", {})))
 
     effect_data = dict(data.get("effect", {}))
     if "active" in effect_data and "active_effect" not in effect_data:
@@ -180,7 +178,7 @@ def load_config(path: Path) -> AppConfig:
             effect_data["beat_pulse_palette"] = beat_pulse_sub["palette"]
         if "gamma" in beat_pulse_sub:
             effect_data["beat_pulse_gamma"] = beat_pulse_sub["gamma"]
-    effect = EffectConfig(**_filter_fields(EffectConfig, effect_data))
+    effect = EffectConfig(**filter_fields(EffectConfig, effect_data))
 
     network_data = dict(data.get("network", {}))
     prodjlink_data = data.get("prodjlink", {})
@@ -188,20 +186,20 @@ def load_config(path: Path) -> AppConfig:
         logger.warning("[prodjlink] config section is deprecated, use [network] instead")
         if "passive_mode" in prodjlink_data and "passive_mode" not in network_data:
             network_data["passive_mode"] = prodjlink_data["passive_mode"]
-    network = NetworkConfig(**_filter_fields(NetworkConfig, network_data))
+    network = NetworkConfig(**filter_fields(NetworkConfig, network_data))
 
-    web = WebConfig(**_filter_fields(WebConfig, data.get("web", {})))
+    web = WebConfig(**filter_fields(WebConfig, data.get("web", {})))
 
     devices_data = data.get("devices", {})
     devices = DevicesConfig(
-        openrgb=OpenRGBConfig(**_filter_fields(OpenRGBConfig, devices_data.get("openrgb", {}))),
-        lifx=LIFXConfig(**_filter_fields(LIFXConfig, devices_data.get("lifx", {}))),
-        govee=GoveeConfig(**_filter_fields(GoveeConfig, devices_data.get("govee", {}))),
+        openrgb=OpenRGBConfig(**filter_fields(OpenRGBConfig, devices_data.get("openrgb", {}))),
+        lifx=LIFXConfig(**filter_fields(LIFXConfig, devices_data.get("lifx", {}))),
+        govee=GoveeConfig(**filter_fields(GoveeConfig, devices_data.get("govee", {}))),
     )
 
     scene_config = data.get("scene_config") or data.get("scene")
 
-    discovery = DiscoveryConfig(**_filter_fields(DiscoveryConfig, data.get("discovery", {})))
+    discovery = DiscoveryConfig(**filter_fields(DiscoveryConfig, data.get("discovery", {})))
 
     return AppConfig(
         engine=engine,

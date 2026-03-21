@@ -25,6 +25,7 @@ from dj_ledfx.config import (
     save_config,
     strip_none,
 )
+from dj_ledfx.web.state import get_db
 
 router = APIRouter()
 
@@ -98,16 +99,17 @@ async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
     request.app.state.config = new_config
     if request.app.state.config_path:
         await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
-    # Optionally persist to StateDB when available
-    db = getattr(request.app.state, "state_db", None)
-    if db is not None:
-        result_dict = dataclasses.asdict(new_config)
-        for section, value in result_dict.items():
+    result = dataclasses.asdict(new_config)
+    # Persist to StateDB when available
+    try:
+        db = get_db(request)
+        for section, value in result.items():
             if isinstance(value, dict):
                 str_kv = {k: json.dumps(v) for k, v in value.items() if not isinstance(v, dict)}
                 if str_kv:
                     await db.save_config_bulk(section, str_kv)
-    result = dataclasses.asdict(new_config)
+    except HTTPException:
+        pass
     return JSONResponse(
         content=result,
         headers={"X-Requires-Restart": "true"},
@@ -150,9 +152,7 @@ async def import_config(request: Request) -> dict[str, Any]:
 async def export_state(request: Request) -> Response:
     from dj_ledfx.persistence.toml_io import export_toml
 
-    db = getattr(request.app.state, "state_db", None)
-    if db is None:
-        raise HTTPException(503, "StateDB not available")
+    db = get_db(request)
     toml_str = await export_toml(db)
     return Response(content=toml_str, media_type="application/toml")
 
@@ -161,9 +161,7 @@ async def export_state(request: Request) -> Response:
 async def import_state(request: Request) -> dict[str, str]:
     from dj_ledfx.persistence.toml_io import import_toml
 
-    db = getattr(request.app.state, "state_db", None)
-    if db is None:
-        raise HTTPException(503, "StateDB not available")
+    db = get_db(request)
     body = await request.body()
     await import_toml(db, body.decode())
     return {"status": "ok"}

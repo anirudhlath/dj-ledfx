@@ -57,7 +57,16 @@ class TestGoveeBackend:
         with patch("dj_ledfx.devices.govee.backend.GoveeTransport") as MockTransport:
             mock_transport = MagicMock()
             mock_transport.open = AsyncMock()
-            mock_transport.discover = AsyncMock(return_value=[rgbic_record])
+            mock_transport.is_open = True
+
+            async def _fake_discover(
+                timeout_s: float = 10.0, on_record: object = None
+            ) -> list[GoveeDeviceRecord]:
+                if callable(on_record):
+                    on_record(rgbic_record)
+                return [rgbic_record]
+
+            mock_transport.discover = _fake_discover
             mock_transport.query_status = AsyncMock(return_value={"onOff": 1})
             mock_transport.send_command = AsyncMock()
             mock_transport.register_device = MagicMock()
@@ -78,7 +87,16 @@ class TestGoveeBackend:
         with patch("dj_ledfx.devices.govee.backend.GoveeTransport") as MockTransport:
             mock_transport = MagicMock()
             mock_transport.open = AsyncMock()
-            mock_transport.discover = AsyncMock(return_value=[unknown_record])
+            mock_transport.is_open = True
+
+            async def _fake_discover(
+                timeout_s: float = 10.0, on_record: object = None
+            ) -> list[GoveeDeviceRecord]:
+                if callable(on_record):
+                    on_record(unknown_record)
+                return [unknown_record]
+
+            mock_transport.discover = _fake_discover
             mock_transport.query_status = AsyncMock(return_value={"onOff": 1})
             mock_transport.send_command = AsyncMock()
             mock_transport.register_device = MagicMock()

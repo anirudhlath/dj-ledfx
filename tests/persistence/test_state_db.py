@@ -1,5 +1,7 @@
 """Tests for StateDB — SQLite persistence layer."""
 
+import asyncio
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -28,9 +30,9 @@ async def test_creates_db_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_schema_version_is_1(db):
+async def test_schema_version_is_2(db):
     version = await db.get_schema_version()
-    assert version == 1
+    assert version == 2
 
 
 @pytest.mark.asyncio
@@ -73,7 +75,7 @@ async def test_idempotent_open(tmp_path):
     db2 = StateDB(db_path)
     await db2.open()
     version = await db2.get_schema_version()
-    assert version == 1
+    assert version == 2
     await db2.close()
 
 
@@ -366,7 +368,8 @@ async def test_set_scene_active(db):
 
 
 @pytest.mark.asyncio
-async def test_set_scene_active_deactivates_others(db):
+async def test_set_scene_active_does_not_deactivate_others(db):
+    """Multiple scenes can be active concurrently; set_scene_active only sets one."""
     await db.save_scene(
         {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
     )
@@ -375,6 +378,25 @@ async def test_set_scene_active_deactivates_others(db):
     )
     await db.set_scene_active("s1")
     await db.set_scene_active("s2")
+    scenes = await db.load_scenes()
+    by_id = {s["id"]: s for s in scenes}
+    # Both scenes should now be active (concurrent multi-scene support)
+    assert by_id["s1"]["is_active"] == 1
+    assert by_id["s2"]["is_active"] == 1
+
+
+@pytest.mark.asyncio
+async def test_set_scene_inactive(db):
+    """set_scene_inactive only deactivates the specified scene."""
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_scene(
+        {"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.set_scene_active("s1")
+    await db.set_scene_active("s2")
+    await db.set_scene_inactive("s1")
     scenes = await db.load_scenes()
     by_id = {s["id"]: s for s in scenes}
     assert by_id["s1"]["is_active"] == 0
@@ -514,17 +536,20 @@ async def test_multiple_presets(db):
     assert names == {"Pulse 1", "Wave 1"}
 
 
-# --- Task 11: Debounced Writes ---
+# --- Task 11: Debounced Writes (via DebouncedWriter) ---
 
 
 @pytest.mark.asyncio
 async def test_schedule_latency_coalesces(db):
     """Multiple rapid latency updates coalesce to the last value."""
+    from dj_ledfx.persistence.debounced_writer import DebouncedWriter
+
+    writer = DebouncedWriter(db)
     await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
-    db.schedule_latency_update("lifx:aa", 10.0)
-    db.schedule_latency_update("lifx:aa", 20.0)
-    db.schedule_latency_update("lifx:aa", 35.5)
-    await db.flush_pending()
+    writer.schedule_latency_update("lifx:aa", 10.0)
+    writer.schedule_latency_update("lifx:aa", 20.0)
+    writer.schedule_latency_update("lifx:aa", 35.5)
+    await writer.flush_pending()
     devices = await db.load_devices()
     assert abs(devices[0]["last_latency_ms"] - 35.5) < 0.001
 
@@ -532,13 +557,16 @@ async def test_schedule_latency_coalesces(db):
 @pytest.mark.asyncio
 async def test_schedule_effect_state_coalesces(db):
     """Multiple rapid effect state updates coalesce to the last value."""
+    from dj_ledfx.persistence.debounced_writer import DebouncedWriter
+
+    writer = DebouncedWriter(db)
     await db.save_scene(
         {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
     )
-    db.schedule_effect_state_update("s1", "BeatPulse", '{"gamma": 1.0}')
-    db.schedule_effect_state_update("s1", "BeatPulse", '{"gamma": 2.0}')
-    db.schedule_effect_state_update("s1", "RainbowWave", '{"speed": 0.5}')
-    await db.flush_pending()
+    writer.schedule_effect_state_update("s1", "BeatPulse", '{"gamma": 1.0}')
+    writer.schedule_effect_state_update("s1", "BeatPulse", '{"gamma": 2.0}')
+    writer.schedule_effect_state_update("s1", "RainbowWave", '{"speed": 0.5}')
+    await writer.flush_pending()
     state = await db.load_scene_effect_state("s1")
     assert state is not None
     assert state["effect_class"] == "RainbowWave"
@@ -546,15 +574,19 @@ async def test_schedule_effect_state_coalesces(db):
 
 
 @pytest.mark.asyncio
-async def test_flush_pending_on_close(tmp_path):
-    """Pending writes are flushed when the DB is closed."""
+async def test_flush_pending_before_close(tmp_path):
+    """Pending writes are flushed before closing the DB."""
+    from dj_ledfx.persistence.debounced_writer import DebouncedWriter
+
     db_path = tmp_path / "state.db"
     state_db = StateDB(db_path)
     await state_db.open()
+    writer = DebouncedWriter(state_db)
     await state_db.upsert_device(
         {"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30}
     )
-    state_db.schedule_latency_update("lifx:aa", 77.7)
+    writer.schedule_latency_update("lifx:aa", 77.7)
+    await writer.flush_pending()
     await state_db.close()
 
     # Re-open and verify the latency was persisted
@@ -568,11 +600,14 @@ async def test_flush_pending_on_close(tmp_path):
 @pytest.mark.asyncio
 async def test_schedule_latency_multiple_devices(db):
     """Pending latency updates track multiple device IDs independently."""
+    from dj_ledfx.persistence.debounced_writer import DebouncedWriter
+
+    writer = DebouncedWriter(db)
     await db.upsert_device({"id": "lifx:aa", "name": "A", "backend": "lifx", "led_count": 10})
     await db.upsert_device({"id": "lifx:bb", "name": "B", "backend": "lifx", "led_count": 10})
-    db.schedule_latency_update("lifx:aa", 11.1)
-    db.schedule_latency_update("lifx:bb", 22.2)
-    await db.flush_pending()
+    writer.schedule_latency_update("lifx:aa", 11.1)
+    writer.schedule_latency_update("lifx:bb", 22.2)
+    await writer.flush_pending()
     devices = await db.load_devices()
     by_id = {d["id"]: d for d in devices}
     assert abs(by_id["lifx:aa"]["last_latency_ms"] - 11.1) < 0.001
@@ -588,6 +623,8 @@ async def test_migrate_from_config_toml(tmp_path):
 
     import tomli_w
 
+    from dj_ledfx.persistence.toml_io import migrate_from_toml
+
     config_toml = tmp_path / "config.toml"
     config_data = {
         "engine": {"fps": 90},
@@ -601,7 +638,7 @@ async def test_migrate_from_config_toml(tmp_path):
 
     db = StateDB(tmp_path / "state.db")
     await db.open()
-    await db.migrate_from_toml(config_path=config_toml)
+    await migrate_from_toml(db, config_path=config_toml)
 
     engine_cfg = await db.load_config("engine")
     assert engine_cfg.get("fps") == "90"
@@ -630,6 +667,8 @@ async def test_migrate_from_presets_toml(tmp_path):
 
     import tomli_w
 
+    from dj_ledfx.persistence.toml_io import migrate_from_toml
+
     presets_toml = tmp_path / "presets.toml"
     presets_data = {
         "presets": {"My Preset": {"effect_class": "beat_pulse", "params": {"gamma": 2.5}}}
@@ -638,7 +677,7 @@ async def test_migrate_from_presets_toml(tmp_path):
 
     db = StateDB(tmp_path / "state.db")
     await db.open()
-    await db.migrate_from_toml(presets_path=presets_toml)
+    await migrate_from_toml(db, presets_path=presets_toml)
 
     presets = await db.load_presets()
     preset_by_name = {p["name"]: p for p in presets}
@@ -653,12 +692,269 @@ async def test_migrate_from_presets_toml(tmp_path):
 
 @pytest.mark.asyncio
 async def test_migrate_skips_if_no_toml(tmp_path):
+    from dj_ledfx.persistence.toml_io import migrate_from_toml
+
     db = StateDB(tmp_path / "state.db")
     await db.open()
-    await db.migrate_from_toml(
+    await migrate_from_toml(
+        db,
         config_path=tmp_path / "config.toml",
         presets_path=tmp_path / "presets.toml",
     )
     engine_cfg = await db.load_config("engine")
     assert engine_cfg == {}
     await db.close()
+
+
+# --- FK-safe upsert tests ---
+
+
+@pytest.mark.asyncio
+async def test_upsert_device_preserves_group_membership(db):
+    """Updating a device via upsert should not cascade-delete its group membership."""
+    await db.upsert_device({"id": "d1", "name": "Dev1", "backend": "lifx", "led_count": 10})
+    await db.save_group("g1", "#ff0000")
+    await db.assign_device_group("g1", "d1")
+    # Update the device (e.g. change IP) — must NOT delete the group assignment
+    await db.upsert_device(
+        {"id": "d1", "name": "Dev1", "backend": "lifx", "led_count": 10, "ip": "1.2.3.4"}
+    )
+    groups = await db.load_device_groups()
+    assert "d1" in groups.get("g1", [])
+
+
+@pytest.mark.asyncio
+async def test_upsert_device_preserves_scene_placements(db):
+    """Updating a device via upsert should not cascade-delete its scene placements."""
+    await db.upsert_device({"id": "d1", "name": "Dev1", "backend": "lifx", "led_count": 10})
+    await db.save_scene(
+        {"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_placement(
+        {
+            "scene_id": "s1",
+            "device_id": "d1",
+            "position_x": 0.0,
+            "position_y": 0.0,
+            "position_z": 0.0,
+            "geometry_type": "strip",
+        }
+    )
+    # Update device with a new IP — must NOT wipe the placement
+    await db.upsert_device(
+        {"id": "d1", "name": "Dev1", "backend": "lifx", "led_count": 10, "ip": "10.0.0.5"}
+    )
+    placements = await db.load_scene_placements("s1")
+    assert len(placements) == 1
+    assert placements[0]["device_id"] == "d1"
+
+
+@pytest.mark.asyncio
+async def test_save_scene_preserves_effect_state(db):
+    """Re-saving a scene via save_scene should not delete its effect state."""
+    await db.save_scene(
+        {"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_scene_effect_state("s1", "BeatPulse", '{"gamma": 2.0}')
+    # Update the scene name — must not wipe effect state
+    await db.save_scene(
+        {"id": "s1", "name": "Renamed", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    state = await db.load_scene_effect_state("s1")
+    assert state is not None
+    assert state["effect_class"] == "BeatPulse"
+
+
+@pytest.mark.asyncio
+async def test_save_scene_preserves_placements(db):
+    """Re-saving a scene via save_scene should not cascade-delete its placements."""
+    await db.upsert_device({"id": "d1", "name": "Dev1", "backend": "lifx", "led_count": 10})
+    await db.save_scene(
+        {"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_placement(
+        {
+            "scene_id": "s1",
+            "device_id": "d1",
+            "position_x": 1.0,
+            "position_y": 0.0,
+            "position_z": 0.0,
+            "geometry_type": "strip",
+        }
+    )
+    # Upsert the scene with new mapping_type — placements must survive
+    await db.save_scene(
+        {"id": "s1", "name": "Scene 1", "mapping_type": "radial", "effect_mode": "independent"}
+    )
+    placements = await db.load_scene_placements("s1")
+    assert len(placements) == 1
+    assert placements[0]["device_id"] == "d1"
+
+
+# --- Multi-scene concurrent activation ---
+
+
+@pytest.mark.asyncio
+async def test_set_scene_active_concurrent_does_not_deactivate_other(db):
+    """set_scene_active on one scene must not touch another already-active scene."""
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_scene(
+        {"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    # Activate s1 first, then s2; both must remain active
+    await db.set_scene_active("s1")
+    await db.set_scene_active("s2")
+    scenes = await db.load_scenes()
+    by_id = {s["id"]: s for s in scenes}
+    assert by_id["s1"]["is_active"] == 1, "s1 should still be active after s2 was activated"
+    assert by_id["s2"]["is_active"] == 1
+
+
+# --- set_scene_inactive only deactivates one scene ---
+
+
+@pytest.mark.asyncio
+async def test_set_scene_inactive_leaves_other_scenes_active(db):
+    """set_scene_inactive on one scene must not deactivate other active scenes."""
+    await db.save_scene(
+        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_scene(
+        {"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.save_scene(
+        {"id": "s3", "name": "S3", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    await db.set_scene_active("s1")
+    await db.set_scene_active("s2")
+    await db.set_scene_active("s3")
+    # Deactivate only s2
+    await db.set_scene_inactive("s2")
+    scenes = await db.load_scenes()
+    by_id = {s["id"]: s for s in scenes}
+    assert by_id["s1"]["is_active"] == 1, "s1 must remain active"
+    assert by_id["s2"]["is_active"] == 0, "s2 must be inactive"
+    assert by_id["s3"]["is_active"] == 1, "s3 must remain active"
+
+
+# --- load_scene_by_id ---
+
+
+@pytest.mark.asyncio
+async def test_load_scene_by_id_returns_correct_scene(db):
+    """load_scene_by_id returns the exact scene dict for a known ID."""
+    await db.save_scene(
+        {"id": "main", "name": "Main Stage", "mapping_type": "radial", "effect_mode": "spatial"}
+    )
+    await db.save_scene(
+        {"id": "booth", "name": "DJ Booth", "mapping_type": "linear", "effect_mode": "independent"}
+    )
+    scene = await db.load_scene_by_id("main")
+    assert scene is not None
+    assert scene["id"] == "main"
+    assert scene["name"] == "Main Stage"
+    assert scene["mapping_type"] == "radial"
+
+
+@pytest.mark.asyncio
+async def test_load_scene_by_id_returns_none_for_missing(db):
+    """load_scene_by_id returns None when the scene ID does not exist."""
+    result = await db.load_scene_by_id("nonexistent-scene")
+    assert result is None
+
+
+# --- device_exists ---
+
+
+@pytest.mark.asyncio
+async def test_device_exists_returns_true_for_known_device(db):
+    """device_exists returns True when the device has been upserted."""
+    await db.upsert_device({"id": "lifx:aa", "name": "Strip", "backend": "lifx", "led_count": 30})
+    assert await db.device_exists("lifx:aa") is True
+
+
+@pytest.mark.asyncio
+async def test_device_exists_returns_false_for_unknown_device(db):
+    """device_exists returns False when no matching device exists."""
+    assert await db.device_exists("govee:not-here") is False
+
+
+@pytest.mark.asyncio
+async def test_device_exists_false_after_delete(db):
+    """device_exists returns False once a device has been deleted."""
+    await db.upsert_device({"id": "lifx:aa", "name": "Strip", "backend": "lifx", "led_count": 30})
+    await db.delete_device("lifx:aa")
+    assert await db.device_exists("lifx:aa") is False
+
+
+# --- Migration rollback on failure ---
+
+
+@pytest.mark.asyncio
+async def test_migration_rollback_on_bad_sql(tmp_path):
+    """A migration with malformed SQL rolls back and leaves schema_version unchanged."""
+    import shutil
+
+    from dj_ledfx.persistence import state_db as state_db_module
+
+    # Open a fresh DB to apply the real migrations (version 2)
+    db_path = tmp_path / "state.db"
+    good_db = StateDB(db_path)
+    await good_db.open()
+    version_before = await good_db.get_schema_version()
+    await good_db.close()
+
+    # Inject a fake migration directory containing a bad SQL file at version 999
+    fake_migrations = tmp_path / "fake_migrations"
+    fake_migrations.mkdir()
+    # Copy existing valid migrations so the DB doesn't re-apply them
+    real_migrations = Path(state_db_module.__file__).parent / "migrations"
+    for f in real_migrations.glob("*.sql"):
+        shutil.copy(f, fake_migrations / f.name)
+    # Plant a bad migration that will cause a parse/execute error
+    (fake_migrations / "999_bad.sql").write_text("THIS IS NOT VALID SQL !!!;")
+
+    # Monkey-patch the migrations directory to point at our fake one
+    original_dir = state_db_module._MIGRATIONS_DIR
+    state_db_module._MIGRATIONS_DIR = fake_migrations
+    try:
+        bad_db = StateDB(db_path)
+        with pytest.raises(sqlite3.OperationalError):
+            await bad_db.open()
+        # Verify schema version was NOT advanced to 999
+        # Re-open with valid migrations to read the version
+        state_db_module._MIGRATIONS_DIR = original_dir
+        check_db = StateDB(db_path)
+        await check_db.open()
+        version_after = await check_db.get_schema_version()
+        await check_db.close()
+        assert version_after == version_before, (
+            f"Schema version should remain {version_before}, got {version_after}"
+        )
+    finally:
+        state_db_module._MIGRATIONS_DIR = original_dir
+
+
+# --- close() is safe during concurrent operation ---
+
+
+@pytest.mark.asyncio
+async def test_close_safe_during_concurrent_read(tmp_path):
+    """Calling close() while a read is in progress does not crash or deadlock."""
+    db_path = tmp_path / "state.db"
+    state_db = StateDB(db_path)
+    await state_db.open()
+
+    # Schedule a read and a close concurrently; both must complete without exception
+    async def do_read() -> None:
+        await state_db._execute_read("SELECT name FROM sqlite_master WHERE type='table'")
+
+    async def do_close() -> None:
+        await state_db.close()
+
+    # Run both; order is non-deterministic but neither must raise
+    results = await asyncio.gather(do_read(), do_close(), return_exceptions=True)
+    for result in results:
+        assert not isinstance(result, Exception), f"Unexpected exception: {result}"

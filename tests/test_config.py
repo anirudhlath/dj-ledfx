@@ -369,15 +369,13 @@ def test_save_config_atomic(tmp_path: Path) -> None:
 
 def test_discovery_config_defaults():
     dc = DiscoveryConfig()
-    assert dc.waves == 3
-    assert dc.wave_interval_s == 5.0
+    assert dc.broadcast_interval_s == 30.0
     assert dc.unicast_concurrency == 50
     assert dc.unicast_timeout_s == 0.5
     assert dc.subnet_mask == 24
-    assert dc.reconnect_interval_s == 30.0
 
 
 def test_app_config_has_discovery():
     config = AppConfig()
     assert isinstance(config.discovery, DiscoveryConfig)
-    assert config.discovery.waves == 3
+    assert config.discovery.broadcast_interval_s == 30.0

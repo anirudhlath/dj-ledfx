@@ -39,8 +39,7 @@ class DeviceResponse(BaseModel):
     send_fps: float = 0.0
     effective_latency_ms: float = 0.0
     frames_dropped: int = 0
-    connected: bool = True
-    status: str = "online"
+    status: Literal["online", "offline", "reconnecting"] = "online"
 
 
 class GroupRequest(BaseModel):
@@ -107,17 +106,17 @@ class SceneListItem(BaseModel):
     id: str
     name: str
     is_active: bool = False
-    mapping_type: str | None = None
-    effect_mode: str | None = None
+    mapping_type: Literal["linear", "radial"] | None = None
+    effect_mode: Literal["independent", "shared"] | None = None
 
 
 class CreateSceneRequest(BaseModel):
     name: str
-    mapping_type: str = "linear"
-    effect_mode: str = "independent"
+    mapping_type: Literal["linear", "radial"] = "linear"
+    effect_mode: Literal["independent", "shared"] = "independent"
 
 
 class UpdateSceneRequest(BaseModel):
     name: str | None = None
-    mapping_type: str | None = None
-    effect_mode: str | None = None
+    mapping_type: Literal["linear", "radial"] | None = None
+    effect_mode: Literal["independent", "shared"] | None = None
