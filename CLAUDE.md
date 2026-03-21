@@ -62,6 +62,9 @@ src/dj_ledfx/ layout:
 - `spatial/scene.py` — SceneModel: device placements, spatial configuration
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
 - `events.py` — Typed callback event bus (sync, non-blocking callbacks only)
+- `persistence/` — SQLite-backed state persistence (state_db.py, toml_io.py, debounced_writer.py, migrations/)
+- `devices/discovery.py` — DiscoveryOrchestrator: multi-wave scanning, fast reconnect, ghost promote/demote
+- `devices/ghost.py` — GhostAdapter: placeholder for offline devices (is_connected=False, send_frame no-op)
 - `status.py` — SystemStatus health tracking
 - `main.py` — Application coordinator (startup/shutdown orchestration)
 
@@ -104,6 +107,12 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Per-device send loops: each device runs at its natural FPS (bounded by configurable cap). Distributor writes target_time floats to depth-1 FrameSlots — no numpy copies until actual send.
 - Device-type heuristic latency: Govee WiFi=100ms, LIFX WiFi=50ms, USB=5ms. Seeds the latency strategy. OpenRGB adapters use heuristics permanently (supports_latency_probing=False).
 - DeviceAdapter is ABC (not Protocol). Provides supports_latency_probing class attribute. discover() excluded from base — adapters own their own discovery.
+- SQLite `state.db` is single source of truth at runtime; TOML is import/export format only
+- Device identity: MAC-based `stable_id` for cross-session matching via `DeviceInfo.effective_id` (falls back to name)
+- Web layer resolves display names → stable_ids before any DB write (placements, deletions)
+- Multi-scene: scenes activate/deactivate independently; conflict detection prevents same device in two active scenes
+- Ghost/promote/demote lifecycle: offline devices stay registered as GhostAdapters, get promoted when rediscovered
+- Discovery `skip_ids` must exclude offline devices — otherwise ghosts can never be re-promoted
 
 ## Logging Discipline
 
@@ -140,3 +149,9 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - R3F: optimistic state updates needed when dragging 3D objects to avoid position jumps during API round-trips
 - Config persistence: `dataclasses.asdict()` serializes field names as-is; `load_config` must match (e.g. `scene_config` not `scene`)
 - Device adapter: use `managed.adapter.device_info.name` (not `managed.adapter.name`) to get device name
+- SQLite: never use `INSERT OR REPLACE` on tables with FK cascades — it's `DELETE + INSERT`, silently wiping child rows. Use `INSERT ... ON CONFLICT DO UPDATE SET` instead
+- SQLite: `executescript()` issues implicit COMMIT before running — breaks transactional migrations. Use manual `BEGIN`/`COMMIT` with individual `execute()` calls
+- SQLite: single `asyncio.Lock` on StateDB protects the `sqlite3.Connection` object (not thread-safe despite `check_same_thread=False`), not DB-level locking
+- Scheduler hot path: don't `list()` wrap `dict.values()` iteration — unnecessary allocation at 60fps on single event loop
+- TOML serialization: use `json.dumps(v)` not `str(v)` for config values — `str(True)` produces `"True"` which fails `json.loads()` round-trip
+- `close()` on StateDB must acquire the lock to prevent races with in-flight `to_thread` operations
