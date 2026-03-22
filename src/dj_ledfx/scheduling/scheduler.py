@@ -12,7 +12,8 @@ from numpy.typing import NDArray
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.engine import RingBuffer
-from dj_ledfx.events import DeviceOfflineEvent, EventBus
+from dj_ledfx.events import DeviceOfflineEvent, EventBus, TransportStateChangedEvent
+from dj_ledfx.transport import TransportState
 from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.types import DeviceStats
 
@@ -83,6 +84,10 @@ class LookaheadScheduler:
         self._event_bus = event_bus
         self._frame_snapshots: dict[str, tuple[NDArray[np.uint8], int]] = {}
         self._frame_seq: dict[str, int] = {}
+        self._transport_state = TransportState.STOPPED
+        self._resume_event = asyncio.Event()
+        if event_bus is not None:
+            event_bus.subscribe(TransportStateChangedEvent, self._on_transport_changed)
 
         # Dict-based device state, keyed by stable_id (or name as fallback)
         self._device_state: dict[str, DeviceSendState] = {}
@@ -105,6 +110,17 @@ class LookaheadScheduler:
     @compositor.setter
     def compositor(self, value: SpatialCompositor | None) -> None:
         self._compositor = value
+
+    @property
+    def transport_state(self) -> TransportState:
+        return self._transport_state
+
+    def _on_transport_changed(self, event: TransportStateChangedEvent) -> None:
+        self._transport_state = event.new_state
+        if event.new_state.is_active:
+            self._resume_event.set()
+        else:
+            self._resume_event.clear()
 
     def add_device(self, managed: ManagedDevice, pipeline: ScenePipeline | None = None) -> None:
         """Add a device dynamically. Spawns a send task if the scheduler is running."""
@@ -138,6 +154,8 @@ class LookaheadScheduler:
 
     def stop(self) -> None:
         self._running = False
+        # Unblock any wait() so loops can check _running and exit
+        self._resume_event.set()
 
     async def run(self) -> None:
         self._running = True
@@ -152,29 +170,33 @@ class LookaheadScheduler:
             state.send_task = asyncio.create_task(self._send_loop(state, key))
 
         try:
-            # Run distributor loop
-            last_tick = time.monotonic()
+            # Run distributor loop — gated by transport state
             while self._running:
-                now = time.monotonic()
-                for state in self._device_state.values():
-                    slot = state.slot
-                    device = state.managed
-                    if slot.has_pending:
-                        logger.trace(
-                            "Frame overwritten for '{}' — device draining slower than engine",
-                            device.adapter.device_info.name,
-                        )
-                        metrics.FRAMES_DROPPED.labels(device=device.adapter.device_info.name).inc()
-                    target_time = now + device.tracker.effective_latency_s
-                    slot.put(target_time)
+                await self._resume_event.wait()
+                last_tick = time.monotonic()
+                while self._running and self._resume_event.is_set():
+                    now = time.monotonic()
+                    for state in self._device_state.values():
+                        slot = state.slot
+                        device = state.managed
+                        if slot.has_pending:
+                            logger.trace(
+                                "Frame overwritten for '{}' — device draining slower than engine",
+                                device.adapter.device_info.name,
+                            )
+                            metrics.FRAMES_DROPPED.labels(
+                                device=device.adapter.device_info.name
+                            ).inc()
+                        target_time = now + device.tracker.effective_latency_s
+                        slot.put(target_time)
 
-                last_tick += self._frame_period
-                sleep_time = last_tick - time.monotonic()
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-                else:
-                    last_tick = time.monotonic()
-                    await asyncio.sleep(0)
+                    last_tick += self._frame_period
+                    sleep_time = last_tick - time.monotonic()
+                    if sleep_time > 0:
+                        await asyncio.sleep(sleep_time)
+                    else:
+                        last_tick = time.monotonic()
+                        await asyncio.sleep(0)
         finally:
             # Clean up child tasks — runs on both normal exit and CancelledError
             # Snapshot to guard against concurrent add_device/remove_device calls
@@ -196,6 +218,7 @@ class LookaheadScheduler:
         last_send_time = time.monotonic()
 
         while self._running and key in self._device_state:
+            await self._resume_event.wait()
             if not device.adapter.is_connected:
                 if was_connected:
                     logger.warning(
@@ -249,21 +272,29 @@ class LookaheadScheduler:
                 mapped = compositor.composite(frame.colors, device.adapter.device_info.name)
                 if mapped is not None:
                     colors = mapped
-            send_start = time.monotonic()
-            try:
-                await device.adapter.send_frame(colors)
-            except Exception:
-                logger.warning(
-                    "Send failed for '{}'",
-                    device.adapter.device_info.name,
-                )
-                continue
 
-            send_elapsed = time.monotonic() - send_start
+            # Gate actual device send on transport state
+            if self._transport_state == TransportState.PLAYING:
+                send_start = time.monotonic()
+                try:
+                    await device.adapter.send_frame(colors)
+                except Exception:
+                    logger.warning(
+                        "Send failed for '{}'",
+                        device.adapter.device_info.name,
+                    )
+                    continue
+
+                send_elapsed = time.monotonic() - send_start
+                device_name = device.adapter.device_info.name
+                metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(send_elapsed)
+
+                if device.adapter.supports_latency_probing:
+                    rtt_ms = (time.monotonic() - send_start) * 1000.0
+                    device.tracker.update(rtt_ms)
+
             # Re-read name each iteration so promotion (ghost→real) is reflected immediately
             device_name = device.adapter.device_info.name
-            metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(send_elapsed)
-
             state.send_count += 1
             seq = self._frame_seq.get(device_name, 0) + 1
             self._frame_seq[device_name] = seq
@@ -272,10 +303,6 @@ class LookaheadScheduler:
                 device.tracker.effective_latency_s
             )
             metrics.DEVICE_FPS.labels(device=device_name).set(device.max_fps)
-
-            if device.adapter.supports_latency_probing:
-                rtt_ms = (time.monotonic() - send_start) * 1000.0
-                device.tracker.update(rtt_ms)
 
             min_frame_interval = 1.0 / device.max_fps
             last_send_time += min_frame_interval
