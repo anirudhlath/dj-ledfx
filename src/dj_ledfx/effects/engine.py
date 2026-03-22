@@ -9,7 +9,9 @@ from loguru import logger
 from dj_ledfx import metrics
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.effects.deck import EffectDeck
+from dj_ledfx.events import EventBus, TransportStateChangedEvent
 from dj_ledfx.spatial.pipeline import ScenePipeline
+from dj_ledfx.transport import TransportState
 from dj_ledfx.types import RenderedFrame
 
 
@@ -61,6 +63,11 @@ class RingBuffer:
     def fill_level(self) -> float:
         return self._count / self._capacity
 
+    def clear(self) -> None:
+        self._frames = [None] * self._capacity
+        self._write_index = 0
+        self._count = 0
+
 
 class EffectEngine:
     def __init__(
@@ -71,6 +78,7 @@ class EffectEngine:
         fps: int = 60,
         max_lookahead_s: float = 1.0,
         pipelines: list[ScenePipeline] | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._clock = clock
         self._deck = deck
@@ -82,6 +90,9 @@ class EffectEngine:
         self._running = False
         self._last_tick_time = 0.0
         self._render_times: deque[float] = deque(maxlen=fps * 10)
+        self._event_bus = event_bus
+        self._transport_state = TransportState.STOPPED
+        self._resume_event = asyncio.Event()
 
         # Always maintain a non-empty pipelines list: build a default pipeline
         # from the engine's own deck and ring_buffer when none are provided.
@@ -104,6 +115,26 @@ class EffectEngine:
         if not self._render_times:
             return 0.0
         return sum(self._render_times) / len(self._render_times) * 1000.0
+
+    @property
+    def transport_state(self) -> TransportState:
+        return self._transport_state
+
+    def set_transport_state(self, state: TransportState) -> None:
+        old = self._transport_state
+        if old == state:
+            return
+        self._transport_state = state
+        if state.is_active:
+            self._resume_event.set()
+        else:
+            self._resume_event.clear()
+            for pipeline in self.pipelines:
+                pipeline.ring_buffer.clear()
+            self.ring_buffer.clear()
+        if self._event_bus is not None:
+            self._event_bus.emit(TransportStateChangedEvent(old_state=old, new_state=state))
+        logger.info("Transport: {} → {}", old.value, state.value)
 
     def tick(self, now: float) -> None:
         target_time = now + self._max_lookahead_s
@@ -143,7 +174,6 @@ class EffectEngine:
     async def run(self) -> None:
         self._running = True
         metrics.RENDER_FPS.set(self._fps)
-        self._last_tick_time = time.monotonic()
         logger.info(
             "EffectEngine started: {}fps, {}ms lookahead, {} LEDs",
             self._fps,
@@ -152,15 +182,18 @@ class EffectEngine:
         )
 
         while self._running:
-            now = time.monotonic()
-            self.tick(now)
+            await self._resume_event.wait()
+            self._last_tick_time = time.monotonic()
+            while self._running and self._resume_event.is_set():
+                now = time.monotonic()
+                self.tick(now)
 
-            self._last_tick_time += self._frame_period
-            sleep_time = self._last_tick_time - time.monotonic()
-            if sleep_time > 0:
-                await asyncio.sleep(sleep_time)
-            else:
-                self._last_tick_time = time.monotonic()
-                await asyncio.sleep(0)
+                self._last_tick_time += self._frame_period
+                sleep_time = self._last_tick_time - time.monotonic()
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
+                else:
+                    self._last_tick_time = time.monotonic()
+                    await asyncio.sleep(0)
 
         logger.info("EffectEngine stopped")
