@@ -32,9 +32,9 @@
 - `src/dj_ledfx/devices/adapter.py` — add `capture_state()` and `restore_state()` with defaults
 - `src/dj_ledfx/devices/manager.py` — call `capture_state()` on connect when stopped
 - `src/dj_ledfx/persistence/state_db.py` — add `save_device_state()`, `load_device_state()`, `load_all_device_states()`
-- `src/dj_ledfx/web/app.py` — include transport router, pass engine to `create_app`
-- `src/dj_ledfx/web/ws.py` — add `transport` channel broadcast, `set_transport` action, transport in `_status_poll`
-- `src/dj_ledfx/main.py` — wire up transport state, pass event_bus to engine
+- `src/dj_ledfx/web/app.py` — include transport router, add `event_bus` param to `create_app`, start transport broadcast task
+- `src/dj_ledfx/web/ws.py` — add `_transport_broadcast` task (EventBus-driven), `set_transport` action, transport in `_status_poll`, `connected_websockets` registry
+- `src/dj_ledfx/main.py` — wire up transport state, pass event_bus to engine and create_app
 - `frontend/src/lib/types.ts` — add `TransportState` type
 - `frontend/src/lib/api-client.ts` — add `getTransport()`, `setTransport()` methods
 - `frontend/src/lib/ws-client.ts` — add `onTransport` callback support
@@ -651,12 +651,10 @@ The remaining code after this block (`state.send_count += 1`, snapshot update, `
 Also add a `_resume_event.wait()` at the start of the `_send_loop` while loop, right after the `while self._running and key in self._device_state:` line:
 
 ```python
-            if not self._resume_event.is_set():
-                try:
-                    await asyncio.wait_for(self._resume_event.wait(), timeout=1.0)
-                except TimeoutError:
-                    continue
+            await self._resume_event.wait()
 ```
+
+This blocks cleanly until the transport state becomes active — no polling, no timeout. The `_resume_event` is set/cleared by `_on_transport_changed`, so the send loop wakes instantly on state change.
 
 - [ ] **Step 4: Run scheduler transport tests**
 
@@ -814,45 +812,49 @@ In `src/dj_ledfx/persistence/state_db.py`, add after the presets section (near e
 
 ```python
 # tests/persistence/test_device_saved_state.py
-import asyncio
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from dj_ledfx.persistence.state_db import StateDB
 
 
-@pytest.fixture
-def db(tmp_path: Path):
+@pytest_asyncio.fixture
+async def db(tmp_path: Path):
     db = StateDB(tmp_path / "state.db")
-    asyncio.run(db.open())
+    await db.open()
     yield db
-    asyncio.run(db.close())
+    await db.close()
 
 
-def test_save_and_load_device_state(db):
+@pytest.mark.asyncio
+async def test_save_and_load_device_state(db):
     state_bytes = b"\x80\x80\x80" * 3
-    asyncio.run(db.save_device_state("mac:aa:bb:cc", state_bytes))
-    loaded = asyncio.run(db.load_device_state("mac:aa:bb:cc"))
+    await db.save_device_state("mac:aa:bb:cc", state_bytes)
+    loaded = await db.load_device_state("mac:aa:bb:cc")
     assert loaded == state_bytes
 
 
-def test_load_missing_device_state(db):
-    loaded = asyncio.run(db.load_device_state("nonexistent"))
+@pytest.mark.asyncio
+async def test_load_missing_device_state(db):
+    loaded = await db.load_device_state("nonexistent")
     assert loaded is None
 
 
-def test_load_all_device_states(db):
-    asyncio.run(db.save_device_state("id1", b"\x01"))
-    asyncio.run(db.save_device_state("id2", b"\x02"))
-    all_states = asyncio.run(db.load_all_device_states())
+@pytest.mark.asyncio
+async def test_load_all_device_states(db):
+    await db.save_device_state("id1", b"\x01")
+    await db.save_device_state("id2", b"\x02")
+    all_states = await db.load_all_device_states()
     assert all_states == {"id1": b"\x01", "id2": b"\x02"}
 
 
-def test_save_device_state_upserts(db):
-    asyncio.run(db.save_device_state("id1", b"\x01"))
-    asyncio.run(db.save_device_state("id1", b"\x02"))
-    loaded = asyncio.run(db.load_device_state("id1"))
+@pytest.mark.asyncio
+async def test_save_device_state_upserts(db):
+    await db.save_device_state("id1", b"\x01")
+    await db.save_device_state("id1", b"\x02")
+    loaded = await db.load_device_state("id1")
     assert loaded == b"\x02"
 ```
 
@@ -916,6 +918,8 @@ In `src/dj_ledfx/scheduling/scheduler.py`, update `_on_transport_changed`:
     async def _restore_device_states(self) -> None:
         if self._state_db is None:
             return
+        # Yield to let in-flight send loops drain before restoring
+        await asyncio.sleep(0)
         saved = await self._state_db.load_all_device_states()
         for key, state in self._device_state.items():
             device = state.managed
@@ -1013,6 +1017,7 @@ def _make_app():
         compositor=None,
         config=MagicMock(),
         config_path="config.toml",
+        event_bus=bus,
     )
     return app, engine
 
@@ -1177,6 +1182,7 @@ def _make_app():
         compositor=None,
         config=MagicMock(),
         config_path="config.toml",
+        event_bus=bus,
     )
     return app, engine
 
@@ -1245,9 +1251,9 @@ from dj_ledfx.transport import TransportState
             await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(e)})
 ```
 
-4. Add a broadcast registry and transport broadcast.
+4. Add a WS client registry and EventBus-driven transport broadcast.
 
-In `src/dj_ledfx/web/state.py`, add a module-level set to track connected websockets:
+In `src/dj_ledfx/web/ws.py`, add a module-level set to track connected websockets:
 
 ```python
 connected_websockets: set[WebSocket] = set()
@@ -1266,12 +1272,12 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         # ... existing cleanup ...
 ```
 
-Add a broadcast helper and a transport state poll that subscribes to `TransportStateChangedEvent`:
+Add a broadcast helper:
 
 ```python
-async def broadcast_transport(state_value: str) -> None:
-    """Broadcast transport state change to all connected WS clients."""
-    msg = json.dumps({"channel": "transport", "state": state_value})
+async def _broadcast_json(data: dict[str, Any]) -> None:
+    """Broadcast JSON message to all connected WS clients."""
+    msg = json.dumps(data)
     for ws in list(connected_websockets):
         try:
             await ws.send_text(msg)
@@ -1279,11 +1285,11 @@ async def broadcast_transport(state_value: str) -> None:
             pass
 ```
 
-In `ws_endpoint()`, start a `_transport_poll` task that subscribes to transport events and broadcasts immediately:
+Add an EventBus-driven transport broadcast task (no polling — uses `asyncio.Queue` as an event bridge):
 
 ```python
-async def _transport_poll(app: Any) -> None:
-    """Listen for transport state changes and broadcast to all clients."""
+async def _transport_broadcast(app: Any) -> None:
+    """Listen for transport state changes via EventBus and broadcast instantly."""
     event_bus = app.state.event_bus
     queue: asyncio.Queue[str] = asyncio.Queue()
 
@@ -1294,34 +1300,39 @@ async def _transport_poll(app: Any) -> None:
     try:
         while True:
             state_value = await queue.get()
-            await broadcast_transport(state_value)
+            await _broadcast_json({"channel": "transport", "state": state_value})
     finally:
         event_bus.unsubscribe(TransportStateChangedEvent, on_change)
 ```
 
-Start this task once globally (not per-client). In `create_app()` in `app.py`, add a startup event:
+This is event-driven: the EventBus callback puts the state into a queue (sync, non-blocking), the broadcast task awaits the queue and sends instantly. No polling.
+
+5. Start the broadcast task globally via `create_app()`.
+
+In `src/dj_ledfx/web/app.py`:
+
+Add `event_bus` parameter to `create_app()`:
+
+```python
+def create_app(
+    # ... existing params ...
+    event_bus: EventBus | None = None,
+) -> FastAPI:
+    # ... existing code ...
+    app.state.event_bus = event_bus
+```
+
+Add a startup event to launch the broadcast task:
 
 ```python
     @app.on_event("startup")
     async def _start_transport_broadcast() -> None:
-        from dj_ledfx.web.ws import _transport_poll
-        asyncio.create_task(_transport_poll(app))
+        if app.state.event_bus is not None:
+            from dj_ledfx.web.ws import _transport_broadcast
+            asyncio.create_task(_transport_broadcast(app))
 ```
 
-Alternatively, the simpler approach: since `set_transport_state` is called from the WS `set_transport` handler and the REST `set_transport` endpoint, both can call `broadcast_transport()` directly after `engine.set_transport_state()`. This avoids the EventBus subscription complexity in the web layer. Update both the WS handler and the REST endpoint:
-
-In `ws.py` `_handle_command`, after `engine.set_transport_state(new_state)`:
-```python
-            await broadcast_transport(new_state.value)
-```
-
-In `router_transport.py` `set_transport`, after `engine.set_transport_state(new_state)`:
-```python
-    from dj_ledfx.web.ws import broadcast_transport
-    await broadcast_transport(new_state.value)
-```
-
-**Use the simpler approach** (broadcast from the call sites) since transport state can only change via these two API entry points.
+This ensures any transport state change from ANY source (REST, WS, or future CLI) broadcasts instantly to all clients.
 
 - [ ] **Step 4: Run WS transport tests**
 
@@ -1370,7 +1381,7 @@ Find where `LookaheadScheduler` is constructed (around line 299-305). Add `state
 ```python
     scheduler = LookaheadScheduler(
         ring_buffer=engine.ring_buffer,
-        devices=list(device_manager.devices_iter()),
+        devices=list(device_manager.devices),
         fps=config.engine.fps,
         compositor=compositor,
         event_bus=event_bus,
@@ -1388,12 +1399,23 @@ After DeviceManager is created and state_db is opened, add:
     device_manager.set_state_db(state_db)
 ```
 
-- [ ] **Step 4: Run full test suite**
+- [ ] **Step 4: Pass event_bus to create_app**
+
+In the web server setup section of `main.py`, add `event_bus=event_bus` to the `create_app()` call:
+
+```python
+    app = create_app(
+        # ... existing params ...
+        event_bus=event_bus,
+    )
+```
+
+- [ ] **Step 5: Run full test suite**
 
 Run: `uv run pytest -x -v`
 Expected: All PASS. Fix any failures from the new STOPPED-by-default behavior breaking existing tests that assume the engine auto-renders. Likely fixes: existing tests that call `engine.run()` or `scheduler.run()` and expect frames need to set transport to PLAYING first.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/dj_ledfx/main.py
@@ -1639,8 +1661,9 @@ export function TransportSection({ beat, transportState, onTransportChange }: Tr
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
+      const el = e.target as HTMLElement
+      const tag = el?.tagName
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return
 
       if (e.code === "Space") {
         e.preventDefault()
@@ -1805,16 +1828,33 @@ Run: `uv run pytest -x -v`
 
 - [ ] **Step 2: Fix any failures**
 
-Expected failures: tests that create an `EffectEngine` and call `run()` expecting frames without setting transport state. Fix pattern:
+Expected failures: tests that create an `EffectEngine` or `LookaheadScheduler` and call `run()` expecting frames without setting transport state. Apply these fixes:
 
-For tests that test the engine run loop directly: set transport state to PLAYING before calling `run()`:
+**Strategy A — Direct `_resume_event.set()` (preferred for existing tests):**
+For tests that don't pass an `event_bus`, set the event directly before calling `run()`:
 ```python
-engine.set_transport_state(TransportState.PLAYING)
+engine._resume_event.set()
+# or
+scheduler._resume_event.set()
 ```
 
-For tests that create a scheduler and expect frame flow: emit a `TransportStateChangedEvent` via the EventBus first.
+**Strategy B — Via transport state (for tests that have an event_bus):**
+```python
+engine.set_transport_state(TransportState.PLAYING)
+# or emit via EventBus for scheduler:
+event_bus.emit(TransportStateChangedEvent(
+    old_state=TransportState.STOPPED,
+    new_state=TransportState.PLAYING,
+))
+```
 
-For existing tests that call `tick()` directly: no change needed — `tick()` is not gated, only `run()` is.
+**No change needed:** Tests that call `tick()` directly — `tick()` is not gated, only `run()` is.
+
+**Key files likely affected:**
+- `tests/effects/test_engine.py` — any test calling `engine.run()`
+- `tests/scheduling/test_scheduler.py` — all tests calling `scheduler.run()`
+- `tests/test_integration.py` — full pipeline tests
+- `tests/web/test_ws.py` — WS tests that depend on frame flow
 
 - [ ] **Step 3: Run full test suite again**
 
