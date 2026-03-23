@@ -42,8 +42,9 @@ def render(self, ctx: BeatContext, led_count: int) -> NDArray[np.uint8]
 Breaking change — requires updating:
 - `Effect` ABC in `effects/base.py`
 - `EffectDeck.render()` in `effects/deck.py`
-- `EffectEngine.tick()` in `effects/engine.py` (constructs `BeatContext` from `BeatState` + frame period)
+- `EffectEngine.tick()` in `effects/engine.py` — constructs `BeatContext` from `BeatState` + frame period. Note: `bpm` is a **net-new data flow** through the render pipeline. Currently `tick()` reads `state.beat_phase` and `state.bar_phase` from `BeatState` but never forwards `state.bpm`. With `BeatContext`, `bpm` flows from `BeatClock` → `BeatState` → `BeatContext` → effects for the first time.
 - `BeatPulse` in `effects/beat_pulse.py`
+- `tests/effects/test_beat_pulse.py` (7 direct `.render()` calls with old signature)
 - Test effects in `tests/effects/test_registry.py` (helper effect classes define `render()`)
 - Direct `deck.render()` calls in `tests/effects/test_deck.py`
 - All other tests that call `render()` or mock it (grep for `\.render(` across `tests/`)
@@ -130,7 +131,7 @@ Sharp beat-locked flash. The "drop" effect.
 ```
 energy = bpm_energy(ctx.bpm)
 # Snap to nearest power of 2: for max_subdivision=4, gives 1, 2, or 4
-subdivision = 2 ** round(log2(lerp(1, max_subdivision, energy)))
+subdivision = 2 ** round(math.log2(lerp(1, max_subdivision, energy)))
 sub_phase = (ctx.beat_phase * subdivision) % 1.0
 on = sub_phase < duty_cycle
 # Derive beat index from bar_phase (0-3 across the 4-beat bar)
@@ -161,7 +162,7 @@ Moving color bands traveling along the strip. The "groove" effect.
 energy = bpm_energy(ctx.bpm)
 speed = 1.0 + energy * 2.0
 effective_bands = band_count + energy * 2.0
-positions = np.linspace(0, 1, led_count) + beat_phase * speed
+positions = np.linspace(0, 1, led_count) + ctx.beat_phase * speed
 if direction == "reverse": positions = -positions
 output = palette_lerp(palette, (positions * effective_bands) % 1.0)
 ```
@@ -187,8 +188,8 @@ Smooth hue rotation flowing across the strip. Universal crowd-pleaser.
 ```
 energy = bpm_energy(ctx.bpm)
 speed = 1.0 + energy
-hues = (np.linspace(0, wave_count, led_count) + bar_phase * speed) % 1.0
-value = 1.0 - beat_pulse * ease_in(beat_phase, 2)
+hues = (np.linspace(0, wave_count, led_count) + ctx.bar_phase * speed) % 1.0
+value = 1.0 - beat_pulse * ease_in(ctx.beat_phase, 2)
 output = hsv_to_rgb_array(hues, saturation, value)
 ```
 
@@ -247,7 +248,21 @@ output = palette_lerp(palette, smoothed) * brightness[:, np.newaxis]
 - **BeatPulse** stays as-is (migrated to `BeatContext` signature but behavior unchanged)
 
 ## Testing Strategy
-- Unit tests for each utility function (color, easing, energy)
-- Unit tests for each effect: verify output shape, dtype, value ranges, energy adaptation behavior
-- BeatPulse regression test: verify identical output after `BeatContext` migration
-- Integration: existing pipeline tests continue to work after signature migration
+
+Test files mirror source structure:
+
+**Utility tests:**
+- `tests/effects/test_color.py` — hex/rgb conversion, hsv_to_rgb_array, palette_lerp
+- `tests/effects/test_easing.py` — lerp, ease_in, ease_out, ease_in_out, sine_ease (float and array inputs)
+- `tests/effects/test_energy.py` — bpm_energy boundary behavior
+
+**Effect tests:**
+- `tests/effects/test_breathe.py` — output shape/dtype, brightness range respects min_brightness, energy adaptation
+- `tests/effects/test_strobe.py` — on/off behavior, subdivision at different BPMs, duty cycle
+- `tests/effects/test_color_chase.py` — spatial gradient, direction reversal, single-LED degradation
+- `tests/effects/test_rainbow_wave.py` — hue distribution, beat pulse modulation
+- `tests/effects/test_fire_storm.py` — temporal smoothing, statefulness, output range
+
+**Migration tests:**
+- BeatPulse regression: verify identical output after `BeatContext` migration
+- Existing pipeline/engine/deck tests updated and passing after signature change
