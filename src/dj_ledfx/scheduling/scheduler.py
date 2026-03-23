@@ -18,6 +18,7 @@ from dj_ledfx.transport import TransportState
 from dj_ledfx.types import DeviceStats
 
 if TYPE_CHECKING:
+    from dj_ledfx.devices.adapter import DeviceAdapter
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.spatial.pipeline import ScenePipeline
 
@@ -135,26 +136,31 @@ class LookaheadScheduler:
         saved_states = await self._state_db.load_all_device_states()
         if not saved_states:
             return
-        for state in self._device_state.values():
-            adapter = state.managed.adapter
-            if not adapter.is_connected:
-                continue
-            stable_id = adapter.device_info.effective_id
-            state_bytes = saved_states.get(stable_id)
-            if state_bytes is None:
-                continue
+
+        async def _restore_one(adapter: DeviceAdapter, state_bytes: bytes) -> None:
             try:
                 await adapter.restore_state(state_bytes)
                 logger.debug(
                     "Restored state for device '{}' (stable_id={})",
                     adapter.device_info.name,
-                    stable_id,
+                    adapter.device_info.effective_id,
                 )
             except Exception:
                 logger.warning(
                     "Failed to restore state for device '{}'",
                     adapter.device_info.name,
                 )
+
+        tasks = []
+        for state in self._device_state.values():
+            adapter = state.managed.adapter
+            if not adapter.is_connected:
+                continue
+            state_bytes = saved_states.get(adapter.device_info.effective_id)
+            if state_bytes is not None:
+                tasks.append(_restore_one(adapter, state_bytes))
+        if tasks:
+            await asyncio.gather(*tasks)
 
     def add_device(self, managed: ManagedDevice, pipeline: ScenePipeline | None = None) -> None:
         """Add a device dynamically. Spawns a send task if the scheduler is running."""
@@ -188,7 +194,6 @@ class LookaheadScheduler:
 
     def stop(self) -> None:
         self._running = False
-        # Unblock any wait() so loops can check _running and exit
         self._resume_event.set()
 
     async def run(self) -> None:
@@ -252,7 +257,10 @@ class LookaheadScheduler:
         last_send_time = time.monotonic()
 
         while self._running and key in self._device_state:
-            await self._resume_event.wait()
+            if not self._resume_event.is_set():
+                await self._resume_event.wait()
+                if not self._running:
+                    break
             if not device.adapter.is_connected:
                 if was_connected:
                     logger.warning(
@@ -298,7 +306,6 @@ class LookaheadScheduler:
                 continue
 
             colors = frame.colors
-            # Use pipeline's compositor if pipeline set, else scheduler-level compositor
             compositor = (
                 state.pipeline.compositor if state.pipeline is not None else self._compositor
             )
@@ -307,7 +314,6 @@ class LookaheadScheduler:
                 if mapped is not None:
                     colors = mapped
 
-            # Re-read name each iteration so promotion (ghost->real) is reflected immediately
             device_name = device.adapter.device_info.name
 
             # Gate actual device send on transport state
@@ -323,16 +329,19 @@ class LookaheadScheduler:
                 metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(send_elapsed)
 
                 if device.adapter.supports_latency_probing:
-                    rtt_ms = (time.monotonic() - send_start) * 1000.0
+                    rtt_ms = send_elapsed * 1000.0
                     device.tracker.update(rtt_ms)
-            state.send_count += 1
+
+                state.send_count += 1
+                metrics.DEVICE_LATENCY.labels(device=device_name).set(
+                    device.tracker.effective_latency_s
+                )
+                metrics.DEVICE_FPS.labels(device=device_name).set(device.max_fps)
+
+            # Always update frame snapshots (needed for WS preview in SIMULATING mode)
             seq = self._frame_seq.get(device_name, 0) + 1
             self._frame_seq[device_name] = seq
             self._frame_snapshots[device_name] = (colors, seq)
-            metrics.DEVICE_LATENCY.labels(device=device_name).set(
-                device.tracker.effective_latency_s
-            )
-            metrics.DEVICE_FPS.labels(device=device_name).set(device.max_fps)
 
             min_frame_interval = 1.0 / device.max_fps
             last_send_time += min_frame_interval

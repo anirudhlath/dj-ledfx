@@ -129,9 +129,15 @@ class EffectEngine:
             self._resume_event.set()
         else:
             self._resume_event.clear()
+            cleared: set[int] = set()
             for pipeline in self.pipelines:
-                pipeline.ring_buffer.clear()
-            self.ring_buffer.clear()
+                buf_id = id(pipeline.ring_buffer)
+                if buf_id not in cleared:
+                    pipeline.ring_buffer.clear()
+                    cleared.add(buf_id)
+            buf_id = id(self.ring_buffer)
+            if buf_id not in cleared:
+                self.ring_buffer.clear()
         if self._event_bus is not None:
             self._event_bus.emit(TransportStateChangedEvent(old_state=old, new_state=state))
         logger.info("Transport: {} → {}", old.value, state.value)
@@ -170,7 +176,6 @@ class EffectEngine:
 
     def stop(self) -> None:
         self._running = False
-        # Unblock _resume_event.wait() so run() can observe _running=False and exit
         self._resume_event.set()
 
     async def run(self) -> None:

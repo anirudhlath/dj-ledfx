@@ -14,7 +14,12 @@ from dj_ledfx.events import TransportStateChangedEvent
 from dj_ledfx.transport import TransportState
 from dj_ledfx.web.state import ClientSubscription
 
-connected_websockets: set[WebSocket] = set()
+
+def _get_connected(app: Any) -> set[WebSocket]:
+    """Return the per-app connected websockets set, creating if needed."""
+    if not hasattr(app.state, "connected_websockets"):
+        app.state.connected_websockets = set()
+    return app.state.connected_websockets
 
 
 async def ws_endpoint(websocket: WebSocket) -> None:
@@ -23,7 +28,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     app = websocket.app
     sub = ClientSubscription()
     tasks: list[asyncio.Task[None]] = []
-    connected_websockets.add(websocket)
+    _get_connected(app).add(websocket)
 
     try:
         # Start polling tasks
@@ -44,7 +49,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     except Exception as e:
         logger.debug("WebSocket error: {}", e)
     finally:
-        connected_websockets.discard(websocket)
+        _get_connected(app).discard(websocket)
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -58,13 +63,13 @@ async def _send_json(ws: WebSocket, data: dict[str, Any]) -> None:
         pass
 
 
-async def _broadcast_json(data: dict[str, Any]) -> None:
+async def _broadcast_json(app: Any, data: dict[str, Any]) -> None:
     """Broadcast JSON message to all connected WebSocket clients."""
-    for ws in list(connected_websockets):
+    for ws in list(_get_connected(app)):
         await _send_json(ws, data)
 
 
-async def _transport_broadcast(app: Any) -> None:
+async def transport_broadcast(app: Any) -> None:
     """Listen for TransportStateChangedEvent and broadcast to all WS clients."""
     event_bus = app.state.event_bus
     queue: asyncio.Queue[str] = asyncio.Queue()
@@ -76,7 +81,7 @@ async def _transport_broadcast(app: Any) -> None:
     try:
         while True:
             state_value = await queue.get()
-            await _broadcast_json({"channel": "transport", "state": state_value})
+            await _broadcast_json(app, {"channel": "transport", "state": state_value})
     finally:
         event_bus.unsubscribe(TransportStateChangedEvent, on_change)
 

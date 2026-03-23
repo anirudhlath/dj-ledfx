@@ -1,5 +1,3 @@
-import type { TransportState } from "./types"
-
 type JsonMessage = {
   channel: string
   [key: string]: unknown
@@ -24,7 +22,6 @@ export class WsClient {
   private handlers = new Map<string, Set<MessageHandler>>()
   private frameHandlers = new Set<FrameHandler>()
   private connectionHandlers = new Set<ConnectionHandler>()
-  private transportCallbacks = new Set<(state: TransportState) => void>()
   private pendingAcks = new Map<
     number,
     { resolve: (v: JsonMessage) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
@@ -66,11 +63,6 @@ export class WsClient {
   onConnectionChange(handler: ConnectionHandler): () => void {
     this.connectionHandlers.add(handler)
     return () => this.connectionHandlers.delete(handler)
-  }
-
-  onTransport(cb: (state: TransportState) => void): () => void {
-    this.transportCallbacks.add(cb)
-    return () => this.transportCallbacks.delete(cb)
   }
 
   private _connect(): void {
@@ -127,19 +119,6 @@ export class WsClient {
             pending.resolve(msg)
           }
         }
-      }
-
-      switch (channel) {
-        case "transport":
-          if (typeof msg.state === "string") {
-            for (const cb of this.transportCallbacks) cb(msg.state as TransportState)
-          }
-          break
-        case "status":
-          if (msg.transport && typeof msg.transport === "string") {
-            for (const cb of this.transportCallbacks) cb(msg.transport as TransportState)
-          }
-          break
       }
 
       const handlers = this.handlers.get(channel)

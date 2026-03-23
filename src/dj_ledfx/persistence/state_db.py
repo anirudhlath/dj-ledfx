@@ -459,15 +459,12 @@ class StateDB:
 
     async def save_device_state(self, stable_id: str, state_bytes: bytes) -> None:
         """Upsert the saved LED state for a device."""
-        import datetime
-
-        captured_at = datetime.datetime.now(datetime.UTC).isoformat()
         await self._execute_write(
             "INSERT INTO device_saved_state (stable_id, state_bytes, captured_at) "
-            "VALUES (?, ?, ?) "
+            "VALUES (?, ?, datetime('now')) "
             "ON CONFLICT(stable_id) DO UPDATE SET state_bytes=excluded.state_bytes, "
-            "captured_at=excluded.captured_at",
-            (stable_id, state_bytes, captured_at),
+            "captured_at=datetime('now')",
+            (stable_id, state_bytes),
         )
 
     async def load_device_state(self, stable_id: str) -> bytes | None:
