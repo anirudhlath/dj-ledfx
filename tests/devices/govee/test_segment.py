@@ -8,7 +8,9 @@ import pytest
 
 from dj_ledfx.devices.govee.protocol import xor_checksum
 from dj_ledfx.devices.govee.segment import GoveeSegmentAdapter
+from dj_ledfx.devices.govee.state import GoveeDeviceState
 from dj_ledfx.devices.govee.types import GoveeDeviceRecord
+from dj_ledfx.spatial.geometry import StripGeometry
 
 
 @pytest.fixture
@@ -25,7 +27,9 @@ def record() -> GoveeDeviceRecord:
 @pytest.fixture
 def mock_transport() -> MagicMock:
     transport = MagicMock()
-    transport.query_status = AsyncMock(return_value={"onOff": 1})
+    transport.query_status = AsyncMock(
+        return_value={"onOff": 1, "brightness": 80, "color": {"r": 100, "g": 150, "b": 200}}
+    )
     transport.send_command = AsyncMock()
     return transport
 
@@ -119,3 +123,79 @@ class TestGoveeSegmentAdapter:
         payload = mock_transport.send_command.call_args[0][1]
         commands = payload["msg"]["data"]["command"]
         assert len(commands) == 3
+
+    def test_geometry_returns_strip(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=15)
+        geo = adapter.geometry
+        assert isinstance(geo, StripGeometry)
+        assert geo.direction == (1, 0, 0)
+        assert geo.length == 1.0
+
+    @pytest.mark.asyncio
+    async def test_connect_captures_original_state(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        mock_transport.query_status = AsyncMock(
+            return_value={"onOff": 0, "brightness": 50, "color": {"r": 10, "g": 20, "b": 30}}
+        )
+        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=15)
+        await adapter.connect()
+        assert adapter._original_state is not None
+        assert adapter._original_state.on_off == 0
+        assert adapter._original_state.brightness == 50
+        assert adapter._original_state.r == 10
+
+    @pytest.mark.asyncio
+    async def test_capture_state_returns_original(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        mock_transport.query_status = AsyncMock(
+            return_value={"onOff": 0, "brightness": 50, "color": {"r": 10, "g": 20, "b": 30}}
+        )
+        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=15)
+        await adapter.connect()
+        state_bytes = await adapter.capture_state()
+        restored = GoveeDeviceState.from_bytes(state_bytes)
+        assert restored.on_off == 0
+        assert restored.brightness == 50
+        assert restored.r == 10
+
+    @pytest.mark.asyncio
+    async def test_restore_state_sends_commands(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=15)
+        await adapter.connect()
+        mock_transport.send_command.reset_mock()
+
+        state = GoveeDeviceState(on_off=0, brightness=50, r=10, g=20, b=30)
+        await adapter.restore_state(state.to_bytes())
+
+        calls = mock_transport.send_command.call_args_list
+        # Should send: color, brightness, turn off (3 commands)
+        assert len(calls) == 3
+        assert calls[0][0][1]["msg"]["cmd"] == "colorwc"
+        assert calls[0][0][1]["msg"]["data"]["color"] == {"r": 10, "g": 20, "b": 30}
+        assert calls[1][0][1]["msg"]["cmd"] == "brightness"
+        assert calls[1][0][1]["msg"]["data"]["value"] == 50
+        assert calls[2][0][1]["msg"]["cmd"] == "turn"
+        assert calls[2][0][1]["msg"]["data"]["value"] == 0
+
+    @pytest.mark.asyncio
+    async def test_restore_state_skips_turn_off_when_on(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=15)
+        await adapter.connect()
+        mock_transport.send_command.reset_mock()
+
+        state = GoveeDeviceState(on_off=1, brightness=80, r=255, g=255, b=255)
+        await adapter.restore_state(state.to_bytes())
+
+        calls = mock_transport.send_command.call_args_list
+        # Should send: color, brightness (no turn off since on_off=1)
+        assert len(calls) == 2
+        assert calls[0][0][1]["msg"]["cmd"] == "colorwc"
+        assert calls[1][0][1]["msg"]["cmd"] == "brightness"

@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
+from dj_ledfx.devices.govee.state import GoveeDeviceState
 from dj_ledfx.devices.govee.types import GoveeDeviceRecord
+from dj_ledfx.spatial.geometry import PointGeometry
 
 
 @pytest.fixture
@@ -23,7 +25,9 @@ def record() -> GoveeDeviceRecord:
 @pytest.fixture
 def mock_transport() -> MagicMock:
     transport = MagicMock()
-    transport.query_status = AsyncMock(return_value={"onOff": 1, "brightness": 100})
+    transport.query_status = AsyncMock(
+        return_value={"onOff": 1, "brightness": 100, "color": {"r": 255, "g": 255, "b": 255}}
+    )
     transport.send_command = AsyncMock()
     return transport
 
@@ -103,3 +107,57 @@ class TestGoveeSolidAdapter:
         assert ip == "192.168.1.23"
         assert payload["msg"]["cmd"] == "colorwc"
         assert payload["msg"]["data"]["color"] == {"r": 255, "g": 128, "b": 0}
+
+    def test_geometry_returns_point(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        adapter = GoveeSolidAdapter(mock_transport, record)
+        geo = adapter.geometry
+        assert isinstance(geo, PointGeometry)
+
+    @pytest.mark.asyncio
+    async def test_connect_captures_original_state(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        mock_transport.query_status = AsyncMock(
+            return_value={"onOff": 0, "brightness": 50, "color": {"r": 10, "g": 20, "b": 30}}
+        )
+        adapter = GoveeSolidAdapter(mock_transport, record)
+        await adapter.connect()
+        assert adapter._original_state is not None
+        assert adapter._original_state.on_off == 0
+        assert adapter._original_state.brightness == 50
+
+    @pytest.mark.asyncio
+    async def test_capture_state_returns_original(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        mock_transport.query_status = AsyncMock(
+            return_value={"onOff": 0, "brightness": 50, "color": {"r": 10, "g": 20, "b": 30}}
+        )
+        adapter = GoveeSolidAdapter(mock_transport, record)
+        await adapter.connect()
+        state_bytes = await adapter.capture_state()
+        restored = GoveeDeviceState.from_bytes(state_bytes)
+        assert restored.on_off == 0
+        assert restored.brightness == 50
+
+    @pytest.mark.asyncio
+    async def test_restore_state_sends_commands(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        adapter = GoveeSolidAdapter(mock_transport, record)
+        await adapter.connect()
+        mock_transport.send_command.reset_mock()
+
+        state = GoveeDeviceState(on_off=0, brightness=50, r=10, g=20, b=30)
+        await adapter.restore_state(state.to_bytes())
+
+        calls = mock_transport.send_command.call_args_list
+        assert len(calls) == 3
+        assert calls[0][0][1]["msg"]["cmd"] == "colorwc"
+        assert calls[0][0][1]["msg"]["data"]["color"] == {"r": 10, "g": 20, "b": 30}
+        assert calls[1][0][1]["msg"]["cmd"] == "brightness"
+        assert calls[1][0][1]["msg"]["data"]["value"] == 50
+        assert calls[2][0][1]["msg"]["cmd"] == "turn"
+        assert calls[2][0][1]["msg"]["data"]["value"] == 0

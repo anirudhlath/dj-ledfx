@@ -16,7 +16,9 @@ from dj_ledfx.devices.govee.protocol import (
     encode_segment_mask,
     map_colors_to_segments,
 )
+from dj_ledfx.devices.govee.state import GoveeDeviceState
 from dj_ledfx.devices.govee.types import GoveeDeviceRecord
+from dj_ledfx.spatial.geometry import DeviceGeometry, StripGeometry
 from dj_ledfx.types import DeviceInfo
 
 if TYPE_CHECKING:
@@ -39,6 +41,7 @@ class GoveeSegmentAdapter(DeviceAdapter):
         self._num_segments = num_segments
         self._use_pt_real = use_pt_real
         self._is_connected = False
+        self._original_state: GoveeDeviceState | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -59,11 +62,17 @@ class GoveeSegmentAdapter(DeviceAdapter):
     def led_count(self) -> int:
         return self._num_segments
 
+    @property
+    def geometry(self) -> DeviceGeometry:
+        return StripGeometry(direction=(1, 0, 0), length=1.0)
+
     async def connect(self) -> None:
         status = await self._transport.query_status(self._record.ip)
         if status is None:
             msg = f"Govee device {self._record.ip} ({self._record.sku}) not reachable"
             raise ConnectionError(msg)
+        # Capture original state BEFORE modifying the device
+        self._original_state = GoveeDeviceState.from_status(status)
         # Ensure device is on and at full brightness for LED effects
         if not status.get("onOff"):
             logger.info("Turning on Govee device {}", self._record.ip)
@@ -93,3 +102,19 @@ class GoveeSegmentAdapter(DeviceAdapter):
         except OSError:
             self._is_connected = False
             logger.warning("Govee send_frame failed for {}", self._record.ip)
+
+    async def capture_state(self) -> bytes:
+        if self._original_state is not None:
+            return self._original_state.to_bytes()
+        return await super().capture_state()
+
+    async def restore_state(self, state: bytes) -> None:
+        saved = GoveeDeviceState.from_bytes(state)
+        ip = self._record.ip
+        # Restore color first (while device is still on and bright)
+        await self._transport.send_command(ip, build_solid_color_message(saved.r, saved.g, saved.b))
+        # Restore brightness
+        await self._transport.send_command(ip, build_brightness_message(saved.brightness))
+        # Restore on/off last — if device was off, turn it off
+        if not saved.on_off:
+            await self._transport.send_command(ip, build_turn_message(on=False))
