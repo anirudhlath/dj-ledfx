@@ -23,6 +23,8 @@ class BeatContext:
     dt: float           # frame delta (seconds)
 ```
 
+**Relationship to BeatState:** `BeatState` already exists in `types.py` with `beat_phase`, `bar_phase`, and `bpm`. `BeatContext` is an intentionally minimal subset — it strips fields that effects should not depend on (`is_playing`, `next_beat_time`, `pitch_percent`, `deck_number`, `deck_name`) and adds `dt` (a rendering parameter). This keeps the effect API narrow and prevents effects from coupling to transport or deck state. The engine constructs `BeatContext` from `BeatState` + frame period.
+
 ### Render Signature Change
 
 `Effect.render()` changes from:
@@ -40,9 +42,11 @@ def render(self, ctx: BeatContext, led_count: int) -> NDArray[np.uint8]
 Breaking change — requires updating:
 - `Effect` ABC in `effects/base.py`
 - `EffectDeck.render()` in `effects/deck.py`
-- `EffectEngine.tick()` in `effects/engine.py` (constructs `BeatContext` with BPM from clock)
+- `EffectEngine.tick()` in `effects/engine.py` (constructs `BeatContext` from `BeatState` + frame period)
 - `BeatPulse` in `effects/beat_pulse.py`
-- All tests that call `render()` or mock it
+- Test effects in `tests/effects/test_registry.py` (helper effect classes define `render()`)
+- Direct `deck.render()` calls in `tests/effects/test_deck.py`
+- All other tests that call `render()` or mock it (grep for `\.render(` across `tests/`)
 
 `led_count` remains a separate parameter — it's a rendering constraint, not musical state.
 
@@ -54,13 +58,14 @@ Three modules under `effects/`:
 
 - `hex_to_rgb(hex: str) -> tuple[int, int, int]` — extracted from BeatPulse
 - `rgb_to_hex(r: int, g: int, b: int) -> str`
-- `hsv_to_rgb_array(h: NDArray, s: float | NDArray, v: float | NDArray, n: int) -> NDArray[np.uint8]` — vectorized HSV to RGB for `n` LEDs
+- `hsv_to_rgb_array(h: NDArray, s: float | NDArray, v: float | NDArray) -> NDArray[np.uint8]` — vectorized HSV to RGB, output size inferred from `h.shape[0]`
 - `palette_lerp(palette: list[tuple[int,int,int]], positions: NDArray[np.float64]) -> NDArray[np.uint8]` — smooth interpolation between palette colors at arbitrary 0-1 positions. Core of any gradient/wave/chase effect.
 
 #### `effects/easing.py` — Easing Functions
 
 All operate on `float` or `NDArray`:
 
+- `lerp(a, b, t)` — linear interpolation `a + (b - a) * t`
 - `ease_in(t, power=2.0)` — `t^power` (generalizes gamma)
 - `ease_out(t, power=2.0)` — `1 - (1-t)^power`
 - `ease_in_out(t)` — smooth hermite `3t^2 - 2t^3`
@@ -85,16 +90,22 @@ Smooth sinusoidal intensity swell. The "chill groove" effect.
 **Parameters:**
 | Name | Type | Default | Range | Description |
 |------|------|---------|-------|-------------|
-| `palette` | color_list | warm amber/gold | — | Color palette |
-| `beats_per_cycle` | float | 4.0 | 1.0–8.0 | Base cycle length before energy scaling |
+| `palette` | color_list | warm amber/gold (hex strings) | — | Color palette |
+| `beats_per_cycle` | float | 4.0 | 1.0–4.0 | Base cycle length before energy scaling (clamped to one bar max — cross-bar cycles would require statefulness) |
 | `min_brightness` | float | 0.05 | 0.0–0.5 | Floor brightness (never fully black) |
 
 **Render logic:**
 ```
+energy = bpm_energy(ctx.bpm)
 effective_beats = lerp(1, beats_per_cycle, 1 - energy)
-cycle_phase = (bar_phase * 4 / effective_beats) % 1.0
-brightness = min_brightness + (1 - min_brightness) * sine_ease(cycle_phase)
-color = palette[int(cycle_count) % len(palette)]
+# bar_phase * 4 gives beat position 0-4 within bar
+cycles_per_bar = 4.0 / effective_beats
+cycle_phase = (ctx.bar_phase * cycles_per_bar) % 1.0
+# Full sine wave: 0→1→0 over one cycle
+brightness = min_brightness + (1 - min_brightness) * (0.5 + 0.5 * sin(cycle_phase * 2 * pi))
+# Advance palette color each cycle within the bar
+color_index = int(ctx.bar_phase * cycles_per_bar) % len(palette)
+color = palette[color_index]
 output = color * brightness
 ```
 
@@ -118,10 +129,13 @@ Sharp beat-locked flash. The "drop" effect.
 **Render logic:**
 ```
 energy = bpm_energy(ctx.bpm)
-subdivision = round_to_power_of_2(lerp(1, max_subdivision, energy))
-sub_phase = (beat_phase * subdivision) % 1.0
+# Snap to nearest power of 2: for max_subdivision=4, gives 1, 2, or 4
+subdivision = 2 ** round(log2(lerp(1, max_subdivision, energy)))
+sub_phase = (ctx.beat_phase * subdivision) % 1.0
 on = sub_phase < duty_cycle
-color = palette[beat_index % len(palette)]
+# Derive beat index from bar_phase (0-3 across the 4-beat bar)
+beat_index = int(ctx.bar_phase * 4) % len(palette)
+color = palette[beat_index]
 output = color if on else black
 ```
 
@@ -147,7 +161,7 @@ Moving color bands traveling along the strip. The "groove" effect.
 energy = bpm_energy(ctx.bpm)
 speed = 1.0 + energy * 2.0
 effective_bands = band_count + energy * 2.0
-positions = linspace(0, 1, led_count) + beat_phase * speed
+positions = np.linspace(0, 1, led_count) + beat_phase * speed
 if direction == "reverse": positions = -positions
 output = palette_lerp(palette, (positions * effective_bands) % 1.0)
 ```
@@ -173,7 +187,7 @@ Smooth hue rotation flowing across the strip. Universal crowd-pleaser.
 ```
 energy = bpm_energy(ctx.bpm)
 speed = 1.0 + energy
-hues = (linspace(0, wave_count, led_count) + bar_phase * speed) % 1.0
+hues = (np.linspace(0, wave_count, led_count) + bar_phase * speed) % 1.0
 value = 1.0 - beat_pulse * ease_in(beat_phase, 2)
 output = hsv_to_rgb_array(hues, saturation, value)
 ```
@@ -199,11 +213,16 @@ Organic chaotic flickering. The "peak energy" effect.
 ```
 energy = bpm_energy(ctx.bpm)
 effective_intensity = intensity * (0.5 + 0.5 * energy)
-noise = rng.random(led_count) * effective_intensity + (1 - effective_intensity)
+# noise ranges 0.0-1.0, used as both brightness and palette position
+noise = rng.random(led_count)
 smoothed = prev_frame * smoothing + noise * (1 - smoothing)
-prev_frame = smoothed  # carry state
-output = palette_lerp(palette, smoothed)
+prev_frame = smoothed  # carry state (values stay in 0.0-1.0)
+# palette_lerp selects color, multiply by brightness for flicker
+brightness = (1.0 - effective_intensity) + smoothed * effective_intensity
+output = palette_lerp(palette, smoothed) * brightness[:, np.newaxis]
 ```
+
+**Thread safety:** FireStorm's `prev_frame` state is safe because effect render methods run synchronously on the single asyncio event loop (per CLAUDE.md).
 
 **Single-color degradation:** Works identically with `led_count == 1` — single flickering light.
 
