@@ -6,15 +6,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.color import hex_to_rgb
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import BeatContext
 
 _DEFAULT_PALETTE = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"]
-
-
-def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
-    h = hex_color.lstrip("#")
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
 class BeatPulse(Effect):
@@ -37,7 +33,7 @@ class BeatPulse(Effect):
         gamma: float = 2.0,
     ) -> None:
         colors = palette or _DEFAULT_PALETTE
-        self._palette = [_hex_to_rgb(c) for c in colors]
+        self._palette = [hex_to_rgb(c) for c in colors]
         self._gamma = gamma
 
     def get_params(self) -> dict[str, Any]:
@@ -50,7 +46,7 @@ class BeatPulse(Effect):
         if "gamma" in kwargs:
             self._gamma = float(kwargs["gamma"])
         if "palette" in kwargs:
-            self._palette = [_hex_to_rgb(c) for c in kwargs["palette"]]
+            self._palette = [hex_to_rgb(c) for c in kwargs["palette"]]
 
     def render(
         self,
