@@ -90,6 +90,31 @@ def build_set_color(hsbk: tuple[int, int, int, int], duration_ms: int = 0) -> by
     return struct.pack("<B4HI", 0, *hsbk, duration_ms)
 
 
+def build_get_color() -> bytes:
+    """Build GetColor(101) payload. Empty (0 bytes)."""
+    return b""
+
+
+def parse_light_state(payload: bytes) -> tuple[int, int, int, int, int, str]:
+    """Parse LightState(107) → (hue, saturation, brightness, kelvin, power, label).
+
+    Payload layout (52 bytes minimum):
+      [0:2]   hue (uint16 LE)
+      [2:4]   saturation (uint16 LE)
+      [4:6]   brightness (uint16 LE)
+      [6:8]   kelvin (uint16 LE)
+      [8:10]  reserved
+      [10:12] power (uint16 LE, 0=off, 65535=on)
+      [12:44] label (32 bytes, null-terminated UTF-8)
+    """
+    if len(payload) < 44:
+        raise ValueError(f"LightState payload too short: {len(payload)} < 44")
+    h, s, b, k = struct.unpack("<4H", payload[:8])
+    power = struct.unpack("<H", payload[10:12])[0]
+    label = payload[12:44].split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+    return h, s, b, k, power, label
+
+
 def build_echo_request(payload: bytes) -> bytes:
     """Build EchoRequest(58) payload. Must be exactly 64 bytes."""
     return payload[:64].ljust(64, b"\x00")
