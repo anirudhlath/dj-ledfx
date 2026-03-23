@@ -80,6 +80,7 @@ def create_app(
     app.state.config_path = config_path
     app.state.state_db = state_db
     app.state.event_bus = event_bus
+    app.state.connected_websockets: set = set()
 
     @app.on_event("startup")
     async def _start_transport_broadcast() -> None:

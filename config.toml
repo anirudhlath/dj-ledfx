@@ -14,20 +14,16 @@ beat_pulse_gamma = 2.0
 
 [network]
 interface = "auto"
-passive_mode = true
+passive_mode = "True"
 
 [web]
-enabled = false
+enabled = "False"
 host = "127.0.0.1"
 port = 8080
-cors_origins = [
-    "http://localhost:5173",
-    "http://localhost:4173",
-    "http://localhost:8080",
-]
+cors_origins = "['http://localhost:5173', 'http://localhost:4173', 'http://localhost:8080']"
 
 [devices.openrgb]
-enabled = false
+enabled = true
 host = "127.0.0.1"
 port = 6742
 latency_strategy = "windowed_mean"
@@ -48,7 +44,7 @@ max_fps = 60
 latency_window_size = 60
 
 [devices.govee]
-enabled = false
+enabled = true
 discovery_timeout_s = 5.0
 latency_strategy = "ema"
 latency_ms = 100.0
@@ -57,48 +53,41 @@ max_fps = 40
 latency_window_size = 60
 probe_interval_s = 5.0
 
-[scene_config]
-mapping = "radial"
+[discovery]
+broadcast_interval_s = 30.0
+unicast_concurrency = 50
+unicast_timeout_s = 0.5
+subnet_mask = 24
 
 [[scene_config.devices]]
-name = "LIFX Bulb (192.168.50.90)"
+name = "Govee H6076 (192.168.50.180)"
 position = [
-    0.9889120880768596,
-    -1.3018732520021574,
-    0.4979298730146935,
-]
-geometry = "point"
-
-[[scene_config.devices]]
-name = "LIFX Bulb (192.168.50.178)"
-position = [
-    1.1567328870634546,
-    1.8274653761950117,
+    0.0,
+    2.411258911091374,
     0.0,
 ]
-geometry = "point"
+geometry = "strip"
+direction = [
+    1,
+    0,
+    0,
+]
+length = 1.0
 
 [[scene_config.devices]]
 name = "LIFX Bulb (192.168.50.6)"
 position = [
-    -4.51430724181693,
-    -1.1745852185111163,
+    0.0,
+    0.0,
     0.0,
 ]
 geometry = "point"
 
 [[scene_config.devices]]
-name = "LIFX Bulb (192.168.50.159)"
+name = "LIFX Bulb (192.168.50.90)"
 position = [
     0.0,
     0.0,
-    2.574529541496082,
+    2.3022004982523674,
 ]
 geometry = "point"
-
-[scene_config.mapping_params]
-center = [
-    -1.6787871773767375,
-    0.26279606209642714,
-    1.287264770748041,
-]

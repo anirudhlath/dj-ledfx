@@ -16,9 +16,7 @@ from dj_ledfx.web.state import ClientSubscription
 
 
 def _get_connected(app: Any) -> set[WebSocket]:
-    """Return the per-app connected websockets set, creating if needed."""
-    if not hasattr(app.state, "connected_websockets"):
-        app.state.connected_websockets = set()
+    """Return the per-app connected websockets set (initialized in create_app)."""
     return app.state.connected_websockets
 
 
@@ -65,8 +63,9 @@ async def _send_json(ws: WebSocket, data: dict[str, Any]) -> None:
 
 async def _broadcast_json(app: Any, data: dict[str, Any]) -> None:
     """Broadcast JSON message to all connected WebSocket clients."""
-    for ws in list(_get_connected(app)):
-        await _send_json(ws, data)
+    clients = list(_get_connected(app))
+    if clients:
+        await asyncio.gather(*(_send_json(ws, data) for ws in clients))
 
 
 async def transport_broadcast(app: Any) -> None:

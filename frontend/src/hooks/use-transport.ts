@@ -46,9 +46,15 @@ export function useTransport() {
       setState(res.state)
       lastState.current = res.state
     } catch {
-      const res = await getTransport()
-      setState(res.state)
-      lastState.current = res.state
+      try {
+        const res = await getTransport()
+        setState(res.state)
+        lastState.current = res.state
+      } catch {
+        // Server unreachable — revert to stopped
+        setState("stopped")
+        lastState.current = "stopped"
+      }
     }
   }, [])
 

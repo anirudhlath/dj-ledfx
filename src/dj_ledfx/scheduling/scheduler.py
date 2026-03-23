@@ -128,6 +128,8 @@ class LookaheadScheduler:
             self._resume_event.clear()
             # Restore saved device states when transitioning from active -> STOPPED
             if event.old_state.is_active and self._state_db is not None:
+                if self._restore_task is not None and not self._restore_task.done():
+                    self._restore_task.cancel()
                 self._restore_task = asyncio.create_task(self._restore_device_states())
 
     async def _restore_device_states(self) -> None:

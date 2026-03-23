@@ -23,8 +23,7 @@ class GoveeDeviceState:
         }).encode("utf-8")
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> GoveeDeviceState:
-        d = json.loads(data)
+    def _from_dict(cls, d: dict[str, Any]) -> GoveeDeviceState:
         color = d.get("color", {})
         return cls(
             on_off=d.get("onOff", 1),
@@ -35,12 +34,9 @@ class GoveeDeviceState:
         )
 
     @classmethod
+    def from_bytes(cls, data: bytes) -> GoveeDeviceState:
+        return cls._from_dict(json.loads(data))
+
+    @classmethod
     def from_status(cls, status: dict[str, Any]) -> GoveeDeviceState:
-        color = status.get("color", {})
-        return cls(
-            on_off=status.get("onOff", 1),
-            brightness=status.get("brightness", 100),
-            r=color.get("r", 255),
-            g=color.get("g", 255),
-            b=color.get("b", 255),
-        )
+        return cls._from_dict(status)
