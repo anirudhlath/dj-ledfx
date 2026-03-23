@@ -7,6 +7,7 @@ from numpy.typing import NDArray
 
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.types import BeatContext
 
 _DEFAULT_PALETTE = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"]
 
@@ -53,14 +54,12 @@ class BeatPulse(Effect):
 
     def render(
         self,
-        beat_phase: float,
-        bar_phase: float,
-        dt: float,
+        ctx: BeatContext,
         led_count: int,
     ) -> NDArray[np.uint8]:
-        brightness = (1.0 - beat_phase) ** self._gamma
+        brightness = (1.0 - ctx.beat_phase) ** self._gamma
 
-        color_index = int(bar_phase * len(self._palette)) % len(self._palette)
+        color_index = int(ctx.bar_phase * len(self._palette)) % len(self._palette)
         r, g, b = self._palette[color_index]
 
         out = np.empty((led_count, 3), dtype=np.uint8)

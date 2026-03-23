@@ -2,6 +2,7 @@ import pytest
 
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.types import BeatContext
 
 
 class DummyEffect(Effect):
@@ -19,7 +20,7 @@ class DummyEffect(Effect):
     def get_params(self):
         return {"speed": self._speed}
 
-    def render(self, beat_phase, bar_phase, dt, led_count):
+    def render(self, ctx: BeatContext, led_count: int):
         import numpy as np
 
         return np.zeros((led_count, 3), dtype=np.uint8)
@@ -66,7 +67,7 @@ def test_constructor_validation():
             def __init__(self):
                 pass
 
-            def render(self, beat_phase, bar_phase, dt, led_count):
+            def render(self, ctx: BeatContext, led_count: int):
                 import numpy as np
 
                 return np.zeros((led_count, 3), dtype=np.uint8)

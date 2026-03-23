@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.types import BeatContext
 
 
 def _to_snake_case(name: str) -> str:
@@ -68,9 +69,7 @@ class Effect(ABC):
     @abstractmethod
     def render(
         self,
-        beat_phase: float,
-        bar_phase: float,
-        dt: float,
+        ctx: BeatContext,
         led_count: int,
     ) -> NDArray[np.uint8]:
         """Return shape (led_count, 3) uint8 RGB array."""

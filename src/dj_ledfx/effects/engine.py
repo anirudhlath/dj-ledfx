@@ -12,7 +12,7 @@ from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.events import EventBus, TransportStateChangedEvent
 from dj_ledfx.spatial.pipeline import ScenePipeline
 from dj_ledfx.transport import TransportState
-from dj_ledfx.types import RenderedFrame
+from dj_ledfx.types import BeatContext, RenderedFrame
 
 
 class RingBuffer:
@@ -148,13 +148,15 @@ class EffectEngine:
 
         render_start = time.monotonic()
 
+        ctx = BeatContext(
+            beat_phase=state.beat_phase,
+            bar_phase=state.bar_phase,
+            bpm=state.bpm,
+            dt=self._frame_period,
+        )
+
         for pipeline in self.pipelines:
-            colors = pipeline.deck.render(
-                beat_phase=state.beat_phase,
-                bar_phase=state.bar_phase,
-                dt=self._frame_period,
-                led_count=pipeline.led_count,
-            )
+            colors = pipeline.deck.render(ctx, pipeline.led_count)
             frame = RenderedFrame(
                 colors=colors,
                 target_time=target_time,
