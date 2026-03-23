@@ -41,6 +41,7 @@ cd frontend && npm run dev       # Frontend dev server (proxies to :8080)
 src/dj_ledfx/ layout:
 - `prodjlink/` — Pro DJ Link UDP protocol (passive listener on port 50001)
 - `beat/` — BeatClock phase interpolation + BeatSimulator for demo mode
+- `transport.py` — TransportState enum (stopped/playing/simulating) — engine and scheduler gate on this
 - `effects/` — Effect ABC + 60fps render engine writing future frames to ring buffer
 - `scheduling/` — LookaheadScheduler: per-device send loops with FrameSlot depth-1 slots, FPS cap, RTT measurement
 - `metrics.py` — Contextmanager-based timing metrics for performance measurement
@@ -56,7 +57,8 @@ src/dj_ledfx/ layout:
 - `effects/presets.py` — PresetStore with TOML persistence
 - `devices/manager.py` — DeviceManager: discovery, lifecycle, group management
 - `web/` — FastAPI app factory, REST routers (effects, devices, config, scene), WebSocket hub, Pydantic schemas
-- `web/ws.py` — WebSocket hub: binary LED frame broadcast (2-byte name + 4-byte seq + RGB), beat/status JSON channels
+- `web/ws.py` — WebSocket hub: binary LED frame broadcast (2-byte name + 4-byte seq + RGB), beat/status/transport JSON channels, EventBus-driven transport broadcast
+- `web/router_transport.py` — Transport REST endpoints (GET/PUT /api/transport)
 - `web/state.py` — Shared app state dataclass passed via FastAPI app.state
 - `web/router_scene.py` — Scene REST endpoints (placement CRUD, mapping config, auto-creates SceneModel)
 - `spatial/mapping.py` — mapping_from_config() shared factory for LinearMapping/RadialMapping
@@ -64,7 +66,7 @@ src/dj_ledfx/ layout:
 - `spatial/geometry.py` — 3D geometry utilities for spatial calculations
 - `spatial/scene.py` — SceneModel: device placements, spatial configuration
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
-- `events.py` — Typed callback event bus (sync, non-blocking callbacks only)
+- `events.py` — Typed callback event bus (sync, non-blocking callbacks only) + TransportStateChangedEvent
 - `persistence/` — SQLite-backed state persistence (state_db.py, toml_io.py, debounced_writer.py, migrations/)
 - `devices/discovery.py` — DiscoveryOrchestrator: multi-wave scanning, fast reconnect, ghost promote/demote
 - `devices/ghost.py` — GhostAdapter: placeholder for offline devices (is_connected=False, send_frame no-op)
@@ -93,7 +95,7 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - AppConfig uses nested dataclasses: `config.engine.fps`, `config.devices.openrgb.host` (not flat)
 - EffectEngine accepts `deck: EffectDeck` (not raw `effect: Effect`)
 - Frontend uses shadcn/ui components (based on @base-ui/react, NOT Radix — different APIs)
-- Frontend hooks in `src/hooks/`, one per domain (use-beat, use-devices, use-effects, use-scene)
+- Frontend hooks in `src/hooks/`, one per domain (use-beat, use-devices, use-effects, use-scene, use-transport)
 - WebSocket binary frame protocol: 2-byte name length, UTF-8 name, 4-byte sequence, then RGB bytes
 
 ## Key Design Decisions
@@ -116,6 +118,8 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Multi-scene: scenes activate/deactivate independently; conflict detection prevents same device in two active scenes
 - Ghost/promote/demote lifecycle: offline devices stay registered as GhostAdapters, get promoted when rediscovered
 - Discovery `skip_ids` must exclude offline devices — otherwise ghosts can never be re-promoted
+- Transport controls: app starts STOPPED, user must play. SIMULATING renders to web UI only (skips send_frame). Device state captured on connect (when stopped), restored on stop.
+- DeviceAdapter provides default `capture_state()` (50% white) and `restore_state()` — adapters override as protocol support is added
 
 ## Logging Discipline
 
@@ -158,3 +162,5 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Scheduler hot path: don't `list()` wrap `dict.values()` iteration — unnecessary allocation at 60fps on single event loop
 - TOML serialization: use `json.dumps(v)` not `str(v)` for config values — `str(True)` produces `"True"` which fails `json.loads()` round-trip
 - `close()` on StateDB must acquire the lock to prevent races with in-flight `to_thread` operations
+- Engine/scheduler start STOPPED by default — tests that call `run()` must set `_resume_event.set()` or `set_transport_state(PLAYING)` first, otherwise they hang forever on `await _resume_event.wait()`
+- `engine.stop()` must set `_resume_event` to unblock `run()` when transport is STOPPED — without this, stop() has no effect since the coroutine is blocked on the event wait
