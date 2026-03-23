@@ -90,6 +90,7 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - All device I/O must be async. Synchronous libs (openrgb-python) wrapped in `asyncio.to_thread()`
 - Effect render methods are synchronous (pure numpy math, no I/O)
 - BeatClock read methods are synchronous and lock-free (called from render loop)
+- BeatClock write method is `on_beat(bpm, beat_number, next_beat_ms, timestamp, ...)` (not `update()`)
 - DeviceAdapter is ABC (abstract base class). ProbeStrategy remains Protocol. Always code to the interface.
 - All components run on a single asyncio event loop — no cross-thread state access
 - AppConfig uses nested dataclasses: `config.engine.fps`, `config.devices.openrgb.host` (not flat)
@@ -140,6 +141,7 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Integration tests run BeatSimulator → full pipeline → mock DeviceAdapter
 - Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern
 - `tests/web/` covers all REST routers and WebSocket hub
+- Tests that call `engine.run()` or `scheduler.run()` must set `_resume_event.set()` first (STOPPED-by-default)
 
 ## Gotchas
 
