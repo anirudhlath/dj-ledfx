@@ -1,6 +1,6 @@
 import numpy as np
 
-from dj_ledfx.types import RGB, BeatState, DeviceInfo, RenderedFrame
+from dj_ledfx.types import RGB, BeatContext, BeatState, DeviceInfo, RenderedFrame
 
 
 def test_rgb_type_alias() -> None:
@@ -61,6 +61,22 @@ def test_device_info_with_mac_and_stable_id():
     )
     assert info.mac == "d073d5aabbcc"
     assert info.stable_id == "lifx:d073d5aabbcc"
+
+
+def test_beat_context_creation():
+    ctx = BeatContext(beat_phase=0.5, bar_phase=0.25, bpm=128.0, dt=0.016)
+    assert ctx.beat_phase == 0.5
+    assert ctx.bar_phase == 0.25
+    assert ctx.bpm == 128.0
+    assert ctx.dt == 0.016
+
+
+def test_beat_context_is_frozen():
+    import pytest
+
+    ctx = BeatContext(beat_phase=0.5, bar_phase=0.25, bpm=128.0, dt=0.016)
+    with pytest.raises(AttributeError):
+        ctx.bpm = 130.0
 
 
 def test_device_info_frozen():

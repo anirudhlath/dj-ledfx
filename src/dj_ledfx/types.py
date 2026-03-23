@@ -33,6 +33,18 @@ class RenderedFrame:
 
 
 @dataclass(frozen=True, slots=True)
+class BeatContext:
+    """Minimal beat state for effect rendering. Intentionally strips transport
+    fields from BeatState (is_playing, next_beat_time, etc.) to keep the
+    effect API narrow."""
+
+    beat_phase: float  # 0.0-1.0 within current beat
+    bar_phase: float  # 0.0-1.0 within current 4-beat bar
+    bpm: float  # current pitch-adjusted BPM
+    dt: float  # frame delta (seconds)
+
+
+@dataclass(frozen=True, slots=True)
 class BeatState:
     beat_phase: float  # 0.0 → 1.0
     bar_phase: float  # 0.0 → 1.0
