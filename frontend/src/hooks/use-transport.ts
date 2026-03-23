@@ -13,7 +13,7 @@ export function useTransport() {
       lastState.current = res.state
     }).catch(() => {})
 
-    const onTransport = (msg: { state?: unknown }) => {
+    const onTransport = (msg: Record<string, unknown>) => {
       if (typeof msg.state === "string") {
         const s = msg.state as TransportState
         if (s !== lastState.current) {
@@ -23,7 +23,7 @@ export function useTransport() {
       }
     }
 
-    const onStatus = (msg: { transport?: unknown }) => {
+    const onStatus = (msg: Record<string, unknown>) => {
       if (typeof msg.transport === "string") {
         const s = msg.transport as TransportState
         if (s !== lastState.current) {
