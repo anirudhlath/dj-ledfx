@@ -441,12 +441,8 @@ class TestMultiSceneEndpoints:
         client, db = self._make_db_client(tmp_path)
         try:
             # Register two distinct devices so both scenes can be activated
-            asyncio.run(
-                db.upsert_device({"id": "lifx:dev_x", "name": "dev_x", "backend": "lifx"})
-            )
-            asyncio.run(
-                db.upsert_device({"id": "lifx:dev_y", "name": "dev_y", "backend": "lifx"})
-            )
+            asyncio.run(db.upsert_device({"id": "lifx:dev_x", "name": "dev_x", "backend": "lifx"}))
+            asyncio.run(db.upsert_device({"id": "lifx:dev_y", "name": "dev_y", "backend": "lifx"}))
 
             scene1 = client.post("/api/scenes", json={"name": "Keep Active"}).json()
             scene2 = client.post("/api/scenes", json={"name": "To Deactivate"}).json()

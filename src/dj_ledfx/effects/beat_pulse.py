@@ -6,14 +6,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.color import hex_to_rgb, rgb_to_hex
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.types import BeatContext
 
 _DEFAULT_PALETTE = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"]
-
-
-def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
-    h = hex_color.lstrip("#")
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
 class BeatPulse(Effect):
@@ -36,31 +33,29 @@ class BeatPulse(Effect):
         gamma: float = 2.0,
     ) -> None:
         colors = palette or _DEFAULT_PALETTE
-        self._palette = [_hex_to_rgb(c) for c in colors]
+        self._palette = [hex_to_rgb(c) for c in colors]
         self._gamma = gamma
 
     def get_params(self) -> dict[str, Any]:
         return {
             "gamma": self._gamma,
-            "palette": [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in self._palette],
+            "palette": [rgb_to_hex(r, g, b) for r, g, b in self._palette],
         }
 
     def _apply_params(self, **kwargs: Any) -> None:
         if "gamma" in kwargs:
             self._gamma = float(kwargs["gamma"])
         if "palette" in kwargs:
-            self._palette = [_hex_to_rgb(c) for c in kwargs["palette"]]
+            self._palette = [hex_to_rgb(c) for c in kwargs["palette"]]
 
     def render(
         self,
-        beat_phase: float,
-        bar_phase: float,
-        dt: float,
+        ctx: BeatContext,
         led_count: int,
     ) -> NDArray[np.uint8]:
-        brightness = (1.0 - beat_phase) ** self._gamma
+        brightness = (1.0 - ctx.beat_phase) ** self._gamma
 
-        color_index = int(bar_phase * len(self._palette)) % len(self._palette)
+        color_index = int(ctx.bar_phase * len(self._palette)) % len(self._palette)
         r, g, b = self._palette[color_index]
 
         out = np.empty((led_count, 3), dtype=np.uint8)

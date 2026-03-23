@@ -2,6 +2,7 @@ import pytest
 
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
+from dj_ledfx.types import BeatContext
 
 
 def test_on_change_callback_fires_on_swap():
@@ -26,7 +27,7 @@ def test_no_callback_no_error():
 def test_deck_delegates_render():
     effect = BeatPulse()
     deck = EffectDeck(effect)
-    result = deck.render(0.5, 0.25, 0.016, 10)
+    result = deck.render(BeatContext(beat_phase=0.5, bar_phase=0.25, bpm=128.0, dt=0.016), 10)
     assert result.shape == (10, 3)
 
 
@@ -45,7 +46,7 @@ def test_deck_swap_effect():
 def test_deck_render_after_swap():
     deck = EffectDeck(BeatPulse())
     deck.swap_effect(BeatPulse(gamma=1.0))
-    result = deck.render(0.0, 0.0, 0.016, 5)
+    result = deck.render(BeatContext(beat_phase=0.0, bar_phase=0.0, bpm=128.0, dt=0.016), 5)
     assert result.shape == (5, 3)
 
 

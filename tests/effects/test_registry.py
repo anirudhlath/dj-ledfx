@@ -1,7 +1,9 @@
+import numpy as np
 import pytest
 
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.types import BeatContext
 
 
 class DummyEffect(Effect):
@@ -19,7 +21,7 @@ class DummyEffect(Effect):
     def get_params(self):
         return {"speed": self._speed}
 
-    def render(self, beat_phase, bar_phase, dt, led_count):
+    def render(self, ctx: BeatContext, led_count: int):
         import numpy as np
 
         return np.zeros((led_count, 3), dtype=np.uint8)
@@ -66,7 +68,7 @@ def test_constructor_validation():
             def __init__(self):
                 pass
 
-            def render(self, beat_phase, bar_phase, dt, led_count):
+            def render(self, ctx: BeatContext, led_count: int):
                 import numpy as np
 
                 return np.zeros((led_count, 3), dtype=np.uint8)
@@ -98,3 +100,37 @@ def test_create_effect():
 def test_create_effect_unknown():
     with pytest.raises(KeyError):
         create_effect("nonexistent_effect")
+
+
+def test_all_registered_effects_render_with_defaults():
+    """Smoke test: instantiate every registered effect with defaults, render one frame."""
+    ctx = BeatContext(beat_phase=0.5, bar_phase=0.25, bpm=128.0, dt=0.016)
+    for name, cls in get_effect_classes().items():
+        if name == "dummy_effect":
+            continue
+        effect = cls()
+        result = effect.render(ctx, 10)
+        assert result.shape == (10, 3), f"{name} returned wrong shape"
+        assert result.dtype == np.uint8, f"{name} returned wrong dtype"
+
+
+def test_all_registered_effects_render_with_zero_bpm():
+    """Edge case: bpm=0 should not crash any effect."""
+    ctx = BeatContext(beat_phase=0.0, bar_phase=0.0, bpm=0.0, dt=0.016)
+    for name, cls in get_effect_classes().items():
+        if name == "dummy_effect":
+            continue
+        effect = cls()
+        result = effect.render(ctx, 5)
+        assert result.shape == (5, 3), f"{name} crashed with bpm=0"
+
+
+def test_all_registered_effects_render_with_zero_leds():
+    """Edge case: led_count=0 should return empty array, not crash."""
+    ctx = BeatContext(beat_phase=0.0, bar_phase=0.0, bpm=128.0, dt=0.016)
+    for name, cls in get_effect_classes().items():
+        if name == "dummy_effect":
+            continue
+        effect = cls()
+        result = effect.render(ctx, 0)
+        assert result.shape == (0, 3), f"{name} crashed with led_count=0"

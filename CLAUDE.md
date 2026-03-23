@@ -43,6 +43,9 @@ src/dj_ledfx/ layout:
 - `beat/` — BeatClock phase interpolation + BeatSimulator for demo mode
 - `transport.py` — TransportState enum (stopped/playing/simulating) — engine and scheduler gate on this
 - `effects/` — Effect ABC + 60fps render engine writing future frames to ring buffer
+- `effects/color.py` — Color math: hex/RGB conversion, HSV→RGB vectorized, palette interpolation
+- `effects/easing.py` — Easing functions: lerp, ease_in/out, sine_ease
+- `effects/energy.py` — BPM→energy mapping (0-1 linear between 100-150 BPM)
 - `scheduling/` — LookaheadScheduler: per-device send loops with FrameSlot depth-1 slots, FPS cap, RTT measurement
 - `metrics.py` — Contextmanager-based timing metrics for performance measurement
 - `devices/` — DeviceAdapter ABC + OpenRGB adapter (asyncio.to_thread wrapped) + device-type heuristics
@@ -88,6 +91,9 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Use `ruff` for linting and formatting
 - Use `mypy` strict mode for type checking
 - All device I/O must be async. Synchronous libs (openrgb-python) wrapped in `asyncio.to_thread()`
+- Effect render signature is `render(self, ctx: BeatContext, led_count: int)` — BeatContext bundles beat_phase, bar_phase, bpm, dt
+- New effects must: import in `effects/__init__.py` to trigger auto-registry via `__init_subclass__`
+- Use shared utilities from `effects/color.py` (hex_to_rgb, rgb_to_hex, hsv_to_rgb_array, palette_lerp) and `effects/easing.py`
 - Effect render methods are synchronous (pure numpy math, no I/O)
 - BeatClock read methods are synchronous and lock-free (called from render loop)
 - BeatClock write method is `on_beat(bpm, beat_number, next_beat_ms, timestamp, ...)` (not `update()`)
@@ -166,3 +172,4 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - `close()` on StateDB must acquire the lock to prevent races with in-flight `to_thread` operations
 - Engine/scheduler start STOPPED by default — tests that call `run()` must set `_resume_event.set()` or `set_transport_state(PLAYING)` first, otherwise they hang forever on `await _resume_event.wait()`
 - `engine.stop()` must set `_resume_event` to unblock `run()` when transport is STOPPED — without this, stop() has no effect since the coroutine is blocked on the event wait
+- numpy `np.clip(...).astype()` returns `Any` per mypy — use `# type: ignore[no-any-return]` (not `[return-value]`)

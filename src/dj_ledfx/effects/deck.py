@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.base import Effect, _to_snake_case
+from dj_ledfx.types import BeatContext
 
 
 class EffectDeck:
@@ -46,9 +47,7 @@ class EffectDeck:
 
     def render(
         self,
-        beat_phase: float,
-        bar_phase: float,
-        dt: float,
+        ctx: BeatContext,
         led_count: int,
     ) -> NDArray[np.uint8]:
-        return self._effect.render(beat_phase, bar_phase, dt, led_count)
+        return self._effect.render(ctx, led_count)
