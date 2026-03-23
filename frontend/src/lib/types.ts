@@ -101,3 +101,5 @@ export interface SceneData {
   mapping: MappingInfo | null
   bounds: [[number, number, number], [number, number, number]] | null
 }
+
+export type TransportState = "stopped" | "playing" | "simulating"

@@ -6,6 +6,7 @@ import type {
   EffectParamSchema,
   Preset,
   SceneData,
+  TransportState,
 } from "./types"
 
 const BASE = "/api"
@@ -211,5 +212,25 @@ export async function updateSceneMapping(
     method: "PUT",
     body: JSON.stringify({ type, params }),
   })
+}
+
+// Transport
+export async function getTransport(): Promise<{ state: TransportState }> {
+  return fetchJson<{ state: TransportState }>("/transport")
+}
+
+export async function setTransport(
+  state: TransportState,
+): Promise<{ state: TransportState }> {
+  return fetchJson<{ state: TransportState }>("/transport", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state }),
+  })
+}
+
+export const apiClient = {
+  getTransport,
+  setTransport,
 }
 
