@@ -224,6 +224,9 @@ class DeviceManager:
             adapter.device_info.name,
             stable_id,
         )
+        # Capture device state on promote when transport is stopped
+        if self._transport_state == TransportState.STOPPED and self._state_db is not None:
+            asyncio.create_task(self._capture_device_state(adapter))
 
     def demote_device(self, stable_id: str) -> None:
         """Swap a real adapter for a GhostAdapter and set status to offline."""
