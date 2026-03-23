@@ -19,6 +19,7 @@ from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.spatial.geometry import PointGeometry
 from dj_ledfx.spatial.mapping import LinearMapping
 from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
+from dj_ledfx.transport import TransportState
 from tests.conftest import MockDeviceAdapter
 
 
@@ -71,6 +72,9 @@ async def test_spatial_pipeline_different_positions_different_colors() -> None:
         compositor=compositor,
     )
 
+    engine._resume_event.set()
+    scheduler._resume_event.set()
+    scheduler._transport_state = TransportState.PLAYING
     sim_task = asyncio.create_task(simulator.run())
     engine_task = asyncio.create_task(engine.run())
     sched_task = asyncio.create_task(scheduler.run())
@@ -137,6 +141,9 @@ async def test_unmapped_device_gets_broadcast_when_compositor_active() -> None:
         compositor=compositor,
     )
 
+    engine._resume_event.set()
+    scheduler._resume_event.set()
+    scheduler._transport_state = TransportState.PLAYING
     sim_task = asyncio.create_task(simulator.run())
     engine_task = asyncio.create_task(engine.run())
     sched_task = asyncio.create_task(scheduler.run())
@@ -194,6 +201,9 @@ async def test_no_scene_matches_mvp_behavior() -> None:
         fps=60,
     )
 
+    engine._resume_event.set()
+    scheduler._resume_event.set()
+    scheduler._transport_state = TransportState.PLAYING
     sim_task = asyncio.create_task(simulator.run())
     engine_task = asyncio.create_task(engine.run())
     sched_task = asyncio.create_task(scheduler.run())
