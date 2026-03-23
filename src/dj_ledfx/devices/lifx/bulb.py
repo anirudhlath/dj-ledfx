@@ -55,7 +55,9 @@ class LifxBulbAdapter(DeviceAdapter):
     def geometry(self) -> DeviceGeometry:
         return PointGeometry()
 
-    def _make_packet(self, msg_type: int, payload: bytes, *, res_required: bool = False) -> LifxPacket:
+    def _make_packet(
+        self, msg_type: int, payload: bytes, *, res_required: bool = False
+    ) -> LifxPacket:
         return LifxPacket(
             tagged=False,
             source=self._transport.source_id,

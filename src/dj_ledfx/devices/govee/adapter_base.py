@@ -55,7 +55,9 @@ class GoveeAdapterBase(DeviceAdapter):
     async def restore_state(self, state: bytes) -> None:
         saved = GoveeDeviceState.from_bytes(state)
         ip = self._record.ip
-        await self._transport.send_command(ip, build_solid_color_message(saved.r, saved.g, saved.b))
+        await self._transport.send_command(
+            ip, build_solid_color_message(saved.r, saved.g, saved.b)
+        )
         await self._transport.send_command(ip, build_brightness_message(saved.brightness))
         # Turn off last so color/brightness are set while device is still on
         if not saved.on_off:

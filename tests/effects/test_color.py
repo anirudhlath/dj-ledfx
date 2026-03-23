@@ -21,8 +21,8 @@ def test_hsv_to_rgb_array_red():
     assert result.shape == (1, 3)
     assert result.dtype == np.uint8
     assert result[0, 0] == 255  # R
-    assert result[0, 1] == 0    # G
-    assert result[0, 2] == 0    # B
+    assert result[0, 1] == 0  # G
+    assert result[0, 2] == 0  # B
 
 
 def test_hsv_to_rgb_array_rainbow():

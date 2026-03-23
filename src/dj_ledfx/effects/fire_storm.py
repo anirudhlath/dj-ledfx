@@ -18,7 +18,9 @@ class FireStorm(Effect):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
-            "palette": EffectParam(type="color_list", default=list(_DEFAULT_PALETTE), label="Palette"),
+            "palette": EffectParam(
+                type="color_list", default=list(_DEFAULT_PALETTE), label="Palette"
+            ),
             "intensity": EffectParam(
                 type="float", default=0.7, min=0.3, max=1.0, step=0.05, label="Intensity"
             ),

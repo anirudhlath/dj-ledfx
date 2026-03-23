@@ -315,9 +315,7 @@ async def test_offline_device_repromotion_via_discovery(config, device_manager, 
     real_adapter.led_count = 1
     real_adapter.is_connected = True
 
-    discovered_device = DiscoveredDevice(
-        adapter=real_adapter, tracker=_make_tracker(), max_fps=30
-    )
+    discovered_device = DiscoveredDevice(adapter=real_adapter, tracker=_make_tracker(), max_fps=30)
 
     async def _mock_discover(config, on_found=None, skip_ids=None):
         if callable(on_found):

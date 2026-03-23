@@ -58,7 +58,9 @@ class LifxStripAdapter(DeviceAdapter):
     def geometry(self) -> DeviceGeometry:
         return StripGeometry(direction=(1, 0, 0), length=1.0)
 
-    def _make_packet(self, msg_type: int, payload: bytes, *, res_required: bool = False) -> LifxPacket:
+    def _make_packet(
+        self, msg_type: int, payload: bytes, *, res_required: bool = False
+    ) -> LifxPacket:
         return LifxPacket(
             tagged=False,
             source=self._transport.source_id,
@@ -96,7 +98,9 @@ class LifxStripAdapter(DeviceAdapter):
         response = await self._transport.request_response(pkt, self._addr, response_type=512)
         if response is not None:
             try:
-                zone_count, _zone_index, colors = parse_state_extended_color_zones(response.payload)
+                zone_count, _zone_index, colors = parse_state_extended_color_zones(
+                    response.payload
+                )
                 # Pack as: zone_count(u16) + HSBK tuples (4 x u16 each)
                 data = struct.pack("<H", zone_count)
                 for h, s, b, k in colors:

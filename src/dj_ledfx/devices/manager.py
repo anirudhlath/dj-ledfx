@@ -243,9 +243,7 @@ class DeviceManager:
             try:
                 await old_adapter.disconnect()
             except Exception:
-                logger.exception(
-                    "Error disconnecting adapter for '{}' during demote", info.name
-                )
+                logger.exception("Error disconnecting adapter for '{}' during demote", info.name)
 
         try:
             asyncio.get_running_loop()

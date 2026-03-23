@@ -610,9 +610,5 @@ async def test_distributor_handles_concurrent_add_device() -> None:
     await run_task
 
     # Both the initial device and the late joiner must have received frames
-    assert len(initial_device.adapter.send_frame_calls) > 0, (
-        "Initial device received no frames"
-    )
-    assert len(late_device.adapter.send_frame_calls) > 0, (
-        "Late-joining device received no frames"
-    )
+    assert len(initial_device.adapter.send_frame_calls) > 0, "Initial device received no frames"
+    assert len(late_device.adapter.send_frame_calls) > 0, "Late-joining device received no frames"

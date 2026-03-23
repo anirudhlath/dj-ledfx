@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from dj_ledfx.effects.fire_storm import FireStorm
 from dj_ledfx.types import BeatContext

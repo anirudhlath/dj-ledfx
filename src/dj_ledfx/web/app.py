@@ -87,9 +87,7 @@ def create_app(
         if app.state.event_bus is not None:
             from dj_ledfx.web.ws import transport_broadcast
 
-            app.state._transport_broadcast_task = asyncio.create_task(
-                transport_broadcast(app)
-            )
+            app.state._transport_broadcast_task = asyncio.create_task(transport_broadcast(app))
 
     @app.on_event("shutdown")
     async def _stop_transport_broadcast() -> None:

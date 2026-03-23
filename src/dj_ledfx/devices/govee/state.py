@@ -16,11 +16,13 @@ class GoveeDeviceState:
     b: int
 
     def to_bytes(self) -> bytes:
-        return json.dumps({
-            "onOff": self.on_off,
-            "brightness": self.brightness,
-            "color": {"r": self.r, "g": self.g, "b": self.b},
-        }).encode("utf-8")
+        return json.dumps(
+            {
+                "onOff": self.on_off,
+                "brightness": self.brightness,
+                "color": {"r": self.r, "g": self.g, "b": self.b},
+            }
+        ).encode("utf-8")
 
     @classmethod
     def _from_dict(cls, d: dict[str, Any]) -> GoveeDeviceState:

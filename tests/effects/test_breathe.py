@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from dj_ledfx.effects.breathe import Breathe
 from dj_ledfx.types import BeatContext
@@ -37,11 +36,20 @@ def test_brightness_varies_across_bar():
 def test_energy_adaptation_faster_at_high_bpm():
     effect = Breathe(beats_per_cycle=4.0)
     # At low BPM (80), cycle should be slower — check full bar for brightness range
-    low_bpm_values = [effect.render(_ctx(bar_phase=p, bpm=80.0), 1).max() for p in np.linspace(0, 0.99, 20)]
-    high_bpm_values = [effect.render(_ctx(bar_phase=p, bpm=160.0), 1).max() for p in np.linspace(0, 0.99, 20)]
-    # High BPM should complete more cycles per bar — more variance in smaller range
-    low_zero_crossings = sum(1 for i in range(1, len(low_bpm_values)) if (low_bpm_values[i] > 128) != (low_bpm_values[i-1] > 128))
-    high_zero_crossings = sum(1 for i in range(1, len(high_bpm_values)) if (high_bpm_values[i] > 128) != (high_bpm_values[i-1] > 128))
+    phases = np.linspace(0, 0.99, 20)
+    low_bpm_values = [effect.render(_ctx(bar_phase=p, bpm=80.0), 1).max() for p in phases]
+    high_bpm_values = [effect.render(_ctx(bar_phase=p, bpm=160.0), 1).max() for p in phases]
+    # High BPM should complete more cycles per bar
+    low_zero_crossings = sum(
+        1
+        for i in range(1, len(low_bpm_values))
+        if (low_bpm_values[i] > 128) != (low_bpm_values[i - 1] > 128)
+    )
+    high_zero_crossings = sum(
+        1
+        for i in range(1, len(high_bpm_values))
+        if (high_bpm_values[i] > 128) != (high_bpm_values[i - 1] > 128)
+    )
     assert high_zero_crossings >= low_zero_crossings
 
 

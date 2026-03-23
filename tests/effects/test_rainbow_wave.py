@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from dj_ledfx.effects.rainbow_wave import RainbowWave
 from dj_ledfx.types import BeatContext

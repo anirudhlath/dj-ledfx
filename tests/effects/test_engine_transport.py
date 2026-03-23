@@ -68,9 +68,7 @@ def test_engine_set_transport_state(engine: EffectEngine) -> None:
     assert engine.transport_state == TransportState.PLAYING
 
 
-def test_engine_set_transport_emits_event(
-    engine: EffectEngine, event_bus: EventBus
-) -> None:
+def test_engine_set_transport_emits_event(engine: EffectEngine, event_bus: EventBus) -> None:
     received: list[TransportStateChangedEvent] = []
     event_bus.subscribe(TransportStateChangedEvent, received.append)
     engine.set_transport_state(TransportState.PLAYING)
@@ -79,9 +77,7 @@ def test_engine_set_transport_emits_event(
     assert received[0].new_state == TransportState.PLAYING
 
 
-def test_engine_no_event_on_same_state(
-    engine: EffectEngine, event_bus: EventBus
-) -> None:
+def test_engine_no_event_on_same_state(engine: EffectEngine, event_bus: EventBus) -> None:
     engine.set_transport_state(TransportState.PLAYING)
     received: list[TransportStateChangedEvent] = []
     event_bus.subscribe(TransportStateChangedEvent, received.append)

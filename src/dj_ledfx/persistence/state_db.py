@@ -389,15 +389,11 @@ class StateDB:
         Multiple scenes may run concurrently; this method only flips the given
         scene to is_active=1.  Use set_scene_inactive() to deactivate a scene.
         """
-        await self._execute_write(
-            "UPDATE scenes SET is_active=1 WHERE id=?", (scene_id,)
-        )
+        await self._execute_write("UPDATE scenes SET is_active=1 WHERE id=?", (scene_id,))
 
     async def set_scene_inactive(self, scene_id: str) -> None:
         """Deactivate a single scene without affecting other scenes."""
-        await self._execute_write(
-            "UPDATE scenes SET is_active=0 WHERE id=?", (scene_id,)
-        )
+        await self._execute_write("UPDATE scenes SET is_active=0 WHERE id=?", (scene_id,))
 
     async def load_scene_effect_state(self, scene_id: str) -> dict[str, str] | None:
         """Return effect class + params for a scene, or None if unset."""
@@ -479,7 +475,5 @@ class StateDB:
 
     async def load_all_device_states(self) -> dict[str, bytes]:
         """Return all saved device states as a mapping of stable_id -> state_bytes."""
-        rows = await self._execute_read(
-            "SELECT stable_id, state_bytes FROM device_saved_state"
-        )
+        rows = await self._execute_read("SELECT stable_id, state_bytes FROM device_saved_state")
         return {row[0]: bytes(row[1]) for row in rows}

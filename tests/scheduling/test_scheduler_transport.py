@@ -71,9 +71,7 @@ def ring_buffer() -> RingBuffer:
 
 def test_scheduler_starts_stopped(event_bus: EventBus, ring_buffer: RingBuffer) -> None:
     managed = _mock_managed()
-    scheduler = LookaheadScheduler(
-        ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus
-    )
+    scheduler = LookaheadScheduler(ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus)
     assert scheduler.transport_state is TransportState.STOPPED
 
 
@@ -81,9 +79,7 @@ def test_scheduler_responds_to_transport_event(
     event_bus: EventBus, ring_buffer: RingBuffer
 ) -> None:
     managed = _mock_managed()
-    scheduler = LookaheadScheduler(
-        ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus
-    )
+    scheduler = LookaheadScheduler(ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus)
     assert scheduler.transport_state is TransportState.STOPPED
 
     event_bus.emit(
@@ -109,13 +105,9 @@ def test_scheduler_responds_to_transport_event(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_blocks_when_stopped(
-    event_bus: EventBus, ring_buffer: RingBuffer
-) -> None:
+async def test_scheduler_blocks_when_stopped(event_bus: EventBus, ring_buffer: RingBuffer) -> None:
     managed = _mock_managed()
-    scheduler = LookaheadScheduler(
-        ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus
-    )
+    scheduler = LookaheadScheduler(ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.05)
 
@@ -127,13 +119,9 @@ async def test_scheduler_blocks_when_stopped(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_sends_when_playing(
-    event_bus: EventBus, ring_buffer: RingBuffer
-) -> None:
+async def test_scheduler_sends_when_playing(event_bus: EventBus, ring_buffer: RingBuffer) -> None:
     managed = _mock_managed()
-    scheduler = LookaheadScheduler(
-        ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus
-    )
+    scheduler = LookaheadScheduler(ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus)
 
     # Transition to PLAYING
     event_bus.emit(
@@ -155,9 +143,7 @@ async def test_scheduler_skips_send_when_simulating(
     event_bus: EventBus, ring_buffer: RingBuffer
 ) -> None:
     managed = _mock_managed()
-    scheduler = LookaheadScheduler(
-        ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus
-    )
+    scheduler = LookaheadScheduler(ring_buffer=ring_buffer, devices=[managed], event_bus=event_bus)
 
     # Transition to SIMULATING
     event_bus.emit(

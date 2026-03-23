@@ -186,9 +186,7 @@ def test_delete_device_persists_to_db(tmp_path):
     manager.add_device(adapter, tracker)
 
     # Pre-seed the device in the DB so there is a row to delete
-    asyncio.run(
-        db.upsert_device({"id": "lifx:strip1", "name": "Strip1", "backend": "lifx"})
-    )
+    asyncio.run(db.upsert_device({"id": "lifx:strip1", "name": "Strip1", "backend": "lifx"}))
 
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []

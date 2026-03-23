@@ -20,7 +20,9 @@ class Strobe(Effect):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
-            "palette": EffectParam(type="color_list", default=list(_DEFAULT_PALETTE), label="Palette"),
+            "palette": EffectParam(
+                type="color_list", default=list(_DEFAULT_PALETTE), label="Palette"
+            ),
             "duty_cycle": EffectParam(
                 type="float", default=0.15, min=0.05, max=0.5, step=0.01, label="Duty Cycle"
             ),

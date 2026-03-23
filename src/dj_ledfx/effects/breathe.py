@@ -20,7 +20,9 @@ class Breathe(Effect):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
-            "palette": EffectParam(type="color_list", default=list(_DEFAULT_PALETTE), label="Palette"),
+            "palette": EffectParam(
+                type="color_list", default=list(_DEFAULT_PALETTE), label="Palette"
+            ),
             "beats_per_cycle": EffectParam(
                 type="float", default=4.0, min=1.0, max=4.0, step=0.5, label="Beats per Cycle"
             ),

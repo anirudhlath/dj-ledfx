@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from dj_ledfx.effects.color_chase import ColorChase
 from dj_ledfx.types import BeatContext

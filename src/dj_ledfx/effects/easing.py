@@ -8,21 +8,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-def lerp(
-    a: float, b: float, t: float | NDArray[np.float64]
-) -> float | NDArray[np.float64]:
+def lerp(a: float, b: float, t: float | NDArray[np.float64]) -> float | NDArray[np.float64]:
     return a + (b - a) * t
 
 
-def ease_in(
-    t: float | NDArray[np.float64], power: float = 2.0
-) -> float | NDArray[np.float64]:
+def ease_in(t: float | NDArray[np.float64], power: float = 2.0) -> float | NDArray[np.float64]:
     return t**power
 
 
-def ease_out(
-    t: float | NDArray[np.float64], power: float = 2.0
-) -> float | NDArray[np.float64]:
+def ease_out(t: float | NDArray[np.float64], power: float = 2.0) -> float | NDArray[np.float64]:
     return 1.0 - (1.0 - t) ** power
 
 
