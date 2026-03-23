@@ -52,6 +52,7 @@ class FireStorm(Effect):
     def _apply_params(self, **kwargs: Any) -> None:
         if "palette" in kwargs:
             self._palette = [hex_to_rgb(c) for c in kwargs["palette"]]
+            self._prev_frame = None
         if "intensity" in kwargs:
             self._intensity = float(kwargs["intensity"])
         if "smoothing" in kwargs:
