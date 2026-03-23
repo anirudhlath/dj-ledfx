@@ -30,9 +30,9 @@ async def test_creates_db_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_schema_version_is_2(db):
+async def test_schema_version_is_3(db):
     version = await db.get_schema_version()
-    assert version == 2
+    assert version == 3
 
 
 @pytest.mark.asyncio
@@ -56,6 +56,7 @@ async def test_tables_created(db):
     expected = [
         "config",
         "device_groups",
+        "device_saved_state",
         "devices",
         "groups",
         "presets",
@@ -75,7 +76,7 @@ async def test_idempotent_open(tmp_path):
     db2 = StateDB(db_path)
     await db2.open()
     version = await db2.get_schema_version()
-    assert version == 2
+    assert version == 3
     await db2.close()
 
 

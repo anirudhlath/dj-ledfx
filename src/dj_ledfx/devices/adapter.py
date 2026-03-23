@@ -44,3 +44,12 @@ class DeviceAdapter(ABC):
 
     @abstractmethod
     async def send_frame(self, colors: NDArray[np.uint8]) -> None: ...
+
+    async def capture_state(self) -> bytes:
+        """Capture current device state. Default: 50% white."""
+        return np.full((self.led_count, 3), 128, dtype=np.uint8).tobytes()
+
+    async def restore_state(self, state: bytes) -> None:
+        """Restore device to a previously captured state. Default: send as RGB frame."""
+        colors = np.frombuffer(state, dtype=np.uint8).reshape(-1, 3)
+        await self.send_frame(colors)

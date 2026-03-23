@@ -13,11 +13,12 @@ from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.engine import RingBuffer
 from dj_ledfx.events import DeviceOfflineEvent, EventBus, TransportStateChangedEvent
-from dj_ledfx.transport import TransportState
 from dj_ledfx.spatial.compositor import SpatialCompositor
+from dj_ledfx.transport import TransportState
 from dj_ledfx.types import DeviceStats
 
 if TYPE_CHECKING:
+    from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.spatial.pipeline import ScenePipeline
 
 
@@ -74,6 +75,7 @@ class LookaheadScheduler:
         disconnect_backoff_s: float = 1.0,
         compositor: SpatialCompositor | None = None,
         event_bus: EventBus | None = None,
+        state_db: StateDB | None = None,
     ) -> None:
         self._ring_buffer = ring_buffer
         self._frame_period = 1.0 / fps
@@ -82,6 +84,7 @@ class LookaheadScheduler:
         self._start_time: float = 0.0
         self._compositor = compositor
         self._event_bus = event_bus
+        self._state_db = state_db
         self._frame_snapshots: dict[str, tuple[NDArray[np.uint8], int]] = {}
         self._frame_seq: dict[str, int] = {}
         self._transport_state = TransportState.STOPPED
@@ -116,11 +119,42 @@ class LookaheadScheduler:
         return self._transport_state
 
     def _on_transport_changed(self, event: TransportStateChangedEvent) -> None:
+        prev_state = self._transport_state
         self._transport_state = event.new_state
         if event.new_state.is_active:
             self._resume_event.set()
         else:
             self._resume_event.clear()
+            # Restore saved device states when transitioning from active -> STOPPED
+            if prev_state.is_active and self._state_db is not None:
+                asyncio.create_task(self._restore_device_states())
+
+    async def _restore_device_states(self) -> None:
+        """Restore all connected devices to their saved pre-effect states."""
+        assert self._state_db is not None
+        saved_states = await self._state_db.load_all_device_states()
+        if not saved_states:
+            return
+        for state in self._device_state.values():
+            adapter = state.managed.adapter
+            if not adapter.is_connected:
+                continue
+            stable_id = adapter.device_info.effective_id
+            state_bytes = saved_states.get(stable_id)
+            if state_bytes is None:
+                continue
+            try:
+                await adapter.restore_state(state_bytes)
+                logger.debug(
+                    "Restored state for device '{}' (stable_id={})",
+                    adapter.device_info.name,
+                    stable_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to restore state for device '{}'",
+                    adapter.device_info.name,
+                )
 
     def add_device(self, managed: ManagedDevice, pipeline: ScenePipeline | None = None) -> None:
         """Add a device dynamically. Spawns a send task if the scheduler is running."""
