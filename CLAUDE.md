@@ -11,7 +11,7 @@ Beat-synced LED effect engine driven by Pro DJ Link network data with per-device
 - Use haiku for committing.
 - Prefer latest internet grounded knowledge over training knowledge.
 - Use context7 to check latest docs and for external dependencies.
-- Add code architect review step as a task for each plan you implement. Fix every issue that comes up during the code architect review step.
+- Add @feature-dev:code-architect review step as a task for each plan you implement. Fix every issue that comes up during the code architect review step.
 - Add /simplify skill step as a task for each plan you implement. Fix every issue that comes up during the simplify step.
 - Add claude md skill as a task to improve and revise claude context, memories etc.
 - Finally create a PR with the changes.
