@@ -170,6 +170,8 @@ class EffectEngine:
 
     def stop(self) -> None:
         self._running = False
+        # Unblock _resume_event.wait() so run() can observe _running=False and exit
+        self._resume_event.set()
 
     async def run(self) -> None:
         self._running = True

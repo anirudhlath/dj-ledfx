@@ -10,17 +10,17 @@ import asyncio
 import time
 
 import pytest
+from conftest import MockDeviceAdapter
 
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine
-from dj_ledfx.events import EventBus, TransportStateChangedEvent
+from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.transport import TransportState
-from conftest import MockDeviceAdapter
 
 
 def _make_clock() -> BeatClock:

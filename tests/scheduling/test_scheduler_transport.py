@@ -15,7 +15,6 @@ from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.transport import TransportState
 from dj_ledfx.types import DeviceInfo, RenderedFrame
 
-
 # --- helpers ---
 
 

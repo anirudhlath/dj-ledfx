@@ -89,6 +89,7 @@ class LookaheadScheduler:
         self._frame_seq: dict[str, int] = {}
         self._transport_state = TransportState.STOPPED
         self._resume_event = asyncio.Event()
+        self._restore_task: asyncio.Task[None] | None = None
         if event_bus is not None:
             event_bus.subscribe(TransportStateChangedEvent, self._on_transport_changed)
 
@@ -119,15 +120,14 @@ class LookaheadScheduler:
         return self._transport_state
 
     def _on_transport_changed(self, event: TransportStateChangedEvent) -> None:
-        prev_state = self._transport_state
         self._transport_state = event.new_state
         if event.new_state.is_active:
             self._resume_event.set()
         else:
             self._resume_event.clear()
             # Restore saved device states when transitioning from active -> STOPPED
-            if prev_state.is_active and self._state_db is not None:
-                asyncio.create_task(self._restore_device_states())
+            if event.old_state.is_active and self._state_db is not None:
+                self._restore_task = asyncio.create_task(self._restore_device_states())
 
     async def _restore_device_states(self) -> None:
         """Restore all connected devices to their saved pre-effect states."""
@@ -307,28 +307,24 @@ class LookaheadScheduler:
                 if mapped is not None:
                     colors = mapped
 
+            # Re-read name each iteration so promotion (ghost->real) is reflected immediately
+            device_name = device.adapter.device_info.name
+
             # Gate actual device send on transport state
             if self._transport_state == TransportState.PLAYING:
                 send_start = time.monotonic()
                 try:
                     await device.adapter.send_frame(colors)
                 except Exception:
-                    logger.warning(
-                        "Send failed for '{}'",
-                        device.adapter.device_info.name,
-                    )
+                    logger.warning("Send failed for '{}'", device_name)
                     continue
 
                 send_elapsed = time.monotonic() - send_start
-                device_name = device.adapter.device_info.name
                 metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(send_elapsed)
 
                 if device.adapter.supports_latency_probing:
                     rtt_ms = (time.monotonic() - send_start) * 1000.0
                     device.tracker.update(rtt_ms)
-
-            # Re-read name each iteration so promotion (ghost→real) is reflected immediately
-            device_name = device.adapter.device_info.name
             state.send_count += 1
             seq = self._frame_seq.get(device_name, 0) + 1
             self._frame_seq[device_name] = seq

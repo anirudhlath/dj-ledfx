@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react"
 import type { TransportState } from "@/lib/types"
-import { apiClient } from "@/lib/api-client"
+import { getTransport, setTransport } from "@/lib/api-client"
 import { wsClient } from "@/lib/ws-client"
 
 export function useTransport() {
   const [state, setState] = useState<TransportState>("stopped")
 
   useEffect(() => {
-    apiClient.getTransport().then((res) => setState(res.state)).catch(() => {})
+    getTransport().then((res) => setState(res.state)).catch(() => {})
     const unsub = wsClient.onTransport(setState)
     return unsub
   }, [])
@@ -15,10 +15,10 @@ export function useTransport() {
   const setTransportState = useCallback(async (newState: TransportState) => {
     setState(newState)
     try {
-      const res = await apiClient.setTransport(newState)
+      const res = await setTransport(newState)
       setState(res.state)
     } catch {
-      const res = await apiClient.getTransport()
+      const res = await getTransport()
       setState(res.state)
     }
   }, [])

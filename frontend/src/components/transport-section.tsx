@@ -204,11 +204,9 @@ export function TransportSection({ beat, transportState, onTransportChange }: Tr
           <span
             className={cn(
               "text-xs font-mono",
-              pitchPercent > 0
-                ? "text-amber-400"
-                : pitchPercent < 0
-                  ? "text-sky-400"
-                  : "text-muted-foreground",
+              pitchPercent > 0 && "text-amber-400",
+              pitchPercent < 0 && "text-sky-400",
+              pitchPercent === 0 && "text-muted-foreground",
             )}
           >
             {pitchPercent > 0 ? "+" : ""}

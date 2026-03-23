@@ -24,7 +24,7 @@ export class WsClient {
   private handlers = new Map<string, Set<MessageHandler>>()
   private frameHandlers = new Set<FrameHandler>()
   private connectionHandlers = new Set<ConnectionHandler>()
-  private transportCallbacks: ((state: TransportState) => void)[] = []
+  private transportCallbacks = new Set<(state: TransportState) => void>()
   private pendingAcks = new Map<
     number,
     { resolve: (v: JsonMessage) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
@@ -69,11 +69,8 @@ export class WsClient {
   }
 
   onTransport(cb: (state: TransportState) => void): () => void {
-    this.transportCallbacks.push(cb)
-    return () => {
-      const idx = this.transportCallbacks.indexOf(cb)
-      if (idx !== -1) this.transportCallbacks.splice(idx, 1)
-    }
+    this.transportCallbacks.add(cb)
+    return () => this.transportCallbacks.delete(cb)
   }
 
   private _connect(): void {
@@ -135,12 +132,12 @@ export class WsClient {
       switch (channel) {
         case "transport":
           if (typeof msg.state === "string") {
-            this.transportCallbacks.forEach((cb) => cb(msg.state as TransportState))
+            for (const cb of this.transportCallbacks) cb(msg.state as TransportState)
           }
           break
         case "status":
           if (msg.transport && typeof msg.transport === "string") {
-            this.transportCallbacks.forEach((cb) => cb(msg.transport as TransportState))
+            for (const cb of this.transportCallbacks) cb(msg.transport as TransportState)
           }
           break
       }

@@ -224,13 +224,7 @@ export async function setTransport(
 ): Promise<{ state: TransportState }> {
   return fetchJson<{ state: TransportState }>("/transport", {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ state }),
   })
-}
-
-export const apiClient = {
-  getTransport,
-  setTransport,
 }
 
