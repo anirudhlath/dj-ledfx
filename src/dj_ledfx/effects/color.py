@@ -97,4 +97,4 @@ def palette_lerp(
     low_colors = palette_arr[idx_low]  # (n, 3)
     high_colors = palette_arr[idx_high]  # (n, 3)
     result = low_colors + (high_colors - low_colors) * frac[:, np.newaxis]
-    return np.clip(result, 0, 255).astype(np.uint8)  # type: ignore[return-value]
+    return np.clip(result, 0, 255).astype(np.uint8)  # type: ignore[no-any-return]
