@@ -16,6 +16,7 @@ from dj_ledfx.latency.strategies import StaticLatency, WindowedMeanLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.prodjlink.listener import BeatEvent
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
+from dj_ledfx.transport import TransportState
 
 
 def _setup_pipeline(
@@ -64,6 +65,9 @@ async def test_full_pipeline_simulator_to_mock_device() -> None:
 
     simulator, engine, scheduler, _ = _setup_pipeline([managed])
 
+    engine._resume_event.set()
+    scheduler._resume_event.set()
+    scheduler._transport_state = TransportState.PLAYING
     sim_task = asyncio.create_task(simulator.run())
     engine_task = asyncio.create_task(engine.run())
     sched_task = asyncio.create_task(scheduler.run())
@@ -95,6 +99,9 @@ async def test_mixed_latency_devices() -> None:
 
     simulator, engine, scheduler, _ = _setup_pipeline([fast_device, slow_device])
 
+    engine._resume_event.set()
+    scheduler._resume_event.set()
+    scheduler._transport_state = TransportState.PLAYING
     sim_task = asyncio.create_task(simulator.run())
     engine_task = asyncio.create_task(engine.run())
     sched_task = asyncio.create_task(scheduler.run())
@@ -154,7 +161,7 @@ async def test_startup_with_fresh_db(tmp_path: Path) -> None:
     db = StateDB(tmp_path / "state.db")
     await db.open()
     version = await db.get_schema_version()
-    assert version == 2
+    assert version == 3
     devices = await db.load_devices()
     assert devices == []
     scenes = await db.load_scenes()

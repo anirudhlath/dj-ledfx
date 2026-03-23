@@ -10,7 +10,14 @@ from dj_ledfx.effects.engine import RingBuffer
 from dj_ledfx.latency.strategies import StaticLatency, WindowedMeanLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.scheduling.scheduler import FrameSlot, LookaheadScheduler
+from dj_ledfx.transport import TransportState
 from dj_ledfx.types import RenderedFrame
+
+
+def _set_playing(scheduler: LookaheadScheduler) -> None:
+    """Put the scheduler in PLAYING state so run() is not blocked."""
+    scheduler._transport_state = TransportState.PLAYING
+    scheduler._resume_event.set()
 
 
 def _make_device(
@@ -124,6 +131,7 @@ async def test_distributor_writes_to_all_devices() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[dev1, dev2], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -141,6 +149,7 @@ async def test_distributor_computes_correct_target_time() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[dev_fast, dev_slow], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -161,6 +170,7 @@ async def test_send_loop_disconnected_backoff() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -181,6 +191,7 @@ async def test_send_loop_reconnection_sends_frames() -> None:
         fps=60,
         disconnect_backoff_s=0.01,
     )
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.05)
 
@@ -212,6 +223,7 @@ async def test_send_loop_reconnection_resets_tracker() -> None:
         fps=60,
         disconnect_backoff_s=0.01,
     )
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.05)
 
@@ -234,6 +246,7 @@ async def test_send_loop_rtt_not_updated_when_probing_disabled() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -253,6 +266,7 @@ async def test_send_loop_rtt_updated_when_probing_enabled() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -269,6 +283,7 @@ async def test_send_loop_buffer_not_ready() -> None:
     # Don't fill buffer
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.1)
     scheduler.stop()
@@ -296,6 +311,7 @@ async def test_send_loop_continues_after_send_exception() -> None:
     device.adapter.send_frame = flaky_send  # type: ignore[assignment]
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.2)
     scheduler.stop()
@@ -312,6 +328,7 @@ async def test_fps_cap_limits_send_rate() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(1.0)
     scheduler.stop()
@@ -329,6 +346,7 @@ async def test_fps_cap_no_accumulated_drift() -> None:
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
     start = time.monotonic()
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(2.0)
     scheduler.stop()
@@ -354,6 +372,7 @@ async def test_graceful_stop() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.1)
     scheduler.stop()
@@ -367,6 +386,7 @@ async def test_external_cancellation() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.1)
     task.cancel()
@@ -389,6 +409,7 @@ async def test_shutdown_during_active_send() -> None:
     device.adapter.send_frame = slow_send  # type: ignore[assignment]
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
 
     # Wait until send_frame is actually in progress
@@ -412,6 +433,7 @@ async def test_get_device_stats() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.2)
 
@@ -433,6 +455,7 @@ async def test_get_device_stats_fps_accuracy() -> None:
     _fill_buffer(buf, time.monotonic(), 60)
 
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(1.0)
 
@@ -458,6 +481,7 @@ async def test_mixed_fps_per_device() -> None:
         fps=60,
     )
 
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.5)
     scheduler.stop()
@@ -531,6 +555,7 @@ async def test_scheduler_add_device_during_run() -> None:
     buf = RingBuffer(60, 60)
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[], fps=60)
 
+    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.05)
 
@@ -570,6 +595,7 @@ async def test_distributor_handles_concurrent_add_device() -> None:
     # Start with one device so the distributor loop is active immediately
     initial_device = _make_device("Initial", latency_ms=10.0)
     scheduler = LookaheadScheduler(ring_buffer=buf, devices=[initial_device], fps=60)
+    _set_playing(scheduler)
     run_task = asyncio.create_task(scheduler.run())
 
     # Let the distributor run for a few ticks before adding the second device

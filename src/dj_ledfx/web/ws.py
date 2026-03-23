@@ -10,7 +10,14 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from dj_ledfx.events import TransportStateChangedEvent
+from dj_ledfx.transport import TransportState
 from dj_ledfx.web.state import ClientSubscription
+
+
+def _get_connected(app: Any) -> set[WebSocket]:
+    """Return the per-app connected websockets set (initialized in create_app)."""
+    return app.state.connected_websockets
 
 
 async def ws_endpoint(websocket: WebSocket) -> None:
@@ -19,6 +26,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     app = websocket.app
     sub = ClientSubscription()
     tasks: list[asyncio.Task[None]] = []
+    _get_connected(app).add(websocket)
 
     try:
         # Start polling tasks
@@ -39,6 +47,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     except Exception as e:
         logger.debug("WebSocket error: {}", e)
     finally:
+        _get_connected(app).discard(websocket)
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -50,6 +59,30 @@ async def _send_json(ws: WebSocket, data: dict[str, Any]) -> None:
         await ws.send_text(json.dumps(data))
     except Exception:
         pass
+
+
+async def _broadcast_json(app: Any, data: dict[str, Any]) -> None:
+    """Broadcast JSON message to all connected WebSocket clients."""
+    clients = list(_get_connected(app))
+    if clients:
+        await asyncio.gather(*(_send_json(ws, data) for ws in clients))
+
+
+async def transport_broadcast(app: Any) -> None:
+    """Listen for TransportStateChangedEvent and broadcast to all WS clients."""
+    event_bus = app.state.event_bus
+    queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def on_change(event: TransportStateChangedEvent) -> None:
+        queue.put_nowait(event.new_state.value)
+
+    event_bus.subscribe(TransportStateChangedEvent, on_change)
+    try:
+        while True:
+            state_value = await queue.get()
+            await _broadcast_json(app, {"channel": "transport", "state": state_value})
+    finally:
+        event_bus.unsubscribe(TransportStateChangedEvent, on_change)
 
 
 async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
@@ -122,6 +155,7 @@ async def _status_poll(ws: WebSocket, app: Any) -> None:
             "ok": True,
             "device_count": len(stats),
             "avg_render_ms": engine.avg_render_time_ms,
+            "transport": engine.transport_state.value,
         }
         await _send_json(ws, status_data)
 
@@ -181,6 +215,16 @@ async def _handle_command(
             deck.apply_update(msg.get("effect"), msg.get("params", {}))
             await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
         except (KeyError, ValueError, TypeError) as e:
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(e)})
+
+    elif action == "set_transport":
+        engine = app.state.effect_engine
+        state_str = msg.get("state", "")
+        try:
+            new_state = TransportState(state_str)
+            engine.set_transport_state(new_state)
+            await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
+        except (ValueError, KeyError) as e:
             await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(e)})
 
     else:

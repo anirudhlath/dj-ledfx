@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from dj_ledfx.transport import TransportState
+
 
 class EffectSchema(BaseModel):
     name: str
@@ -120,3 +122,14 @@ class UpdateSceneRequest(BaseModel):
     name: str | None = None
     mapping_type: Literal["linear", "radial"] | None = None
     effect_mode: Literal["independent", "shared"] | None = None
+
+
+# Transport schemas
+
+
+class TransportBody(BaseModel):
+    state: TransportState
+
+
+class TransportResponse(BaseModel):
+    state: TransportState

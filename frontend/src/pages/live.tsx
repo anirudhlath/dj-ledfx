@@ -2,6 +2,7 @@ import { useBeat } from "@/hooks/use-beat"
 import { useEffects } from "@/hooks/use-effects"
 import { useDevices } from "@/hooks/use-devices"
 import { useScene } from "@/hooks/use-scene"
+import { useTransport } from "@/hooks/use-transport"
 import { TransportSection } from "@/components/transport-section"
 import { EffectDeck } from "@/components/effect-deck"
 import { DeviceMonitor } from "@/components/device-monitor"
@@ -13,13 +14,14 @@ export default function LivePage() {
   const effects = useEffects()
   const { devices, frameData } = useDevices()
   const { scene } = useScene()
+  const { transportState, setTransportState } = useTransport()
 
   const placements = scene?.placements ?? []
 
   return (
     <div className="flex flex-col gap-3 h-full">
       {/* Transport */}
-      <TransportSection beat={beat} />
+      <TransportSection beat={beat} transportState={transportState} onTransportChange={setTransportState} />
 
       {/* Middle: Scene preview + Effect deck */}
       <div className="flex gap-3 flex-1 min-h-0">

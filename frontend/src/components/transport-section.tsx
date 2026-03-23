@@ -1,7 +1,9 @@
-import { useRef, useState, useLayoutEffect } from "react"
-import type { BeatState } from "@/lib/types"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import type { BeatState, TransportState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Play, Eye, Square } from "lucide-react"
 
 function BeatGrid({
   isPlaying,
@@ -76,15 +78,88 @@ function BeatGrid({
 
 interface TransportSectionProps {
   beat: BeatState
+  transportState: TransportState
+  onTransportChange: (state: TransportState) => void
 }
 
-export function TransportSection({ beat }: TransportSectionProps) {
+export function TransportSection({ beat, transportState, onTransportChange }: TransportSectionProps) {
   const { bpm, beatPhase, barPhase, isPlaying, beatPos, pitchPercent, deckName } = beat
 
   const bpmDisplay = bpm > 0 ? bpm.toFixed(1) : "---.-"
 
+  // Keyboard shortcuts: Space = toggle Play/Stop, S = toggle Simulate/Stop
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable
+      ) {
+        return
+      }
+
+      if (e.code === "Space") {
+        e.preventDefault()
+        onTransportChange(transportState === "playing" ? "stopped" : "playing")
+      } else if (e.code === "KeyS") {
+        e.preventDefault()
+        onTransportChange(transportState === "simulating" ? "stopped" : "simulating")
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [transportState, onTransportChange])
+
   return (
     <div className="flex items-stretch gap-4 p-3 bg-card ring-1 ring-foreground/10 rounded-xl">
+      {/* Transport controls */}
+      <div className="flex items-center gap-1.5">
+        <Button
+          size="sm"
+          variant={transportState === "playing" ? "default" : "outline"}
+          className={cn(
+            "gap-1.5",
+            transportState === "playing" && "bg-green-600 hover:bg-green-700 text-white border-green-600",
+          )}
+          onClick={() => onTransportChange(transportState === "playing" ? "stopped" : "playing")}
+          title="Play (Space)"
+        >
+          <Play className="h-3.5 w-3.5" />
+          <span className="text-xs">Play</span>
+        </Button>
+        <Button
+          size="sm"
+          variant={transportState === "simulating" ? "default" : "outline"}
+          className={cn(
+            "gap-1.5",
+            transportState === "simulating" && "bg-amber-500 hover:bg-amber-600 text-white border-amber-500",
+          )}
+          onClick={() => onTransportChange(transportState === "simulating" ? "stopped" : "simulating")}
+          title="Simulate (S)"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          <span className="text-xs">Sim</span>
+        </Button>
+        <Button
+          size="sm"
+          variant={transportState === "stopped" ? "default" : "outline"}
+          className={cn(
+            "gap-1.5",
+            transportState === "stopped" && "bg-red-600 hover:bg-red-700 text-white border-red-600",
+          )}
+          onClick={() => onTransportChange("stopped")}
+          title="Stop"
+        >
+          <Square className="h-3.5 w-3.5" />
+          <span className="text-xs">Stop</span>
+        </Button>
+      </div>
+
+      <div className="w-px bg-border self-stretch" />
+
       {/* BPM — most prominent */}
       <div className="flex flex-col items-center justify-center min-w-[110px] px-3">
         <span className="text-5xl font-mono font-bold tracking-tight text-foreground leading-none">
@@ -105,7 +180,7 @@ export function TransportSection({ beat }: TransportSectionProps) {
         />
       </div>
 
-      {/* Play state */}
+      {/* LIVE badge — shows when DJ deck is playing */}
       <div className="flex items-center">
         <Badge
           variant={isPlaying ? "default" : "outline"}
@@ -116,7 +191,7 @@ export function TransportSection({ beat }: TransportSectionProps) {
               : "text-muted-foreground border-muted",
           )}
         >
-          {isPlaying ? "PLAY" : "STOP"}
+          LIVE
         </Badge>
       </div>
 
@@ -129,11 +204,9 @@ export function TransportSection({ beat }: TransportSectionProps) {
           <span
             className={cn(
               "text-xs font-mono",
-              pitchPercent > 0
-                ? "text-amber-400"
-                : pitchPercent < 0
-                  ? "text-sky-400"
-                  : "text-muted-foreground",
+              pitchPercent > 0 && "text-amber-400",
+              pitchPercent < 0 && "text-sky-400",
+              pitchPercent === 0 && "text-muted-foreground",
             )}
           >
             {pitchPercent > 0 ? "+" : ""}

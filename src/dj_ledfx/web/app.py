@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.resources
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.deck import EffectDeck
     from dj_ledfx.effects.engine import EffectEngine
     from dj_ledfx.effects.presets import PresetStore
+    from dj_ledfx.events import EventBus
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 
@@ -55,6 +57,7 @@ def create_app(
     config_path: Path | None,
     web_static_dir: str | None = None,
     state_db: StateDB | None = None,
+    event_bus: EventBus | None = None,
 ) -> FastAPI:
     app = FastAPI(title="dj-ledfx")
     app.add_middleware(
@@ -76,18 +79,41 @@ def create_app(
     app.state.config = config
     app.state.config_path = config_path
     app.state.state_db = state_db
+    app.state.event_bus = event_bus
+    app.state.connected_websockets: set = set()
+
+    @app.on_event("startup")
+    async def _start_transport_broadcast() -> None:
+        if app.state.event_bus is not None:
+            from dj_ledfx.web.ws import transport_broadcast
+
+            app.state._transport_broadcast_task = asyncio.create_task(
+                transport_broadcast(app)
+            )
+
+    @app.on_event("shutdown")
+    async def _stop_transport_broadcast() -> None:
+        task = getattr(app.state, "_transport_broadcast_task", None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     from dj_ledfx.web.router_config import router as config_router
     from dj_ledfx.web.router_devices import router as devices_router
     from dj_ledfx.web.router_effects import router as effects_router
     from dj_ledfx.web.router_scene import router as scene_router
     from dj_ledfx.web.router_scene import router_scenes
+    from dj_ledfx.web.router_transport import router as transport_router
 
     app.include_router(effects_router, prefix="/api")
     app.include_router(devices_router, prefix="/api")
     app.include_router(config_router, prefix="/api")
     app.include_router(scene_router, prefix="/api")
     app.include_router(router_scenes, prefix="/api")
+    app.include_router(transport_router, prefix="/api")
 
     from dj_ledfx.web.ws import ws_endpoint
 

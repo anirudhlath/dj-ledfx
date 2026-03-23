@@ -174,6 +174,7 @@ async def _run(args: argparse.Namespace) -> None:
         await start_listener(event_bus=event_bus)
 
     device_manager = DeviceManager(event_bus=event_bus)
+    device_manager.set_state_db(state_db)
     registered_devices = await state_db.load_devices()
     for dev_row in registered_devices:
         led_count = dev_row.get("led_count") or 60
@@ -294,6 +295,7 @@ async def _run(args: argparse.Namespace) -> None:
         led_count=led_count,
         fps=config.engine.fps,
         max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
+        event_bus=event_bus,
     )
 
     scheduler = LookaheadScheduler(
@@ -302,6 +304,7 @@ async def _run(args: argparse.Namespace) -> None:
         fps=config.engine.fps,
         compositor=compositor,
         event_bus=event_bus,
+        state_db=state_db,
     )
 
     def _on_device_offline(event: DeviceOfflineEvent) -> None:
@@ -367,6 +370,7 @@ async def _run(args: argparse.Namespace) -> None:
             config_path=args.config,
             web_static_dir=None if web_mode == "dev" else args.web_static_dir,
             state_db=state_db,
+            event_bus=event_bus,
         )
 
         try:

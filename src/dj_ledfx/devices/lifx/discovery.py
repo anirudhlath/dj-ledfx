@@ -171,8 +171,7 @@ class LifxBackend(DeviceBackend):
 
                 await adapter.connect()
 
-                last_latency = row.get("last_latency_ms") or 50.0
-                tracker = LatencyTracker(strategy=StaticLatency(float(last_latency)))
+                tracker = self._create_tracker(config)
 
                 # Register for RTT probing
                 mock_record = LifxDeviceRecord(

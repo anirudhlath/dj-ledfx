@@ -7,6 +7,8 @@ from typing import Any
 
 from loguru import logger
 
+from dj_ledfx.transport import TransportState
+
 
 @dataclass(frozen=True, slots=True)
 class BeatEvent:
@@ -45,6 +47,12 @@ class SceneActivatedEvent:
 @dataclass(frozen=True, slots=True)
 class SceneDeactivatedEvent:
     scene_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class TransportStateChangedEvent:
+    old_state: TransportState
+    new_state: TransportState
 
 
 class EventBus:

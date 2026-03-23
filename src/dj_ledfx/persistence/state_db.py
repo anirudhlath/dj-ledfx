@@ -456,3 +456,30 @@ class StateDB:
     async def delete_preset(self, name: str) -> None:
         """Delete a preset by name."""
         await self._execute_write("DELETE FROM presets WHERE name=?", (name,))
+
+    async def save_device_state(self, stable_id: str, state_bytes: bytes) -> None:
+        """Upsert the saved LED state for a device."""
+        await self._execute_write(
+            "INSERT INTO device_saved_state (stable_id, state_bytes, captured_at) "
+            "VALUES (?, ?, datetime('now')) "
+            "ON CONFLICT(stable_id) DO UPDATE SET state_bytes=excluded.state_bytes, "
+            "captured_at=datetime('now')",
+            (stable_id, state_bytes),
+        )
+
+    async def load_device_state(self, stable_id: str) -> bytes | None:
+        """Return the saved LED state for a device, or None if not found."""
+        rows = await self._execute_read(
+            "SELECT state_bytes FROM device_saved_state WHERE stable_id=?",
+            (stable_id,),
+        )
+        if not rows:
+            return None
+        return bytes(rows[0][0])
+
+    async def load_all_device_states(self) -> dict[str, bytes]:
+        """Return all saved device states as a mapping of stable_id -> state_bytes."""
+        rows = await self._execute_read(
+            "SELECT stable_id, state_bytes FROM device_saved_state"
+        )
+        return {row[0]: bytes(row[1]) for row in rows}
