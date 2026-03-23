@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.base import Effect
-from dj_ledfx.effects.color import hex_to_rgb, palette_lerp
+from dj_ledfx.effects.color import hex_to_rgb, palette_lerp, rgb_to_hex
 from dj_ledfx.effects.energy import bpm_energy
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import BeatContext
@@ -44,7 +44,7 @@ class FireStorm(Effect):
 
     def get_params(self) -> dict[str, Any]:
         return {
-            "palette": [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in self._palette],
+            "palette": [rgb_to_hex(r, g, b) for r, g, b in self._palette],
             "intensity": self._intensity,
             "smoothing": self._smoothing,
         }
@@ -63,15 +63,13 @@ class FireStorm(Effect):
 
         noise = self._rng.random(led_count)
 
-        # Apply temporal smoothing
         if self._prev_frame is not None and len(self._prev_frame) == led_count:
             smoothed = self._prev_frame * self._smoothing + noise * (1.0 - self._smoothing)
         else:
             smoothed = noise
 
-        self._prev_frame = smoothed.copy()
+        self._prev_frame = smoothed
 
-        # palette_lerp for color, brightness for flicker
         brightness = (1.0 - effective_intensity) + smoothed * effective_intensity
         colors = palette_lerp(self._palette, smoothed)
         result = (colors.astype(np.float64) * brightness[:, np.newaxis]).astype(np.uint8)

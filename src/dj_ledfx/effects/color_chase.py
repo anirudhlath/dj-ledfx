@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.base import Effect
-from dj_ledfx.effects.color import hex_to_rgb, palette_lerp
+from dj_ledfx.effects.color import hex_to_rgb, palette_lerp, rgb_to_hex
 from dj_ledfx.effects.energy import bpm_energy
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import BeatContext
@@ -42,7 +42,7 @@ class ColorChase(Effect):
 
     def get_params(self) -> dict[str, Any]:
         return {
-            "palette": [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in self._palette],
+            "palette": [rgb_to_hex(r, g, b) for r, g, b in self._palette],
             "band_count": self._band_count,
             "direction": self._direction,
         }
