@@ -379,3 +379,13 @@ def test_app_config_has_discovery():
     config = AppConfig()
     assert isinstance(config.discovery, DiscoveryConfig)
     assert config.discovery.broadcast_interval_s == 30.0
+
+
+def test_engine_config_unassigned_device_mode_default():
+    cfg = EngineConfig()
+    assert cfg.unassigned_device_mode == "default_effect"
+
+
+def test_engine_config_unassigned_device_mode_idle():
+    cfg = EngineConfig(unassigned_device_mode="idle")
+    assert cfg.unassigned_device_mode == "idle"

@@ -69,3 +69,48 @@ def test_ws_subscribe_beat_command(client):
             if msg.get("channel") == "ack":
                 assert msg["id"] == 1
                 break
+
+
+def test_ws_set_effect_with_scene_id(client):
+    """set_effect with scene_id targets that scene's pipeline."""
+    mock_pm = MagicMock()
+    client.app.state.pipeline_manager = mock_pm
+
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_text()  # drain beat
+
+        ws.send_json(
+            {
+                "action": "set_effect",
+                "id": "test1",
+                "scene_id": "scene1",
+                "effect": "rainbow_wave",
+                "params": {},
+            }
+        )
+        for _ in range(10):
+            data = ws.receive_text()
+            msg = json.loads(data)
+            if msg.get("channel") == "ack" and msg.get("id") == "test1":
+                break
+        mock_pm.set_scene_effect.assert_called_once_with("scene1", "rainbow_wave", {})
+
+
+def test_ws_set_effect_without_scene_id(client):
+    """set_effect without scene_id targets the global deck (backward compat)."""
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_text()  # drain beat
+        ws.send_json(
+            {
+                "action": "set_effect",
+                "id": "test2",
+                "effect": "beat_pulse",
+                "params": {},
+            }
+        )
+        for _ in range(10):
+            data = ws.receive_text()
+            msg = json.loads(data)
+            if msg.get("channel") == "ack" and msg.get("id") == "test2":
+                break
+        assert client.app.state.effect_deck.effect_name == "beat_pulse"

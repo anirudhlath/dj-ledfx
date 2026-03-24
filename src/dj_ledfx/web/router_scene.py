@@ -7,6 +7,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from dj_ledfx.config import save_config
 from dj_ledfx.spatial.compositor import SpatialCompositor
@@ -345,6 +346,16 @@ async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest
     db = get_db(request)
     existing = await _get_scene_row(db, scene_id)
 
+    # Guard: can't change effect_mode while scene is active
+    if (
+        existing.get("is_active")
+        and body.effect_mode is not None
+        and body.effect_mode != existing.get("effect_mode")
+    ):
+        raise HTTPException(
+            409, "Cannot change effect_mode while scene is active. Deactivate first."
+        )
+
     updated: dict[str, Any] = {"id": scene_id}
     updated["name"] = body.name if body.name is not None else existing["name"]
     updated["mapping_type"] = (
@@ -368,9 +379,14 @@ async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest
 @router_scenes.delete("/{scene_id}")
 async def delete_scene(request: Request, scene_id: str) -> dict[str, str]:
     db = get_db(request)
-    await _get_scene_row(db, scene_id)
+    scene = await _get_scene_row(db, scene_id)
+    if scene.get("is_active"):
+        pm = getattr(request.app.state, "pipeline_manager", None)
+        if pm is not None:
+            await pm.deactivate_scene(scene_id)
+        await db.set_scene_inactive(scene_id)
     await db.delete_scene(scene_id)
-    return {"status": "deleted"}
+    return {"status": "deleted", "scene_id": scene_id}
 
 
 @router_scenes.post("/{scene_id}/activate")
@@ -404,6 +420,9 @@ async def activate_scene(request: Request, scene_id: str) -> dict[str, str]:
                 },
             )
 
+    pm = getattr(request.app.state, "pipeline_manager", None)
+    if pm is not None:
+        await pm.activate_scene(scene_id)
     await db.set_scene_active(scene_id)
     return {"status": "activated", "scene_id": scene_id}
 
@@ -412,9 +431,42 @@ async def activate_scene(request: Request, scene_id: str) -> dict[str, str]:
 async def deactivate_scene(request: Request, scene_id: str) -> dict[str, str]:
     db = get_db(request)
     await _get_scene_row(db, scene_id)
-    # Targeted update — only touches is_active, leaves all other columns intact.
-    await db._execute_write("UPDATE scenes SET is_active=0 WHERE id=?", (scene_id,))
+    await db.set_scene_inactive(scene_id)
+    pm = getattr(request.app.state, "pipeline_manager", None)
+    if pm is not None:
+        await pm.deactivate_scene(scene_id)
     return {"status": "deactivated", "scene_id": scene_id}
+
+
+class SetSceneEffectRequest(BaseModel):
+    effect_name: str
+    params: dict[str, Any] = {}
+
+
+@router_scenes.get("/{scene_id}/effect")
+async def get_scene_effect(request: Request, scene_id: str) -> dict[str, Any]:
+    pm = getattr(request.app.state, "pipeline_manager", None)
+    if pm is None:
+        raise HTTPException(501, "Pipeline manager not available")
+    try:
+        result: dict[str, Any] = pm.get_scene_effect(scene_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@router_scenes.put("/{scene_id}/effect")
+async def set_scene_effect(
+    request: Request, scene_id: str, body: SetSceneEffectRequest
+) -> dict[str, str]:
+    pm = getattr(request.app.state, "pipeline_manager", None)
+    if pm is None:
+        raise HTTPException(501, "Pipeline manager not available")
+    try:
+        pm.set_scene_effect(scene_id, body.effect_name, body.params)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    return {"status": "ok", "scene_id": scene_id, "effect_name": body.effect_name}
 
 
 @router_scenes.put("/{scene_id}/devices/{device_name}", response_model=PlacementResponse)

@@ -194,6 +194,16 @@ class LookaheadScheduler:
             return
         state.pipeline = pipeline
 
+    def has_device(self, stable_id: str) -> bool:
+        """Check if a device is registered in the scheduler."""
+        return stable_id in self._device_state
+
+    def remove_pipeline_refs(self, scene_id: str) -> None:
+        """Null out pipeline for all devices referencing the given scene."""
+        for state in self._device_state.values():
+            if state.pipeline is not None and state.pipeline.scene_id == scene_id:
+                state.pipeline = None
+
     def stop(self) -> None:
         self._running = False
         self._resume_event.set()

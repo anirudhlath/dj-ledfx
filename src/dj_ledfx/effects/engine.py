@@ -31,6 +31,10 @@ class RingBuffer:
     def capacity(self) -> int:
         return self._capacity
 
+    @property
+    def led_count(self) -> int:
+        return self._led_count
+
     def write(self, frame: RenderedFrame) -> None:
         self._frames[self._write_index] = frame
         self._write_index = (self._write_index + 1) % self._capacity
@@ -155,7 +159,12 @@ class EffectEngine:
             dt=self._frame_period,
         )
 
+        seen_buffers: set[int] = set()
         for pipeline in self.pipelines:
+            buf_id = id(pipeline.ring_buffer)
+            if buf_id in seen_buffers:
+                continue
+            seen_buffers.add(buf_id)
             colors = pipeline.deck.render(ctx, pipeline.led_count)
             frame = RenderedFrame(
                 colors=colors,
@@ -175,6 +184,18 @@ class EffectEngine:
             len(self.pipelines),
             self._max_lookahead_s * 1000,
         )
+
+    def add_pipeline(self, pipeline: ScenePipeline) -> None:
+        """Add a pipeline to the render loop."""
+        self.pipelines.append(pipeline)
+
+    def remove_pipeline(self, scene_id: str) -> None:
+        """Remove a pipeline by scene_id and clear its ring buffer."""
+        for i, p in enumerate(self.pipelines):
+            if p.scene_id == scene_id:
+                p.ring_buffer.clear()
+                self.pipelines.pop(i)
+                return
 
     def stop(self) -> None:
         self._running = False

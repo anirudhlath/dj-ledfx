@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from dj_ledfx.events import EventBus
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
+    from dj_ledfx.spatial.pipeline_manager import PipelineManager
 
 
 def _resolve_static_dir(explicit: str | None, config_dir: str | None) -> Path | None:
@@ -58,6 +59,7 @@ def create_app(
     web_static_dir: str | None = None,
     state_db: StateDB | None = None,
     event_bus: EventBus | None = None,
+    pipeline_manager: PipelineManager | None = None,
 ) -> FastAPI:
     app = FastAPI(title="dj-ledfx")
     app.add_middleware(
@@ -80,6 +82,7 @@ def create_app(
     app.state.config_path = config_path
     app.state.state_db = state_db
     app.state.event_bus = event_bus
+    app.state.pipeline_manager = pipeline_manager
     app.state.connected_websockets: set = set()
 
     @app.on_event("startup")

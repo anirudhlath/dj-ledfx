@@ -68,6 +68,8 @@ src/dj_ledfx/ layout:
 - `spatial/compositor.py` — Spatial compositor for multi-device LED frame distribution
 - `spatial/geometry.py` — 3D geometry utilities for spatial calculations
 - `spatial/scene.py` — SceneModel: device placements, spatial configuration
+- `spatial/pipeline.py` — ScenePipeline dataclass: per-scene rendering state (deck, ring_buffer, compositor, devices)
+- `spatial/pipeline_manager.py` — PipelineManager: multi-pipeline lifecycle orchestration (activate/deactivate scenes, device assignment)
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
 - `events.py` — Typed callback event bus (sync, non-blocking callbacks only) + TransportStateChangedEvent
 - `persistence/` — SQLite-backed state persistence (state_db.py, toml_io.py, debounced_writer.py, migrations/)
@@ -127,6 +129,8 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Discovery `skip_ids` must exclude offline devices — otherwise ghosts can never be re-promoted
 - Transport controls: app starts STOPPED, user must play. SIMULATING renders to web UI only (skips send_frame). Device state captured on connect (when stopped), restored on stop.
 - DeviceAdapter provides default `capture_state()` (50% white) and `restore_state()` — adapters override as protocol support is added
+- Multi-pipeline: PipelineManager orchestrates ScenePipeline lifecycle. Engine iterates all pipelines in tick(). Scheduler routes devices to their pipeline's ring buffer. Default pipeline catches unassigned devices.
+- Pipeline activate order: build pipeline first, then persist DB flag. Deactivate: persist DB first, then tear down pipeline. Failed activations don't corrupt DB state.
 
 ## Logging Discipline
 
@@ -173,3 +177,7 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Engine/scheduler start STOPPED by default — tests that call `run()` must set `_resume_event.set()` or `set_transport_state(PLAYING)` first, otherwise they hang forever on `await _resume_event.wait()`
 - `engine.stop()` must set `_resume_event` to unblock `run()` when transport is STOPPED — without this, stop() has no effect since the coroutine is blocked on the event wait
 - numpy `np.clip(...).astype()` returns `Any` per mypy — use `# type: ignore[no-any-return]` (not `[return-value]`)
+- MockDeviceAdapter: never patch `type(adapter).device_info` (class-level property) — leaks to all instances across tests. Use a subclass instead.
+- Web tests: `uv sync --extra web` required in worktrees — web tests skip silently without it
+- PipelineManager: `activate_scene` must guard against double-activation (check `scene_id in _pipelines` first)
+- PipelineManager uses `scheduler.has_device()` for upsert logic — never access `scheduler._device_state` directly

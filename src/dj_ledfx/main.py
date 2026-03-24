@@ -35,10 +35,7 @@ from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.persistence.toml_io import migrate_from_toml
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
-from dj_ledfx.spatial.compositor import SpatialCompositor
-from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
-from dj_ledfx.spatial.mapping import mapping_from_config
-from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
+from dj_ledfx.spatial.pipeline_manager import PipelineManager
 from dj_ledfx.status import SystemStatus
 from dj_ledfx.types import DeviceInfo
 
@@ -206,106 +203,46 @@ async def _run(args: argparse.Namespace) -> None:
     if registered_devices:
         await discovery_orchestrator.connect_known_devices(registered_devices)
 
-    scene: SceneModel | None = None
-    compositor: SpatialCompositor | None = None
-    if config.scene_config is not None:
-        adapters = [d.adapter for d in device_manager.devices]
-        scene = SceneModel.from_config(config.scene_config, adapters)
-        if scene.placements:
-            mapping = mapping_from_config(config.scene_config)
-            compositor = SpatialCompositor(scene, mapping)
-            logger.info(
-                "Spatial compositor active: {} mapping, {} devices",
-                config.scene_config.get("mapping", "linear"),
-                len(scene.placements),
-            )
+    pipeline_manager = PipelineManager(
+        device_manager=device_manager,
+        state_db=state_db,
+        event_bus=event_bus,
+        config=config,
+    )
+    await pipeline_manager.load_active_scenes()
 
-    if compositor is None:
-        db_scenes = await state_db.load_scenes()
-        active_scene_row = next((s for s in db_scenes if s.get("is_active")), None)
-        if active_scene_row is not None:
-            scene_id = active_scene_row["id"]
-            placement_rows = await state_db.load_scene_placements(scene_id)
-            if placement_rows:
-                # Build a device lookup by stable_id
-                managed_by_id = {
-                    d.adapter.device_info.stable_id: d
-                    for d in device_manager.devices
-                    if d.adapter.device_info.stable_id
-                }
-                placements: dict[str, DevicePlacement] = {}
-                for row in placement_rows:
-                    device_id = row["device_id"]
-                    managed = managed_by_id.get(device_id)
-                    led_count = managed.adapter.led_count if managed is not None else 1
-                    geo_type = row.get("geometry_type") or "point"
-                    if geo_type == "strip":
-                        geo: PointGeometry | StripGeometry = StripGeometry(
-                            direction=(
-                                float(row.get("direction_x") or 1.0),
-                                float(row.get("direction_y") or 0.0),
-                                float(row.get("direction_z") or 0.0),
-                            ),
-                            length=float(row.get("length") or 1.0),
-                        )
-                    else:
-                        geo = PointGeometry()
-                    placements[device_id] = DevicePlacement(
-                        device_id=device_id,
-                        position=(
-                            float(row.get("position_x") or 0.0),
-                            float(row.get("position_y") or 0.0),
-                            float(row.get("position_z") or 0.0),
-                        ),
-                        geometry=geo,
-                        led_count=led_count,
-                    )
-                scene = SceneModel(placements=placements)
-                mapping_type = active_scene_row.get("mapping_type") or "linear"
-                scene_cfg_for_mapping: dict[str, object] = {"mapping": mapping_type}
-                raw_params = active_scene_row.get("mapping_params")
-                if raw_params:
-                    import json as _json
-
-                    try:
-                        scene_cfg_for_mapping["mapping_params"] = _json.loads(raw_params)
-                    except (ValueError, TypeError):
-                        pass
-                mapping = mapping_from_config(scene_cfg_for_mapping)
-                compositor = SpatialCompositor(scene, mapping)
-                logger.info(
-                    "Spatial compositor active (from DB scene '{}'): {} mapping, {} devices",
-                    scene_id,
-                    mapping_type,
-                    len(placements),
-                )
-
+    default_deck = pipeline_manager.default_deck or EffectDeck(BeatPulse())
+    default_pipeline = pipeline_manager.default_pipeline
     led_count = device_manager.max_led_count or 60
     logger.info("Using {} LEDs", led_count)
 
-    effect = BeatPulse(
-        palette=config.effect.beat_pulse_palette,
-        gamma=config.effect.beat_pulse_gamma,
-    )
-    deck = EffectDeck(effect)
-
     engine = EffectEngine(
         clock=clock,
-        deck=deck,
+        deck=default_deck,
         led_count=led_count,
         fps=config.engine.fps,
         max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
+        pipelines=pipeline_manager.all_pipelines if pipeline_manager.all_pipelines else None,
         event_bus=event_bus,
     )
 
+    default_ring_buffer = default_pipeline.ring_buffer if default_pipeline else engine.ring_buffer
+    default_compositor = default_pipeline.compositor if default_pipeline else None
+
     scheduler = LookaheadScheduler(
-        ring_buffer=engine.ring_buffer,
-        devices=device_manager.devices,
+        ring_buffer=default_ring_buffer,
+        devices=[],
         fps=config.engine.fps,
-        compositor=compositor,
+        compositor=default_compositor,
         event_bus=event_bus,
         state_db=state_db,
     )
+
+    pipeline_manager.bind(engine, scheduler)
+
+    for pipeline in pipeline_manager.all_pipelines:
+        for managed in pipeline.devices:
+            scheduler.add_device(managed, pipeline=pipeline)
 
     def _on_device_offline(event: DeviceOfflineEvent) -> None:
         if event.stable_id:
@@ -316,19 +253,21 @@ async def _run(args: argparse.Namespace) -> None:
                     "demote_device: stable_id '{}' not found (already removed?)",
                     event.stable_id,
                 )
+        scheduler.remove_device(event.stable_id)
 
     event_bus.subscribe(DeviceOfflineEvent, _on_device_offline)
 
     def _on_device_discovered(event: DeviceDiscoveredEvent) -> None:
-        """When a new device is discovered, add it to the scheduler so it gets frames."""
         managed = device_manager.get_by_stable_id(event.stable_id)
         if managed is not None:
-            scheduler.add_device(managed)
+            pipeline_manager.reassign_devices()
 
     event_bus.subscribe(DeviceDiscoveredEvent, _on_device_discovered)
 
     def _on_device_online(event: DeviceOnlineEvent) -> None:
-        logger.info("Device '{}' ({}) came back online", event.name, event.stable_id)
+        managed = device_manager.get_by_stable_id(event.stable_id)
+        if managed is not None:
+            pipeline_manager.reassign_devices()
 
     event_bus.subscribe(DeviceOnlineEvent, _on_device_online)
 
@@ -359,18 +298,19 @@ async def _run(args: argparse.Namespace) -> None:
 
         web_app = create_app(
             beat_clock=clock,
-            effect_deck=deck,
+            effect_deck=default_deck,
             effect_engine=engine,
             device_manager=device_manager,
             scheduler=scheduler,
             preset_store=preset_store,
-            scene_model=scene,
-            compositor=compositor,
+            scene_model=None,
+            compositor=default_compositor,
             config=config,
             config_path=args.config,
             web_static_dir=None if web_mode == "dev" else args.web_static_dir,
             state_db=state_db,
             event_bus=event_bus,
+            pipeline_manager=pipeline_manager,
         )
 
         try:
@@ -444,11 +384,11 @@ async def _run(args: argparse.Namespace) -> None:
                 prodjlink_connected=beat_state.is_playing,
                 current_bpm=beat_state.bpm or None,
                 connected_devices=[d.adapter.device_info.name for d in device_manager.devices],
-                buffer_fill_level=engine.ring_buffer.fill_level,
+                buffer_fill_level=default_ring_buffer.fill_level,
                 avg_frame_render_time_ms=engine.avg_render_time_ms,
                 device_stats=scheduler.get_device_stats(),
             )
-            metrics.RING_BUFFER_DEPTH.set(engine.ring_buffer.fill_level)
+            metrics.RING_BUFFER_DEPTH.set(default_ring_buffer.fill_level)
             summary = status.summary()
             await asyncio.to_thread(logger.info, "Status: {}", summary)
             try:
