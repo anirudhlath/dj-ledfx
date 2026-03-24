@@ -581,6 +581,80 @@ async def test_scheduler_add_device_during_run() -> None:
         pass
 
 
+async def test_remove_pipeline_refs():
+    """remove_pipeline_refs nulls out pipeline for devices referencing that scene."""
+    from dj_ledfx.effects.beat_pulse import BeatPulse
+    from dj_ledfx.effects.deck import EffectDeck
+    from dj_ledfx.effects.engine import RingBuffer
+    from dj_ledfx.spatial.pipeline import ScenePipeline
+
+    d1 = _make_device("Dev1", latency_ms=10.0)
+    d2 = _make_device("Dev2", latency_ms=10.0)
+    buf = RingBuffer(60, 10)
+    deck = EffectDeck(BeatPulse())
+    pipeline = ScenePipeline(
+        scene_id="scene1",
+        deck=deck,
+        ring_buffer=buf,
+        compositor=None,
+        mapping=None,
+        devices=[d1, d2],
+        led_count=10,
+    )
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[], fps=60)
+    scheduler.add_device(d1, pipeline=pipeline)
+    scheduler.add_device(d2, pipeline=pipeline)
+
+    for state in scheduler._device_state.values():
+        assert state.pipeline is pipeline
+
+    scheduler.remove_pipeline_refs("scene1")
+
+    for state in scheduler._device_state.values():
+        assert state.pipeline is None
+
+
+async def test_remove_pipeline_refs_only_affects_target_scene():
+    """remove_pipeline_refs only nulls devices in the target scene, not others."""
+    from dj_ledfx.effects.beat_pulse import BeatPulse
+    from dj_ledfx.effects.deck import EffectDeck
+    from dj_ledfx.effects.engine import RingBuffer
+    from dj_ledfx.spatial.pipeline import ScenePipeline
+
+    d1 = _make_device("Dev1", latency_ms=10.0)
+    d2 = _make_device("Dev2", latency_ms=10.0)
+    buf = RingBuffer(60, 10)
+    deck = EffectDeck(BeatPulse())
+    pipeline_a = ScenePipeline(
+        scene_id="sceneA",
+        deck=deck,
+        ring_buffer=buf,
+        compositor=None,
+        mapping=None,
+        devices=[d1],
+        led_count=10,
+    )
+    pipeline_b = ScenePipeline(
+        scene_id="sceneB",
+        deck=deck,
+        ring_buffer=buf,
+        compositor=None,
+        mapping=None,
+        devices=[d2],
+        led_count=10,
+    )
+    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[], fps=60)
+    scheduler.add_device(d1, pipeline=pipeline_a)
+    scheduler.add_device(d2, pipeline=pipeline_b)
+
+    scheduler.remove_pipeline_refs("sceneA")
+
+    d1_key = d1.adapter.device_info.effective_id
+    d2_key = d2.adapter.device_info.effective_id
+    assert scheduler._device_state[d1_key].pipeline is None
+    assert scheduler._device_state[d2_key].pipeline is pipeline_b
+
+
 @pytest.mark.asyncio
 async def test_distributor_handles_concurrent_add_device() -> None:
     """Device added while distributor is running receives frames without errors.
