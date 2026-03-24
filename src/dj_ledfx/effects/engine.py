@@ -31,6 +31,10 @@ class RingBuffer:
     def capacity(self) -> int:
         return self._capacity
 
+    @property
+    def led_count(self) -> int:
+        return self._led_count
+
     def write(self, frame: RenderedFrame) -> None:
         self._frames[self._write_index] = frame
         self._write_index = (self._write_index + 1) % self._capacity

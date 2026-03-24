@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -13,7 +14,7 @@ from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import RingBuffer
 from dj_ledfx.events import EventBus
 from dj_ledfx.spatial.compositor import SpatialCompositor
-from dj_ledfx.spatial.geometry import StripGeometry
+from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 from dj_ledfx.spatial.mapping import mapping_from_config
 from dj_ledfx.spatial.pipeline import ScenePipeline
 from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
@@ -129,13 +130,8 @@ class PipelineManager:
         self._pipelines[scene_id] = pipeline
         self._engine.add_pipeline(pipeline)
 
-        # Assign devices to this pipeline in the scheduler
         for managed in pipeline.devices:
-            sid = managed.adapter.device_info.effective_id
-            if self._scheduler.has_device(sid):
-                self._scheduler.set_device_pipeline(sid, pipeline)
-            else:
-                self._scheduler.add_device(managed, pipeline=pipeline)
+            self._upsert_scheduler_device(managed, pipeline)
 
         self._rebuild_default_pipeline()
         logger.info("Activated scene pipeline: {} ({} devices)", scene_id, len(pipeline.devices))
@@ -175,8 +171,6 @@ class PipelineManager:
             msg = f"No active pipeline for scene {scene_id}"
             raise ValueError(msg)
         pipeline.deck.apply_update(effect_name, params)
-        import asyncio
-
         asyncio.create_task(
             self._state_db.save_scene_effect_state(scene_id, effect_name, json.dumps(params))
         )
@@ -199,17 +193,22 @@ class PipelineManager:
         if self._scheduler is None:
             return
 
-        assigned_ids: set[str] = set()
         for pipeline in self._pipelines.values():
             for managed in pipeline.devices:
-                sid = managed.adapter.device_info.effective_id
-                assigned_ids.add(sid)
-                if self._scheduler.has_device(sid):
-                    self._scheduler.set_device_pipeline(sid, pipeline)
-                else:
-                    self._scheduler.add_device(managed, pipeline=pipeline)
+                self._upsert_scheduler_device(managed, pipeline)
 
         self._rebuild_default_pipeline()
+
+    def _upsert_scheduler_device(
+        self, managed: ManagedDevice, pipeline: ScenePipeline
+    ) -> None:
+        """Add or update a device in the scheduler with the given pipeline."""
+        assert self._scheduler is not None
+        sid = managed.adapter.device_info.effective_id
+        if self._scheduler.has_device(sid):
+            self._scheduler.set_device_pipeline(sid, pipeline)
+        else:
+            self._scheduler.add_device(managed, pipeline=pipeline)
 
     # ── Pipeline construction ───────────────────────────────────
 
@@ -228,14 +227,18 @@ class PipelineManager:
             if managed is None:
                 continue
             devices.append(managed)
-            geometry = StripGeometry(
-                direction=(
-                    p.get("direction_x", 1.0),
-                    p.get("direction_y", 0.0),
-                    p.get("direction_z", 0.0),
-                ),
-                length=p.get("length", 1.0),
-            )
+            geo_type = p.get("geometry_type") or "point"
+            if geo_type == "strip":
+                geometry: PointGeometry | StripGeometry = StripGeometry(
+                    direction=(
+                        p.get("direction_x", 1.0),
+                        p.get("direction_y", 0.0),
+                        p.get("direction_z", 0.0),
+                    ),
+                    length=p.get("length", 1.0),
+                )
+            else:
+                geometry = PointGeometry()
             placement = DevicePlacement(
                 device_id=p["device_id"],
                 position=(
@@ -293,7 +296,7 @@ class PipelineManager:
                 capacity=self._config.engine.fps,
                 led_count=led_count,
             )
-        elif self._shared_buffer._led_count < led_count:
+        elif self._shared_buffer.led_count < led_count:
             old_buffer = self._shared_buffer
             new_buffer = RingBuffer(
                 capacity=self._config.engine.fps,
@@ -358,11 +361,6 @@ class PipelineManager:
         else:
             self._default_pipeline.devices = unassigned
 
-        # Update scheduler: assign unassigned devices to default pipeline
         if self._scheduler is not None:
             for managed in unassigned:
-                sid = managed.adapter.device_info.effective_id
-                if self._scheduler.has_device(sid):
-                    self._scheduler.set_device_pipeline(sid, self._default_pipeline)
-                else:
-                    self._scheduler.add_device(managed, pipeline=self._default_pipeline)
+                self._upsert_scheduler_device(managed, self._default_pipeline)

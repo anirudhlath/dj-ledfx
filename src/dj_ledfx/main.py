@@ -228,8 +228,6 @@ async def _run(args: argparse.Namespace) -> None:
 
     default_ring_buffer = default_pipeline.ring_buffer if default_pipeline else engine.ring_buffer
     default_compositor = default_pipeline.compositor if default_pipeline else None
-    scene_model = None  # Legacy: PipelineManager now owns scene models
-    compositor = default_compositor
 
     scheduler = LookaheadScheduler(
         ring_buffer=default_ring_buffer,
@@ -242,22 +240,9 @@ async def _run(args: argparse.Namespace) -> None:
 
     pipeline_manager.bind(engine, scheduler)
 
-    # Add all devices to scheduler with correct pipeline assignments
     for pipeline in pipeline_manager.all_pipelines:
         for managed in pipeline.devices:
             scheduler.add_device(managed, pipeline=pipeline)
-
-    # Add any remaining devices not in a pipeline
-    assigned_ids = {
-        m.adapter.device_info.effective_id
-        for p in pipeline_manager.all_pipelines
-        for m in p.devices
-    }
-    for managed in device_manager.devices:
-        eid = managed.adapter.device_info.effective_id
-        if eid not in assigned_ids:
-            if pipeline_manager.default_pipeline is not None:
-                scheduler.add_device(managed, pipeline=pipeline_manager.default_pipeline)
 
     def _on_device_offline(event: DeviceOfflineEvent) -> None:
         if event.stable_id:
@@ -318,8 +303,8 @@ async def _run(args: argparse.Namespace) -> None:
             device_manager=device_manager,
             scheduler=scheduler,
             preset_store=preset_store,
-            scene_model=scene_model,
-            compositor=compositor,
+            scene_model=None,
+            compositor=default_compositor,
             config=config,
             config_path=args.config,
             web_static_dir=None if web_mode == "dev" else args.web_static_dir,
