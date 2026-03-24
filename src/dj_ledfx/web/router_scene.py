@@ -352,7 +352,9 @@ async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest
         and body.effect_mode is not None
         and body.effect_mode != existing.get("effect_mode")
     ):
-        raise HTTPException(409, "Cannot change effect_mode while scene is active. Deactivate first.")
+        raise HTTPException(
+            409, "Cannot change effect_mode while scene is active. Deactivate first."
+        )
 
     updated: dict[str, Any] = {"id": scene_id}
     updated["name"] = body.name if body.name is not None else existing["name"]
@@ -442,12 +444,13 @@ class SetSceneEffectRequest(BaseModel):
 
 
 @router_scenes.get("/{scene_id}/effect")
-async def get_scene_effect(request: Request, scene_id: str) -> dict:
+async def get_scene_effect(request: Request, scene_id: str) -> dict[str, Any]:
     pm = getattr(request.app.state, "pipeline_manager", None)
     if pm is None:
         raise HTTPException(501, "Pipeline manager not available")
     try:
-        return pm.get_scene_effect(scene_id)
+        result: dict[str, Any] = pm.get_scene_effect(scene_id)
+        return result
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
 
@@ -455,7 +458,7 @@ async def get_scene_effect(request: Request, scene_id: str) -> dict:
 @router_scenes.put("/{scene_id}/effect")
 async def set_scene_effect(
     request: Request, scene_id: str, body: SetSceneEffectRequest
-) -> dict:
+) -> dict[str, str]:
     pm = getattr(request.app.state, "pipeline_manager", None)
     if pm is None:
         raise HTTPException(501, "Pipeline manager not available")

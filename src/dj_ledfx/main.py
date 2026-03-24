@@ -228,11 +228,7 @@ async def _run(args: argparse.Namespace) -> None:
 
     default_ring_buffer = default_pipeline.ring_buffer if default_pipeline else engine.ring_buffer
     default_compositor = default_pipeline.compositor if default_pipeline else None
-    scene_model = (
-        default_pipeline.compositor._scene
-        if (default_pipeline and default_pipeline.compositor)
-        else None
-    )
+    scene_model = None  # Legacy: PipelineManager now owns scene models
     compositor = default_compositor
 
     scheduler = LookaheadScheduler(

@@ -79,13 +79,15 @@ def test_ws_set_effect_with_scene_id(client):
     with client.websocket_connect("/ws") as ws:
         ws.receive_text()  # drain beat
 
-        ws.send_json({
-            "action": "set_effect",
-            "id": "test1",
-            "scene_id": "scene1",
-            "effect": "rainbow_wave",
-            "params": {},
-        })
+        ws.send_json(
+            {
+                "action": "set_effect",
+                "id": "test1",
+                "scene_id": "scene1",
+                "effect": "rainbow_wave",
+                "params": {},
+            }
+        )
         for _ in range(10):
             data = ws.receive_text()
             msg = json.loads(data)
@@ -98,12 +100,14 @@ def test_ws_set_effect_without_scene_id(client):
     """set_effect without scene_id targets the global deck (backward compat)."""
     with client.websocket_connect("/ws") as ws:
         ws.receive_text()  # drain beat
-        ws.send_json({
-            "action": "set_effect",
-            "id": "test2",
-            "effect": "beat_pulse",
-            "params": {},
-        })
+        ws.send_json(
+            {
+                "action": "set_effect",
+                "id": "test2",
+                "effect": "beat_pulse",
+                "params": {},
+            }
+        )
         for _ in range(10):
             data = ws.receive_text()
             msg = json.loads(data)

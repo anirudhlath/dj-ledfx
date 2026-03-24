@@ -9,9 +9,6 @@ import pytest
 
 from dj_ledfx.config import AppConfig, EngineConfig
 from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
-from dj_ledfx.effects.beat_pulse import BeatPulse
-from dj_ledfx.effects.deck import EffectDeck
-from dj_ledfx.effects.engine import RingBuffer
 from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
@@ -21,7 +18,7 @@ from tests.conftest import MockDeviceAdapter
 
 
 class _StableIdAdapter(MockDeviceAdapter):
-    """MockDeviceAdapter subclass with stable_id support (avoids class-level property pollution)."""
+    """MockDeviceAdapter with stable_id support (avoids class-level property pollution)."""
 
     def __init__(self, name: str, led_count: int, stable_id: str) -> None:
         super().__init__(name=name, led_count=led_count)
@@ -30,8 +27,11 @@ class _StableIdAdapter(MockDeviceAdapter):
     @property
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
-            name=self._name, device_type="mock", led_count=self._led_count,
-            address="mock", stable_id=self._stable_id,
+            name=self._name,
+            device_type="mock",
+            led_count=self._led_count,
+            address="mock",
+            stable_id=self._stable_id,
         )
 
 
@@ -67,7 +67,7 @@ def _make_manager(
     config = config or AppConfig()
     event_bus = EventBus()
     device_manager = DeviceManager(event_bus)
-    for d in (devices or []):
+    for d in devices or []:
         device_manager._devices.append(d)
     db = _make_db_mock(scenes=scenes, placements=placements)
     pm = PipelineManager(
@@ -115,13 +115,33 @@ class TestLoadActiveScenes:
         assert pm.default_deck is None
 
     async def test_loads_active_independent_scene(self):
-        scenes = [{"id": "s1", "name": "Scene1", "mapping_type": "linear",
-                    "mapping_params": "{}", "effect_mode": "independent",
-                    "effect_source": None, "is_active": 1}]
-        placements = [{"device_id": "dev1", "position_x": 0.0, "position_y": 0.0,
-                        "position_z": 0.0, "geometry_type": "strip",
-                        "direction_x": 1.0, "direction_y": 0.0, "direction_z": 0.0,
-                        "length": 1.0, "width": 0.0, "rows": 1, "cols": 1}]
+        scenes = [
+            {
+                "id": "s1",
+                "name": "Scene1",
+                "mapping_type": "linear",
+                "mapping_params": "{}",
+                "effect_mode": "independent",
+                "effect_source": None,
+                "is_active": 1,
+            }
+        ]
+        placements = [
+            {
+                "device_id": "dev1",
+                "position_x": 0.0,
+                "position_y": 0.0,
+                "position_z": 0.0,
+                "geometry_type": "strip",
+                "direction_x": 1.0,
+                "direction_y": 0.0,
+                "direction_z": 0.0,
+                "length": 1.0,
+                "width": 0.0,
+                "rows": 1,
+                "cols": 1,
+            }
+        ]
         managed = _make_managed("Dev1", led_count=20, stable_id="dev1")
         pm, db, _ = _make_manager(scenes=scenes, placements=placements, devices=[managed])
         db.load_scene_placements.return_value = placements
@@ -137,17 +157,35 @@ class TestLoadActiveScenes:
 
 class TestActivateDeactivate:
     async def test_activate_scene_creates_pipeline(self):
-        scenes = [{"id": "s1", "name": "Scene1", "mapping_type": "linear",
-                    "mapping_params": "{}", "effect_mode": "independent",
-                    "effect_source": None, "is_active": 0}]
+        scenes = [
+            {
+                "id": "s1",
+                "name": "Scene1",
+                "mapping_type": "linear",
+                "mapping_params": "{}",
+                "effect_mode": "independent",
+                "effect_source": None,
+                "is_active": 0,
+            }
+        ]
         managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
         pm, db, _ = _make_manager(devices=[managed])
         db.load_scene_by_id.return_value = scenes[0]
         db.load_scene_placements.return_value = [
-            {"device_id": "dev1", "position_x": 0.0, "position_y": 0.0,
-             "position_z": 0.0, "geometry_type": "strip",
-             "direction_x": 1.0, "direction_y": 0.0, "direction_z": 0.0,
-             "length": 1.0, "width": 0.0, "rows": 1, "cols": 1},
+            {
+                "device_id": "dev1",
+                "position_x": 0.0,
+                "position_y": 0.0,
+                "position_z": 0.0,
+                "geometry_type": "strip",
+                "direction_x": 1.0,
+                "direction_y": 0.0,
+                "direction_z": 0.0,
+                "length": 1.0,
+                "width": 0.0,
+                "rows": 1,
+                "cols": 1,
+            },
         ]
 
         engine = MagicMock()
@@ -166,15 +204,29 @@ class TestActivateDeactivate:
         managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
         pm, db, _ = _make_manager(devices=[managed])
         db.load_scene_by_id.return_value = {
-            "id": "s1", "name": "Scene1", "mapping_type": "linear",
-            "mapping_params": "{}", "effect_mode": "independent",
-            "effect_source": None, "is_active": 1,
+            "id": "s1",
+            "name": "Scene1",
+            "mapping_type": "linear",
+            "mapping_params": "{}",
+            "effect_mode": "independent",
+            "effect_source": None,
+            "is_active": 1,
         }
         db.load_scene_placements.return_value = [
-            {"device_id": "dev1", "position_x": 0.0, "position_y": 0.0,
-             "position_z": 0.0, "geometry_type": "strip",
-             "direction_x": 1.0, "direction_y": 0.0, "direction_z": 0.0,
-             "length": 1.0, "width": 0.0, "rows": 1, "cols": 1},
+            {
+                "device_id": "dev1",
+                "position_x": 0.0,
+                "position_y": 0.0,
+                "position_z": 0.0,
+                "geometry_type": "strip",
+                "direction_x": 1.0,
+                "direction_y": 0.0,
+                "direction_z": 0.0,
+                "length": 1.0,
+                "width": 0.0,
+                "rows": 1,
+                "cols": 1,
+            },
         ]
 
         engine = MagicMock()
@@ -193,16 +245,37 @@ class TestActivateDeactivate:
 
 class TestEffectControl:
     async def test_set_scene_effect(self):
-        scenes = [{"id": "s1", "name": "Scene1", "mapping_type": "linear",
-                    "mapping_params": "{}", "effect_mode": "independent",
-                    "effect_source": None, "is_active": 1}]
+        scenes = [
+            {
+                "id": "s1",
+                "name": "Scene1",
+                "mapping_type": "linear",
+                "mapping_params": "{}",
+                "effect_mode": "independent",
+                "effect_source": None,
+                "is_active": 1,
+            }
+        ]
         managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
         pm, db, _ = _make_manager(
-            scenes=scenes, devices=[managed],
-            placements=[{"device_id": "dev1", "position_x": 0.0, "position_y": 0.0,
-                          "position_z": 0.0, "geometry_type": "strip",
-                          "direction_x": 1.0, "direction_y": 0.0, "direction_z": 0.0,
-                          "length": 1.0, "width": 0.0, "rows": 1, "cols": 1}],
+            scenes=scenes,
+            devices=[managed],
+            placements=[
+                {
+                    "device_id": "dev1",
+                    "position_x": 0.0,
+                    "position_y": 0.0,
+                    "position_z": 0.0,
+                    "geometry_type": "strip",
+                    "direction_x": 1.0,
+                    "direction_y": 0.0,
+                    "direction_z": 0.0,
+                    "length": 1.0,
+                    "width": 0.0,
+                    "rows": 1,
+                    "cols": 1,
+                }
+            ],
         )
         db.load_scene_placements.return_value = pm._state_db.load_scene_placements.return_value
 
@@ -221,12 +294,24 @@ class TestEffectControl:
 class TestSharedMode:
     async def test_shared_scenes_use_same_deck_and_buffer(self):
         scenes = [
-            {"id": "s1", "name": "Scene1", "mapping_type": "linear",
-             "mapping_params": "{}", "effect_mode": "shared",
-             "effect_source": None, "is_active": 1},
-            {"id": "s2", "name": "Scene2", "mapping_type": "linear",
-             "mapping_params": "{}", "effect_mode": "shared",
-             "effect_source": None, "is_active": 1},
+            {
+                "id": "s1",
+                "name": "Scene1",
+                "mapping_type": "linear",
+                "mapping_params": "{}",
+                "effect_mode": "shared",
+                "effect_source": None,
+                "is_active": 1,
+            },
+            {
+                "id": "s2",
+                "name": "Scene2",
+                "mapping_type": "linear",
+                "mapping_params": "{}",
+                "effect_mode": "shared",
+                "effect_source": None,
+                "is_active": 1,
+            },
         ]
         d1 = _make_managed("Dev1", led_count=10, stable_id="dev1")
         d2 = _make_managed("Dev2", led_count=10, stable_id="dev2")
@@ -234,14 +319,39 @@ class TestSharedMode:
 
         async def load_placements(scene_id):
             if scene_id == "s1":
-                return [{"device_id": "dev1", "position_x": 0.0, "position_y": 0.0,
-                          "position_z": 0.0, "geometry_type": "strip",
-                          "direction_x": 1.0, "direction_y": 0.0, "direction_z": 0.0,
-                          "length": 1.0, "width": 0.0, "rows": 1, "cols": 1}]
-            return [{"device_id": "dev2", "position_x": 1.0, "position_y": 0.0,
-                      "position_z": 0.0, "geometry_type": "strip",
-                      "direction_x": 1.0, "direction_y": 0.0, "direction_z": 0.0,
-                      "length": 1.0, "width": 0.0, "rows": 1, "cols": 1}]
+                return [
+                    {
+                        "device_id": "dev1",
+                        "position_x": 0.0,
+                        "position_y": 0.0,
+                        "position_z": 0.0,
+                        "geometry_type": "strip",
+                        "direction_x": 1.0,
+                        "direction_y": 0.0,
+                        "direction_z": 0.0,
+                        "length": 1.0,
+                        "width": 0.0,
+                        "rows": 1,
+                        "cols": 1,
+                    }
+                ]
+            return [
+                {
+                    "device_id": "dev2",
+                    "position_x": 1.0,
+                    "position_y": 0.0,
+                    "position_z": 0.0,
+                    "geometry_type": "strip",
+                    "direction_x": 1.0,
+                    "direction_y": 0.0,
+                    "direction_z": 0.0,
+                    "length": 1.0,
+                    "width": 0.0,
+                    "rows": 1,
+                    "cols": 1,
+                }
+            ]
+
         db.load_scene_placements = AsyncMock(side_effect=load_placements)
 
         await pm.load_active_scenes()

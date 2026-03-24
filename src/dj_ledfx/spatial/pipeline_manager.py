@@ -11,7 +11,6 @@ from dj_ledfx.config import AppConfig
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import RingBuffer
-from dj_ledfx.effects.registry import create_effect
 from dj_ledfx.events import EventBus
 from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.spatial.geometry import StripGeometry
@@ -169,9 +168,7 @@ class PipelineManager:
         import asyncio
 
         asyncio.create_task(
-            self._state_db.save_scene_effect_state(
-                scene_id, effect_name, json.dumps(params)
-            )
+            self._state_db.save_scene_effect_state(scene_id, effect_name, json.dumps(params))
         )
 
     def get_scene_effect(self, scene_id: str) -> dict[str, Any]:
@@ -263,7 +260,8 @@ class PipelineManager:
         else:
             deck = self._build_deck_for_scene(scene_id)
             ring_buffer = RingBuffer(
-                capacity=self._config.engine.fps, led_count=led_count,
+                capacity=self._config.engine.fps,
+                led_count=led_count,
             )
 
         return ScenePipeline(
@@ -282,12 +280,14 @@ class PipelineManager:
             self._shared_deck = EffectDeck(BeatPulse())
         if self._shared_buffer is None:
             self._shared_buffer = RingBuffer(
-                capacity=self._config.engine.fps, led_count=led_count,
+                capacity=self._config.engine.fps,
+                led_count=led_count,
             )
         elif self._shared_buffer._led_count < led_count:
             old_buffer = self._shared_buffer
             new_buffer = RingBuffer(
-                capacity=self._config.engine.fps, led_count=led_count,
+                capacity=self._config.engine.fps,
+                led_count=led_count,
             )
             self._shared_buffer = new_buffer
             for p in self._pipelines.values():
@@ -320,7 +320,8 @@ class PipelineManager:
                 assigned_ids.add(managed.adapter.device_info.effective_id)
 
         unassigned = [
-            d for d in self._device_manager.devices
+            d
+            for d in self._device_manager.devices
             if d.adapter.device_info.effective_id not in assigned_ids
         ]
 
@@ -332,7 +333,8 @@ class PipelineManager:
         if self._default_pipeline is None:
             deck = EffectDeck(BeatPulse())
             ring_buffer = RingBuffer(
-                capacity=self._config.engine.fps, led_count=led_count,
+                capacity=self._config.engine.fps,
+                led_count=led_count,
             )
             self._default_pipeline = ScenePipeline(
                 scene_id="__default__",

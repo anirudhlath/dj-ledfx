@@ -226,16 +226,26 @@ async def test_multi_pipeline_renders_to_separate_devices() -> None:
     deck_a = EffectDeck(BeatPulse())
     buf_a = RingBuffer(60, 10)
     pipeline_a = ScenePipeline(
-        scene_id="scene_a", deck=deck_a, ring_buffer=buf_a,
-        compositor=None, mapping=None, devices=[managed1], led_count=10,
+        scene_id="scene_a",
+        deck=deck_a,
+        ring_buffer=buf_a,
+        compositor=None,
+        mapping=None,
+        devices=[managed1],
+        led_count=10,
     )
 
     # Pipeline B: RainbowWave
     deck_b = EffectDeck(RainbowWave())
     buf_b = RingBuffer(60, 10)
     pipeline_b = ScenePipeline(
-        scene_id="scene_b", deck=deck_b, ring_buffer=buf_b,
-        compositor=None, mapping=None, devices=[managed2], led_count=10,
+        scene_id="scene_b",
+        deck=deck_b,
+        ring_buffer=buf_b,
+        compositor=None,
+        mapping=None,
+        devices=[managed2],
+        led_count=10,
     )
 
     event_bus = EventBus()
@@ -245,13 +255,20 @@ async def test_multi_pipeline_renders_to_separate_devices() -> None:
     clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=time.monotonic())
 
     engine = EffectEngine(
-        clock=clock, deck=deck_a, led_count=10, fps=60,
-        max_lookahead_s=1.0, pipelines=[pipeline_a, pipeline_b],
+        clock=clock,
+        deck=deck_a,
+        led_count=10,
+        fps=60,
+        max_lookahead_s=1.0,
+        pipelines=[pipeline_a, pipeline_b],
         event_bus=event_bus,
     )
 
     scheduler = LookaheadScheduler(
-        ring_buffer=buf_a, devices=[], fps=60, event_bus=event_bus,
+        ring_buffer=buf_a,
+        devices=[],
+        fps=60,
+        event_bus=event_bus,
     )
     scheduler.add_device(managed1, pipeline=pipeline_a)
     scheduler.add_device(managed2, pipeline=pipeline_b)
