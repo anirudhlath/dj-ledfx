@@ -210,9 +210,15 @@ async def _handle_command(
         await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
 
     elif action == "set_effect":
-        deck = app.state.effect_deck
+        scene_id = msg.get("scene_id")
         try:
-            deck.apply_update(msg.get("effect"), msg.get("params", {}))
+            if scene_id and app.state.pipeline_manager is not None:
+                app.state.pipeline_manager.set_scene_effect(
+                    scene_id, msg.get("effect"), msg.get("params", {})
+                )
+            else:
+                deck = app.state.effect_deck
+                deck.apply_update(msg.get("effect"), msg.get("params", {}))
             await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
         except (KeyError, ValueError, TypeError) as e:
             await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(e)})
