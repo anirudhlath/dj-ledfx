@@ -67,7 +67,7 @@ When `effect_mode = "shared"`, the pipeline gets a reference to a shared `Effect
 
 One effect renders once into the shared buffer. Each scene's compositor samples it differently based on spatial position, giving coherent effects across device groups (e.g., a rainbow wave sweeping across the room hits devices in the correct spatial order regardless of which scene they belong to).
 
-**Shared buffer LED count invariant:** The shared buffer's `led_count` is `max(led_count)` across all sharing pipelines. All shared-mode pipelines use this same `led_count` for rendering. When a shared scene is activated/deactivated, the shared buffer is resized if the max changes. Each pipeline's `led_count` field stores this shared max.
+**Shared buffer LED count invariant:** The shared buffer's `led_count` is `max(led_count)` across all sharing pipelines. All shared-mode pipelines use this same `led_count` for rendering. When a shared scene is activated/deactivated and the max changes, a new `RingBuffer` is created with the updated `led_count`, all sharing pipeline references are updated atomically (single event loop — no race), and the old buffer is discarded. Each pipeline's `led_count` field stores this shared max.
 
 **Shared deck lifecycle:** The shared deck and buffer are created lazily when the first shared-mode scene is activated, using BeatPulse as the default effect. They persist as long as at least one shared-mode scene is active. When the last shared-mode scene is deactivated, the shared deck and buffer are destroyed.
 
@@ -110,7 +110,7 @@ def tick(self, now: float) -> None:
 - `remove_pipeline_refs(scene_id: str)` — for devices that referenced the deactivated scene's pipeline:
   - If `unassigned_device_mode = "default_effect"`: reassign to default pipeline via `set_device_pipeline(stable_id, default_pipeline)`
   - If `unassigned_device_mode = "idle"`: cancel the device's send task via existing `remove_device()`, so it doesn't poll an empty buffer
-- `pause_device(stable_id)` / `resume_device(stable_id)` — cancel/restart a device's send task for idle mode transitions
+- PipelineManager calls `scheduler.remove_device()` for idle transitions and `scheduler.add_device(managed, pipeline)` when an idle device gets assigned to a scene
 - Existing `set_device_pipeline()` and per-device pipeline routing in `_send_loop` are unchanged
 
 ### Web API Changes
@@ -142,6 +142,8 @@ app.state.pipeline_manager = pipeline_manager
 
 **Delete active scene safety:** `DELETE /scenes/{id}` must call `deactivate_scene` first if the scene is active, before removing from DB. Return 409 if deactivation fails.
 
+**`effect_mode` change on active scene:** `PUT /scenes/{id}` returns 409 if `effect_mode` is changed while the scene is active. User must deactivate first, change mode, then reactivate.
+
 ### main.py Startup Flow
 
 1. (unchanged) Open StateDB, migrate, load config, create EventBus, BeatClock, beat source
@@ -171,7 +173,7 @@ Backward compatible: if no scenes exist in DB, one default pipeline with BeatPul
 - Engine dedup: shared-buffer pipelines only render once per tick
 - Pipeline `led_count` computation: `max(device.adapter.led_count for device in devices)` per pipeline; shared mode uses max across all sharing pipelines
 - Error cases: activate scene with no placements (succeeds with empty device list), activate before `bind()` (raises RuntimeError), delete active scene (deactivates first)
-- `effect_mode` change on active scene (requires deactivate + reactivate)
+- `effect_mode` change on active scene: `PUT /scenes/{id}` with changed `effect_mode` returns 409 if scene is active (must deactivate first, change mode, then reactivate)
 
 **Integration tests:**
 - Full startup with 2 active scenes -> devices get frames from correct pipelines
