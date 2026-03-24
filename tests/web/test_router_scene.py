@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi.testclient import TestClient
 
@@ -13,7 +13,11 @@ from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
 from dj_ledfx.web.app import create_app
 
 
-def _make_test_app(scene: SceneModel | None = None, state_db: StateDB | None = None) -> TestClient:
+def _make_test_app(
+    scene: SceneModel | None = None,
+    state_db: StateDB | None = None,
+    pipeline_manager: object | None = None,
+) -> TestClient:
     """Create a test FastAPI app with a scene model."""
     compositor = None
     if scene and scene.placements:
@@ -36,6 +40,7 @@ def _make_test_app(scene: SceneModel | None = None, state_db: StateDB | None = N
         config=mock_config,
         config_path=None,
         state_db=state_db,
+        pipeline_manager=pipeline_manager,
     )
     return TestClient(app)
 
@@ -187,10 +192,17 @@ class TestSceneEndpoints:
 class TestMultiSceneEndpoints:
     """Tests for multi-scene CRUD endpoints (require StateDB)."""
 
-    def _make_db_client(self, tmp_path):
+    def _make_db_client(self, tmp_path, with_pipeline_manager=True):
         db = StateDB(tmp_path / "state.db")
         asyncio.run(db.open())
-        client = _make_test_app(state_db=db)
+        if with_pipeline_manager:
+            mock_pm = MagicMock()
+            # async methods need to be AsyncMock
+            mock_pm.activate_scene = AsyncMock()
+            mock_pm.deactivate_scene = AsyncMock()
+        else:
+            mock_pm = None
+        client = _make_test_app(state_db=db, pipeline_manager=mock_pm)
         return client, db
 
     def test_list_scenes_empty(self, tmp_path) -> None:
@@ -544,5 +556,112 @@ class TestMultiSceneEndpoints:
             placements = asyncio.run(db.load_scene_placements(scene_id))
             assert len(placements) == 1
             assert placements[0]["device_id"] == "lifx:my_strip"
+        finally:
+            asyncio.run(db.close())
+
+    def test_activate_scene_calls_pipeline_manager(self, tmp_path) -> None:
+        """activate endpoint should call pipeline_manager.activate_scene."""
+        client, db = self._make_db_client(tmp_path)
+        try:
+            resp = client.post("/api/scenes", json={"name": "TestScene"})
+            scene_id = resp.json()["id"]
+            resp = client.post(f"/api/scenes/{scene_id}/activate")
+            assert resp.status_code == 200
+
+            pm = client.app.state.pipeline_manager
+            pm.activate_scene.assert_called_once_with(scene_id)
+        finally:
+            asyncio.run(db.close())
+
+    def test_deactivate_scene_calls_pipeline_manager(self, tmp_path) -> None:
+        """deactivate endpoint should call pipeline_manager.deactivate_scene."""
+        client, db = self._make_db_client(tmp_path)
+        try:
+            resp = client.post("/api/scenes", json={"name": "TestScene"})
+            scene_id = resp.json()["id"]
+            client.post(f"/api/scenes/{scene_id}/activate")
+
+            resp = client.post(f"/api/scenes/{scene_id}/deactivate")
+            assert resp.status_code == 200
+
+            pm = client.app.state.pipeline_manager
+            pm.deactivate_scene.assert_called_once_with(scene_id)
+        finally:
+            asyncio.run(db.close())
+
+    def test_delete_active_scene_deactivates_first(self, tmp_path) -> None:
+        """Deleting an active scene should deactivate it first."""
+        client, db = self._make_db_client(tmp_path)
+        try:
+            resp = client.post("/api/scenes", json={"name": "TestScene"})
+            scene_id = resp.json()["id"]
+            client.post(f"/api/scenes/{scene_id}/activate")
+
+            resp = client.delete(f"/api/scenes/{scene_id}")
+            assert resp.status_code == 200
+
+            pm = client.app.state.pipeline_manager
+            pm.deactivate_scene.assert_called_once_with(scene_id)
+        finally:
+            asyncio.run(db.close())
+
+    def test_get_scene_effect(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            resp = client.post("/api/scenes", json={"name": "TestScene"})
+            scene_id = resp.json()["id"]
+
+            pm = client.app.state.pipeline_manager
+            pm.get_scene_effect.return_value = {"effect_name": "beat_pulse", "params": {}}
+
+            resp = client.get(f"/api/scenes/{scene_id}/effect")
+            assert resp.status_code == 200
+            assert resp.json()["effect_name"] == "beat_pulse"
+        finally:
+            asyncio.run(db.close())
+
+    def test_put_scene_effect(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            resp = client.post("/api/scenes", json={"name": "TestScene"})
+            scene_id = resp.json()["id"]
+
+            resp = client.put(
+                f"/api/scenes/{scene_id}/effect",
+                json={"effect_name": "rainbow_wave", "params": {}},
+            )
+            assert resp.status_code == 200
+
+            pm = client.app.state.pipeline_manager
+            pm.set_scene_effect.assert_called_once_with(scene_id, "rainbow_wave", {})
+        finally:
+            asyncio.run(db.close())
+
+    def test_put_scene_effect_no_pipeline_manager(self, tmp_path) -> None:
+        """Without pipeline_manager, scene effect endpoints return 501."""
+        client, db = self._make_db_client(tmp_path, with_pipeline_manager=False)
+        try:
+            resp = client.put(
+                "/api/scenes/fake/effect",
+                json={"effect_name": "beat_pulse", "params": {}},
+            )
+            assert resp.status_code == 501
+        finally:
+            asyncio.run(db.close())
+
+    def test_update_active_scene_effect_mode_returns_409(self, tmp_path) -> None:
+        client, db = self._make_db_client(tmp_path)
+        try:
+            resp = client.post(
+                "/api/scenes", json={"name": "TestScene", "effect_mode": "independent"}
+            )
+            scene_id = resp.json()["id"]
+            client.post(f"/api/scenes/{scene_id}/activate")
+
+            resp = client.put(
+                f"/api/scenes/{scene_id}",
+                json={"name": "TestScene", "effect_mode": "shared"},
+            )
+            assert resp.status_code == 409
         finally:
             asyncio.run(db.close())
