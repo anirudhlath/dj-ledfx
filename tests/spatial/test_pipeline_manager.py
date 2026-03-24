@@ -20,14 +20,26 @@ from dj_ledfx.types import DeviceInfo
 from tests.conftest import MockDeviceAdapter
 
 
-def _make_managed(name: str, led_count: int = 10, stable_id: str | None = None) -> ManagedDevice:
-    adapter = MockDeviceAdapter(name=name, led_count=led_count)
-    if stable_id:
-        patched_info = DeviceInfo(
-            name=name, device_type="mock", led_count=led_count,
-            address="mock", stable_id=stable_id,
+class _StableIdAdapter(MockDeviceAdapter):
+    """MockDeviceAdapter subclass with stable_id support (avoids class-level property pollution)."""
+
+    def __init__(self, name: str, led_count: int, stable_id: str) -> None:
+        super().__init__(name=name, led_count=led_count)
+        self._stable_id = stable_id
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            name=self._name, device_type="mock", led_count=self._led_count,
+            address="mock", stable_id=self._stable_id,
         )
-        type(adapter).device_info = property(lambda self, _info=patched_info: _info)  # type: ignore[assignment]
+
+
+def _make_managed(name: str, led_count: int = 10, stable_id: str | None = None) -> ManagedDevice:
+    if stable_id:
+        adapter = _StableIdAdapter(name=name, led_count=led_count, stable_id=stable_id)
+    else:
+        adapter = MockDeviceAdapter(name=name, led_count=led_count)
     tracker = LatencyTracker(strategy=StaticLatency(10.0))
     return ManagedDevice(adapter=adapter, tracker=tracker)
 
