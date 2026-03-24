@@ -55,6 +55,8 @@ class PipelineManager:
 
     # Internal
     def _build_pipeline(self, scene_row, placements, devices) -> ScenePipeline
+        # led_count = max(d.adapter.led_count for d in devices) if devices else device_manager.max_led_count
+        # For shared mode: led_count = max across all sharing pipelines (shared buffer resized if needed)
     def _build_default_pipeline(self, unassigned_devices) -> ScenePipeline
     def _teardown_pipeline(self, scene_id: str) -> None
 ```
@@ -64,6 +66,10 @@ class PipelineManager:
 When `effect_mode = "shared"`, the pipeline gets a reference to a shared `EffectDeck` and shared `RingBuffer`. Multiple shared-mode scenes point to the same deck/buffer but each has its own `SpatialCompositor` (built from that scene's placements and mapping).
 
 One effect renders once into the shared buffer. Each scene's compositor samples it differently based on spatial position, giving coherent effects across device groups (e.g., a rainbow wave sweeping across the room hits devices in the correct spatial order regardless of which scene they belong to).
+
+**Shared buffer LED count invariant:** The shared buffer's `led_count` is `max(led_count)` across all sharing pipelines. All shared-mode pipelines use this same `led_count` for rendering. When a shared scene is activated/deactivated, the shared buffer is resized if the max changes. Each pipeline's `led_count` field stores this shared max.
+
+**Shared deck lifecycle:** The shared deck and buffer are created lazily when the first shared-mode scene is activated, using BeatPulse as the default effect. They persist as long as at least one shared-mode scene is active. When the last shared-mode scene is deactivated, the shared deck and buffer are destroyed.
 
 When `effect_mode = "independent"`, the pipeline gets its own deck and ring buffer. Its effect renders independently.
 
@@ -76,7 +82,9 @@ unassigned_device_mode: str = "default_effect"  # "default_effect" | "idle"
 ```
 
 - `"default_effect"`: PipelineManager creates a default pipeline with BeatPulse for devices not in any active scene.
-- `"idle"`: No default pipeline. Unassigned devices receive no frames.
+- `"idle"`: No default pipeline. Unassigned devices receive no frames. Their scheduler send tasks are cancelled (not left polling an empty buffer).
+
+Existing DBs with no `unassigned_device_mode` key will get the default `"default_effect"` via the dataclass default.
 
 ### Engine Changes
 
@@ -99,7 +107,10 @@ def tick(self, now: float) -> None:
 
 ### Scheduler Changes
 
-- `remove_pipeline_refs(scene_id: str)` — null out `state.pipeline` for any device that referenced the deactivated scene's pipeline (falls back to default or idle)
+- `remove_pipeline_refs(scene_id: str)` — for devices that referenced the deactivated scene's pipeline:
+  - If `unassigned_device_mode = "default_effect"`: reassign to default pipeline via `set_device_pipeline(stable_id, default_pipeline)`
+  - If `unassigned_device_mode = "idle"`: cancel the device's send task via existing `remove_device()`, so it doesn't poll an empty buffer
+- `pause_device(stable_id)` / `resume_device(stable_id)` — cancel/restart a device's send task for idle mode transitions
 - Existing `set_device_pipeline()` and per-device pipeline routing in `_send_loop` are unchanged
 
 ### Web API Changes
@@ -114,7 +125,7 @@ PUT  /scenes/{id}/effect   -> {effect_name, params?} -> sets scene's effect
 **Modified endpoints:**
 
 - `POST /scenes/{id}/activate` — after DB write + conflict check, calls `pipeline_manager.activate_scene(scene_id)`
-- `POST /scenes/{id}/deactivate` — after DB write, calls `pipeline_manager.deactivate_scene(scene_id)`
+- `POST /scenes/{id}/deactivate` — after DB write, calls `pipeline_manager.deactivate_scene(scene_id)`. Also fix existing raw `_execute_write` call to use `db.set_scene_inactive()` method.
 
 **WebSocket `set_effect` command:**
 
@@ -126,6 +137,10 @@ Add optional `scene_id` field. When omitted, targets the default pipeline (backw
 app.state.pipeline_manager = pipeline_manager
 # Keep app.state.effect_deck as alias for default pipeline's deck (backward compat)
 ```
+
+**`create_app()` signature:** Add `pipeline_manager` parameter. Route handlers access it via `request.app.state.pipeline_manager`. The existing `effect_deck`, `scene_model`, and `compositor` params are kept for backward compat (they alias the default pipeline's components).
+
+**Delete active scene safety:** `DELETE /scenes/{id}` must call `deactivate_scene` first if the scene is active, before removing from DB. Return 409 if deactivation fails.
 
 ### main.py Startup Flow
 
@@ -139,9 +154,13 @@ app.state.pipeline_manager = pipeline_manager
 8. For each pipeline's devices, call `scheduler.add_device(managed, pipeline=pipeline)`
 9. (unchanged) Subscribe device events, start web server, launch engine/scheduler tasks
 
-Device lifecycle events (discovered/offline) trigger `pipeline_manager.reassign_devices()`.
+Device lifecycle events (discovered/offline) trigger `pipeline_manager.reassign_devices()`. The existing `_on_device_discovered` handler in `main.py` is replaced: instead of calling `scheduler.add_device(managed)` directly, it calls `pipeline_manager.reassign_devices()`, which looks up which scene (if any) the device belongs to and assigns the correct pipeline.
 
 Backward compatible: if no scenes exist in DB, one default pipeline with BeatPulse, all devices assigned.
+
+**Error handling:** If engine/scheduler creation fails after `load_active_scenes()`, the pipelines are inert dataclasses with no side effects — safe to discard. `bind()` is required before any runtime `activate_scene`/`deactivate_scene` calls; calling them before `bind()` raises `RuntimeError`.
+
+**Thread safety:** `add_pipeline`/`remove_pipeline` are called from web request handlers on the same asyncio event loop as `tick()`. Since `tick()` is synchronous (no await inside the pipeline iteration loop), list mutation between ticks is safe. This invariant depends on the single-event-loop architecture.
 
 ## Testing Strategy
 
@@ -150,6 +169,9 @@ Backward compatible: if no scenes exist in DB, one default pipeline with BeatPul
 - Shared mode: two shared scenes reference same deck/buffer, different compositors
 - Default pipeline: creation/omission based on `unassigned_device_mode`
 - Engine dedup: shared-buffer pipelines only render once per tick
+- Pipeline `led_count` computation: `max(device.adapter.led_count for device in devices)` per pipeline; shared mode uses max across all sharing pipelines
+- Error cases: activate scene with no placements (succeeds with empty device list), activate before `bind()` (raises RuntimeError), delete active scene (deactivates first)
+- `effect_mode` change on active scene (requires deactivate + reactivate)
 
 **Integration tests:**
 - Full startup with 2 active scenes -> devices get frames from correct pipelines
