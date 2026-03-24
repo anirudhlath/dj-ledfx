@@ -169,3 +169,101 @@ def test_engine_empty_pipelines_uses_legacy_buffer(clock: BeatClock) -> None:
     engine = EffectEngine(clock=clock, deck=deck, led_count=60, fps=60)
     engine.tick(0.0)
     assert engine.ring_buffer.count == 1
+
+
+def test_engine_add_pipeline(clock: BeatClock) -> None:
+    deck = EffectDeck(BeatPulse())
+    engine = EffectEngine(clock=clock, deck=deck, led_count=10, fps=60, max_lookahead_s=1.0)
+    assert len(engine.pipelines) == 1  # default pipeline
+
+    new_buf = RingBuffer(60, 20)
+    new_deck = EffectDeck(BeatPulse())
+    pipeline = ScenePipeline(
+        scene_id="test",
+        deck=new_deck,
+        ring_buffer=new_buf,
+        compositor=None,
+        mapping=None,
+        devices=[],
+        led_count=20,
+    )
+    engine.add_pipeline(pipeline)
+    assert len(engine.pipelines) == 2
+    assert engine.pipelines[1].scene_id == "test"
+
+
+def test_engine_remove_pipeline(clock: BeatClock) -> None:
+    deck = EffectDeck(BeatPulse())
+    buf1 = RingBuffer(60, 10)
+    buf2 = RingBuffer(60, 10)
+    p1 = ScenePipeline(
+        scene_id="s1",
+        deck=deck,
+        ring_buffer=buf1,
+        compositor=None,
+        mapping=None,
+        devices=[],
+        led_count=10,
+    )
+    p2 = ScenePipeline(
+        scene_id="s2",
+        deck=EffectDeck(BeatPulse()),
+        ring_buffer=buf2,
+        compositor=None,
+        mapping=None,
+        devices=[],
+        led_count=10,
+    )
+    engine = EffectEngine(
+        clock=clock,
+        deck=deck,
+        led_count=10,
+        fps=60,
+        max_lookahead_s=1.0,
+        pipelines=[p1, p2],
+    )
+
+    # Write some frames
+    engine.tick(0.0)
+    assert buf2.count == 1
+
+    engine.remove_pipeline("s2")
+    assert len(engine.pipelines) == 1
+    assert engine.pipelines[0].scene_id == "s1"
+    assert buf2.count == 0  # cleared on removal
+
+
+def test_engine_tick_shared_buffer_dedup(clock: BeatClock) -> None:
+    """Shared-mode pipelines with same buffer only render once per tick."""
+    shared_deck = EffectDeck(BeatPulse())
+    shared_buf = RingBuffer(60, 10)
+    p1 = ScenePipeline(
+        scene_id="s1",
+        deck=shared_deck,
+        ring_buffer=shared_buf,
+        compositor=None,
+        mapping=None,
+        devices=[],
+        led_count=10,
+    )
+    p2 = ScenePipeline(
+        scene_id="s2",
+        deck=shared_deck,
+        ring_buffer=shared_buf,
+        compositor=None,
+        mapping=None,
+        devices=[],
+        led_count=10,
+    )
+    engine = EffectEngine(
+        clock=clock,
+        deck=shared_deck,
+        led_count=10,
+        fps=60,
+        max_lookahead_s=1.0,
+        pipelines=[p1, p2],
+    )
+
+    engine.tick(0.0)
+    # Only 1 frame written, not 2 (dedup by buffer identity)
+    assert shared_buf.count == 1
