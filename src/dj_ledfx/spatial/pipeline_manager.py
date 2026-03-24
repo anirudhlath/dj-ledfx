@@ -91,7 +91,13 @@ class PipelineManager:
 
         for scene_row in active_scenes:
             placements = await self._state_db.load_scene_placements(scene_row["id"])
-            pipeline = self._build_pipeline(scene_row, placements)
+            try:
+                pipeline = self._build_pipeline(scene_row, placements)
+            except Exception:
+                logger.warning(
+                    "Failed to build pipeline for scene '{}', skipping", scene_row["id"]
+                )
+                continue
             if pipeline is not None:
                 self._pipelines[scene_row["id"]] = pipeline
 
@@ -104,6 +110,10 @@ class PipelineManager:
         self._require_bound()
         assert self._engine is not None  # for type narrowing
         assert self._scheduler is not None
+
+        if scene_id in self._pipelines:
+            msg = f"Scene {scene_id} is already active"
+            raise ValueError(msg)
 
         scene_row = await self._state_db.load_scene_by_id(scene_id)
         if scene_row is None:
@@ -122,7 +132,7 @@ class PipelineManager:
         # Assign devices to this pipeline in the scheduler
         for managed in pipeline.devices:
             sid = managed.adapter.device_info.effective_id
-            if sid in self._scheduler._device_state:
+            if self._scheduler.has_device(sid):
                 self._scheduler.set_device_pipeline(sid, pipeline)
             else:
                 self._scheduler.add_device(managed, pipeline=pipeline)
@@ -194,7 +204,7 @@ class PipelineManager:
             for managed in pipeline.devices:
                 sid = managed.adapter.device_info.effective_id
                 assigned_ids.add(sid)
-                if sid in self._scheduler._device_state:
+                if self._scheduler.has_device(sid):
                     self._scheduler.set_device_pipeline(sid, pipeline)
                 else:
                     self._scheduler.add_device(managed, pipeline=pipeline)
@@ -352,5 +362,7 @@ class PipelineManager:
         if self._scheduler is not None:
             for managed in unassigned:
                 sid = managed.adapter.device_info.effective_id
-                if sid in self._scheduler._device_state:
+                if self._scheduler.has_device(sid):
                     self._scheduler.set_device_pipeline(sid, self._default_pipeline)
+                else:
+                    self._scheduler.add_device(managed, pipeline=self._default_pipeline)

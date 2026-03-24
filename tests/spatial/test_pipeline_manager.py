@@ -190,7 +190,7 @@ class TestActivateDeactivate:
 
         engine = MagicMock()
         scheduler = MagicMock()
-        scheduler._device_state = {}
+        scheduler.has_device.return_value = False
         pm.bind(engine, scheduler)
 
         pipeline = await pm.activate_scene("s1")
@@ -231,7 +231,7 @@ class TestActivateDeactivate:
 
         engine = MagicMock()
         scheduler = MagicMock()
-        scheduler._device_state = {}
+        scheduler.has_device.return_value = False
         pm.bind(engine, scheduler)
 
         await pm.activate_scene("s1")

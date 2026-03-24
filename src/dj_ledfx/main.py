@@ -222,7 +222,7 @@ async def _run(args: argparse.Namespace) -> None:
         led_count=led_count,
         fps=config.engine.fps,
         max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
-        pipelines=pipeline_manager.all_pipelines or None,
+        pipelines=pipeline_manager.all_pipelines if pipeline_manager.all_pipelines else None,
         event_bus=event_bus,
     )
 
@@ -399,11 +399,11 @@ async def _run(args: argparse.Namespace) -> None:
                 prodjlink_connected=beat_state.is_playing,
                 current_bpm=beat_state.bpm or None,
                 connected_devices=[d.adapter.device_info.name for d in device_manager.devices],
-                buffer_fill_level=engine.ring_buffer.fill_level,
+                buffer_fill_level=default_ring_buffer.fill_level,
                 avg_frame_render_time_ms=engine.avg_render_time_ms,
                 device_stats=scheduler.get_device_stats(),
             )
-            metrics.RING_BUFFER_DEPTH.set(engine.ring_buffer.fill_level)
+            metrics.RING_BUFFER_DEPTH.set(default_ring_buffer.fill_level)
             summary = status.summary()
             await asyncio.to_thread(logger.info, "Status: {}", summary)
             try:

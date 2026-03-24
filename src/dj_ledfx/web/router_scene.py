@@ -420,10 +420,10 @@ async def activate_scene(request: Request, scene_id: str) -> dict[str, str]:
                 },
             )
 
-    await db.set_scene_active(scene_id)
     pm = getattr(request.app.state, "pipeline_manager", None)
     if pm is not None:
         await pm.activate_scene(scene_id)
+    await db.set_scene_active(scene_id)
     return {"status": "activated", "scene_id": scene_id}
 
 
