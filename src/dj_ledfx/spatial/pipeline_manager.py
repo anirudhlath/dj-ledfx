@@ -134,6 +134,10 @@ class PipelineManager:
             msg = f"Could not build pipeline for scene {scene_id}"
             raise ValueError(msg)
 
+        if scene_id in self._pipelines:
+            msg = f"Scene {scene_id} is already active"
+            raise ValueError(msg)
+
         self._pipelines[scene_id] = pipeline
         self._engine.add_pipeline(pipeline)
 

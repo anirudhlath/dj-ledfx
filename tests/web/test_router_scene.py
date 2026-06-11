@@ -764,6 +764,7 @@ class TestActivateHardening:
             assert resp.status_code == 200
             assert resp.json()["status"] == "already_active"
             pm.activate_scene.assert_not_called()
+            assert client.get(f"/api/scenes/{scene_id}").json()["is_active"] is True
         finally:
             asyncio.run(db.close())
 

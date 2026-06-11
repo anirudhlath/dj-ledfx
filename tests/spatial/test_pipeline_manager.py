@@ -200,6 +200,35 @@ class TestActivateDeactivate:
         engine.add_pipeline.assert_called_once_with(pipeline)
         scheduler.add_device.assert_called_once()
 
+    async def test_double_activation_raises_value_error(self) -> None:
+        managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
+        pm, db, _ = _make_manager(devices=[managed])
+        db.load_scene_by_id.return_value = _SCENE_ROW_S1
+        db.load_scene_placements.return_value = [_PLACEMENT_DEV1]
+
+        engine = MagicMock()
+        scheduler = MagicMock()
+        scheduler.has_device.return_value = False
+        pm.bind(engine, scheduler)
+
+        await pm.activate_scene("s1")
+        assert pm.is_scene_active("s1") is True
+        with pytest.raises(ValueError, match="already active"):
+            await pm.activate_scene("s1")
+
+    async def test_is_scene_active_false_when_inactive(self) -> None:
+        managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
+        pm, db, _ = _make_manager(devices=[managed])
+        db.load_scene_by_id.return_value = _SCENE_ROW_S1
+        db.load_scene_placements.return_value = [_PLACEMENT_DEV1]
+
+        engine = MagicMock()
+        scheduler = MagicMock()
+        scheduler.has_device.return_value = False
+        pm.bind(engine, scheduler)
+
+        assert pm.is_scene_active("s1") is False
+
     async def test_deactivate_scene_removes_pipeline(self):
         managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
         pm, db, _ = _make_manager(devices=[managed])
