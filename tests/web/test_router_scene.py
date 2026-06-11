@@ -12,6 +12,7 @@ from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 from dj_ledfx.spatial.mapping import LinearMapping
 from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
 from dj_ledfx.web.app import create_app
+from dj_ledfx.web.router_scene import _row_value
 
 
 def _make_test_app(
@@ -880,6 +881,54 @@ class TestSceneDetail:
         finally:
             asyncio.run(db.close())
 
+    def test_invalid_mapping_params_rejected_and_get_survives(self, tmp_path) -> None:
+        db = StateDB(tmp_path / "state.db")
+        asyncio.run(db.open())
+        mock_pm = MagicMock()
+        mock_pm.activate_scene = AsyncMock()
+        mock_pm.deactivate_scene = AsyncMock()
+        mock_pm.is_scene_active.return_value = False
+        client = _make_test_app(state_db=db, pipeline_manager=mock_pm)
+        try:
+            scene_id = client.post("/api/scenes", json={"name": "A"}).json()["id"]
+            # Bad mapping_params (zero direction vector) must be rejected.
+            resp = client.put(
+                f"/api/scenes/{scene_id}",
+                json={"mapping_params": {"direction": [0, 0, 0]}},
+            )
+            assert resp.status_code == 422
+            # Scene GET must still work — bad params were never persisted.
+            assert client.get(f"/api/scenes/{scene_id}").status_code == 200
+
+            # Read-guard: seed bad params directly into DB bypassing validation.
+            existing = asyncio.run(db.load_scene_by_id(scene_id))
+            assert existing is not None
+            bad_row = dict(existing)
+            bad_row["mapping_params"] = '{"direction": [0, 0, 0]}'
+            asyncio.run(db.save_scene(bad_row))
+            # Add a placement so the compositor path is exercised.
+            asyncio.run(db.upsert_device({"id": "d1", "name": "d1", "backend": "mock"}))
+            asyncio.run(
+                db.save_placement(
+                    {
+                        "scene_id": scene_id,
+                        "device_id": "d1",
+                        "position_x": 0.0,
+                        "position_y": 0.0,
+                        "position_z": 0.0,
+                        "geometry_type": "point",
+                    }
+                )
+            )
+            # GET must degrade gracefully: 200 with strip_index None.
+            resp = client.get(f"/api/scenes/{scene_id}")
+            assert resp.status_code == 200
+            placements = resp.json()["placements"]
+            assert len(placements) == 1
+            assert placements[0]["strip_index"] is None
+        finally:
+            asyncio.run(db.close())
+
 
 class TestActivateHardening:
     """Tests for idempotent activation and 409 on pipeline build failure."""
@@ -930,3 +979,14 @@ class TestActivateHardening:
             assert scene_row["is_active"] is False
         finally:
             asyncio.run(db.close())
+
+
+class TestRowValue:
+    def test_zero_is_preserved(self) -> None:
+        assert _row_value({"k": 0.0}, "k", 1.0) == 0.0
+
+    def test_none_uses_default(self) -> None:
+        assert _row_value({"k": None}, "k", 1.0) == 1.0
+
+    def test_int_coerced_to_float(self) -> None:
+        assert _row_value({"k": 2}, "k", 0.0) == 2.0

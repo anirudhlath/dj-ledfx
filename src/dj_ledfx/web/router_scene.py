@@ -8,6 +8,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
+from loguru import logger
 from pydantic import BaseModel
 
 from dj_ledfx.config import save_config
@@ -384,18 +385,26 @@ async def get_scene_by_id(request: Request, scene_id: str) -> SceneDetail:
         from dj_ledfx.spatial.scene import SceneModel as _SM
 
         model = _SM(scene_placements)
-        mapping = mapping_from_config({"mapping": mapping_type, "mapping_params": mapping_params})
-        compositor = SpatialCompositor(model, mapping)
-        for device_id, indices in compositor.get_strip_indices().items():
-            strip_indices[device_id] = float(indices.mean())
         bounds_min, bounds_max = model.get_bounds()
         bounds = [bounds_min.tolist(), bounds_max.tolist()]
+        try:
+            mapping = mapping_from_config(
+                {"mapping": mapping_type, "mapping_params": mapping_params}
+            )
+            compositor = SpatialCompositor(model, mapping)
+            for device_id, indices in compositor.get_strip_indices().items():
+                strip_indices[device_id] = float(indices.mean())
+        except (TypeError, ValueError):
+            logger.warning(
+                "Scene {}: invalid mapping_params in DB, degrading strip_indices",
+                row["id"],
+            )
 
     return SceneDetail(
         id=row["id"],
         name=row["name"],
         is_active=bool(row.get("is_active", 0)),
-        mapping_type=row.get("mapping_type"),
+        mapping_type=mapping_type if row.get("mapping_type") is not None else None,
         effect_mode=row.get("effect_mode"),
         placements=[
             _placement_to_response(p, strip_index=strip_indices.get(p.device_id))
@@ -420,6 +429,13 @@ async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest
         raise HTTPException(
             409, "Cannot change effect_mode while scene is active. Deactivate first."
         )
+
+    if body.mapping_params is not None:
+        effective_type = body.mapping_type or existing.get("mapping_type") or "linear"
+        try:
+            mapping_from_config({"mapping": effective_type, "mapping_params": body.mapping_params})
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=422, detail=f"Invalid mapping_params: {e}") from e
 
     updated: dict[str, Any] = {"id": scene_id}
     updated["name"] = body.name if body.name is not None else existing["name"]
