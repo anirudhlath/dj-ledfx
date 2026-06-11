@@ -28,7 +28,6 @@ export function useScene(sceneId: string | null = null) {
 
   useEffect(() => {
     setLoading(true)
-    setScene(null)
     setError(null)
     setIsActive(false)
     refresh()

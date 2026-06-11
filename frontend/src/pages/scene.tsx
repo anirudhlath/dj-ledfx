@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "react"
+import { useRef, useState, useCallback, useMemo, useEffect } from "react"
 import { toast } from "sonner"
 import * as THREE from "three"
 import { useScene } from "@/hooks/use-scene"
@@ -53,8 +53,14 @@ function clampToBounds(
 export default function ScenePage() {
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const { devices, frameData } = useDevices()
-  const scenesApi = useScenes(devices)
-  const { scene, loading, refresh: refreshScene, movePlacement, removePlacement, changeMapping, addPlacement } = useScene(selectedSceneId)
+  const { activate, deactivate, scenes: allScenes, create, rename, remove, setEffectMode } = useScenes(devices)
+  const { scene, loading, error, refresh: refreshScene, movePlacement, removePlacement, changeMapping, addPlacement } = useScene(selectedSceneId)
+
+  const scenes = useMemo(() => allScenes.filter((s) => s.id !== "default"), [allScenes])
+
+  useEffect(() => {
+    if (error) toast.error(error)
+  }, [error])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedHandle, setSelectedHandle] = useState<MappingHandleId | null>(null)
   const [transformMode, setTransformMode] = useState<"translate" | "rotate">("translate")
@@ -158,24 +164,24 @@ export default function ScenePage() {
 
   const handleActivateScene = useCallback(
     async (sceneId: string): Promise<boolean> => {
-      const ok = await scenesApi.activate(sceneId)
+      const ok = await activate(sceneId)
       if (ok && sceneId === selectedSceneId) {
         await refreshScene()
       }
       return ok
     },
-    [scenesApi, selectedSceneId, refreshScene],
+    [activate, selectedSceneId, refreshScene],
   )
 
   const handleDeactivateScene = useCallback(
     async (sceneId: string): Promise<boolean> => {
-      const ok = await scenesApi.deactivate(sceneId)
+      const ok = await deactivate(sceneId)
       if (ok && sceneId === selectedSceneId) {
         await refreshScene()
       }
       return ok
     },
-    [scenesApi, selectedSceneId, refreshScene],
+    [deactivate, selectedSceneId, refreshScene],
   )
 
   const handleSelectDevice = useCallback((deviceId: string | null) => {
@@ -212,7 +218,7 @@ export default function ScenePage() {
     [addPlacement],
   )
 
-  if (loading) {
+  if (loading && !scene) {
     return (
       <div className="flex items-center justify-center h-full">
         <p className="text-muted-foreground">Loading scene...</p>
@@ -245,15 +251,15 @@ export default function ScenePage() {
       <div className="flex-1 flex gap-2 min-h-0 p-2">
         <div className="w-52 shrink-0 flex flex-col gap-2 min-h-0">
           <ScenesPanel
-            scenes={scenesApi.scenes.filter((s) => s.id !== "default")}
+            scenes={scenes}
             selectedSceneId={selectedSceneId}
             onSelectScene={handleSelectScene}
-            onCreate={scenesApi.create}
-            onRename={scenesApi.rename}
-            onDelete={scenesApi.remove}
+            onCreate={create}
+            onRename={rename}
+            onDelete={remove}
             onActivate={handleActivateScene}
             onDeactivate={handleDeactivateScene}
-            onEffectModeChange={scenesApi.setEffectMode}
+            onEffectModeChange={setEffectMode}
           />
           <div className="flex-1 min-h-0">
             <DeviceListPanel

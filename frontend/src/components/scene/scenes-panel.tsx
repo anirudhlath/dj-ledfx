@@ -1,7 +1,6 @@
 import { useState, useRef } from "react"
 import { toast } from "sonner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -38,35 +37,38 @@ export default function ScenesPanel({
   onDeactivate,
   onEffectModeChange,
 }: ScenesPanelProps) {
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [renameValue, setRenameValue] = useState("")
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState("")
   const [newSceneName, setNewSceneName] = useState("")
-  const renameInputRef = useRef<HTMLInputElement>(null)
+  const committingRef = useRef(false)
 
   const selected = scenes.find((s) => s.id === selectedSceneId) ?? null
 
   const startRename = (s: SceneListItem) => {
-    setRenamingId(s.id)
-    setRenameValue(s.name)
+    setEditingId(s.id)
+    setEditName(s.name)
   }
 
-  const commitRename = async (sceneId: string) => {
-    const trimmed = renameValue.trim()
-    if (!trimmed) {
-      setRenamingId(null)
+  const commitRename = async (scene: SceneListItem) => {
+    if (committingRef.current) return
+    const trimmed = editName.trim()
+    if (!trimmed || trimmed === scene.name) {
+      setEditingId(null)
       return
     }
+    committingRef.current = true
     try {
-      await onRename(sceneId, trimmed)
+      await onRename(scene.id, trimmed)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to rename scene")
     } finally {
-      setRenamingId(null)
+      setEditingId(null)
+      committingRef.current = false
     }
   }
 
   const cancelRename = () => {
-    setRenamingId(null)
+    setEditingId(null)
   }
 
   const handleCreate = async () => {
@@ -88,11 +90,11 @@ export default function ScenesPanel({
         <CardTitle className="text-sm">Scenes</CardTitle>
       </CardHeader>
       <CardContent className="p-0 flex flex-col gap-0">
-        <ScrollArea className="max-h-56 px-3">
+        <div className="max-h-56 overflow-y-auto px-3">
           {/* Default pseudo-scene row */}
-          <div
+          <button
             className={cn(
-              "flex items-center gap-1 px-2 py-1.5 rounded cursor-pointer transition-colors",
+              "w-full flex items-center gap-1 px-2 py-1.5 rounded transition-colors text-left",
               selectedSceneId === null ? "bg-primary/15 text-primary" : "hover:bg-muted",
             )}
             onClick={() => onSelectScene(null)}
@@ -101,87 +103,85 @@ export default function ScenesPanel({
             <Badge variant="outline" className="text-[10px] shrink-0">
               active
             </Badge>
-          </div>
+          </button>
 
           {/* DB scene rows */}
           {scenes.map((s) => (
-            <div key={s.id} className="flex flex-col">
-              <div
-                className={cn(
-                  "flex items-center gap-1 px-2 py-1.5 rounded transition-colors",
-                  selectedSceneId === s.id ? "bg-primary/15 text-primary" : "hover:bg-muted",
-                )}
-              >
-                {renamingId === s.id ? (
-                  <Input
-                    ref={renameInputRef}
-                    autoFocus
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        void commitRename(s.id)
-                      } else if (e.key === "Escape") {
-                        cancelRename()
-                      }
-                    }}
-                    onBlur={() => void commitRename(s.id)}
-                    className="h-6 text-xs flex-1 min-w-0 px-1"
-                  />
-                ) : (
-                  <button
-                    className="flex-1 text-left text-xs truncate min-w-0 bg-transparent border-0 p-0 cursor-pointer"
-                    onClick={() => onSelectScene(s.id)}
-                    onDoubleClick={() => startRename(s)}
-                  >
-                    {s.name}
-                  </button>
-                )}
-
-                {s.is_active && (
-                  <Badge variant="outline" className="text-[10px] shrink-0">
-                    active
-                  </Badge>
-                )}
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-6 px-1.5 text-[10px] shrink-0"
-                  onClick={async () => {
-                    const ok = s.is_active
-                      ? await onDeactivate(s.id)
-                      : await onActivate(s.id)
-                    if (ok) {
-                      toast.success(
-                        s.is_active ? `Stopped "${s.name}"` : `Activated "${s.name}"`,
-                      )
+            <div
+              key={s.id}
+              className={cn(
+                "flex items-center gap-1 px-2 py-1.5 rounded transition-colors",
+                selectedSceneId === s.id ? "bg-primary/15 text-primary" : "hover:bg-muted",
+              )}
+            >
+              {editingId === s.id ? (
+                <Input
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      void commitRename(s)
+                    } else if (e.key === "Escape") {
+                      cancelRename()
                     }
                   }}
-                >
-                  {s.is_active ? "Stop" : "Go"}
-                </Button>
-
+                  onBlur={() => void commitRename(s)}
+                  className="h-6 text-xs flex-1 min-w-0 px-1"
+                />
+              ) : (
                 <button
-                  className="h-6 w-5 text-xs text-muted-foreground opacity-50 hover:opacity-100 hover:text-destructive transition-opacity bg-transparent border-0 cursor-pointer shrink-0"
-                  onClick={async () => {
-                    const ok = await onDelete(s.id)
-                    if (ok) {
-                      toast.success(`Deleted "${s.name}"`)
-                      if (selectedSceneId === s.id) {
-                        onSelectScene(null)
-                      }
-                    }
-                  }}
-                  aria-label={`Delete ${s.name}`}
+                  className="flex-1 text-left text-xs truncate min-w-0 bg-transparent border-0 p-0 cursor-pointer"
+                  onClick={() => onSelectScene(s.id)}
+                  onDoubleClick={() => startRename(s)}
                 >
-                  ×
+                  {s.name}
                 </button>
-              </div>
+              )}
+
+              {s.is_active && (
+                <Badge variant="outline" className="text-[10px] shrink-0">
+                  active
+                </Badge>
+              )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 px-1.5 text-[10px] shrink-0"
+                onClick={async () => {
+                  const ok = s.is_active
+                    ? await onDeactivate(s.id)
+                    : await onActivate(s.id)
+                  if (ok) {
+                    toast.success(
+                      s.is_active ? `Stopped "${s.name}"` : `Activated "${s.name}"`,
+                    )
+                  }
+                }}
+              >
+                {s.is_active ? "Stop" : "Go"}
+              </Button>
+
+              <button
+                className="h-6 w-5 text-xs text-muted-foreground opacity-50 hover:opacity-100 hover:text-destructive transition-opacity bg-transparent border-0 cursor-pointer shrink-0"
+                onClick={async () => {
+                  const ok = await onDelete(s.id)
+                  if (ok) {
+                    toast.success(`Deleted "${s.name}"`)
+                    if (selectedSceneId === s.id) {
+                      onSelectScene(null)
+                    }
+                  }
+                }}
+                aria-label={`Delete ${s.name}`}
+              >
+                ×
+              </button>
             </div>
           ))}
-        </ScrollArea>
+        </div>
 
         {/* Effect mode selector for selected non-default scene */}
         {selected !== null && (
