@@ -15,22 +15,15 @@ from dj_ledfx.effects.engine import RingBuffer
 from dj_ledfx.effects.registry import create_effect
 from dj_ledfx.events import EventBus
 from dj_ledfx.spatial.compositor import SpatialCompositor
-from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 from dj_ledfx.spatial.mapping import mapping_from_config
 from dj_ledfx.spatial.pipeline import ScenePipeline
-from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
+from dj_ledfx.spatial.scene import DevicePlacement, SceneModel, placement_from_row
 
 if TYPE_CHECKING:
     from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
     from dj_ledfx.effects.engine import EffectEngine
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
-
-
-def _row_value(row: dict[str, Any], key: str, default: float) -> float:
-    """NULL-safe numeric read from a DB row (0.0 is a valid value, None is not)."""
-    value = row.get(key)
-    return float(value) if value is not None else default
 
 
 class PipelineManager:
@@ -184,8 +177,10 @@ class PipelineManager:
 
     # ── Effect control ──────────────────────────────────────────
 
-    def set_scene_effect(self, scene_id: str, effect_name: str, params: dict[str, Any]) -> None:
-        """Set the effect for a scene's pipeline."""
+    def set_scene_effect(
+        self, scene_id: str, effect_name: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Set the effect for a scene's pipeline. Returns canonical params after apply."""
         pipeline = self._pipelines.get(scene_id)
         if pipeline is None:
             msg = f"No active pipeline for scene {scene_id}"
@@ -197,6 +192,7 @@ class PipelineManager:
                 scene_id, effect_name, json.dumps(canonical_params)
             )
         )
+        return canonical_params
 
     def get_scene_effect(self, scene_id: str) -> dict[str, Any]:
         """Get the current effect info for a scene's pipeline."""
@@ -251,29 +247,12 @@ class PipelineManager:
             if managed is None:
                 continue
             devices.append(managed)
-            geo_type = p.get("geometry_type") or "point"
-            if geo_type == "strip":
-                geometry: PointGeometry | StripGeometry = StripGeometry(
-                    direction=(
-                        _row_value(p, "direction_x", 1.0),
-                        _row_value(p, "direction_y", 0.0),
-                        _row_value(p, "direction_z", 0.0),
-                    ),
-                    length=_row_value(p, "length", 1.0),
-                )
-            else:
-                geometry = PointGeometry()
             # Key the in-memory model by display name: the scheduler composites
             # frames by device_info.name, not by stable_id.
             display_name = managed.adapter.device_info.name
-            placement = DevicePlacement(
+            placement = placement_from_row(
+                p,
                 device_id=display_name,
-                position=(
-                    _row_value(p, "position_x", 0.0),
-                    _row_value(p, "position_y", 0.0),
-                    _row_value(p, "position_z", 0.0),
-                ),
-                geometry=geometry,
                 led_count=managed.adapter.device_info.led_count,
             )
             if display_name in scene_placements:

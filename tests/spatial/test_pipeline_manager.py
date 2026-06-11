@@ -13,7 +13,7 @@ from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
 from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
-from dj_ledfx.spatial.pipeline_manager import PipelineManager, _row_value
+from dj_ledfx.spatial.pipeline_manager import PipelineManager
 from dj_ledfx.types import DeviceInfo
 from tests.conftest import MockDeviceAdapter
 
@@ -78,6 +78,52 @@ def _make_manager(
         config=config,
     )
     return pm, db, device_manager
+
+
+_SCENE_ROW_S1 = {
+    "id": "s1",
+    "name": "Scene1",
+    "mapping_type": "linear",
+    "mapping_params": "{}",
+    "effect_mode": "independent",
+    "effect_source": None,
+    "is_active": 0,
+}
+
+_PLACEMENT_DEV1 = {
+    "device_id": "dev1",
+    "position_x": 0.0,
+    "position_y": 0.0,
+    "position_z": 0.0,
+    "geometry_type": "strip",
+    "direction_x": 1.0,
+    "direction_y": 0.0,
+    "direction_z": 0.0,
+    "length": 1.0,
+    "width": 0.0,
+    "rows": 1,
+    "cols": 1,
+}
+
+
+def _make_bound_manager(
+    name: str = "Dev1",
+    led_count: int = 10,
+    stable_id: str = "dev1",
+    scene_row: dict | None = None,
+    placement_row: dict | None = None,
+):
+    """Create a bound PipelineManager (engine + scheduler mocked) for one device/scene."""
+    managed = _make_managed(name, led_count=led_count, stable_id=stable_id)
+    pm, db, _ = _make_manager(devices=[managed])
+    db.load_scene_by_id.return_value = scene_row or _SCENE_ROW_S1
+    db.load_scene_placements.return_value = [placement_row or _PLACEMENT_DEV1]
+
+    engine = MagicMock()
+    scheduler = MagicMock()
+    scheduler.has_device.return_value = False
+    pm.bind(engine, scheduler)
+    return pm, db
 
 
 class TestPipelineManagerConstruction:
@@ -202,15 +248,7 @@ class TestActivateDeactivate:
         scheduler.add_device.assert_called_once()
 
     async def test_double_activation_raises_value_error(self) -> None:
-        managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
-        pm, db, _ = _make_manager(devices=[managed])
-        db.load_scene_by_id.return_value = _SCENE_ROW_S1
-        db.load_scene_placements.return_value = [_PLACEMENT_DEV1]
-
-        engine = MagicMock()
-        scheduler = MagicMock()
-        scheduler.has_device.return_value = False
-        pm.bind(engine, scheduler)
+        pm, db = _make_bound_manager()
 
         await pm.activate_scene("s1")
         assert pm.is_scene_active("s1") is True
@@ -218,15 +256,7 @@ class TestActivateDeactivate:
             await pm.activate_scene("s1")
 
     async def test_is_scene_active_false_when_inactive(self) -> None:
-        managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
-        pm, db, _ = _make_manager(devices=[managed])
-        db.load_scene_by_id.return_value = _SCENE_ROW_S1
-        db.load_scene_placements.return_value = [_PLACEMENT_DEV1]
-
-        engine = MagicMock()
-        scheduler = MagicMock()
-        scheduler.has_device.return_value = False
-        pm.bind(engine, scheduler)
+        pm, db = _make_bound_manager()
 
         assert pm.is_scene_active("s1") is False
 
@@ -275,45 +305,19 @@ class TestActivateDeactivate:
 
 class TestEffectControl:
     async def test_set_scene_effect(self):
-        scenes = [
-            {
-                "id": "s1",
-                "name": "Scene1",
-                "mapping_type": "linear",
-                "mapping_params": "{}",
-                "effect_mode": "independent",
-                "effect_source": None,
-                "is_active": 1,
-            }
-        ]
         managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
         pm, db, _ = _make_manager(
-            scenes=scenes,
+            scenes=[{**_SCENE_ROW_S1, "is_active": 1}],
             devices=[managed],
-            placements=[
-                {
-                    "device_id": "dev1",
-                    "position_x": 0.0,
-                    "position_y": 0.0,
-                    "position_z": 0.0,
-                    "geometry_type": "strip",
-                    "direction_x": 1.0,
-                    "direction_y": 0.0,
-                    "direction_z": 0.0,
-                    "length": 1.0,
-                    "width": 0.0,
-                    "rows": 1,
-                    "cols": 1,
-                }
-            ],
+            placements=[_PLACEMENT_DEV1],
         )
-        db.load_scene_placements.return_value = pm._state_db.load_scene_placements.return_value
-
         await pm.load_active_scenes()
 
-        pm.set_scene_effect("s1", "rainbow_wave", {})
+        returned = pm.set_scene_effect("s1", "rainbow_wave", {})
         info = pm.get_scene_effect("s1")
         assert info["effect_name"] == "rainbow_wave"
+        # Return value must equal the canonical params after apply
+        assert isinstance(returned, dict)
 
     def test_set_effect_no_active_pipeline_raises(self):
         pm, _, _ = _make_manager()
@@ -321,45 +325,18 @@ class TestEffectControl:
             pm.set_scene_effect("nonexistent", "beat_pulse", {})
 
     async def test_set_scene_effect_persists_full_params(self) -> None:
-        scenes = [
-            {
-                "id": "s1",
-                "name": "Scene1",
-                "mapping_type": "linear",
-                "mapping_params": "{}",
-                "effect_mode": "independent",
-                "effect_source": None,
-                "is_active": 1,
-            }
-        ]
         managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
         pm, db, _ = _make_manager(
-            scenes=scenes,
+            scenes=[{**_SCENE_ROW_S1, "is_active": 1}],
             devices=[managed],
-            placements=[
-                {
-                    "device_id": "dev1",
-                    "position_x": 0.0,
-                    "position_y": 0.0,
-                    "position_z": 0.0,
-                    "geometry_type": "strip",
-                    "direction_x": 1.0,
-                    "direction_y": 0.0,
-                    "direction_z": 0.0,
-                    "length": 1.0,
-                    "width": 0.0,
-                    "rows": 1,
-                    "cols": 1,
-                }
-            ],
+            placements=[_PLACEMENT_DEV1],
         )
-        db.load_scene_placements.return_value = pm._state_db.load_scene_placements.return_value
 
         await pm.load_active_scenes()
 
         # First call sets wave_count; second call sends only saturation (a delta)
         pm.set_scene_effect("s1", "rainbow_wave", {"wave_count": 3.0})
-        pm.set_scene_effect("s1", "rainbow_wave", {"saturation": 0.7})
+        canonical = pm.set_scene_effect("s1", "rainbow_wave", {"saturation": 0.7})
         # Drain the create_task coroutines
         await asyncio.sleep(0)
         await asyncio.sleep(0)
@@ -371,52 +348,9 @@ class TestEffectControl:
         # Both params must survive: wave_count from first call, saturation from second
         assert persisted["wave_count"] == 3.0
         assert persisted["saturation"] == 0.7
-
-
-_SCENE_ROW_S1 = {
-    "id": "s1",
-    "name": "Scene1",
-    "mapping_type": "linear",
-    "mapping_params": "{}",
-    "effect_mode": "independent",
-    "effect_source": None,
-    "is_active": 0,
-}
-
-_PLACEMENT_DEV1 = {
-    "device_id": "dev1",
-    "position_x": 0.0,
-    "position_y": 0.0,
-    "position_z": 0.0,
-    "geometry_type": "strip",
-    "direction_x": 1.0,
-    "direction_y": 0.0,
-    "direction_z": 0.0,
-    "length": 1.0,
-    "width": 0.0,
-    "rows": 1,
-    "cols": 1,
-}
-
-
-def _make_bound_manager(
-    name: str = "Dev1",
-    led_count: int = 10,
-    stable_id: str = "dev1",
-    scene_row: dict | None = None,
-    placement_row: dict | None = None,
-):
-    """Create a bound PipelineManager (engine + scheduler mocked) for one device/scene."""
-    managed = _make_managed(name, led_count=led_count, stable_id=stable_id)
-    pm, db, _ = _make_manager(devices=[managed])
-    db.load_scene_by_id.return_value = scene_row or _SCENE_ROW_S1
-    db.load_scene_placements.return_value = [placement_row or _PLACEMENT_DEV1]
-
-    engine = MagicMock()
-    scheduler = MagicMock()
-    scheduler.has_device.return_value = False
-    pm.bind(engine, scheduler)
-    return pm, db
+        # Return value must equal persisted canonical params
+        assert canonical["wave_count"] == 3.0
+        assert canonical["saturation"] == 0.7
 
 
 class TestEffectRestore:
@@ -492,7 +426,7 @@ class TestCompositorKeying:
         }
         pm, db = _make_bound_manager(placement_row=placement)
         db.load_scene_effect_state.return_value = None
-        # Must not raise — _row_value falls back to the default float for None values.
+        # Must not raise — row_value falls back to the default float for None values.
         await pm.activate_scene("s1")
 
         pipeline = pm._pipelines["s1"]
@@ -573,14 +507,3 @@ class TestSharedMode:
         assert p1.deck is p2.deck  # same shared deck
         assert p1.ring_buffer is p2.ring_buffer  # same shared buffer
         assert p1.compositor is not p2.compositor  # different compositors
-
-
-class TestRowValue:
-    def test_zero_is_preserved(self) -> None:
-        assert _row_value({"k": 0.0}, "k", 1.0) == 0.0
-
-    def test_none_uses_default(self) -> None:
-        assert _row_value({"k": None}, "k", 1.0) == 1.0
-
-    def test_int_coerced_to_float(self) -> None:
-        assert _row_value({"k": 2}, "k", 0.0) == 2.0

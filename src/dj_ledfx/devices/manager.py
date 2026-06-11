@@ -178,6 +178,13 @@ class DeviceManager:
                 return d
         return None
 
+    def resolve_stable_id(self, device_name: str) -> str:
+        """Resolve a display name to the device's effective_id (falls back to the name)."""
+        managed = self.get_device(device_name)
+        if managed is None:
+            return device_name
+        return managed.adapter.device_info.effective_id
+
     def add_device_from_info(
         self,
         device_info: DeviceInfo,

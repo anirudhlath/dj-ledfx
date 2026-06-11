@@ -216,6 +216,20 @@ def test_get_by_stable_id_returns_none() -> None:
     assert mgr.get_by_stable_id("nonexistent") is None
 
 
+def test_resolve_stable_id_known_device() -> None:
+    """resolve_stable_id returns effective_id for a known device."""
+    mgr = DeviceManager(event_bus=EventBus())
+    info = _make_info(name="My Strip", stable_id="lifx:abc123")
+    mgr.add_device_from_info(info, tracker=_make_tracker())
+    assert mgr.resolve_stable_id("My Strip") == "lifx:abc123"
+
+
+def test_resolve_stable_id_unknown_device() -> None:
+    """resolve_stable_id returns the name unchanged for an unknown device."""
+    mgr = DeviceManager(event_bus=EventBus())
+    assert mgr.resolve_stable_id("ghost_device") == "ghost_device"
+
+
 # ---------------------------------------------------------------------------
 # New tests: demote disconnects old adapter
 # ---------------------------------------------------------------------------

@@ -19,6 +19,42 @@ if TYPE_CHECKING:
     from dj_ledfx.devices.adapter import DeviceAdapter
 
 
+def row_value(row: dict[str, Any], key: str, default: float) -> float:
+    """NULL-safe numeric read from a DB row (0.0 is a valid value, None is not)."""
+    value = row.get(key)
+    return float(value) if value is not None else default
+
+
+def placement_from_row(
+    row: dict[str, Any], *, device_id: str, led_count: int
+) -> DevicePlacement:
+    """Build a DevicePlacement from a scene_placements DB row.
+
+    The caller supplies identity and led_count policy; this owns the
+    NULL-safe geometry/position reconstruction.
+    """
+    geometry: PointGeometry | StripGeometry = PointGeometry()
+    if (row.get("geometry_type") or "point") == "strip":
+        geometry = StripGeometry(
+            direction=(
+                row_value(row, "direction_x", 1.0),
+                row_value(row, "direction_y", 0.0),
+                row_value(row, "direction_z", 0.0),
+            ),
+            length=row_value(row, "length", 1.0),
+        )
+    return DevicePlacement(
+        device_id=device_id,
+        position=(
+            row_value(row, "position_x", 0.0),
+            row_value(row, "position_y", 0.0),
+            row_value(row, "position_z", 0.0),
+        ),
+        geometry=geometry,
+        led_count=led_count,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class DevicePlacement:
     """A device placed in 3D space."""
