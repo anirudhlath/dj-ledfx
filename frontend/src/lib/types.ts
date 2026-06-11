@@ -33,6 +33,7 @@ export interface Preset {
 
 export interface Device {
   name: string
+  stable_id: string | null
   device_type: string
   led_count: number
   address: string
@@ -103,3 +104,22 @@ export interface SceneData {
 }
 
 export type TransportState = "stopped" | "playing" | "simulating"
+
+export interface SceneListItem {
+  id: string
+  name: string
+  is_active: boolean
+  mapping_type: "linear" | "radial" | null
+  effect_mode: "independent" | "shared" | null
+}
+
+export interface SceneDetail extends SceneListItem {
+  placements: Placement[]
+  mapping: MappingInfo | null
+  bounds: [[number, number, number], [number, number, number]] | null
+}
+
+export interface SceneEffect {
+  effect_name: string
+  params: Record<string, unknown>
+}
