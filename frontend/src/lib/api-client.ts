@@ -19,6 +19,7 @@ export class ApiError extends Error {
   detail: unknown
   constructor(message: string, status: number, detail: unknown) {
     super(message)
+    this.name = "ApiError"
     this.status = status
     this.detail = detail
   }
@@ -201,7 +202,7 @@ export async function updateSceneDevice(
   deviceId: string,
   opts: {
     position?: [number, number, number]
-    geometry?: string
+    geometry?: "point" | "strip" | "matrix"
     direction?: number[]
     length?: number
     led_count?: number
@@ -312,7 +313,7 @@ export async function updateScenePlacement(
   deviceName: string,
   opts: {
     position?: [number, number, number]
-    geometry?: string
+    geometry?: "point" | "strip" | "matrix"
     direction?: number[]
     length?: number
     led_count?: number

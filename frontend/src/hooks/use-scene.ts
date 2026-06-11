@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react"
-import { toast } from "sonner"
 import type { SceneData } from "@/lib/types"
 import * as api from "@/lib/api-client"
 
@@ -30,17 +29,22 @@ export function useScene(sceneId: string | null = null) {
   useEffect(() => {
     setLoading(true)
     setScene(null)
+    setError(null)
+    setIsActive(false)
     refresh()
   }, [refresh])
 
   // Rebuild the running pipeline after editing an active scene (placements and
-  // mapping are read only at activation).
+  // mapping are read only at activation). Activation state is re-checked
+  // server-side because it can change from outside this hook.
   const reapply = useCallback(async () => {
-    if (sceneId === null || !isActive) return
+    if (sceneId === null) return
+    const detail = await api.getSceneDetail(sceneId)
+    setIsActive(detail.is_active)
+    if (!detail.is_active) return
     await api.deactivateScene(sceneId)
     await api.activateScene(sceneId)
-    toast.info("Scene re-applied")
-  }, [sceneId, isActive])
+  }, [sceneId])
 
   const movePlacement = useCallback(
     async (deviceId: string, position: [number, number, number]) => {
@@ -51,9 +55,10 @@ export function useScene(sceneId: string | null = null) {
           await api.updateScenePlacement(sceneId, deviceId, { position })
           await reapply()
         }
-        await refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to update placement")
+      } finally {
+        await refresh()
       }
     },
     [sceneId, reapply, refresh],
@@ -68,9 +73,10 @@ export function useScene(sceneId: string | null = null) {
           await api.deleteScenePlacement(sceneId, deviceId)
           await reapply()
         }
-        await refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to remove placement")
+      } finally {
+        await refresh()
       }
     },
     [sceneId, reapply, refresh],
@@ -87,9 +93,10 @@ export function useScene(sceneId: string | null = null) {
           await api.updateScene(sceneId, { mapping_type: type, mapping_params: params })
           await reapply()
         }
-        await refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to update mapping")
+      } finally {
+        await refresh()
       }
     },
     [sceneId, reapply, refresh],
@@ -108,9 +115,10 @@ export function useScene(sceneId: string | null = null) {
           await api.updateScenePlacement(sceneId, deviceId, opts)
           await reapply()
         }
-        await refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to add placement")
+      } finally {
+        await refresh()
       }
     },
     [sceneId, reapply, refresh],

@@ -4,6 +4,8 @@ import type { Device, SceneListItem } from "@/lib/types"
 import * as api from "@/lib/api-client"
 import { ApiError } from "@/lib/api-client"
 
+const NO_DEVICES: Device[] = []
+
 function conflictMessage(detail: unknown, devices: Device[]): string | null {
   if (
     typeof detail === "object" &&
@@ -17,7 +19,7 @@ function conflictMessage(detail: unknown, devices: Device[]): string | null {
   return null
 }
 
-export function useScenes(devices: Device[] = []) {
+export function useScenes(devices: Device[] = NO_DEVICES) {
   const [scenes, setScenes] = useState<SceneListItem[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -61,9 +63,15 @@ export function useScenes(devices: Device[] = []) {
   )
 
   const remove = useCallback(
-    async (sceneId: string) => {
-      await api.deleteScene(sceneId)
-      await refresh()
+    async (sceneId: string): Promise<boolean> => {
+      try {
+        await api.deleteScene(sceneId)
+        await refresh()
+        return true
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to delete scene")
+        return false
+      }
     },
     [refresh],
   )
@@ -87,9 +95,15 @@ export function useScenes(devices: Device[] = []) {
   )
 
   const deactivate = useCallback(
-    async (sceneId: string) => {
-      await api.deactivateScene(sceneId)
-      await refresh()
+    async (sceneId: string): Promise<boolean> => {
+      try {
+        await api.deactivateScene(sceneId)
+        await refresh()
+        return true
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to deactivate scene")
+        return false
+      }
     },
     [refresh],
   )
