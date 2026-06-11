@@ -200,6 +200,7 @@ class TestMultiSceneEndpoints:
             # async methods need to be AsyncMock
             mock_pm.activate_scene = AsyncMock()
             mock_pm.deactivate_scene = AsyncMock()
+            mock_pm.is_scene_active.return_value = False
         else:
             mock_pm = None
         client = _make_test_app(state_db=db, pipeline_manager=mock_pm)
@@ -663,5 +664,126 @@ class TestMultiSceneEndpoints:
                 json={"name": "TestScene", "effect_mode": "shared"},
             )
             assert resp.status_code == 409
+        finally:
+            asyncio.run(db.close())
+
+    def test_remove_placement_resolves_stable_id(self, tmp_path) -> None:
+        """DELETE /api/scenes/{id}/devices/{name} resolves display name to stable_id."""
+        from unittest.mock import MagicMock
+
+        from dj_ledfx.devices.adapter import DeviceAdapter
+        from dj_ledfx.devices.manager import DeviceManager
+        from dj_ledfx.events import EventBus
+        from dj_ledfx.latency.strategies import StaticLatency
+        from dj_ledfx.latency.tracker import LatencyTracker
+        from dj_ledfx.types import DeviceInfo
+
+        db = StateDB(tmp_path / "state.db")
+        asyncio.run(db.open())
+
+        manager = DeviceManager(EventBus())
+        info = DeviceInfo(
+            name="My Strip",
+            device_type="lifx_strip",
+            led_count=30,
+            address="192.168.1.50",
+            stable_id="lifx:my_strip",
+        )
+        tracker = LatencyTracker(StaticLatency(50.0))
+        adapter = MagicMock(spec=DeviceAdapter)
+        adapter.device_info = info
+        adapter.led_count = 30
+        adapter.is_connected = True
+        manager.add_device(adapter, tracker)
+
+        mock_config = MagicMock()
+        mock_config.web.cors_origins = ["*"]
+        mock_config.web.static_dir = None
+        mock_config.scene_config = None
+
+        app = create_app(
+            beat_clock=MagicMock(),
+            effect_deck=MagicMock(),
+            effect_engine=MagicMock(),
+            device_manager=manager,
+            scheduler=MagicMock(),
+            preset_store=MagicMock(),
+            scene_model=None,
+            compositor=None,
+            config=mock_config,
+            config_path=None,
+            state_db=db,
+        )
+        client = TestClient(app)
+
+        try:
+            scene = client.post("/api/scenes", json={"name": "Test Scene"}).json()
+            scene_id = scene["id"]
+
+            # Add placement via display name — stored under lifx:my_strip
+            resp = client.put(
+                f"/api/scenes/{scene_id}/devices/My Strip",
+                json={"position": [2.0, 0.0, 0.0], "geometry": "point"},
+            )
+            assert resp.status_code == 200
+            assert resp.json()["device_id"] == "lifx:my_strip"
+
+            # Delete via display name — must resolve to stable_id
+            resp = client.delete(f"/api/scenes/{scene_id}/devices/My Strip")
+            assert resp.status_code == 200
+
+            # Placement must be gone
+            placements = asyncio.run(db.load_scene_placements(scene_id))
+            assert placements == []
+        finally:
+            asyncio.run(db.close())
+
+
+class TestActivateHardening:
+    """Tests for idempotent activation and 409 on pipeline build failure."""
+
+    def _make_db_client_with_pm(self, tmp_path, pm_mock):
+        db = StateDB(tmp_path / "state.db")
+        asyncio.run(db.open())
+        client = _make_test_app(state_db=db, pipeline_manager=pm_mock)
+        return client, db
+
+    def test_activate_already_active_returns_200(self, tmp_path) -> None:
+        """Re-activating an already-active scene returns 200 with status already_active."""
+        pm = MagicMock()
+        pm.activate_scene = AsyncMock()
+        pm.deactivate_scene = AsyncMock()
+        pm.is_scene_active.return_value = True
+
+        client, db = self._make_db_client_with_pm(tmp_path, pm)
+        try:
+            resp = client.post("/api/scenes", json={"name": "Show"})
+            scene_id = resp.json()["id"]
+
+            resp = client.post(f"/api/scenes/{scene_id}/activate")
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "already_active"
+            pm.activate_scene.assert_not_called()
+        finally:
+            asyncio.run(db.close())
+
+    def test_activate_pipeline_failure_returns_409_and_db_unchanged(self, tmp_path) -> None:
+        """A pipeline build failure raises 409 and leaves is_active=False in DB."""
+        pm = MagicMock()
+        pm.activate_scene = AsyncMock(side_effect=ValueError("Could not build pipeline"))
+        pm.deactivate_scene = AsyncMock()
+        pm.is_scene_active.return_value = False
+
+        client, db = self._make_db_client_with_pm(tmp_path, pm)
+        try:
+            resp = client.post("/api/scenes", json={"name": "Broken"})
+            scene_id = resp.json()["id"]
+
+            resp = client.post(f"/api/scenes/{scene_id}/activate")
+            assert resp.status_code == 409
+
+            # DB must still show is_active=False (atomicity invariant)
+            scene_row = client.get(f"/api/scenes/{scene_id}").json()
+            assert scene_row["is_active"] is False
         finally:
             asyncio.run(db.close())

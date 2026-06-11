@@ -422,7 +422,14 @@ async def activate_scene(request: Request, scene_id: str) -> dict[str, str]:
 
     pm = getattr(request.app.state, "pipeline_manager", None)
     if pm is not None:
-        await pm.activate_scene(scene_id)
+        if pm.is_scene_active(scene_id):
+            # Self-heal the DB flag and treat as success (idempotent activate).
+            await db.set_scene_active(scene_id)
+            return {"status": "already_active", "scene_id": scene_id}
+        try:
+            await pm.activate_scene(scene_id)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
     await db.set_scene_active(scene_id)
     return {"status": "activated", "scene_id": scene_id}
 
@@ -570,5 +577,14 @@ async def remove_scene_placement(
     db = get_db(request)
     await _get_scene_row(db, scene_id)
 
-    await db.delete_placement(scene_id, device_name)
+    # Resolve display name to stable_id (placements are stored by stable_id).
+    device_id = device_name
+    device_manager = request.app.state.device_manager
+    from dj_ledfx.devices.manager import ManagedDevice as _MD
+
+    managed = device_manager.get_device(device_name)
+    if isinstance(managed, _MD):
+        device_id = managed.adapter.device_info.effective_id
+
+    await db.delete_placement(scene_id, device_id)
     return {"status": "removed", "device_name": device_name}

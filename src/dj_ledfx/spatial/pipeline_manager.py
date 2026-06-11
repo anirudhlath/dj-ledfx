@@ -84,6 +84,10 @@ class PipelineManager:
     def default_pipeline(self) -> ScenePipeline | None:
         return self._default_pipeline
 
+    def is_scene_active(self, scene_id: str) -> bool:
+        """True if a pipeline is currently registered for this scene."""
+        return scene_id in self._pipelines
+
     # ── Startup ─────────────────────────────────────────────────
 
     async def load_active_scenes(self) -> None:
