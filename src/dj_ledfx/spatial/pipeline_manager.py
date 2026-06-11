@@ -253,7 +253,7 @@ class PipelineManager:
             placement = placement_from_row(
                 p,
                 device_id=display_name,
-                led_count=managed.adapter.device_info.led_count,
+                led_count=managed.adapter.led_count,
             )
             if display_name in scene_placements:
                 logger.warning(
@@ -266,7 +266,7 @@ class PipelineManager:
             scene_placements[display_name] = placement
 
         led_count = max(
-            (d.adapter.device_info.led_count for d in devices),
+            (d.adapter.led_count for d in devices),
             default=self._device_manager.max_led_count or 60,
         )
 

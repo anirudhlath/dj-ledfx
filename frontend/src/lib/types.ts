@@ -122,8 +122,6 @@ export interface SceneDetail extends SceneData {
 }
 
 export interface SceneEffect {
-  status: string
-  scene_id: string
   effect_name: string
   params: Record<string, unknown>
 }
