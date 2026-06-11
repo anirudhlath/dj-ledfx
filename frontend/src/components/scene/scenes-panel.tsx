@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { memo, useState, useRef } from "react"
 import { toast } from "sonner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -26,7 +26,7 @@ interface ScenesPanelProps {
   onEffectModeChange: (sceneId: string, mode: "independent" | "shared") => Promise<void>
 }
 
-export default function ScenesPanel({
+export default memo(function ScenesPanel({
   scenes,
   selectedSceneId,
   onSelectScene,
@@ -37,23 +37,22 @@ export default function ScenesPanel({
   onDeactivate,
   onEffectModeChange,
 }: ScenesPanelProps) {
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editName, setEditName] = useState("")
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
   const [newSceneName, setNewSceneName] = useState("")
+  // Guards the Enter→blur sequence from committing a rename twice
   const committingRef = useRef(false)
 
   const selected = scenes.find((s) => s.id === selectedSceneId) ?? null
 
   const startRename = (s: SceneListItem) => {
-    setEditingId(s.id)
-    setEditName(s.name)
+    setEditing({ id: s.id, name: s.name })
   }
 
   const commitRename = async (scene: SceneListItem) => {
     if (committingRef.current) return
-    const trimmed = editName.trim()
+    const trimmed = editing?.name.trim() ?? ""
     if (!trimmed || trimmed === scene.name) {
-      setEditingId(null)
+      setEditing(null)
       return
     }
     committingRef.current = true
@@ -62,13 +61,9 @@ export default function ScenesPanel({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to rename scene")
     } finally {
-      setEditingId(null)
+      setEditing(null)
       committingRef.current = false
     }
-  }
-
-  const cancelRename = () => {
-    setEditingId(null)
   }
 
   const handleCreate = async () => {
@@ -114,17 +109,17 @@ export default function ScenesPanel({
                 selectedSceneId === s.id ? "bg-primary/15 text-primary" : "hover:bg-muted",
               )}
             >
-              {editingId === s.id ? (
+              {editing?.id === s.id ? (
                 <Input
                   autoFocus
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
+                  value={editing.name}
+                  onChange={(e) => setEditing({ id: s.id, name: e.target.value })}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault()
                       void commitRename(s)
                     } else if (e.key === "Escape") {
-                      cancelRename()
+                      setEditing(null)
                     }
                   }}
                   onBlur={() => void commitRename(s)}
@@ -191,25 +186,25 @@ export default function ScenesPanel({
               className="flex-1"
               title={selected.is_active ? "Deactivate the scene to change effect mode" : undefined}
             >
-            <Select
-              value={selected.effect_mode ?? "independent"}
-              onValueChange={(v) => {
-                if (v === "independent" || v === "shared") {
-                  void onEffectModeChange(selected.id, v).catch((e: unknown) => {
-                    toast.error(e instanceof Error ? e.message : "Failed to change effect mode")
-                  })
-                }
-              }}
-              disabled={selected.is_active}
-            >
-              <SelectTrigger size="sm" className="h-7 w-full text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="independent">Independent</SelectItem>
-                <SelectItem value="shared">Shared</SelectItem>
-              </SelectContent>
-            </Select>
+              <Select
+                value={selected.effect_mode ?? "independent"}
+                onValueChange={(v) => {
+                  if (v === "independent" || v === "shared") {
+                    void onEffectModeChange(selected.id, v).catch((e: unknown) => {
+                      toast.error(e instanceof Error ? e.message : "Failed to change effect mode")
+                    })
+                  }
+                }}
+                disabled={selected.is_active}
+              >
+                <SelectTrigger size="sm" className="h-7 w-full text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="independent">Independent</SelectItem>
+                  <SelectItem value="shared">Shared</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         )}
@@ -240,4 +235,4 @@ export default function ScenesPanel({
       </CardContent>
     </Card>
   )
-}
+})

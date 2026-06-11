@@ -301,8 +301,8 @@ export async function setSceneEffect(
   sceneId: string,
   effectName: string,
   params: Record<string, unknown>,
-): Promise<void> {
-  await fetchJson(`/scenes/${encodeURIComponent(sceneId)}/effect`, {
+): Promise<SceneEffect> {
+  return fetchJson(`/scenes/${encodeURIComponent(sceneId)}/effect`, {
     method: "PUT",
     body: JSON.stringify({ effect_name: effectName, params }),
   })

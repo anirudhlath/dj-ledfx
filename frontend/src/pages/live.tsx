@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useBeat } from "@/hooks/use-beat"
 import { useEffects } from "@/hooks/use-effects"
 import { useSceneEffects } from "@/hooks/use-scene-effects"
@@ -8,26 +8,24 @@ import { useScenes } from "@/hooks/use-scenes"
 import { useTransport } from "@/hooks/use-transport"
 import { TransportSection } from "@/components/transport-section"
 import { EffectDeck } from "@/components/effect-deck"
+import type { EffectDeckProps } from "@/components/effect-deck"
 import { DeviceMonitor } from "@/components/device-monitor"
 import SceneViewport from "@/components/scene/scene-viewport"
 import DeviceMesh from "@/components/scene/device-mesh"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import type { EffectParamSchema, Preset } from "@/lib/types"
 
-function SceneEffectDeck({ sceneId }: { sceneId: string }) {
-  const sceneEffects = useSceneEffects(sceneId)
-  return (
-    <EffectDeck
-      schemas={sceneEffects.schemas}
-      activeEffect={sceneEffects.activeEffect}
-      activeParams={sceneEffects.activeParams}
-      presets={sceneEffects.presets}
-      loading={sceneEffects.loading}
-      switchEffect={sceneEffects.switchEffect}
-      updateParam={sceneEffects.updateParam}
-      loadPreset={sceneEffects.loadPreset}
-      savePreset={sceneEffects.savePreset}
-    />
-  )
+function SceneEffectDeck({
+  sceneId,
+  schemas,
+  presets,
+}: {
+  sceneId: string
+  schemas: Record<string, Record<string, EffectParamSchema>>
+  presets: Preset[]
+}) {
+  const sceneEffects = useSceneEffects(sceneId, schemas, presets)
+  return <EffectDeck {...(sceneEffects as EffectDeckProps)} />
 }
 
 export default function LivePage() {
@@ -37,7 +35,10 @@ export default function LivePage() {
   const { transportState, setTransportState } = useTransport()
   const { scenes } = useScenes(devices)
 
-  const activeScenes = scenes.filter((s) => s.is_active && s.id !== "default")
+  const activeScenes = useMemo(
+    () => scenes.filter((s) => s.is_active),
+    [scenes],
+  )
 
   const [selectedTab, setSelectedTab] = useState("default")
   const currentTab = activeScenes.some((s) => s.id === selectedTab) ? selectedTab : "default"
@@ -84,19 +85,14 @@ export default function LivePage() {
 
           <div className="flex-1 min-h-0">
             {currentTab === "default" ? (
-              <EffectDeck
-                schemas={effects.schemas}
-                activeEffect={effects.activeEffect}
-                activeParams={effects.activeParams}
-                presets={effects.presets}
-                loading={effects.loading}
-                switchEffect={effects.switchEffect}
-                updateParam={effects.updateParam}
-                loadPreset={effects.loadPreset}
-                savePreset={effects.savePreset}
-              />
+              <EffectDeck {...effects} />
             ) : (
-              <SceneEffectDeck key={currentTab} sceneId={currentTab} />
+              <SceneEffectDeck
+                key={currentTab}
+                sceneId={currentTab}
+                schemas={effects.schemas}
+                presets={effects.presets}
+              />
             )}
           </div>
         </div>

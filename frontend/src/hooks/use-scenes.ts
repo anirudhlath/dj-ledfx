@@ -27,7 +27,7 @@ export function useScenes(devices: Device[] = NO_DEVICES) {
 
   const refresh = useCallback(async () => {
     try {
-      setScenes(await api.listScenes())
+      setScenes((await api.listScenes()).filter((s) => s.id !== "default"))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load scenes")
     } finally {

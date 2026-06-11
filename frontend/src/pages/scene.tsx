@@ -56,7 +56,7 @@ export default function ScenePage() {
   const { activate, deactivate, scenes: allScenes, create, rename, remove, setEffectMode } = useScenes(devices)
   const { scene, loading, error, refresh: refreshScene, movePlacement, removePlacement, changeMapping, addPlacement } = useScene(selectedSceneId)
 
-  const scenes = useMemo(() => allScenes.filter((s) => s.id !== "default"), [allScenes])
+  const scenes = allScenes
 
   useEffect(() => {
     if (error) toast.error(error)
@@ -162,27 +162,18 @@ export default function ScenePage() {
     setSelectedHandle(null)
   }, [])
 
-  const handleActivateScene = useCallback(
-    async (sceneId: string): Promise<boolean> => {
-      const ok = await activate(sceneId)
-      if (ok && sceneId === selectedSceneId) {
-        await refreshScene()
-      }
-      return ok
-    },
-    [activate, selectedSceneId, refreshScene],
+  const makeToggleHandler = useCallback(
+    (action: (id: string) => Promise<boolean>) =>
+      async (sceneId: string): Promise<boolean> => {
+        const ok = await action(sceneId)
+        if (ok && sceneId === selectedSceneId) await refreshScene()
+        return ok
+      },
+    [selectedSceneId, refreshScene],
   )
 
-  const handleDeactivateScene = useCallback(
-    async (sceneId: string): Promise<boolean> => {
-      const ok = await deactivate(sceneId)
-      if (ok && sceneId === selectedSceneId) {
-        await refreshScene()
-      }
-      return ok
-    },
-    [deactivate, selectedSceneId, refreshScene],
-  )
+  const handleActivateScene = useMemo(() => makeToggleHandler(activate), [makeToggleHandler, activate])
+  const handleDeactivateScene = useMemo(() => makeToggleHandler(deactivate), [makeToggleHandler, deactivate])
 
   const handleSelectDevice = useCallback((deviceId: string | null) => {
     setSelectedId(deviceId)

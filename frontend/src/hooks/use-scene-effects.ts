@@ -3,29 +3,34 @@ import { toast } from "sonner"
 import * as api from "@/lib/api-client"
 import type { EffectParamSchema, Preset } from "@/lib/types"
 
-export function useSceneEffects(sceneId: string) {
-  const [schemas, setSchemas] = useState<Record<string, Record<string, EffectParamSchema>>>({})
+export function useSceneEffects(
+  sceneId: string,
+  schemas: Record<string, Record<string, EffectParamSchema>>,
+  presets: Preset[],
+) {
   const [activeEffect, setActiveEffect] = useState("")
   const [activeParams, setActiveParams] = useState<Record<string, unknown>>({})
-  const [presets, setPresets] = useState<Preset[]>([])
   const [loading, setLoading] = useState(true)
 
   const activeEffectRef = useRef("")
   const activeParamsRef = useRef<Record<string, unknown>>({})
   const seqRef = useRef(0)
 
+  const commitActive = useCallback((effect: string, params: Record<string, unknown>) => {
+    activeEffectRef.current = effect
+    activeParamsRef.current = params
+    setActiveEffect(effect)
+    setActiveParams(params)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    Promise.all([api.getEffects(), api.getSceneEffect(sceneId), api.getPresets()])
-      .then(([effects, active, presetList]) => {
+    api
+      .getSceneEffect(sceneId)
+      .then((active) => {
         if (cancelled) return
-        setSchemas(effects)
-        setActiveEffect(active.effect_name)
-        setActiveParams(active.params)
-        activeEffectRef.current = active.effect_name
-        activeParamsRef.current = active.params
-        setPresets(presetList)
+        commitActive(active.effect_name, active.params)
       })
       .catch((e) => console.error("Failed to init scene effects:", e))
       .finally(() => {
@@ -34,24 +39,20 @@ export function useSceneEffects(sceneId: string) {
     return () => {
       cancelled = true
     }
-  }, [sceneId])
+  }, [sceneId, commitActive])
 
   const apply = useCallback(
     async (effectName: string, params: Record<string, unknown>) => {
       const seq = ++seqRef.current
       try {
-        await api.setSceneEffect(sceneId, effectName, params)
-        const active = await api.getSceneEffect(sceneId)
+        const response = await api.setSceneEffect(sceneId, effectName, params)
         if (seq !== seqRef.current) return // a newer apply superseded this one
-        activeEffectRef.current = active.effect_name
-        activeParamsRef.current = active.params
-        setActiveEffect(active.effect_name)
-        setActiveParams(active.params)
+        commitActive(response.effect_name, response.params)
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Failed to update effect")
       }
     },
-    [sceneId],
+    [sceneId, commitActive],
   )
 
   const switchEffect = useCallback((name: string) => apply(name, {}), [apply])
@@ -76,9 +77,5 @@ export function useSceneEffects(sceneId: string) {
     [apply, presets],
   )
 
-  const savePreset = useCallback(async (_name: string) => {
-    toast.info("Presets can only be saved from the Default deck")
-  }, [])
-
-  return { schemas, activeEffect, activeParams, presets, loading, switchEffect, updateParam, loadPreset, savePreset }
+  return { schemas, activeEffect, activeParams, presets, loading, switchEffect, updateParam, loadPreset }
 }

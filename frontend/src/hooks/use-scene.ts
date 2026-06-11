@@ -6,17 +6,13 @@ export function useScene(sceneId: string | null = null) {
   const [scene, setScene] = useState<SceneData | SceneDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isActive, setIsActive] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
       if (sceneId === null) {
         setScene(await api.getScene())
-        setIsActive(false)
       } else {
-        const detail = await api.getSceneDetail(sceneId)
-        setScene(detail)
-        setIsActive(detail.is_active)
+        setScene(await api.getSceneDetail(sceneId))
       }
       setError(null)
     } catch (e) {
@@ -29,7 +25,6 @@ export function useScene(sceneId: string | null = null) {
   useEffect(() => {
     setLoading(true)
     setError(null)
-    setIsActive(false)
     refresh()
   }, [refresh])
 
@@ -39,23 +34,22 @@ export function useScene(sceneId: string | null = null) {
   const reapply = useCallback(async () => {
     if (sceneId === null) return
     const detail = await api.getSceneDetail(sceneId)
-    setIsActive(detail.is_active)
     if (!detail.is_active) return
     await api.deactivateScene(sceneId)
     await api.activateScene(sceneId)
   }, [sceneId])
 
-  const movePlacement = useCallback(
-    async (deviceId: string, position: [number, number, number]) => {
+  const mutate = useCallback(
+    async (errMsg: string, legacyFn: () => Promise<unknown>, dbFn: (id: string) => Promise<unknown>) => {
       try {
         if (sceneId === null) {
-          await api.updateSceneDevice(deviceId, { position })
+          await legacyFn()
         } else {
-          await api.updateScenePlacement(sceneId, deviceId, { position })
+          await dbFn(sceneId)
           await reapply()
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to update placement")
+        setError(e instanceof Error ? e.message : errMsg)
       } finally {
         await refresh()
       }
@@ -63,71 +57,58 @@ export function useScene(sceneId: string | null = null) {
     [sceneId, reapply, refresh],
   )
 
+  const movePlacement = useCallback(
+    (deviceId: string, position: [number, number, number]) =>
+      mutate(
+        "Failed to update placement",
+        () => api.updateSceneDevice(deviceId, { position }),
+        (id) => api.updateScenePlacement(id, deviceId, { position }),
+      ),
+    [mutate],
+  )
+
   const removePlacement = useCallback(
-    async (deviceId: string) => {
-      try {
-        if (sceneId === null) {
-          await api.deleteSceneDevice(deviceId)
-        } else {
-          await api.deleteScenePlacement(sceneId, deviceId)
-          await reapply()
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to remove placement")
-      } finally {
-        await refresh()
-      }
-    },
-    [sceneId, reapply, refresh],
+    (deviceId: string) =>
+      mutate(
+        "Failed to remove placement",
+        () => api.deleteSceneDevice(deviceId),
+        (id) => api.deleteScenePlacement(id, deviceId),
+      ),
+    [mutate],
   )
 
   const changeMapping = useCallback(
     async (type: "linear" | "radial", params: Record<string, unknown>) => {
-      try {
-        // Optimistically update mapping so handle positions don't jump
-        setScene((prev) => (prev ? { ...prev, mapping: { type, params } } : prev))
-        if (sceneId === null) {
-          await api.updateSceneMapping(type, params)
-        } else {
-          await api.updateScene(sceneId, { mapping_type: type, mapping_params: params })
-          await reapply()
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to update mapping")
-      } finally {
-        await refresh()
-      }
+      // Optimistically update mapping so handle positions don't jump
+      setScene((prev) => (prev ? { ...prev, mapping: { type, params } } : prev))
+      await mutate(
+        "Failed to update mapping",
+        () => api.updateSceneMapping(type, params),
+        (id) => api.updateScene(id, { mapping_type: type, mapping_params: params }),
+      )
     },
-    [sceneId, reapply, refresh],
+    [mutate],
   )
 
   const addPlacement = useCallback(
-    async (deviceId: string, ledCount?: number) => {
-      try {
-        const opts = {
-          position: [0, 0, 0] as [number, number, number],
-          led_count: ledCount ?? 1,
-        }
-        if (sceneId === null) {
-          await api.updateSceneDevice(deviceId, opts)
-        } else {
-          await api.updateScenePlacement(sceneId, deviceId, opts)
-          await reapply()
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to add placement")
-      } finally {
-        await refresh()
+    (deviceId: string, ledCount?: number) => {
+      const opts = {
+        position: [0, 0, 0] as [number, number, number],
+        led_count: ledCount ?? 1,
       }
+      return mutate(
+        "Failed to add placement",
+        () => api.updateSceneDevice(deviceId, opts),
+        (id) => api.updateScenePlacement(id, deviceId, opts),
+      )
     },
-    [sceneId, reapply, refresh],
+    [mutate],
   )
 
   return {
     scene,
     loading,
     error,
-    isActive,
     refresh,
     movePlacement,
     removePlacement,
