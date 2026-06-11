@@ -122,6 +122,13 @@ class UpdateSceneRequest(BaseModel):
     name: str | None = None
     mapping_type: Literal["linear", "radial"] | None = None
     effect_mode: Literal["independent", "shared"] | None = None
+    mapping_params: dict[str, Any] | None = None
+
+
+class SceneDetail(SceneListItem):
+    placements: list[PlacementResponse] = []
+    mapping: MappingResponse | None = None
+    bounds: list[list[float]] | None = None
 
 
 # Transport schemas

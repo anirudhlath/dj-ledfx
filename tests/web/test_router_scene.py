@@ -739,6 +739,126 @@ class TestMultiSceneEndpoints:
             asyncio.run(db.close())
 
 
+class TestSceneDetail:
+    """Tests for GET /api/scenes/{id} returning full SceneDetail."""
+
+    def _make_real_device_client(self, tmp_path):
+        from dj_ledfx.devices.adapter import DeviceAdapter
+        from dj_ledfx.devices.manager import DeviceManager
+        from dj_ledfx.events import EventBus
+        from dj_ledfx.latency.strategies import StaticLatency
+        from dj_ledfx.latency.tracker import LatencyTracker
+        from dj_ledfx.types import DeviceInfo
+
+        db = StateDB(tmp_path / "state.db")
+        asyncio.run(db.open())
+
+        manager = DeviceManager(EventBus())
+        info = DeviceInfo(
+            name="My Strip",
+            device_type="lifx_strip",
+            led_count=30,
+            address="192.168.1.50",
+            stable_id="lifx:my_strip",
+        )
+        tracker = LatencyTracker(StaticLatency(50.0))
+        adapter = MagicMock(spec=DeviceAdapter)
+        adapter.device_info = info
+        adapter.led_count = 30
+        adapter.is_connected = True
+        manager.add_device(adapter, tracker)
+
+        mock_config = MagicMock()
+        mock_config.web.cors_origins = ["*"]
+        mock_config.web.static_dir = None
+        mock_config.scene_config = None
+
+        app = create_app(
+            beat_clock=MagicMock(),
+            effect_deck=MagicMock(),
+            effect_engine=MagicMock(),
+            device_manager=manager,
+            scheduler=MagicMock(),
+            preset_store=MagicMock(),
+            scene_model=None,
+            compositor=None,
+            config=mock_config,
+            config_path=None,
+            state_db=db,
+        )
+        client = TestClient(app)
+        return client, db
+
+    def test_get_scene_detail_includes_placements_and_mapping(self, tmp_path) -> None:
+        client, db = self._make_real_device_client(tmp_path)
+        try:
+            scene_id = client.post("/api/scenes", json={"name": "A"}).json()["id"]
+            client.put(
+                f"/api/scenes/{scene_id}/devices/My Strip",
+                json={
+                    "position": [1.0, 2.0, 3.0],
+                    "geometry": "strip",
+                    "direction": [1, 0, 0],
+                    "length": 2.0,
+                },
+            )
+            client.put(
+                f"/api/scenes/{scene_id}",
+                json={"mapping_type": "radial", "mapping_params": {"center": [0, 0, 0]}},
+            )
+            detail = client.get(f"/api/scenes/{scene_id}").json()
+            assert detail["name"] == "A"
+            assert len(detail["placements"]) == 1
+            p = detail["placements"][0]
+            assert p["device_id"] == "My Strip"  # display name, not stable_id
+            assert p["position"] == [1.0, 2.0, 3.0]
+            assert p["geometry"]["type"] == "strip"
+            assert p["led_count"] == 30  # from adapter, not DB
+            assert p["strip_index"] is not None
+            assert detail["mapping"] == {"type": "radial", "params": {"center": [0.0, 0.0, 0.0]}}
+            assert detail["bounds"] is not None
+        finally:
+            asyncio.run(db.close())
+
+    def test_get_scene_detail_unknown_device_falls_back_to_stable_id(self, tmp_path) -> None:
+        # plain _make_db_client (device_manager bare MagicMock -> no resolution)
+        db = StateDB(tmp_path / "state.db")
+        asyncio.run(db.open())
+        mock_pm = MagicMock()
+        mock_pm.activate_scene = AsyncMock()
+        mock_pm.deactivate_scene = AsyncMock()
+        mock_pm.is_scene_active.return_value = False
+        client = _make_test_app(state_db=db, pipeline_manager=mock_pm)
+        try:
+            scene_id = client.post("/api/scenes", json={"name": "A"}).json()["id"]
+            client.put(f"/api/scenes/{scene_id}/devices/ghost", json={"position": [0, 0, 0]})
+            detail = client.get(f"/api/scenes/{scene_id}").json()
+            assert detail["placements"][0]["device_id"] == "ghost"
+        finally:
+            asyncio.run(db.close())
+
+    def test_update_scene_persists_mapping_params(self, tmp_path) -> None:
+        db = StateDB(tmp_path / "state.db")
+        asyncio.run(db.open())
+        mock_pm = MagicMock()
+        mock_pm.activate_scene = AsyncMock()
+        mock_pm.deactivate_scene = AsyncMock()
+        mock_pm.is_scene_active.return_value = False
+        client = _make_test_app(state_db=db, pipeline_manager=mock_pm)
+        try:
+            scene_id = client.post("/api/scenes", json={"name": "A"}).json()["id"]
+            client.put(
+                f"/api/scenes/{scene_id}", json={"mapping_params": {"origin": [1, 1, 1]}}
+            )
+            detail = client.get(f"/api/scenes/{scene_id}").json()
+            assert detail["mapping"]["params"] == {"origin": [1.0, 1.0, 1.0]}
+            client.put(f"/api/scenes/{scene_id}", json={"name": "B"})  # must not wipe params
+            detail = client.get(f"/api/scenes/{scene_id}").json()
+            assert detail["mapping"]["params"] == {"origin": [1.0, 1.0, 1.0]}
+        finally:
+            asyncio.run(db.close())
+
+
 class TestActivateHardening:
     """Tests for idempotent activation and 409 on pipeline build failure."""
 

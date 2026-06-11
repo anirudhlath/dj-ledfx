@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +23,7 @@ from dj_ledfx.web.schemas import (
     GeometrySchema,
     MappingResponse,
     PlacementResponse,
+    SceneDetail,
     SceneListItem,
     SceneResponse,
     UpdateMappingRequest,
@@ -328,16 +330,75 @@ async def create_scene(request: Request, body: CreateSceneRequest) -> SceneListI
     )
 
 
-@router_scenes.get("/{scene_id}", response_model=SceneListItem)
-async def get_scene_by_id(request: Request, scene_id: str) -> SceneListItem:
+@router_scenes.get("/{scene_id}", response_model=SceneDetail)
+async def get_scene_by_id(request: Request, scene_id: str) -> SceneDetail:
     db = get_db(request)
     row = await _get_scene_row(db, scene_id)
-    return SceneListItem(
+    placement_rows = await db.load_scene_placements(scene_id)
+
+    from dj_ledfx.devices.manager import ManagedDevice as _MD
+    from dj_ledfx.spatial.scene import DevicePlacement as _DP
+
+    device_manager = request.app.state.device_manager
+    scene_placements: dict[str, _DP] = {}
+    for p in placement_rows:
+        display_name = p["device_id"]
+        led_count = 1
+        managed = device_manager.get_by_stable_id(p["device_id"])
+        if isinstance(managed, _MD):
+            display_name = managed.adapter.device_info.name
+            led_count = managed.adapter.led_count
+        geometry: PointGeometry | StripGeometry = PointGeometry()
+        if (p.get("geometry_type") or "point") == "strip":
+            geometry = StripGeometry(
+                direction=(
+                    p.get("direction_x") or 1.0,
+                    p.get("direction_y") or 0.0,
+                    p.get("direction_z") or 0.0,
+                ),
+                length=p.get("length") or 1.0,
+            )
+        scene_placements[display_name] = _DP(
+            device_id=display_name,
+            position=(
+                p.get("position_x") or 0.0,
+                p.get("position_y") or 0.0,
+                p.get("position_z") or 0.0,
+            ),
+            geometry=geometry,
+            led_count=led_count,
+        )
+
+    raw_mapping_type = row.get("mapping_type") or "linear"
+    mapping_type: Any = raw_mapping_type if raw_mapping_type in {"linear", "radial"} else "linear"
+    mapping_params: dict[str, Any] = json.loads(row.get("mapping_params") or "{}")
+    strip_indices: dict[str, float] = {}
+    bounds = None
+    if scene_placements:
+        from dj_ledfx.spatial.scene import SceneModel as _SM
+
+        model = _SM(scene_placements)
+        mapping = mapping_from_config(
+            {"mapping": mapping_type, "mapping_params": mapping_params}
+        )
+        compositor = SpatialCompositor(model, mapping)
+        for device_id, indices in compositor.get_strip_indices().items():
+            strip_indices[device_id] = float(indices.mean())
+        bounds_min, bounds_max = model.get_bounds()
+        bounds = [bounds_min.tolist(), bounds_max.tolist()]
+
+    return SceneDetail(
         id=row["id"],
         name=row["name"],
         is_active=bool(row.get("is_active", 0)),
         mapping_type=row.get("mapping_type"),
         effect_mode=row.get("effect_mode"),
+        placements=[
+            _placement_to_response(p, strip_index=strip_indices.get(p.device_id))
+            for p in scene_placements.values()
+        ],
+        mapping=MappingResponse(type=mapping_type, params=mapping_params),
+        bounds=bounds,
     )
 
 
@@ -365,6 +426,11 @@ async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest
         body.effect_mode if body.effect_mode is not None else existing.get("effect_mode")
     )
     updated["is_active"] = existing.get("is_active", 0)
+    updated["mapping_params"] = (
+        json.dumps(body.mapping_params)
+        if body.mapping_params is not None
+        else existing.get("mapping_params")
+    )
 
     await db.save_scene(updated)
     return SceneListItem(
