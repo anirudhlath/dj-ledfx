@@ -2,11 +2,13 @@ import { useRef, useState, useCallback } from "react"
 import { toast } from "sonner"
 import * as THREE from "three"
 import { useScene } from "@/hooks/use-scene"
+import { useScenes } from "@/hooks/use-scenes"
 import { useDevices } from "@/hooks/use-devices"
 import SceneViewport from "@/components/scene/scene-viewport"
 import DeviceMesh from "@/components/scene/device-mesh"
 import BoundsBox from "@/components/scene/bounds-box"
 import DeviceListPanel from "@/components/scene/device-list-panel"
+import ScenesPanel from "@/components/scene/scenes-panel"
 import PropertiesPanel from "@/components/scene/properties-panel"
 import SceneToolbar from "@/components/scene/scene-toolbar"
 import MappingPreview from "@/components/scene/mapping-preview"
@@ -49,8 +51,10 @@ function clampToBounds(
 }
 
 export default function ScenePage() {
-  const { scene, loading, movePlacement, removePlacement, changeMapping, addPlacement } = useScene()
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const { devices, frameData } = useDevices()
+  const scenesApi = useScenes(devices)
+  const { scene, loading, refresh: refreshScene, movePlacement, removePlacement, changeMapping, addPlacement } = useScene(selectedSceneId)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedHandle, setSelectedHandle] = useState<MappingHandleId | null>(null)
   const [transformMode, setTransformMode] = useState<"translate" | "rotate">("translate")
@@ -146,6 +150,34 @@ export default function ScenePage() {
     [selectedId, selectedHandle, movePlacement, changeMapping, scene?.mapping?.params, scene?.bounds],
   )
 
+  const handleSelectScene = useCallback((sceneId: string | null) => {
+    setSelectedSceneId(sceneId)
+    setSelectedId(null)
+    setSelectedHandle(null)
+  }, [])
+
+  const handleActivateScene = useCallback(
+    async (sceneId: string): Promise<boolean> => {
+      const ok = await scenesApi.activate(sceneId)
+      if (ok && sceneId === selectedSceneId) {
+        await refreshScene()
+      }
+      return ok
+    },
+    [scenesApi, selectedSceneId, refreshScene],
+  )
+
+  const handleDeactivateScene = useCallback(
+    async (sceneId: string): Promise<boolean> => {
+      const ok = await scenesApi.deactivate(sceneId)
+      if (ok && sceneId === selectedSceneId) {
+        await refreshScene()
+      }
+      return ok
+    },
+    [scenesApi, selectedSceneId, refreshScene],
+  )
+
   const handleSelectDevice = useCallback((deviceId: string | null) => {
     setSelectedId(deviceId)
     setSelectedHandle(null)
@@ -211,14 +243,27 @@ export default function ScenePage() {
       />
 
       <div className="flex-1 flex gap-2 min-h-0 p-2">
-        <div className="w-52 shrink-0">
-          <DeviceListPanel
-            placements={placements}
-            allDevices={devices}
-            selectedDeviceId={selectedId}
-            onSelectDevice={handleSelectDevice}
-            onAddDevice={handleAddDevice}
+        <div className="w-52 shrink-0 flex flex-col gap-2 min-h-0">
+          <ScenesPanel
+            scenes={scenesApi.scenes.filter((s) => s.id !== "default")}
+            selectedSceneId={selectedSceneId}
+            onSelectScene={handleSelectScene}
+            onCreate={scenesApi.create}
+            onRename={scenesApi.rename}
+            onDelete={scenesApi.remove}
+            onActivate={handleActivateScene}
+            onDeactivate={handleDeactivateScene}
+            onEffectModeChange={scenesApi.setEffectMode}
           />
+          <div className="flex-1 min-h-0">
+            <DeviceListPanel
+              placements={placements}
+              allDevices={devices}
+              selectedDeviceId={selectedId}
+              onSelectDevice={handleSelectDevice}
+              onAddDevice={handleAddDevice}
+            />
+          </div>
         </div>
 
         <div className="flex-1 min-w-0 rounded-lg border border-border overflow-hidden">
