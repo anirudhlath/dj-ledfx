@@ -376,7 +376,7 @@ async def get_scene_by_id(request: Request, scene_id: str) -> SceneDetail:
             led_count=led_count,
         )
 
-    raw_mapping_type = row.get("mapping_type") or "linear"
+    raw_mapping_type = row.get("mapping_type")
     mapping_type: Any = raw_mapping_type if raw_mapping_type in {"linear", "radial"} else "linear"
     mapping_params: dict[str, Any] = json.loads(row.get("mapping_params") or "{}")
     strip_indices: dict[str, float] = {}
@@ -400,6 +400,12 @@ async def get_scene_by_id(request: Request, scene_id: str) -> SceneDetail:
                 row["id"],
             )
 
+    mapping_response: MappingResponse | None = None
+    # Only return a mapping object when mapping has been explicitly configured:
+    # a fresh scene has mapping_params=NULL in the DB (never persisted via PUT /scenes/{id}).
+    if row.get("mapping_params") is not None or mapping_params:
+        mapping_response = MappingResponse(type=mapping_type, params=mapping_params)
+
     return SceneDetail(
         id=row["id"],
         name=row["name"],
@@ -410,7 +416,7 @@ async def get_scene_by_id(request: Request, scene_id: str) -> SceneDetail:
             _placement_to_response(p, strip_index=strip_indices.get(p.device_id))
             for p in scene_placements.values()
         ],
-        mapping=MappingResponse(type=mapping_type, params=mapping_params),
+        mapping=mapping_response,
         bounds=bounds,
     )
 
@@ -647,7 +653,7 @@ async def add_or_update_scene_placement(
     from dj_ledfx.spatial.scene import DevicePlacement as DP
 
     placement = DP(
-        device_id=device_stable_id,
+        device_id=device_name,
         position=tuple(body.position) if body.position else (0.0, 0.0, 0.0),
         geometry=geo,
         led_count=led_count,

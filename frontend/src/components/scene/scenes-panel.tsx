@@ -187,6 +187,10 @@ export default function ScenesPanel({
         {selected !== null && (
           <div className="flex items-center gap-2 px-3 py-2 border-t border-border">
             <span className="text-xs text-muted-foreground shrink-0">Effect mode</span>
+            <div
+              className="flex-1"
+              title={selected.is_active ? "Deactivate the scene to change effect mode" : undefined}
+            >
             <Select
               value={selected.effect_mode ?? "independent"}
               onValueChange={(v) => {
@@ -198,7 +202,7 @@ export default function ScenesPanel({
               }}
               disabled={selected.is_active}
             >
-              <SelectTrigger size="sm" className="h-7 flex-1 text-xs">
+              <SelectTrigger size="sm" className="h-7 w-full text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -206,6 +210,7 @@ export default function ScenesPanel({
                 <SelectItem value="shared">Shared</SelectItem>
               </SelectContent>
             </Select>
+            </div>
           </div>
         )}
 

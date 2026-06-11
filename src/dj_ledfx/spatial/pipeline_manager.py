@@ -140,6 +140,9 @@ class PipelineManager:
             msg = f"Could not build pipeline for scene {scene_id}"
             raise ValueError(msg)
 
+        # Re-check after the awaits above: a concurrent activate request can
+        # interleave at any await point on the shared event loop, and double
+        # registration would orphan a pipeline in the engine's list.
         if scene_id in self._pipelines:
             msg = f"Scene {scene_id} is already active"
             raise ValueError(msg)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { toast } from "sonner"
 import type { Device, SceneListItem } from "@/lib/types"
 import * as api from "@/lib/api-client"
@@ -22,6 +22,8 @@ function conflictMessage(detail: unknown, devices: Device[]): string | null {
 export function useScenes(devices: Device[] = NO_DEVICES) {
   const [scenes, setScenes] = useState<SceneListItem[]>([])
   const [loading, setLoading] = useState(true)
+  const devicesRef = useRef(devices)
+  devicesRef.current = devices
 
   const refresh = useCallback(async () => {
     try {
@@ -85,13 +87,13 @@ export function useScenes(devices: Device[] = NO_DEVICES) {
       } catch (e) {
         const msg =
           e instanceof ApiError
-            ? (conflictMessage(e.detail, devices) ?? e.message)
+            ? (conflictMessage(e.detail, devicesRef.current) ?? e.message)
             : "Failed to activate scene"
         toast.error(msg)
         return false
       }
     },
-    [refresh, devices],
+    [refresh],
   )
 
   const deactivate = useCallback(

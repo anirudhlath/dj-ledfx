@@ -492,8 +492,8 @@ class TestMultiSceneEndpoints:
         finally:
             asyncio.run(db.close())
 
-    def test_placement_uses_stable_id(self, tmp_path) -> None:
-        """Placement stored in DB uses device stable_id, not the display name."""
+    def test_placement_stores_stable_id_returns_display_name(self, tmp_path) -> None:
+        """PUT placement stores stable_id in DB but returns display name in the response."""
         from unittest.mock import MagicMock
 
         from dj_ledfx.devices.adapter import DeviceAdapter
@@ -552,10 +552,10 @@ class TestMultiSceneEndpoints:
             )
             assert resp.status_code == 200
 
-            # The response device_id should be the stable_id
-            assert resp.json()["device_id"] == "lifx:my_strip"
+            # The response device_id should be the display name (matches GET /api/scenes/{id})
+            assert resp.json()["device_id"] == "My Strip"
 
-            # The DB placement record must also use the stable_id
+            # The DB placement record must use the stable_id (not the display name)
             placements = asyncio.run(db.load_scene_placements(scene_id))
             assert len(placements) == 1
             assert placements[0]["device_id"] == "lifx:my_strip"
@@ -728,7 +728,7 @@ class TestMultiSceneEndpoints:
                 json={"position": [2.0, 0.0, 0.0], "geometry": "point"},
             )
             assert resp.status_code == 200
-            assert resp.json()["device_id"] == "lifx:my_strip"
+            assert resp.json()["device_id"] == "My Strip"  # response returns display name
 
             # Delete via display name — must resolve to stable_id
             resp = client.delete(f"/api/scenes/{scene_id}/devices/My Strip")
@@ -836,6 +836,8 @@ class TestSceneDetail:
             client.put(f"/api/scenes/{scene_id}/devices/ghost", json={"position": [0, 0, 0]})
             detail = client.get(f"/api/scenes/{scene_id}").json()
             assert detail["placements"][0]["device_id"] == "ghost"
+            # A fresh scene with no mapping_type set must return mapping=None
+            assert detail["mapping"] is None
         finally:
             asyncio.run(db.close())
 

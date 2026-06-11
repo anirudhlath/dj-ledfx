@@ -113,10 +113,12 @@ export interface SceneListItem {
   effect_mode: "independent" | "shared" | null
 }
 
-export interface SceneDetail extends SceneListItem {
-  placements: Placement[]
-  mapping: MappingInfo | null
-  bounds: [[number, number, number], [number, number, number]] | null
+export interface SceneDetail extends SceneData {
+  id: string
+  name: string
+  is_active: boolean
+  mapping_type: "linear" | "radial" | null
+  effect_mode: "independent" | "shared" | null
 }
 
 export interface SceneEffect {

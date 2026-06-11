@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react"
-import type { SceneData } from "@/lib/types"
+import type { SceneData, SceneDetail } from "@/lib/types"
 import * as api from "@/lib/api-client"
 
 export function useScene(sceneId: string | null = null) {
-  const [scene, setScene] = useState<SceneData | null>(null)
+  const [scene, setScene] = useState<SceneData | SceneDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isActive, setIsActive] = useState(false)
