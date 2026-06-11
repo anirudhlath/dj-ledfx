@@ -42,6 +42,7 @@ class DeviceResponse(BaseModel):
     effective_latency_ms: float = 0.0
     frames_dropped: int = 0
     status: Literal["online", "offline", "reconnecting"] = "online"
+    stable_id: str | None = None
 
 
 class GroupRequest(BaseModel):

@@ -87,6 +87,19 @@ def test_list_devices_includes_status(client_with_device):
     assert devices[0]["status"] == "online"
 
 
+def test_list_devices_includes_stable_id(client_with_device):
+    """Each device in GET /api/devices carries stable_id == effective_id."""
+    test_client, manager = client_with_device
+    resp = test_client.get("/api/devices")
+    assert resp.status_code == 200
+    devices = resp.json()
+    assert len(devices) == 1
+    device = devices[0]
+    assert "stable_id" in device
+    # The fixture adapter has stable_id="lifx:strip1" so effective_id == "lifx:strip1"
+    assert device["stable_id"] == "lifx:strip1"
+
+
 def test_groups_crud(client):
     resp = client.post("/api/devices/groups", json={"name": "Booth", "color": "#00e5ff"})
     assert resp.status_code == 200
