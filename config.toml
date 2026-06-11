@@ -1,6 +1,7 @@
 [engine]
 fps = 60
 max_lookahead_ms = 1000
+unassigned_device_mode = "default_effect"
 
 [effect]
 active_effect = "beat_pulse"
@@ -63,7 +64,7 @@ subnet_mask = 24
 name = "Govee H6076 (192.168.50.180)"
 position = [
     0.0,
-    2.411258911091374,
+    1.092062402076009,
     0.0,
 ]
 geometry = "strip"
@@ -79,15 +80,33 @@ name = "LIFX Bulb (192.168.50.6)"
 position = [
     0.0,
     0.0,
-    0.0,
+    1.1236057146594975,
 ]
 geometry = "point"
 
 [[scene_config.devices]]
 name = "LIFX Bulb (192.168.50.90)"
 position = [
+    -2.826550337641626,
     0.0,
     0.0,
-    2.3022004982523674,
+]
+geometry = "point"
+
+[[scene_config.devices]]
+name = "LIFX Bulb (192.168.50.178)"
+position = [
+    0.0,
+    2.2147174414598476,
+    0.0,
+]
+geometry = "point"
+
+[[scene_config.devices]]
+name = "LIFX Bulb (192.168.50.159)"
+position = [
+    2.4129919021625996,
+    0.0,
+    0.0,
 ]
 geometry = "point"

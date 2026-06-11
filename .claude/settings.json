@@ -11,13 +11,6 @@
       "WebSearch"
     ]
   },
-  "enabledPlugins": {
-    "frontend-design@claude-plugins-official": true,
-    "code-review@claude-plugins-official": true,
-    "feature-dev@claude-plugins-official": true,
-    "code-simplifier@claude-plugins-official": true,
-    "context7@claude-plugins-official": true
-  },
   "hooks": {
     "PostToolUse": [
       {
@@ -25,18 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "case \"$CLAUDE_FILE_PATH\" in *.py) uv run ruff format \"$CLAUDE_FILE_PATH\" 2>/dev/null;; *.ts|*.tsx) cd frontend && npx prettier --write \"../$CLAUDE_FILE_PATH\" 2>/dev/null;; esac"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "case \"$CLAUDE_FILE_PATH\" in *.env*|*credentials*|*secrets*) echo 'BLOCK: Cannot edit secrets files' >&2; exit 1;; esac"
+            "command": "case \"$CLAUDE_FILE_PATH\" in *.ts|*.tsx) cd frontend && npx prettier --write \"../$CLAUDE_FILE_PATH\" 2>/dev/null;; esac"
           }
         ]
       }
