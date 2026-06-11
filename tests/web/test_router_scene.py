@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dj_ledfx.persistence.state_db import StateDB
@@ -847,14 +848,35 @@ class TestSceneDetail:
         client = _make_test_app(state_db=db, pipeline_manager=mock_pm)
         try:
             scene_id = client.post("/api/scenes", json={"name": "A"}).json()["id"]
-            client.put(
-                f"/api/scenes/{scene_id}", json={"mapping_params": {"origin": [1, 1, 1]}}
-            )
+            client.put(f"/api/scenes/{scene_id}", json={"mapping_params": {"origin": [1, 1, 1]}})
             detail = client.get(f"/api/scenes/{scene_id}").json()
             assert detail["mapping"]["params"] == {"origin": [1.0, 1.0, 1.0]}
             client.put(f"/api/scenes/{scene_id}", json={"name": "B"})  # must not wipe params
             detail = client.get(f"/api/scenes/{scene_id}").json()
             assert detail["mapping"]["params"] == {"origin": [1.0, 1.0, 1.0]}
+        finally:
+            asyncio.run(db.close())
+
+    def test_get_scene_detail_preserves_zero_direction_components(self, tmp_path) -> None:
+        """A stored direction of [0, 1, 0] must not be coerced to [1, 1, 0] by falsy-zero or."""
+        client, db = self._make_real_device_client(tmp_path)
+        try:
+            scene_id = client.post("/api/scenes", json={"name": "A"}).json()["id"]
+            client.put(
+                f"/api/scenes/{scene_id}/devices/My Strip",
+                json={
+                    "position": [0.0, 0.0, 0.0],
+                    "geometry": "strip",
+                    "direction": [0, 1, 0],
+                    "length": 2.0,
+                },
+            )
+            detail = client.get(f"/api/scenes/{scene_id}").json()
+            assert len(detail["placements"]) == 1
+            direction = detail["placements"][0]["geometry"]["direction"]
+            assert direction[0] == pytest.approx(0.0), "x component must not be coerced to 1.0"
+            assert direction[1] == pytest.approx(1.0), "y component must be preserved"
+            assert direction[2] == pytest.approx(0.0)
         finally:
             asyncio.run(db.close())
 

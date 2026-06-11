@@ -428,6 +428,74 @@ class TestCompositorKeying:
         assert "My Strip" in indices
         assert "lifx:abc123" not in indices
 
+    async def test_strip_direction_zero_component_preserved(self) -> None:
+        """direction_x=0.0 must not be coerced to 1.0 by falsy-zero dict.get default.
+
+        Uses a Y-axis LinearMapping so that a vertical strip (0,1,0) produces a non-trivial
+        spread of indices. A horizontal strip (1,0,0) — what you get if direction_x=0 is
+        wrongly coerced to 1.0 — projects to zero range against a Y-axis mapping, causing
+        the assertion to fail.
+        """
+        import json
+
+        # Map along Y: vertical (0,1,0) strip → full range; horizontal (1,0,0) → range 0.
+        scene_row_y = {
+            **_SCENE_ROW_S1,
+            "mapping_params": json.dumps({"direction": [0.0, 1.0, 0.0]}),
+        }
+        placement = {
+            **_PLACEMENT_DEV1,
+            "direction_x": 0.0,
+            "direction_y": 1.0,
+            "direction_z": 0.0,
+        }
+        managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
+        pm, db, _ = _make_manager(devices=[managed])
+        db.load_scene_by_id.return_value = scene_row_y
+        db.load_scene_placements.return_value = [placement]
+        db.load_scene_effect_state.return_value = None
+
+        engine = MagicMock()
+        scheduler = MagicMock()
+        scheduler.has_device.return_value = False
+        pm.bind(engine, scheduler)
+
+        await pm.activate_scene("s1")
+
+        pipeline = pm._pipelines["s1"]
+        assert pipeline.compositor is not None
+        indices = pipeline.compositor.get_strip_indices()
+        assert "Dev1" in indices
+        idx_range = float(indices["Dev1"].max() - indices["Dev1"].min())
+        # Vertical strip + Y-axis mapping → range ≈ 1.0.
+        # If direction_x=0 had been coerced to 1.0, direction becomes (1,0,0);
+        # a horizontal strip has no Y variation → range = 0.
+        assert idx_range > 0.5, (
+            f"strip index range too small ({idx_range}); "
+            "direction_x=0 may have been coerced to 1.0, turning (0,1,0) into (1,0,0)"
+        )
+
+    async def test_strip_direction_null_uses_defaults(self) -> None:
+        """None values (SQL NULL) must not crash _build_pipeline; defaults to (1,0,0)/1.0."""
+        placement = {
+            **_PLACEMENT_DEV1,
+            "direction_x": None,
+            "direction_y": None,
+            "direction_z": None,
+            "length": None,
+        }
+        pm, db = _make_bound_manager(placement_row=placement)
+        db.load_scene_effect_state.return_value = None
+        # Must not raise — _row_value falls back to the default float for None values.
+        await pm.activate_scene("s1")
+
+        pipeline = pm._pipelines["s1"]
+        assert pipeline.compositor is not None
+        indices = pipeline.compositor.get_strip_indices()
+        assert "Dev1" in indices
+        # Default direction (1,0,0) with length 1.0 produces a valid horizontal strip.
+        assert len(indices["Dev1"]) > 0
+
 
 class TestSharedMode:
     async def test_shared_scenes_use_same_deck_and_buffer(self):

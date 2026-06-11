@@ -27,6 +27,12 @@ if TYPE_CHECKING:
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 
 
+def _row_value(row: dict[str, Any], key: str, default: float) -> float:
+    """NULL-safe numeric read from a DB row (0.0 is a valid value, None is not)."""
+    value = row.get(key)
+    return float(value) if value is not None else default
+
+
 class PipelineManager:
     """Orchestrates ScenePipeline lifecycle between DB/web and engine/scheduler."""
 
@@ -243,11 +249,11 @@ class PipelineManager:
             if geo_type == "strip":
                 geometry: PointGeometry | StripGeometry = StripGeometry(
                     direction=(
-                        p.get("direction_x", 1.0),
-                        p.get("direction_y", 0.0),
-                        p.get("direction_z", 0.0),
+                        _row_value(p, "direction_x", 1.0),
+                        _row_value(p, "direction_y", 0.0),
+                        _row_value(p, "direction_z", 0.0),
                     ),
-                    length=p.get("length", 1.0),
+                    length=_row_value(p, "length", 1.0),
                 )
             else:
                 geometry = PointGeometry()
@@ -257,9 +263,9 @@ class PipelineManager:
             placement = DevicePlacement(
                 device_id=display_name,
                 position=(
-                    p.get("position_x", 0.0),
-                    p.get("position_y", 0.0),
-                    p.get("position_z", 0.0),
+                    _row_value(p, "position_x", 0.0),
+                    _row_value(p, "position_y", 0.0),
+                    _row_value(p, "position_z", 0.0),
                 ),
                 geometry=geometry,
                 led_count=managed.adapter.device_info.led_count,

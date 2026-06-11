@@ -38,6 +38,12 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/scene", tags=["scene"])
 
 
+def _row_value(row: dict[str, Any], key: str, default: float) -> float:
+    """NULL-safe numeric read from a DB row (0.0 is a valid value, None is not)."""
+    value = row.get(key)
+    return float(value) if value is not None else default
+
+
 def _placements_to_config(scene: SceneModel) -> list[dict]:
     devices = []
     for p in scene.placements.values():
@@ -352,18 +358,18 @@ async def get_scene_by_id(request: Request, scene_id: str) -> SceneDetail:
         if (p.get("geometry_type") or "point") == "strip":
             geometry = StripGeometry(
                 direction=(
-                    p.get("direction_x") or 1.0,
-                    p.get("direction_y") or 0.0,
-                    p.get("direction_z") or 0.0,
+                    _row_value(p, "direction_x", 1.0),
+                    _row_value(p, "direction_y", 0.0),
+                    _row_value(p, "direction_z", 0.0),
                 ),
-                length=p.get("length") or 1.0,
+                length=_row_value(p, "length", 1.0),
             )
         scene_placements[display_name] = _DP(
             device_id=display_name,
             position=(
-                p.get("position_x") or 0.0,
-                p.get("position_y") or 0.0,
-                p.get("position_z") or 0.0,
+                _row_value(p, "position_x", 0.0),
+                _row_value(p, "position_y", 0.0),
+                _row_value(p, "position_z", 0.0),
             ),
             geometry=geometry,
             led_count=led_count,
@@ -378,9 +384,7 @@ async def get_scene_by_id(request: Request, scene_id: str) -> SceneDetail:
         from dj_ledfx.spatial.scene import SceneModel as _SM
 
         model = _SM(scene_placements)
-        mapping = mapping_from_config(
-            {"mapping": mapping_type, "mapping_params": mapping_params}
-        )
+        mapping = mapping_from_config({"mapping": mapping_type, "mapping_params": mapping_params})
         compositor = SpatialCompositor(model, mapping)
         for device_id, indices in compositor.get_strip_indices().items():
             strip_indices[device_id] = float(indices.mean())
