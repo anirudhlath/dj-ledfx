@@ -15,6 +15,8 @@ import DeviceMesh from "@/components/scene/device-mesh"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { EffectParamSchema, Preset } from "@/lib/types"
 
+const GLOBAL_TAB = "__global__"
+
 function SceneEffectDeck({
   sceneId,
   schemas,
@@ -40,10 +42,12 @@ export default function LivePage() {
     [scenes],
   )
 
-  const [selectedTab, setSelectedTab] = useState("default")
-  const currentTab = activeScenes.some((s) => s.id === selectedTab) ? selectedTab : "default"
+  // "__global__" is the global/default-pipeline deck; it cannot collide with a
+  // scene id (scene ids are UUIDs or the TOML-migrated "default").
+  const [selectedTab, setSelectedTab] = useState(GLOBAL_TAB)
+  const currentTab = activeScenes.some((s) => s.id === selectedTab) ? selectedTab : GLOBAL_TAB
 
-  const { scene } = useScene(currentTab === "default" ? null : currentTab)
+  const { scene } = useScene(currentTab === GLOBAL_TAB ? null : currentTab)
   const placements = scene?.placements ?? []
 
   return (
@@ -73,7 +77,7 @@ export default function LivePage() {
           {activeScenes.length > 0 && (
             <Tabs value={currentTab} onValueChange={setSelectedTab}>
               <TabsList className="w-full">
-                <TabsTrigger value="default">Default</TabsTrigger>
+                <TabsTrigger value={GLOBAL_TAB}>Global</TabsTrigger>
                 {activeScenes.map((s) => (
                   <TabsTrigger key={s.id} value={s.id}>
                     {s.name}
@@ -84,7 +88,7 @@ export default function LivePage() {
           )}
 
           <div className="flex-1 min-h-0">
-            {currentTab === "default" ? (
+            {currentTab === GLOBAL_TAB ? (
               <EffectDeck {...effects} />
             ) : (
               <SceneEffectDeck

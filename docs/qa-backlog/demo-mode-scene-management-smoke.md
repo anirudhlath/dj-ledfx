@@ -9,7 +9,7 @@
 - Browser at the served web UI
 
 ## Test Steps
-1. Press Play; verify simulated beats drive the beat indicator and the Default deck's preview.
+1. Press Play; verify simulated beats drive the beat indicator and the Global deck's preview.
 2. Create a scene, add whatever devices are available (real LAN devices may still be discovered; OpenRGB optional), position them, activate.
 3. Switch the scene's effect from the Live page tab, scrub params.
 4. Edit a placement while active (re-apply cycle), deactivate, reactivate, delete the scene.

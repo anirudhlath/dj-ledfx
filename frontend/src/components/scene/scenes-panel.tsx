@@ -86,21 +86,9 @@ export default memo(function ScenesPanel({
       </CardHeader>
       <CardContent className="p-0 flex flex-col gap-0">
         <div className="max-h-56 overflow-y-auto px-3">
-          {/* Default pseudo-scene row */}
-          <button
-            className={cn(
-              "w-full flex items-center gap-1 px-2 py-1.5 rounded transition-colors text-left",
-              selectedSceneId === null ? "bg-primary/15 text-primary" : "hover:bg-muted",
-            )}
-            onClick={() => onSelectScene(null)}
-          >
-            <span className="flex-1 truncate text-xs">Default</span>
-            <Badge variant="outline" className="text-[10px] shrink-0">
-              active
-            </Badge>
-          </button>
-
-          {/* DB scene rows */}
+          {scenes.length === 0 && (
+            <p className="text-xs text-muted-foreground px-2 py-1.5">No scenes yet</p>
+          )}
           {scenes.map((s) => (
             <div
               key={s.id}

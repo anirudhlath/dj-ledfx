@@ -58,6 +58,17 @@ export default function ScenePage() {
 
   const scenes = allScenes
 
+  // Auto-select the first scene once the list arrives (the editor edits DB
+  // scenes; a null selection targets the legacy in-memory scene, which is
+  // empty in normal DB-backed runs).
+  const autoSelectedRef = useRef(false)
+  useEffect(() => {
+    if (!autoSelectedRef.current && selectedSceneId === null && scenes.length > 0) {
+      autoSelectedRef.current = true
+      setSelectedSceneId(scenes.find((s) => s.is_active)?.id ?? scenes[0].id)
+    }
+  }, [scenes, selectedSceneId])
+
   useEffect(() => {
     if (error) toast.error(error)
   }, [error])
