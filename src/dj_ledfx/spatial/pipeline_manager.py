@@ -188,8 +188,11 @@ class PipelineManager:
             msg = f"No active pipeline for scene {scene_id}"
             raise ValueError(msg)
         pipeline.deck.apply_update(effect_name, params)
+        canonical_params = pipeline.deck.effect.get_params()
         asyncio.create_task(
-            self._state_db.save_scene_effect_state(scene_id, effect_name, json.dumps(params))
+            self._state_db.save_scene_effect_state(
+                scene_id, effect_name, json.dumps(canonical_params)
+            )
         )
 
     def get_scene_effect(self, scene_id: str) -> dict[str, Any]:

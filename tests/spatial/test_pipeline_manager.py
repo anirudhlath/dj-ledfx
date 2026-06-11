@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -318,6 +319,58 @@ class TestEffectControl:
         pm, _, _ = _make_manager()
         with pytest.raises(ValueError, match="No active pipeline"):
             pm.set_scene_effect("nonexistent", "beat_pulse", {})
+
+    async def test_set_scene_effect_persists_full_params(self) -> None:
+        scenes = [
+            {
+                "id": "s1",
+                "name": "Scene1",
+                "mapping_type": "linear",
+                "mapping_params": "{}",
+                "effect_mode": "independent",
+                "effect_source": None,
+                "is_active": 1,
+            }
+        ]
+        managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
+        pm, db, _ = _make_manager(
+            scenes=scenes,
+            devices=[managed],
+            placements=[
+                {
+                    "device_id": "dev1",
+                    "position_x": 0.0,
+                    "position_y": 0.0,
+                    "position_z": 0.0,
+                    "geometry_type": "strip",
+                    "direction_x": 1.0,
+                    "direction_y": 0.0,
+                    "direction_z": 0.0,
+                    "length": 1.0,
+                    "width": 0.0,
+                    "rows": 1,
+                    "cols": 1,
+                }
+            ],
+        )
+        db.load_scene_placements.return_value = pm._state_db.load_scene_placements.return_value
+
+        await pm.load_active_scenes()
+
+        # First call sets wave_count; second call sends only saturation (a delta)
+        pm.set_scene_effect("s1", "rainbow_wave", {"wave_count": 3.0})
+        pm.set_scene_effect("s1", "rainbow_wave", {"saturation": 0.7})
+        # Drain the create_task coroutines
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        args = db.save_scene_effect_state.call_args
+        assert args.args[0] == "s1"
+        assert args.args[1] == "rainbow_wave"
+        persisted = json.loads(args.args[2])
+        # Both params must survive: wave_count from first call, saturation from second
+        assert persisted["wave_count"] == 3.0
+        assert persisted["saturation"] == 0.7
 
 
 _SCENE_ROW_S1 = {
