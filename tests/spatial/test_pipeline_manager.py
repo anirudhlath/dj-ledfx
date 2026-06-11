@@ -362,6 +362,25 @@ class TestEffectRestore:
         await pm.activate_scene("s1")
         assert pm._pipelines["s1"].deck.effect_name == "beat_pulse"
 
+    async def test_activate_restores_effect_params(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = {
+            "effect_class": "rainbow_wave",
+            "params": '{"wave_count": 2.0}',
+        }
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "rainbow_wave"
+        assert pm._pipelines["s1"].deck.effect.get_params()["wave_count"] == 2.0
+
+    async def test_activate_falls_back_when_params_stale(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = {
+            "effect_class": "rainbow_wave",
+            "params": '{"definitely_not_a_param": 1}',
+        }
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "beat_pulse"
+
 
 class TestCompositorKeying:
     async def test_compositor_keyed_by_display_name(self) -> None:

@@ -256,6 +256,14 @@ class PipelineManager:
                 geometry=geometry,
                 led_count=managed.adapter.device_info.led_count,
             )
+            if display_name in scene_placements:
+                logger.warning(
+                    "Duplicate device display name '{}' in scene {};"
+                    " placement for {} overwrites an earlier device",
+                    display_name,
+                    scene_id,
+                    p["device_id"],
+                )
             scene_placements[display_name] = placement
 
         led_count = max(
