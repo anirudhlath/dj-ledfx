@@ -291,6 +291,96 @@ class TestEffectControl:
             pm.set_scene_effect("nonexistent", "beat_pulse", {})
 
 
+_SCENE_ROW_S1 = {
+    "id": "s1",
+    "name": "Scene1",
+    "mapping_type": "linear",
+    "mapping_params": "{}",
+    "effect_mode": "independent",
+    "effect_source": None,
+    "is_active": 0,
+}
+
+_PLACEMENT_DEV1 = {
+    "device_id": "dev1",
+    "position_x": 0.0,
+    "position_y": 0.0,
+    "position_z": 0.0,
+    "geometry_type": "strip",
+    "direction_x": 1.0,
+    "direction_y": 0.0,
+    "direction_z": 0.0,
+    "length": 1.0,
+    "width": 0.0,
+    "rows": 1,
+    "cols": 1,
+}
+
+
+def _make_bound_manager(
+    name: str = "Dev1",
+    led_count: int = 10,
+    stable_id: str = "dev1",
+    scene_row: dict | None = None,
+    placement_row: dict | None = None,
+):
+    """Create a bound PipelineManager (engine + scheduler mocked) for one device/scene."""
+    managed = _make_managed(name, led_count=led_count, stable_id=stable_id)
+    pm, db, _ = _make_manager(devices=[managed])
+    db.load_scene_by_id.return_value = scene_row or _SCENE_ROW_S1
+    db.load_scene_placements.return_value = [placement_row or _PLACEMENT_DEV1]
+
+    engine = MagicMock()
+    scheduler = MagicMock()
+    scheduler.has_device.return_value = False
+    pm.bind(engine, scheduler)
+    return pm, db
+
+
+class TestEffectRestore:
+    async def test_activate_restores_persisted_effect(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = {
+            "effect_class": "rainbow_wave",
+            "params": "{}",
+        }
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "rainbow_wave"
+
+    async def test_activate_falls_back_to_beat_pulse_on_unknown_effect(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = {
+            "effect_class": "does_not_exist",
+            "params": "{}",
+        }
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "beat_pulse"
+
+    async def test_activate_with_no_saved_effect_uses_beat_pulse(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = None
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "beat_pulse"
+
+
+class TestCompositorKeying:
+    async def test_compositor_keyed_by_display_name(self) -> None:
+        # device: name="My Strip", stable_id="lifx:abc123"; placement row device_id="lifx:abc123"
+        placement = {**_PLACEMENT_DEV1, "device_id": "lifx:abc123"}
+        pm, db = _make_bound_manager(
+            name="My Strip",
+            stable_id="lifx:abc123",
+            placement_row=placement,
+        )
+        db.load_scene_effect_state.return_value = None
+        await pm.activate_scene("s1")
+        pipeline = pm._pipelines["s1"]
+        assert pipeline.compositor is not None
+        indices = pipeline.compositor.get_strip_indices()
+        assert "My Strip" in indices
+        assert "lifx:abc123" not in indices
+
+
 class TestSharedMode:
     async def test_shared_scenes_use_same_deck_and_buffer(self):
         scenes = [
