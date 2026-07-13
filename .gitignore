@@ -17,9 +17,11 @@ profiles/
 *.njsproj
 *.sln
 *.sw?
+.vite/
 frontend/.vite/
+frontend/dist/
 .playwright-mcp/
 state.db
 *.db-wal
 *.db-shm
-config.toml.bak
+*.bak
