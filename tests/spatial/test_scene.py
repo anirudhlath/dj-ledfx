@@ -7,7 +7,7 @@ from dj_ledfx.spatial.geometry import (
     PointGeometry,
     StripGeometry,
 )
-from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
+from dj_ledfx.spatial.scene import DevicePlacement, SceneModel, row_value
 from tests.conftest import MockDeviceAdapter
 
 
@@ -291,3 +291,14 @@ class TestSceneModelMutations:
         scene = SceneModel(placements={})
         with pytest.raises(KeyError, match="nonexistent"):
             scene.remove_placement("nonexistent")
+
+
+class TestRowValue:
+    def test_zero_is_preserved(self) -> None:
+        assert row_value({"k": 0.0}, "k", 1.0) == 0.0
+
+    def test_none_uses_default(self) -> None:
+        assert row_value({"k": None}, "k", 1.0) == 1.0
+
+    def test_int_coerced_to_float(self) -> None:
+        assert row_value({"k": 2}, "k", 0.0) == 2.0

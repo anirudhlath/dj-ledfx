@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -77,6 +78,52 @@ def _make_manager(
         config=config,
     )
     return pm, db, device_manager
+
+
+_SCENE_ROW_S1 = {
+    "id": "s1",
+    "name": "Scene1",
+    "mapping_type": "linear",
+    "mapping_params": "{}",
+    "effect_mode": "independent",
+    "effect_source": None,
+    "is_active": 0,
+}
+
+_PLACEMENT_DEV1 = {
+    "device_id": "dev1",
+    "position_x": 0.0,
+    "position_y": 0.0,
+    "position_z": 0.0,
+    "geometry_type": "strip",
+    "direction_x": 1.0,
+    "direction_y": 0.0,
+    "direction_z": 0.0,
+    "length": 1.0,
+    "width": 0.0,
+    "rows": 1,
+    "cols": 1,
+}
+
+
+def _make_bound_manager(
+    name: str = "Dev1",
+    led_count: int = 10,
+    stable_id: str = "dev1",
+    scene_row: dict | None = None,
+    placement_row: dict | None = None,
+):
+    """Create a bound PipelineManager (engine + scheduler mocked) for one device/scene."""
+    managed = _make_managed(name, led_count=led_count, stable_id=stable_id)
+    pm, db, _ = _make_manager(devices=[managed])
+    db.load_scene_by_id.return_value = scene_row or _SCENE_ROW_S1
+    db.load_scene_placements.return_value = [placement_row or _PLACEMENT_DEV1]
+
+    engine = MagicMock()
+    scheduler = MagicMock()
+    scheduler.has_device.return_value = False
+    pm.bind(engine, scheduler)
+    return pm, db
 
 
 class TestPipelineManagerConstruction:
@@ -200,6 +247,19 @@ class TestActivateDeactivate:
         engine.add_pipeline.assert_called_once_with(pipeline)
         scheduler.add_device.assert_called_once()
 
+    async def test_double_activation_raises_value_error(self) -> None:
+        pm, db = _make_bound_manager()
+
+        await pm.activate_scene("s1")
+        assert pm.is_scene_active("s1") is True
+        with pytest.raises(ValueError, match="already active"):
+            await pm.activate_scene("s1")
+
+    async def test_is_scene_active_false_when_inactive(self) -> None:
+        pm, db = _make_bound_manager()
+
+        assert pm.is_scene_active("s1") is False
+
     async def test_deactivate_scene_removes_pipeline(self):
         managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
         pm, db, _ = _make_manager(devices=[managed])
@@ -245,50 +305,136 @@ class TestActivateDeactivate:
 
 class TestEffectControl:
     async def test_set_scene_effect(self):
-        scenes = [
-            {
-                "id": "s1",
-                "name": "Scene1",
-                "mapping_type": "linear",
-                "mapping_params": "{}",
-                "effect_mode": "independent",
-                "effect_source": None,
-                "is_active": 1,
-            }
-        ]
         managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
         pm, db, _ = _make_manager(
-            scenes=scenes,
+            scenes=[{**_SCENE_ROW_S1, "is_active": 1}],
             devices=[managed],
-            placements=[
-                {
-                    "device_id": "dev1",
-                    "position_x": 0.0,
-                    "position_y": 0.0,
-                    "position_z": 0.0,
-                    "geometry_type": "strip",
-                    "direction_x": 1.0,
-                    "direction_y": 0.0,
-                    "direction_z": 0.0,
-                    "length": 1.0,
-                    "width": 0.0,
-                    "rows": 1,
-                    "cols": 1,
-                }
-            ],
+            placements=[_PLACEMENT_DEV1],
         )
-        db.load_scene_placements.return_value = pm._state_db.load_scene_placements.return_value
-
         await pm.load_active_scenes()
 
-        pm.set_scene_effect("s1", "rainbow_wave", {})
+        returned = pm.set_scene_effect("s1", "rainbow_wave", {})
         info = pm.get_scene_effect("s1")
         assert info["effect_name"] == "rainbow_wave"
+        # Return value must equal the canonical params after apply
+        assert isinstance(returned, dict)
 
     def test_set_effect_no_active_pipeline_raises(self):
         pm, _, _ = _make_manager()
         with pytest.raises(ValueError, match="No active pipeline"):
             pm.set_scene_effect("nonexistent", "beat_pulse", {})
+
+    async def test_set_scene_effect_persists_full_params(self) -> None:
+        managed = _make_managed("Dev1", led_count=10, stable_id="dev1")
+        pm, db, _ = _make_manager(
+            scenes=[{**_SCENE_ROW_S1, "is_active": 1}],
+            devices=[managed],
+            placements=[_PLACEMENT_DEV1],
+        )
+
+        await pm.load_active_scenes()
+
+        # First call sets wave_count; second call sends only saturation (a delta)
+        pm.set_scene_effect("s1", "rainbow_wave", {"wave_count": 3.0})
+        canonical = pm.set_scene_effect("s1", "rainbow_wave", {"saturation": 0.7})
+        # Drain the create_task coroutines
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        args = db.save_scene_effect_state.call_args
+        assert args.args[0] == "s1"
+        assert args.args[1] == "rainbow_wave"
+        persisted = json.loads(args.args[2])
+        # Both params must survive: wave_count from first call, saturation from second
+        assert persisted["wave_count"] == 3.0
+        assert persisted["saturation"] == 0.7
+        # Return value must equal persisted canonical params
+        assert canonical["wave_count"] == 3.0
+        assert canonical["saturation"] == 0.7
+
+
+class TestEffectRestore:
+    async def test_activate_restores_persisted_effect(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = {
+            "effect_class": "rainbow_wave",
+            "params": "{}",
+        }
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "rainbow_wave"
+
+    async def test_activate_falls_back_to_beat_pulse_on_unknown_effect(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = {
+            "effect_class": "does_not_exist",
+            "params": "{}",
+        }
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "beat_pulse"
+
+    async def test_activate_with_no_saved_effect_uses_beat_pulse(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = None
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "beat_pulse"
+
+    async def test_activate_restores_effect_params(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = {
+            "effect_class": "rainbow_wave",
+            "params": '{"wave_count": 2.0}',
+        }
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "rainbow_wave"
+        assert pm._pipelines["s1"].deck.effect.get_params()["wave_count"] == 2.0
+
+    async def test_activate_falls_back_when_params_stale(self) -> None:
+        pm, db = _make_bound_manager()
+        db.load_scene_effect_state.return_value = {
+            "effect_class": "rainbow_wave",
+            "params": '{"definitely_not_a_param": 1}',
+        }
+        await pm.activate_scene("s1")
+        assert pm._pipelines["s1"].deck.effect_name == "beat_pulse"
+
+
+class TestCompositorKeying:
+    async def test_compositor_keyed_by_display_name(self) -> None:
+        # device: name="My Strip", stable_id="lifx:abc123"; placement row device_id="lifx:abc123"
+        placement = {**_PLACEMENT_DEV1, "device_id": "lifx:abc123"}
+        pm, db = _make_bound_manager(
+            name="My Strip",
+            stable_id="lifx:abc123",
+            placement_row=placement,
+        )
+        db.load_scene_effect_state.return_value = None
+        await pm.activate_scene("s1")
+        pipeline = pm._pipelines["s1"]
+        assert pipeline.compositor is not None
+        indices = pipeline.compositor.get_strip_indices()
+        assert "My Strip" in indices
+        assert "lifx:abc123" not in indices
+
+    async def test_strip_direction_null_uses_defaults(self) -> None:
+        """None values (SQL NULL) must not crash _build_pipeline; defaults to (1,0,0)/1.0."""
+        placement = {
+            **_PLACEMENT_DEV1,
+            "direction_x": None,
+            "direction_y": None,
+            "direction_z": None,
+            "length": None,
+        }
+        pm, db = _make_bound_manager(placement_row=placement)
+        db.load_scene_effect_state.return_value = None
+        # Must not raise — row_value falls back to the default float for None values.
+        await pm.activate_scene("s1")
+
+        pipeline = pm._pipelines["s1"]
+        assert pipeline.compositor is not None
+        indices = pipeline.compositor.get_strip_indices()
+        assert "Dev1" in indices
+        # Default direction (1,0,0) with length 1.0 produces a valid horizontal strip.
+        assert len(indices["Dev1"]) > 0
 
 
 class TestSharedMode:

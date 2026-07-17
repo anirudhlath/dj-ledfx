@@ -2,21 +2,6 @@
 
 Beat-synced LED effect engine driven by Pro DJ Link network data with per-device latency compensation.
 
-## Superpowers Skill Guidelines
-
-- Use opus with max effort from brainstorming and planning.
-- Use /executing-plans skill for executing the plan.
-- Use sonnet or opus for implementing the plan.
-- Use opus for reviewing and simplification stages.
-- Use haiku for committing.
-- Prefer latest internet grounded knowledge over training knowledge.
-- Use context7 to check latest docs and for external dependencies.
-- Add @feature-dev:code-architect review step as a task for each plan you implement. Fix every issue that comes up during the code architect review step.
-- Add /simplify skill step as a task for each plan you implement. Fix every issue that comes up during the simplify step.
-- Add claude md skill as a task to improve and revise claude context, memories etc.
-- Finally create a PR with the changes.
-
-
 ## Commands
 
 ```bash
@@ -63,11 +48,11 @@ src/dj_ledfx/ layout:
 - `web/ws.py` — WebSocket hub: binary LED frame broadcast (2-byte name + 4-byte seq + RGB), beat/status/transport JSON channels, EventBus-driven transport broadcast
 - `web/router_transport.py` — Transport REST endpoints (GET/PUT /api/transport)
 - `web/state.py` — Shared app state dataclass passed via FastAPI app.state
-- `web/router_scene.py` — Scene REST endpoints (placement CRUD, mapping config, auto-creates SceneModel)
+- `web/router_scene.py` — Legacy single-scene endpoints (/api/scene) + multi-scene CRUD (/api/scenes): SceneDetail GET (placements/mapping/bounds/strip_index), activate/deactivate (409 device_conflict + idempotent already_active), per-scene effect GET/PUT (PUT returns canonical post-merge params)
 - `spatial/mapping.py` — mapping_from_config() shared factory for LinearMapping/RadialMapping
 - `spatial/compositor.py` — Spatial compositor for multi-device LED frame distribution
 - `spatial/geometry.py` — 3D geometry utilities for spatial calculations
-- `spatial/scene.py` — SceneModel: device placements, spatial configuration
+- `spatial/scene.py` — SceneModel: device placements, spatial configuration + `row_value`/`placement_from_row` (NULL-safe DB-row → DevicePlacement reconstruction, shared by router and PipelineManager)
 - `spatial/pipeline.py` — ScenePipeline dataclass: per-scene rendering state (deck, ring_buffer, compositor, devices)
 - `spatial/pipeline_manager.py` — PipelineManager: multi-pipeline lifecycle orchestration (activate/deactivate scenes, device assignment)
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
@@ -81,9 +66,9 @@ src/dj_ledfx/ layout:
 frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - `src/lib/ws-client.ts` — Multiplexed WS client with reconnection
 - `src/lib/api-client.ts` — Typed REST client
-- `src/hooks/` — React hooks for beat, effects, devices, scene state
-- `src/pages/` — Views: Live Performance, Devices, Config, Scene (3D editor)
-- `src/components/` — transport-section, effect-deck, device-monitor (Live page); scene/ (3D editor)
+- `src/hooks/` — React hooks for beat, effects, devices, scene state; `use-scenes` (scene list/CRUD/activate with conflict toasts), `use-scene(sceneId|null)` (null = legacy Default scene, id = DB scene w/ auto re-apply), `use-scene-effects` (per-scene effect deck state)
+- `src/pages/` — Views: Live Performance (per-scene effect deck tabs), Devices, Config, Scene (3D editor + ScenesPanel)
+- `src/components/` — transport-section, effect-deck (savePreset prop optional — save UI hidden when absent), device-monitor (Live page); scene/ (3D editor, scenes-panel)
 - `src/components/scene/` — R3F scene editor: viewport, device meshes, mapping helpers, bounds box, panels
 
 ## Code Style
@@ -123,14 +108,16 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - DeviceAdapter is ABC (not Protocol). Provides supports_latency_probing class attribute. discover() excluded from base — adapters own their own discovery.
 - SQLite `state.db` is single source of truth at runtime; TOML is import/export format only
 - Device identity: MAC-based `stable_id` for cross-session matching via `DeviceInfo.effective_id` (falls back to name)
-- Web layer resolves display names → stable_ids before any DB write (placements, deletions)
+- Web layer resolves display names → stable_ids before any DB write (placements, deletions) via `DeviceManager.resolve_stable_id(name)`; reads resolve back to display names (SceneDetail placements, PUT placement responses)
 - Multi-scene: scenes activate/deactivate independently; conflict detection prevents same device in two active scenes
 - Ghost/promote/demote lifecycle: offline devices stay registered as GhostAdapters, get promoted when rediscovered
 - Discovery `skip_ids` must exclude offline devices — otherwise ghosts can never be re-promoted
 - Transport controls: app starts STOPPED, user must play. SIMULATING renders to web UI only (skips send_frame). Device state captured on connect (when stopped), restored on stop.
 - DeviceAdapter provides default `capture_state()` (50% white) and `restore_state()` — adapters override as protocol support is added
 - Multi-pipeline: PipelineManager orchestrates ScenePipeline lifecycle. Engine iterates all pipelines in tick(). Scheduler routes devices to their pipeline's ring buffer. Default pipeline catches unassigned devices.
-- Pipeline activate order: build pipeline first, then persist DB flag. Deactivate: persist DB first, then tear down pipeline. Failed activations don't corrupt DB state.
+- Pipeline activate order: build pipeline first, then persist DB flag. Deactivate: persist DB first, then tear down pipeline. Failed activations don't corrupt DB state (route converts PipelineManager ValueError → 409; already-active → 200 with DB self-heal).
+- Per-scene effect state persists canonical post-merge params (`deck.effect.get_params()`) and is restored on activation/startup; unknown effect class falls back to BeatPulse with a warning. Shared-mode decks are not restored.
+- Frontend re-apply: placement/mapping edits to an ACTIVE scene trigger deactivate→activate from `use-scene.ts` (placements are read only at pipeline build) — expect a brief device blink per committed edit.
 
 ## Logging Discipline
 
@@ -149,7 +136,9 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Packet parsing tests use hex dump fixtures from `tests/fixtures/`
 - Mock `openrgb-python` for device tests
 - Integration tests run BeatSimulator → full pipeline → mock DeviceAdapter
-- Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern
+- Web tests use the sync `fastapi.testclient.TestClient` (NOT httpx.AsyncClient — none exists in the suite)
+- `tests/web/test_router_scene.py` has module-level helpers: `_make_test_app` (mock-everything app), `_make_db_client(tmp_path, pm=None)` (real StateDB + MagicMock pipeline manager), `_make_real_device_client(tmp_path, ...)` (real DeviceManager + stable_id adapter) — reuse them, don't inline app setup
+- Bare-MagicMock `device_manager` fixtures must set `get_device.return_value = None` (a truthy MagicMock leaks into name→stable_id resolution paths)
 - `tests/web/` covers all REST routers and WebSocket hub
 - Tests that call `engine.run()` or `scheduler.run()` must set `_resume_event.set()` first (STOPPED-by-default)
 
@@ -179,5 +168,9 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - numpy `np.clip(...).astype()` returns `Any` per mypy — use `# type: ignore[no-any-return]` (not `[return-value]`)
 - MockDeviceAdapter: never patch `type(adapter).device_info` (class-level property) — leaks to all instances across tests. Use a subclass instead.
 - Web tests: `uv sync --extra web` required in worktrees — web tests skip silently without it
-- PipelineManager: `activate_scene` must guard against double-activation (check `scene_id in _pipelines` first)
+- PipelineManager: `activate_scene` must guard against double-activation (check `scene_id in _pipelines` first) AND re-check after its awaits — concurrent requests interleave at every await on the shared event loop
 - PipelineManager uses `scheduler.has_device()` for upsert logic — never access `scheduler._device_state` directly
+- DB placement rows: never use `row.get(col) or default` or `row.get(col, default)` for numeric columns — rows are built from column zips so every key EXISTS (dict.get default never fires) and SQL NULL arrives as None, while stored `0.0` is falsy. Use `spatial.scene.row_value` (None-safe, zero-preserving)
+- Compositor placements (in-memory SceneModel) must be keyed by device DISPLAY NAME — the scheduler composites by `device_info.name`; DB rows keep `stable_id`. Mismatched keys silently skip compositing
+- Read LED counts from `adapter.led_count` (the contract property), not `device_info.led_count` (frozen at discovery)
+- mypy baseline: 26 pre-existing errors in 8 web-layer files (visible only with the web extra installed) — the gate is "no NEW errors", see docs/backlog/medium/fix-web-layer-mypy-errors.md

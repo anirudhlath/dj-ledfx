@@ -40,6 +40,7 @@ async def list_devices(request: Request) -> list[DeviceResponse]:
                 effective_latency_ms=stats.effective_latency_ms if stats else 0.0,
                 frames_dropped=stats.frames_dropped if stats else 0,
                 status=d.status,
+                stable_id=info.effective_id,
             )
         )
     return devices

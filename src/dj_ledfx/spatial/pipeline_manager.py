@@ -12,12 +12,12 @@ from dj_ledfx.config import AppConfig
 from dj_ledfx.effects.beat_pulse import BeatPulse
 from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import RingBuffer
+from dj_ledfx.effects.registry import create_effect
 from dj_ledfx.events import EventBus
 from dj_ledfx.spatial.compositor import SpatialCompositor
-from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 from dj_ledfx.spatial.mapping import mapping_from_config
 from dj_ledfx.spatial.pipeline import ScenePipeline
-from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
+from dj_ledfx.spatial.scene import DevicePlacement, SceneModel, placement_from_row
 
 if TYPE_CHECKING:
     from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
@@ -83,6 +83,10 @@ class PipelineManager:
     def default_pipeline(self) -> ScenePipeline | None:
         return self._default_pipeline
 
+    def is_scene_active(self, scene_id: str) -> bool:
+        """True if a pipeline is currently registered for this scene."""
+        return scene_id in self._pipelines
+
     # ── Startup ─────────────────────────────────────────────────
 
     async def load_active_scenes(self) -> None:
@@ -92,8 +96,9 @@ class PipelineManager:
 
         for scene_row in active_scenes:
             placements = await self._state_db.load_scene_placements(scene_row["id"])
+            effect_row = await self._state_db.load_scene_effect_state(scene_row["id"])
             try:
-                pipeline = self._build_pipeline(scene_row, placements)
+                pipeline = self._build_pipeline(scene_row, placements, effect_row)
             except Exception:
                 logger.warning(
                     "Failed to build pipeline for scene '{}', skipping", scene_row["id"]
@@ -122,9 +127,17 @@ class PipelineManager:
             raise ValueError(msg)
 
         placements = await self._state_db.load_scene_placements(scene_id)
-        pipeline = self._build_pipeline(scene_row, placements)
+        effect_row = await self._state_db.load_scene_effect_state(scene_id)
+        pipeline = self._build_pipeline(scene_row, placements, effect_row)
         if pipeline is None:
             msg = f"Could not build pipeline for scene {scene_id}"
+            raise ValueError(msg)
+
+        # Re-check after the awaits above: a concurrent activate request can
+        # interleave at any await point on the shared event loop, and double
+        # registration would orphan a pipeline in the engine's list.
+        if scene_id in self._pipelines:
+            msg = f"Scene {scene_id} is already active"
             raise ValueError(msg)
 
         self._pipelines[scene_id] = pipeline
@@ -164,16 +177,22 @@ class PipelineManager:
 
     # ── Effect control ──────────────────────────────────────────
 
-    def set_scene_effect(self, scene_id: str, effect_name: str, params: dict[str, Any]) -> None:
-        """Set the effect for a scene's pipeline."""
+    def set_scene_effect(
+        self, scene_id: str, effect_name: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Set the effect for a scene's pipeline. Returns canonical params after apply."""
         pipeline = self._pipelines.get(scene_id)
         if pipeline is None:
             msg = f"No active pipeline for scene {scene_id}"
             raise ValueError(msg)
         pipeline.deck.apply_update(effect_name, params)
+        canonical_params = pipeline.deck.effect.get_params()
         asyncio.create_task(
-            self._state_db.save_scene_effect_state(scene_id, effect_name, json.dumps(params))
+            self._state_db.save_scene_effect_state(
+                scene_id, effect_name, json.dumps(canonical_params)
+            )
         )
+        return canonical_params
 
     def get_scene_effect(self, scene_id: str) -> dict[str, Any]:
         """Get the current effect info for a scene's pipeline."""
@@ -199,9 +218,7 @@ class PipelineManager:
 
         self._rebuild_default_pipeline()
 
-    def _upsert_scheduler_device(
-        self, managed: ManagedDevice, pipeline: ScenePipeline
-    ) -> None:
+    def _upsert_scheduler_device(self, managed: ManagedDevice, pipeline: ScenePipeline) -> None:
         """Add or update a device in the scheduler with the given pipeline."""
         assert self._scheduler is not None
         sid = managed.adapter.device_info.effective_id
@@ -213,7 +230,10 @@ class PipelineManager:
     # ── Pipeline construction ───────────────────────────────────
 
     def _build_pipeline(
-        self, scene_row: dict[str, Any], placements: list[dict[str, Any]]
+        self,
+        scene_row: dict[str, Any],
+        placements: list[dict[str, Any]],
+        effect_row: dict[str, str] | None = None,
     ) -> ScenePipeline | None:
         """Build a ScenePipeline from DB scene data and placements."""
         scene_id = scene_row["id"]
@@ -227,32 +247,26 @@ class PipelineManager:
             if managed is None:
                 continue
             devices.append(managed)
-            geo_type = p.get("geometry_type") or "point"
-            if geo_type == "strip":
-                geometry: PointGeometry | StripGeometry = StripGeometry(
-                    direction=(
-                        p.get("direction_x", 1.0),
-                        p.get("direction_y", 0.0),
-                        p.get("direction_z", 0.0),
-                    ),
-                    length=p.get("length", 1.0),
-                )
-            else:
-                geometry = PointGeometry()
-            placement = DevicePlacement(
-                device_id=p["device_id"],
-                position=(
-                    p.get("position_x", 0.0),
-                    p.get("position_y", 0.0),
-                    p.get("position_z", 0.0),
-                ),
-                geometry=geometry,
-                led_count=managed.adapter.device_info.led_count,
+            # Key the in-memory model by display name: the scheduler composites
+            # frames by device_info.name, not by stable_id.
+            display_name = managed.adapter.device_info.name
+            placement = placement_from_row(
+                p,
+                device_id=display_name,
+                led_count=managed.adapter.led_count,
             )
-            scene_placements[p["device_id"]] = placement
+            if display_name in scene_placements:
+                logger.warning(
+                    "Duplicate device display name '{}' in scene {};"
+                    " placement for {} overwrites an earlier device",
+                    display_name,
+                    scene_id,
+                    p["device_id"],
+                )
+            scene_placements[display_name] = placement
 
         led_count = max(
-            (d.adapter.device_info.led_count for d in devices),
+            (d.adapter.led_count for d in devices),
             default=self._device_manager.max_led_count or 60,
         )
 
@@ -271,7 +285,7 @@ class PipelineManager:
         if effect_mode == "shared":
             deck, ring_buffer = self._get_or_create_shared(led_count)
         else:
-            deck = self._build_deck_for_scene(scene_id)
+            deck = self._build_deck_for_scene(scene_id, effect_row)
             ring_buffer = RingBuffer(
                 capacity=self._config.engine.fps,
                 led_count=led_count,
@@ -309,8 +323,22 @@ class PipelineManager:
                     p.led_count = led_count
         return self._shared_deck, self._shared_buffer
 
-    def _build_deck_for_scene(self, scene_id: str) -> EffectDeck:
+    def _build_deck_for_scene(
+        self, scene_id: str, effect_row: dict[str, str] | None
+    ) -> EffectDeck:
         """Build an EffectDeck for an independent scene, restoring saved state."""
+        if effect_row is not None:
+            try:
+                params = json.loads(effect_row.get("params") or "{}")
+                effect = create_effect(effect_row["effect_class"], **params)
+            except (KeyError, TypeError, ValueError):
+                logger.warning(
+                    "Could not restore effect '{}' for scene {}, falling back to beat_pulse",
+                    effect_row.get("effect_class"),
+                    scene_id,
+                )
+            else:
+                return EffectDeck(effect)
         return EffectDeck(BeatPulse())
 
     def _rebuild_default_pipeline(self) -> None:

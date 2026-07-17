@@ -6,10 +6,24 @@ import type {
   EffectParamSchema,
   Preset,
   SceneData,
+  SceneListItem,
+  SceneDetail,
+  SceneEffect,
   TransportState,
 } from "./types"
 
 const BASE = "/api"
+
+export class ApiError extends Error {
+  status: number
+  detail: unknown
+  constructor(message: string, status: number, detail: unknown) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+    this.detail = detail
+  }
+}
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`${BASE}${path}`, {
@@ -17,8 +31,10 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   })
   if (!resp.ok) {
-    const body = await resp.json().catch(() => ({}))
-    throw new Error((body as { detail?: string }).detail || `HTTP ${resp.status}`)
+    const body = (await resp.json().catch(() => ({}))) as { detail?: unknown }
+    const message =
+      typeof body.detail === "string" ? body.detail : `HTTP ${resp.status}`
+    throw new ApiError(message, resp.status, body.detail)
   }
   return resp.json() as Promise<T>
 }
@@ -186,7 +202,7 @@ export async function updateSceneDevice(
   deviceId: string,
   opts: {
     position?: [number, number, number]
-    geometry?: string
+    geometry?: "point" | "strip" | "matrix"
     direction?: number[]
     length?: number
     led_count?: number
@@ -226,5 +242,101 @@ export async function setTransport(
     method: "PUT",
     body: JSON.stringify({ state }),
   })
+}
+
+// Multi-scene
+export async function listScenes(): Promise<SceneListItem[]> {
+  return fetchJson("/scenes")
+}
+
+export async function createScene(name: string): Promise<SceneListItem> {
+  return fetchJson("/scenes", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function updateScene(
+  sceneId: string,
+  updates: {
+    name?: string
+    mapping_type?: "linear" | "radial"
+    effect_mode?: "independent" | "shared"
+    mapping_params?: Record<string, unknown>
+  },
+): Promise<SceneListItem> {
+  return fetchJson(`/scenes/${encodeURIComponent(sceneId)}`, {
+    method: "PUT",
+    body: JSON.stringify(updates),
+  })
+}
+
+export async function deleteScene(sceneId: string): Promise<void> {
+  await fetchJson(`/scenes/${encodeURIComponent(sceneId)}`, {
+    method: "DELETE",
+  })
+}
+
+export async function activateScene(sceneId: string): Promise<void> {
+  await fetchJson(`/scenes/${encodeURIComponent(sceneId)}/activate`, {
+    method: "POST",
+  })
+}
+
+export async function deactivateScene(sceneId: string): Promise<void> {
+  await fetchJson(`/scenes/${encodeURIComponent(sceneId)}/deactivate`, {
+    method: "POST",
+  })
+}
+
+export async function getSceneDetail(sceneId: string): Promise<SceneDetail> {
+  return fetchJson(`/scenes/${encodeURIComponent(sceneId)}`)
+}
+
+export async function getSceneEffect(sceneId: string): Promise<SceneEffect> {
+  return fetchJson(`/scenes/${encodeURIComponent(sceneId)}/effect`)
+}
+
+export async function setSceneEffect(
+  sceneId: string,
+  effectName: string,
+  params: Record<string, unknown>,
+): Promise<SceneEffect> {
+  return fetchJson(`/scenes/${encodeURIComponent(sceneId)}/effect`, {
+    method: "PUT",
+    body: JSON.stringify({ effect_name: effectName, params }),
+  })
+}
+
+export async function updateScenePlacement(
+  sceneId: string,
+  deviceName: string,
+  opts: {
+    position?: [number, number, number]
+    geometry?: "point" | "strip" | "matrix"
+    direction?: number[]
+    length?: number
+    led_count?: number
+  },
+): Promise<void> {
+  await fetchJson(
+    `/scenes/${encodeURIComponent(sceneId)}/devices/${encodeURIComponent(deviceName)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(opts),
+    },
+  )
+}
+
+export async function deleteScenePlacement(
+  sceneId: string,
+  deviceName: string,
+): Promise<void> {
+  await fetchJson(
+    `/scenes/${encodeURIComponent(sceneId)}/devices/${encodeURIComponent(deviceName)}`,
+    {
+      method: "DELETE",
+    },
+  )
 }
 

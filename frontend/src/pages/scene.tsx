@@ -1,12 +1,14 @@
-import { useRef, useState, useCallback } from "react"
+import { useRef, useState, useCallback, useMemo, useEffect } from "react"
 import { toast } from "sonner"
 import * as THREE from "three"
 import { useScene } from "@/hooks/use-scene"
+import { useScenes } from "@/hooks/use-scenes"
 import { useDevices } from "@/hooks/use-devices"
 import SceneViewport from "@/components/scene/scene-viewport"
 import DeviceMesh from "@/components/scene/device-mesh"
 import BoundsBox from "@/components/scene/bounds-box"
 import DeviceListPanel from "@/components/scene/device-list-panel"
+import ScenesPanel from "@/components/scene/scenes-panel"
 import PropertiesPanel from "@/components/scene/properties-panel"
 import SceneToolbar from "@/components/scene/scene-toolbar"
 import MappingPreview from "@/components/scene/mapping-preview"
@@ -49,8 +51,27 @@ function clampToBounds(
 }
 
 export default function ScenePage() {
-  const { scene, loading, movePlacement, removePlacement, changeMapping, addPlacement } = useScene()
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const { devices, frameData } = useDevices()
+  const { activate, deactivate, scenes: allScenes, create, rename, remove, setEffectMode } = useScenes(devices)
+  const { scene, loading, error, refresh: refreshScene, movePlacement, removePlacement, changeMapping, addPlacement } = useScene(selectedSceneId)
+
+  const scenes = allScenes
+
+  // Auto-select the first scene once the list arrives (the editor edits DB
+  // scenes; a null selection targets the legacy in-memory scene, which is
+  // empty in normal DB-backed runs).
+  const autoSelectedRef = useRef(false)
+  useEffect(() => {
+    if (!autoSelectedRef.current && selectedSceneId === null && scenes.length > 0) {
+      autoSelectedRef.current = true
+      setSelectedSceneId(scenes.find((s) => s.is_active)?.id ?? scenes[0].id)
+    }
+  }, [scenes, selectedSceneId])
+
+  useEffect(() => {
+    if (error) toast.error(error)
+  }, [error])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedHandle, setSelectedHandle] = useState<MappingHandleId | null>(null)
   const [transformMode, setTransformMode] = useState<"translate" | "rotate">("translate")
@@ -146,6 +167,25 @@ export default function ScenePage() {
     [selectedId, selectedHandle, movePlacement, changeMapping, scene?.mapping?.params, scene?.bounds],
   )
 
+  const handleSelectScene = useCallback((sceneId: string | null) => {
+    setSelectedSceneId(sceneId)
+    setSelectedId(null)
+    setSelectedHandle(null)
+  }, [])
+
+  const makeToggleHandler = useCallback(
+    (action: (id: string) => Promise<boolean>) =>
+      async (sceneId: string): Promise<boolean> => {
+        const ok = await action(sceneId)
+        if (ok && sceneId === selectedSceneId) await refreshScene()
+        return ok
+      },
+    [selectedSceneId, refreshScene],
+  )
+
+  const handleActivateScene = useMemo(() => makeToggleHandler(activate), [makeToggleHandler, activate])
+  const handleDeactivateScene = useMemo(() => makeToggleHandler(deactivate), [makeToggleHandler, deactivate])
+
   const handleSelectDevice = useCallback((deviceId: string | null) => {
     setSelectedId(deviceId)
     setSelectedHandle(null)
@@ -180,7 +220,7 @@ export default function ScenePage() {
     [addPlacement],
   )
 
-  if (loading) {
+  if (loading && !scene) {
     return (
       <div className="flex items-center justify-center h-full">
         <p className="text-muted-foreground">Loading scene...</p>
@@ -211,14 +251,27 @@ export default function ScenePage() {
       />
 
       <div className="flex-1 flex gap-2 min-h-0 p-2">
-        <div className="w-52 shrink-0">
-          <DeviceListPanel
-            placements={placements}
-            allDevices={devices}
-            selectedDeviceId={selectedId}
-            onSelectDevice={handleSelectDevice}
-            onAddDevice={handleAddDevice}
+        <div className="w-52 shrink-0 flex flex-col gap-2 min-h-0">
+          <ScenesPanel
+            scenes={scenes}
+            selectedSceneId={selectedSceneId}
+            onSelectScene={handleSelectScene}
+            onCreate={create}
+            onRename={rename}
+            onDelete={remove}
+            onActivate={handleActivateScene}
+            onDeactivate={handleDeactivateScene}
+            onEffectModeChange={setEffectMode}
           />
+          <div className="flex-1 min-h-0">
+            <DeviceListPanel
+              placements={placements}
+              allDevices={devices}
+              selectedDeviceId={selectedId}
+              onSelectDevice={handleSelectDevice}
+              onAddDevice={handleAddDevice}
+            />
+          </div>
         </div>
 
         <div className="flex-1 min-w-0 rounded-lg border border-border overflow-hidden">

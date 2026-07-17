@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from loguru import logger
 from pydantic import BaseModel
 
 from dj_ledfx.config import save_config
+from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.spatial.geometry import (
     MatrixGeometry,
@@ -17,11 +20,13 @@ from dj_ledfx.spatial.geometry import (
     StripGeometry,
 )
 from dj_ledfx.spatial.mapping import mapping_from_config
+from dj_ledfx.spatial.scene import DevicePlacement, SceneModel, placement_from_row
 from dj_ledfx.web.schemas import (
     CreateSceneRequest,
     GeometrySchema,
     MappingResponse,
     PlacementResponse,
+    SceneDetail,
     SceneListItem,
     SceneResponse,
     UpdateMappingRequest,
@@ -29,9 +34,6 @@ from dj_ledfx.web.schemas import (
     UpdateSceneRequest,
 )
 from dj_ledfx.web.state import get_db
-
-if TYPE_CHECKING:
-    from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
 
 router = APIRouter(prefix="/scene", tags=["scene"])
 
@@ -77,9 +79,7 @@ def _ensure_scene(request: Request) -> SceneModel:
     """Return the scene model, creating an empty one if none exists."""
     scene = request.app.state.scene_model
     if scene is None:
-        from dj_ledfx.spatial.scene import SceneModel as SM
-
-        scene = SM(placements={})
+        scene = SceneModel(placements={})
         request.app.state.scene_model = scene
     return scene
 
@@ -154,8 +154,7 @@ async def get_scene(request: Request) -> SceneResponse:
     compositor: SpatialCompositor | None = request.app.state.compositor
     strip_indices: dict[str, float] = {}
     if compositor is not None:
-        for device_id, indices in compositor.get_strip_indices().items():
-            strip_indices[device_id] = float(indices.mean())
+        strip_indices = _mean_strip_indices(compositor)
 
     placements = [
         _placement_to_response(p, strip_index=strip_indices.get(p.device_id))
@@ -211,8 +210,6 @@ async def update_scene_device(
                 status_code=400,
                 detail="position is required when adding a new device",
             )
-        from dj_ledfx.spatial.scene import DevicePlacement
-
         # Look up real LED count from device manager
         led_count = body.led_count or 1
         device_manager = request.app.state.device_manager
@@ -269,6 +266,25 @@ async def update_mapping(request: Request, body: UpdateMappingRequest) -> Mappin
 # ---------------------------------------------------------------------------
 
 
+def _scene_row_to_item(row: dict[str, Any]) -> SceneListItem:
+    """Build a SceneListItem from a scene DB row."""
+    return SceneListItem(
+        id=row["id"],
+        name=row["name"],
+        is_active=bool(row.get("is_active", 0)),
+        mapping_type=row.get("mapping_type"),
+        effect_mode=row.get("effect_mode"),
+    )
+
+
+def _mean_strip_indices(compositor: SpatialCompositor) -> dict[str, float]:
+    """Compute mean strip index per device from a compositor."""
+    return {
+        device_id: float(indices.mean())
+        for device_id, indices in compositor.get_strip_indices().items()
+    }
+
+
 async def _get_scene_row(db: Any, scene_id: str) -> dict[str, Any]:
     """Load a single scene row by ID or raise 404."""
     row = await db.load_scene_by_id(scene_id)
@@ -289,16 +305,7 @@ async def list_scenes(request: Request) -> list[SceneListItem]:
         db = None
     if db is not None:
         rows = await db.load_scenes()
-        return [
-            SceneListItem(
-                id=row["id"],
-                name=row["name"],
-                is_active=bool(row.get("is_active", 0)),
-                mapping_type=row.get("mapping_type"),
-                effect_mode=row.get("effect_mode"),
-            )
-            for row in rows
-        ]
+        return [_scene_row_to_item(row) for row in rows]
     # Fallback: return in-memory scene as "default"
     scene = _get_scene(request)
     if scene is not None:
@@ -310,34 +317,74 @@ async def list_scenes(request: Request) -> list[SceneListItem]:
 async def create_scene(request: Request, body: CreateSceneRequest) -> SceneListItem:
     db = get_db(request)
     scene_id = str(uuid.uuid4())
-    await db.save_scene(
-        {
-            "id": scene_id,
-            "name": body.name,
-            "mapping_type": body.mapping_type,
-            "effect_mode": body.effect_mode,
-            "is_active": 0,
-        }
-    )
-    return SceneListItem(
-        id=scene_id,
-        name=body.name,
-        is_active=False,
-        mapping_type=body.mapping_type,
-        effect_mode=body.effect_mode,
-    )
+    scene_row: dict[str, Any] = {
+        "id": scene_id,
+        "name": body.name,
+        "mapping_type": body.mapping_type,
+        "effect_mode": body.effect_mode,
+        "is_active": 0,
+    }
+    await db.save_scene(scene_row)
+    return _scene_row_to_item(scene_row)
 
 
-@router_scenes.get("/{scene_id}", response_model=SceneListItem)
-async def get_scene_by_id(request: Request, scene_id: str) -> SceneListItem:
+@router_scenes.get("/{scene_id}", response_model=SceneDetail)
+async def get_scene_by_id(request: Request, scene_id: str) -> SceneDetail:
     db = get_db(request)
     row = await _get_scene_row(db, scene_id)
-    return SceneListItem(
-        id=row["id"],
-        name=row["name"],
-        is_active=bool(row.get("is_active", 0)),
-        mapping_type=row.get("mapping_type"),
-        effect_mode=row.get("effect_mode"),
+    placement_rows = await db.load_scene_placements(scene_id)
+
+    device_manager = request.app.state.device_manager
+    scene_placements: dict[str, DevicePlacement] = {}
+    for p in placement_rows:
+        display_name = p["device_id"]
+        led_count = 1
+        managed = device_manager.get_by_stable_id(p["device_id"])
+        if isinstance(managed, ManagedDevice):
+            display_name = managed.adapter.device_info.name
+            led_count = managed.adapter.led_count
+        scene_placements[display_name] = placement_from_row(
+            p, device_id=display_name, led_count=led_count
+        )
+
+    raw_mapping_type = row.get("mapping_type")
+    mapping_type: Any = raw_mapping_type if raw_mapping_type in {"linear", "radial"} else "linear"
+    mapping_params: dict[str, Any] = json.loads(row.get("mapping_params") or "{}")
+    strip_indices: dict[str, float] = {}
+    bounds = None
+    if scene_placements:
+        model = SceneModel(scene_placements)
+        bounds_min, bounds_max = model.get_bounds()
+        bounds = [bounds_min.tolist(), bounds_max.tolist()]
+        try:
+            mapping = mapping_from_config(
+                {"mapping": mapping_type, "mapping_params": mapping_params}
+            )
+            compositor = SpatialCompositor(model, mapping)
+            strip_indices = _mean_strip_indices(compositor)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Scene {}: invalid mapping_params in DB, degrading strip_indices",
+                row["id"],
+            )
+
+    mapping_response: MappingResponse | None = None
+    # Only return a mapping object when mapping has been explicitly configured:
+    # a fresh scene has mapping_params=NULL in the DB (never persisted via PUT /scenes/{id}).
+    # mapping is "configured" iff params were ever written; mapping_type alone has a DB default
+    if row.get("mapping_params") is not None:
+        mapping_response = MappingResponse(type=mapping_type, params=mapping_params)
+
+    item_fields = _scene_row_to_item(row).model_dump()
+    item_fields["mapping_type"] = mapping_type if row.get("mapping_type") is not None else None
+    return SceneDetail(
+        **item_fields,
+        placements=[
+            _placement_to_response(p, strip_index=strip_indices.get(p.device_id))
+            for p in scene_placements.values()
+        ],
+        mapping=mapping_response,
+        bounds=bounds,
     )
 
 
@@ -356,24 +403,24 @@ async def update_scene(request: Request, scene_id: str, body: UpdateSceneRequest
             409, "Cannot change effect_mode while scene is active. Deactivate first."
         )
 
-    updated: dict[str, Any] = {"id": scene_id}
-    updated["name"] = body.name if body.name is not None else existing["name"]
-    updated["mapping_type"] = (
-        body.mapping_type if body.mapping_type is not None else existing.get("mapping_type")
-    )
-    updated["effect_mode"] = (
-        body.effect_mode if body.effect_mode is not None else existing.get("effect_mode")
-    )
-    updated["is_active"] = existing.get("is_active", 0)
+    if body.mapping_params is not None:
+        effective_type = body.mapping_type or existing.get("mapping_type") or "linear"
+        try:
+            mapping_from_config({"mapping": effective_type, "mapping_params": body.mapping_params})
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=422, detail=f"Invalid mapping_params: {e}") from e
 
+    updated = dict(existing)
+    if body.name is not None:
+        updated["name"] = body.name
+    if body.mapping_type is not None:
+        updated["mapping_type"] = body.mapping_type
+    if body.effect_mode is not None:
+        updated["effect_mode"] = body.effect_mode
+    if body.mapping_params is not None:
+        updated["mapping_params"] = json.dumps(body.mapping_params)
     await db.save_scene(updated)
-    return SceneListItem(
-        id=scene_id,
-        name=updated["name"],
-        is_active=bool(updated["is_active"]),
-        mapping_type=updated["mapping_type"],
-        effect_mode=updated["effect_mode"],
-    )
+    return _scene_row_to_item(updated)
 
 
 @router_scenes.delete("/{scene_id}")
@@ -422,7 +469,14 @@ async def activate_scene(request: Request, scene_id: str) -> dict[str, str]:
 
     pm = getattr(request.app.state, "pipeline_manager", None)
     if pm is not None:
-        await pm.activate_scene(scene_id)
+        if pm.is_scene_active(scene_id):
+            # Self-heal the DB flag and treat as success (idempotent activate).
+            await db.set_scene_active(scene_id)
+            return {"status": "already_active", "scene_id": scene_id}
+        try:
+            await pm.activate_scene(scene_id)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
     await db.set_scene_active(scene_id)
     return {"status": "activated", "scene_id": scene_id}
 
@@ -458,15 +512,20 @@ async def get_scene_effect(request: Request, scene_id: str) -> dict[str, Any]:
 @router_scenes.put("/{scene_id}/effect")
 async def set_scene_effect(
     request: Request, scene_id: str, body: SetSceneEffectRequest
-) -> dict[str, str]:
+) -> dict[str, Any]:
     pm = getattr(request.app.state, "pipeline_manager", None)
     if pm is None:
         raise HTTPException(501, "Pipeline manager not available")
     try:
-        pm.set_scene_effect(scene_id, body.effect_name, body.params)
+        params = pm.set_scene_effect(scene_id, body.effect_name, body.params)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
-    return {"status": "ok", "scene_id": scene_id, "effect_name": body.effect_name}
+    return {
+        "status": "ok",
+        "scene_id": scene_id,
+        "effect_name": body.effect_name,
+        "params": params,
+    }
 
 
 @router_scenes.put("/{scene_id}/devices/{device_name}", response_model=PlacementResponse)
@@ -478,43 +537,28 @@ async def add_or_update_scene_placement(
     await _get_scene_row(db, scene_id)
 
     # Resolve display name to stable_id via DeviceManager, falling back to display name.
-    device_stable_id: str = device_name
-    try:
-        device_manager = request.app.state.device_manager
-        from dj_ledfx.devices.manager import ManagedDevice as _MD
-
-        managed_for_id = device_manager.get_device(device_name)
-        if managed_for_id is not None and isinstance(managed_for_id, _MD):
-            device_stable_id = managed_for_id.adapter.device_info.effective_id
-    except Exception:
-        pass
+    device_manager = request.app.state.device_manager
+    managed = device_manager.get_device(device_name)
+    device_stable_id = device_manager.resolve_stable_id(device_name)
 
     # Ensure the device exists in the DB (required by FK constraint)
     if not await db.device_exists(device_stable_id):
-        # Auto-register device with a minimal record
+        # Auto-register device with a minimal record, enriched from manager if available
         device_record: dict[str, Any] = {
             "id": device_stable_id,
             "name": device_name,
             "backend": "unknown",
         }
-        # Try to get more info from device manager
-        try:
-            device_manager = request.app.state.device_manager
-            from dj_ledfx.devices.manager import ManagedDevice as _MD
-
-            managed = device_manager.get_device(device_name)
-            if managed is not None and isinstance(managed, _MD):
-                info = managed.adapter.device_info
-                device_record["name"] = str(info.name)
-                device_record["backend"] = (
-                    info.device_type.split("_")[0] if info.device_type else "unknown"
-                )
-                device_record["led_count"] = int(managed.adapter.led_count)
-                if info.address:
-                    ip = info.address.split(":")[0] if ":" in info.address else info.address
-                    device_record["ip"] = str(ip)
-        except Exception:
-            pass
+        if managed is not None:
+            info = managed.adapter.device_info
+            device_record["name"] = str(info.name)
+            device_record["backend"] = (
+                info.device_type.split("_")[0] if info.device_type else "unknown"
+            )
+            device_record["led_count"] = int(managed.adapter.led_count)
+            if info.address:
+                ip = info.address.split(":")[0] if ":" in info.address else info.address
+                device_record["ip"] = str(ip)
         await db.upsert_device(device_record)
 
     placement_data: dict[str, Any] = {
@@ -546,15 +590,11 @@ async def add_or_update_scene_placement(
         geo = MatrixGeometry()
 
     led_count = body.led_count or 1
-    device_manager = request.app.state.device_manager
-    managed = device_manager.get_device(device_name)
     if managed is not None:
         led_count = managed.adapter.led_count
 
-    from dj_ledfx.spatial.scene import DevicePlacement as DP
-
-    placement = DP(
-        device_id=device_stable_id,
+    placement = DevicePlacement(
+        device_id=device_name,
         position=tuple(body.position) if body.position else (0.0, 0.0, 0.0),
         geometry=geo,
         led_count=led_count,
@@ -570,5 +610,7 @@ async def remove_scene_placement(
     db = get_db(request)
     await _get_scene_row(db, scene_id)
 
-    await db.delete_placement(scene_id, device_name)
+    # Resolve display name to stable_id (placements are stored by stable_id).
+    device_id = request.app.state.device_manager.resolve_stable_id(device_name)
+    await db.delete_placement(scene_id, device_id)
     return {"status": "removed", "device_name": device_name}

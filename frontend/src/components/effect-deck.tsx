@@ -24,7 +24,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 
-interface EffectDeckProps {
+export interface EffectDeckProps {
   schemas: Record<string, Record<string, EffectParamSchema>>
   activeEffect: string
   activeParams: Record<string, unknown>
@@ -33,7 +33,7 @@ interface EffectDeckProps {
   switchEffect: (name: string) => Promise<void>
   updateParam: (key: string, value: unknown) => Promise<void>
   loadPreset: (name: string) => Promise<void>
-  savePreset: (name: string) => Promise<void>
+  savePreset?: (name: string) => Promise<void>
 }
 
 function ParamControl({
@@ -156,12 +156,13 @@ export function EffectDeck({
 }: EffectDeckProps) {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [presetName, setPresetName] = useState("")
+  const canSave = savePreset !== undefined
 
   const effectNames = Object.keys(schemas)
   const currentSchema = activeEffect ? (schemas[activeEffect] ?? {}) : {}
 
   const handleSavePreset = async () => {
-    if (!presetName.trim()) return
+    if (!presetName.trim() || !savePreset) return
     await savePreset(presetName.trim())
     setSaveDialogOpen(false)
     setPresetName("")
@@ -248,50 +249,54 @@ export function EffectDeck({
                     )}
                   </SelectContent>
                 </Select>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs px-3"
-                  onClick={() => setSaveDialogOpen(true)}
-                  disabled={!activeEffect}
-                >
-                  Save
-                </Button>
+                {canSave && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs px-3"
+                    onClick={() => setSaveDialogOpen(true)}
+                    disabled={!activeEffect}
+                  >
+                    Save
+                  </Button>
+                )}
               </div>
             </div>
           </>
         )}
       </CardContent>
 
-      <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
-        <DialogContent className="sm:max-w-xs">
-          <DialogHeader>
-            <DialogTitle className="text-sm">Save Preset</DialogTitle>
-          </DialogHeader>
-          <div className="py-2">
-            <Input
-              placeholder="Preset name"
-              value={presetName}
-              onChange={(e) => setPresetName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSavePreset()}
-              className="text-sm"
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSaveDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleSavePreset} disabled={!presetName.trim()}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {canSave && (
+        <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+          <DialogContent className="sm:max-w-xs">
+            <DialogHeader>
+              <DialogTitle className="text-sm">Save Preset</DialogTitle>
+            </DialogHeader>
+            <div className="py-2">
+              <Input
+                placeholder="Preset name"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void handleSavePreset()}
+                className="text-sm"
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSaveDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" onClick={() => void handleSavePreset()} disabled={!presetName.trim()}>
+                Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </Card>
   )
 }
