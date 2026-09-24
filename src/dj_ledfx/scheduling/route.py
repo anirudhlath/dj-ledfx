@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
-    from dj_ledfx.effects.engine import RingBuffer
+    from dj_ledfx.effects.ring_buffer import RingBuffer
     from dj_ledfx.types import FloatRGB
 
 
@@ -24,7 +24,6 @@ def to_device_colors(colors: FloatRGB, led_count: int) -> NDArray[np.uint8]:
 
 @dataclass(frozen=True, slots=True)
 class DeviceRoute:
-    zone_id: str
     ring: RingBuffer
     start: int
     stop: int

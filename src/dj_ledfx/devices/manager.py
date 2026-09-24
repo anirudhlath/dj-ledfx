@@ -12,7 +12,6 @@ from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.backend import DeviceBackend
 from dj_ledfx.devices.ghost import GhostAdapter
-from dj_ledfx.events import EventBus
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.types import DeviceGroup, DeviceInfo
 
@@ -26,8 +25,7 @@ class ManagedDevice:
 
 
 class DeviceManager:
-    def __init__(self, event_bus: EventBus) -> None:
-        self._event_bus = event_bus
+    def __init__(self) -> None:
         self._devices: list[ManagedDevice] = []
         self._by_id: dict[str | None, ManagedDevice] = {}  # by stable id; see _index
         self._groups: dict[str, DeviceGroup] = {}
@@ -36,12 +34,6 @@ class DeviceManager:
     @property
     def devices(self) -> list[ManagedDevice]:
         return list(self._devices)
-
-    @property
-    def max_led_count(self) -> int:
-        if not self._devices:
-            return 0
-        return max(d.adapter.led_count for d in self._devices)
 
     def add_device(
         self,

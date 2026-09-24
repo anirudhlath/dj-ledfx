@@ -80,8 +80,8 @@ async def test_takeover_keeps_first_capture_and_off_restores_it(make_home: HomeF
     left = home.manager.running_info("left")
     assert left is not None and left.lights == ("a",)
     assert home.host.runtimes["left"].leds.count == a.led_count
-    assert home.routes.routes["a"].zone_id == "left"
-    assert home.routes.routes["b"].zone_id == "right"
+    assert home.routes.routes["a"].ring is home.host.runtimes["left"].ring
+    assert home.routes.routes["b"].ring is home.host.runtimes["right"].ring
     assert b.names().count("capture") == 1
     saved = {x.zone_id: x.lights for x in await home.store.load_assignments()}
     assert saved == {"left": ("a",), "right": ("b", "c")}
@@ -228,7 +228,7 @@ async def test_a_look_switches_on_a_light_switched_off_while_it_was_idle(
 
     assert lamp.names()[-2:] == ["power", "prepare_stream"]
     assert lamp.power is True
-    assert home.routes.routes["lamp"].zone_id == "z"
+    assert home.routes.routes["lamp"].ring is home.host.runtimes["z"].ring
 
 
 # B1: Off restores a light switched off meanwhile, and leaves it off.

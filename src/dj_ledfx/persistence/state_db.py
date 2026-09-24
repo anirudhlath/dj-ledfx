@@ -386,40 +386,9 @@ class StateDB:
         rows = await self._execute_read(f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes")
         return [dict(zip(self._SCENE_COLUMNS, row, strict=True)) for row in rows]
 
-    async def load_scene_by_id(self, scene_id: str) -> dict[str, Any] | None:
-        """Return a single scene row by ID, or None if not found."""
-        rows = await self._execute_read(
-            f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes WHERE id=?",
-            (scene_id,),
-        )
-        if not rows:
-            return None
-        return dict(zip(self._SCENE_COLUMNS, rows[0], strict=True))
-
-    async def device_exists(self, device_id: str) -> bool:
-        """Return True if a device with the given ID exists."""
-        rows = await self._execute_read("SELECT 1 FROM devices WHERE id=? LIMIT 1", (device_id,))
-        return bool(rows)
-
     async def save_scene(self, data: dict[str, Any]) -> None:
         """Insert or replace a scene record. Must include 'id', 'name'."""
         await self._upsert("scenes", self._SCENE_COLUMNS, data, pk_columns=("id",))
-
-    async def delete_scene(self, scene_id: str) -> None:
-        """Delete a scene and cascade to placements and effect state."""
-        await self._execute_write("DELETE FROM scenes WHERE id=?", (scene_id,))
-
-    async def set_scene_active(self, scene_id: str) -> None:
-        """Set a single scene as active without touching other scenes.
-
-        Multiple scenes may run concurrently; this method only flips the given
-        scene to is_active=1.  Use set_scene_inactive() to deactivate a scene.
-        """
-        await self._execute_write("UPDATE scenes SET is_active=1 WHERE id=?", (scene_id,))
-
-    async def set_scene_inactive(self, scene_id: str) -> None:
-        """Deactivate a single scene without affecting other scenes."""
-        await self._execute_write("UPDATE scenes SET is_active=0 WHERE id=?", (scene_id,))
 
     async def load_scene_effect_state(self, scene_id: str) -> dict[str, str] | None:
         """Return effect class + params for a scene, or None if unset."""
@@ -454,13 +423,6 @@ class StateDB:
             self._PLACEMENT_COLUMNS,
             data,
             pk_columns=("scene_id", "device_id"),
-        )
-
-    async def delete_placement(self, scene_id: str, device_id: str) -> None:
-        """Remove a device from a scene's placement list."""
-        await self._execute_write(
-            "DELETE FROM scene_placements WHERE scene_id=? AND device_id=?",
-            (scene_id, device_id),
         )
 
     async def load_presets(self) -> list[dict[str, str]]:

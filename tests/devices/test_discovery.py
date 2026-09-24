@@ -19,7 +19,7 @@ def event_bus():
 
 @pytest.fixture
 def device_manager(event_bus):
-    return DeviceManager(event_bus=event_bus)
+    return DeviceManager()
 
 
 @pytest.fixture

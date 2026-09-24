@@ -7,8 +7,6 @@ from dj_ledfx.events import (
     DeviceOfflineEvent,
     DeviceOnlineEvent,
     EventBus,
-    SceneActivatedEvent,
-    SceneDeactivatedEvent,
 )
 
 
@@ -86,16 +84,6 @@ def test_device_online_event():
 def test_device_offline_event():
     e = DeviceOfflineEvent(stable_id="lifx:aabb", name="LIFX Strip")
     assert e.stable_id == "lifx:aabb"
-
-
-def test_scene_activated_event():
-    e = SceneActivatedEvent(scene_id="dj-booth")
-    assert e.scene_id == "dj-booth"
-
-
-def test_scene_deactivated_event():
-    e = SceneDeactivatedEvent(scene_id="dj-booth")
-    assert e.scene_id == "dj-booth"
 
 
 def test_event_bus_emits_new_event_types(event_bus):

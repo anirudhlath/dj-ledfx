@@ -195,7 +195,7 @@ async def _run(args: argparse.Namespace) -> None:
         logger.info("Starting Pro DJ Link listener")
         await start_listener(event_bus=event_bus)
 
-    device_manager = DeviceManager(event_bus=event_bus)
+    device_manager = DeviceManager()
     registered_devices = await state_db.load_devices()
     for dev_row in registered_devices:
         led_count = dev_row.get("led_count") or 60

@@ -37,16 +37,6 @@ class DeviceOfflineEvent:
     name: str
 
 
-@dataclass(frozen=True, slots=True)
-class SceneActivatedEvent:
-    scene_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class SceneDeactivatedEvent:
-    scene_id: str
-
-
 class EventBus:
     def __init__(self) -> None:
         self._subscribers: dict[type, list[Callable[..., Any]]] = defaultdict(list)

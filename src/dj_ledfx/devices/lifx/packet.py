@@ -376,12 +376,6 @@ def parse_state_host_firmware(payload: bytes) -> tuple[int, int]:
     return int(major), int(minor)
 
 
-def parse_state_unhandled(payload: bytes) -> int:
-    """StateUnhandled(223) -> the message type the light didn't handle."""
-    (unhandled,) = struct.unpack("<H", payload[:2])
-    return int(unhandled)
-
-
 # --- Color conversion ---
 
 

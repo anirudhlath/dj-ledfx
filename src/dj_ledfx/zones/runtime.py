@@ -15,9 +15,9 @@ import numpy as np
 from loguru import logger
 
 from dj_ledfx.effects.context import render_context
-from dj_ledfx.effects.engine import RingBuffer
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.ledset import DeviceSlice, LedSource, build_ledset
+from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.looks.model import (
     Layer,
     Look,
@@ -125,7 +125,7 @@ class ZoneRuntime:
         self._ticks = 0
         self._rendered: deque[float] = deque()
         self._below_since: float | None = None
-        self.ring = RingBuffer(capacity=int(max_lookahead_s * fps) + 2, led_count=0)
+        self.ring = RingBuffer(capacity=int(max_lookahead_s * fps) + 2)
         self.leds = build_ledset([])
         self.set_lights(lights)
         self._compile()
@@ -193,7 +193,6 @@ class ZoneRuntime:
         if piece is None or piece.count == 0:
             return None
         return DeviceRoute(
-            zone_id=self.zone_id,
             ring=self.ring,
             start=piece.start,
             stop=piece.stop,
@@ -209,7 +208,7 @@ class ZoneRuntime:
             [LedSource(light.device_id, light.led_count, light.geometry) for light in self._lights]
         )
         self._slices = {piece.device_id: piece for piece in self.leds.slices}
-        self.ring = RingBuffer(capacity=self.ring.capacity, led_count=self.leds.count)
+        self.ring = RingBuffer(capacity=self.ring.capacity)
         self._emulated &= set(self._slices)
         self._plan_claims()
 

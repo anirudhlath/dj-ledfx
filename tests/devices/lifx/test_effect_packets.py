@@ -16,7 +16,6 @@ from dj_ledfx.devices.lifx.packet import (
     parse_state_host_firmware,
     parse_state_multizone_effect,
     parse_state_tile_effect,
-    parse_state_unhandled,
 )
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "lifx"
@@ -106,7 +105,3 @@ def test_parse_state_multizone_effect() -> None:
 
 def test_parse_state_host_firmware() -> None:
     assert parse_state_host_firmware(load_hex("state_host_firmware.hex")) == (3, 90)
-
-
-def test_parse_state_unhandled() -> None:
-    assert parse_state_unhandled(b"\xcf\x02") == 719

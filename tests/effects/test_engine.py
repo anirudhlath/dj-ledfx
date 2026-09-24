@@ -8,7 +8,8 @@ import pytest
 import dj_ledfx.metrics as metrics_mod
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.capabilities import DeviceCapabilities
-from dj_ledfx.effects.engine import EffectEngine, RingBuffer
+from dj_ledfx.effects.engine import EffectEngine
+from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
@@ -23,7 +24,7 @@ def clock() -> BeatClock:
 
 
 def test_ring_buffer_write_and_read() -> None:
-    buf = RingBuffer(capacity=10, led_count=5)
+    buf = RingBuffer(capacity=10)
     frame = RenderedFrame(
         colors=np.zeros((5, 3), dtype=np.uint8),
         target_time=100.0,
@@ -37,7 +38,7 @@ def test_ring_buffer_write_and_read() -> None:
 
 
 def test_ring_buffer_find_nearest() -> None:
-    buf = RingBuffer(capacity=60, led_count=5)
+    buf = RingBuffer(capacity=60)
     for i in range(10):
         frame = RenderedFrame(
             colors=np.zeros((5, 3), dtype=np.uint8),
@@ -53,7 +54,7 @@ def test_ring_buffer_find_nearest() -> None:
 
 
 def test_ring_buffer_returns_copy() -> None:
-    buf = RingBuffer(capacity=10, led_count=5)
+    buf = RingBuffer(capacity=10)
     colors = np.full((5, 3), 42, dtype=np.uint8)
     frame = RenderedFrame(colors=colors, target_time=100.0, beat_phase=0.0, bar_phase=0.0)
     buf.write(frame)
@@ -67,7 +68,7 @@ def test_ring_buffer_returns_copy() -> None:
 
 
 def test_ring_buffer_empty_returns_none() -> None:
-    buf = RingBuffer(capacity=10, led_count=5)
+    buf = RingBuffer(capacity=10)
     assert buf.find_nearest(100.0) is None
 
 

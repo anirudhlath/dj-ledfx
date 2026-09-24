@@ -141,7 +141,7 @@ async def assemble(
 ) -> Home:
     """The app's objects around an open state.db and a set of lights."""
     bus = EventBus()
-    devices = DeviceManager(event_bus=bus)
+    devices = DeviceManager()
     for light in lights:
         tracker = LatencyTracker(strategy=StaticLatency(20.0))
         if not ghosts:

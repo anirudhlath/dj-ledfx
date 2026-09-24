@@ -36,14 +36,17 @@ async def test_resume_never_powers_on_and_switched_off_lights_rejoin(
     assert info is not None and info.lights == ("a", "b") and info.state == "running"
     assert a.calls == []  # not captured again, not switched on
     assert b.names() == ["prepare_stream"]
-    assert "a" not in home.routes.routes and home.routes.routes["b"].zone_id == "z"
+    assert (
+        "a" not in home.routes.routes
+        and home.routes.routes["b"].ring is home.host.runtimes["z"].ring
+    )
     assert home.manager.power_of("a") is False
 
     a.power = True
     await home.manager.on_power_reading("a", True)  # the light monitor sees it back on
 
     assert a.names() == ["prepare_stream"]
-    assert home.routes.routes["a"].zone_id == "z"
+    assert home.routes.routes["a"].ring is home.host.runtimes["z"].ring
     assert home.host.runtimes["z"].leds.count == 8  # it kept its LEDs while it was off
 
 
@@ -96,7 +99,7 @@ async def test_resume_replays_take_overs_oldest_first(make_home: HomeFactory) ->
         ("left", ("a",)),
         ("right", ("b", "c")),
     ]
-    assert home.routes.routes["b"].zone_id == "right"
+    assert home.routes.routes["b"].ring is home.host.runtimes["right"].ring
     assert all("capture" not in light.names() for light in (a, b, c))
 
 

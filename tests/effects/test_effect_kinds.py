@@ -16,7 +16,6 @@ from dj_ledfx.effects.firmware import FirmwareEffect, Params
 from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.registry import (
-    create_strip_effect,
     get_effect_class,
     get_effect_schemas,
     get_strip_effect_classes,
@@ -116,17 +115,6 @@ def test_schemas_cover_strip_effects_only() -> None:
 def test_unknown_kinds_raise_key_error() -> None:
     with pytest.raises(KeyError):
         get_effect_class("no_such_effect")
-    with pytest.raises(KeyError):
-        create_strip_effect("no_such_effect")
-
-
-def test_create_strip_effect_refuses_other_kinds() -> None:
-    class ProbeField2(FieldEffect):
-        def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
-            return np.zeros((leds.count, 3), dtype=np.float32)
-
-    with pytest.raises(KeyError, match="strip"):
-        create_strip_effect("probe_field2")
 
 
 def test_strip_adapter_plays_the_strip_along_the_leds_in_order() -> None:

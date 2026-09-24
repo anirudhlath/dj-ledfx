@@ -79,7 +79,6 @@ def test_constructor_validation():
 
 
 from dj_ledfx.effects.registry import (  # noqa: E402
-    create_effect,
     get_effect_classes,
     get_effect_schemas,
     get_strip_effect_classes,
@@ -95,16 +94,6 @@ def test_get_effect_schemas():
     schemas = get_effect_schemas()
     assert "beat_pulse" in schemas
     assert "gamma" in schemas["beat_pulse"]
-
-
-def test_create_effect():
-    effect = create_effect("beat_pulse", gamma=3.0)
-    assert effect.get_params()["gamma"] == 3.0
-
-
-def test_create_effect_unknown():
-    with pytest.raises(KeyError):
-        create_effect("nonexistent_effect")
 
 
 def test_all_registered_effects_render_with_defaults():

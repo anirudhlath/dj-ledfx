@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from dj_ledfx.effects.engine import RingBuffer
+from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.scheduling.route import DeviceRoute, to_device_colors
 from dj_ledfx.types import RenderedFrame
 
@@ -20,20 +20,20 @@ def test_to_device_colors_clamps_rounds_and_fits_the_device() -> None:
 
 
 def test_a_route_reads_its_slice_of_the_nearest_frame() -> None:
-    ring = RingBuffer(capacity=4, led_count=5)
+    ring = RingBuffer(capacity=4)
     colors = np.linspace(0.0, 1.0, 15, dtype=np.float32).reshape(5, 3)
     ring.write(_frame(colors, 10.0))
     ring.write(_frame(np.zeros((5, 3), dtype=np.float32), 11.0))
-    route = DeviceRoute(zone_id="z", ring=ring, start=1, stop=3, streaming=True)
+    route = DeviceRoute(ring=ring, start=1, stop=3, streaming=True)
     out = route.colors_at(10.1, 2)
     assert out is not None
     assert out.tolist() == to_device_colors(colors[1:3], 2).tolist()
 
 
 def test_a_route_never_reads_past_the_end_of_a_frame() -> None:
-    ring = RingBuffer(capacity=4, led_count=2)
+    ring = RingBuffer(capacity=4)
     ring.write(_frame(np.zeros((2, 3), dtype=np.float32), 1.0))
-    too_long = DeviceRoute(zone_id="z", ring=ring, start=1, stop=3, streaming=True)
+    too_long = DeviceRoute(ring=ring, start=1, stop=3, streaming=True)
     assert too_long.colors_at(1.0, 2) is None
-    empty = DeviceRoute(zone_id="z", ring=RingBuffer(4, 2), start=0, stop=2, streaming=True)
+    empty = DeviceRoute(ring=RingBuffer(4), start=0, stop=2, streaming=True)
     assert empty.colors_at(1.0, 2) is None

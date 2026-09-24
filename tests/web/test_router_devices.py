@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.manager import DeviceManager
-from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.persistence.state_db import StateDB
@@ -16,7 +15,7 @@ from dj_ledfx.web.app import create_app
 
 @pytest.fixture
 def client():
-    manager = DeviceManager(EventBus())
+    manager = DeviceManager()
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
     app = create_app(
@@ -36,7 +35,7 @@ def client():
 @pytest.fixture
 def client_with_device():
     """Client with one real device registered."""
-    manager = DeviceManager(EventBus())
+    manager = DeviceManager()
     info = DeviceInfo(
         name="Strip1",
         device_type="lifx_strip",
@@ -97,7 +96,7 @@ def test_groups_crud(client):
 
 def test_scan_endpoint_fallback():
     """POST /devices/scan with no orchestrator falls back to legacy rediscover."""
-    manager = DeviceManager(EventBus())
+    manager = DeviceManager()
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
     # Mock manager.rediscover to avoid real network calls
@@ -122,7 +121,7 @@ def test_scan_endpoint_fallback():
 
 def test_scan_endpoint_with_orchestrator():
     """POST /devices/scan uses DiscoveryOrchestrator when available."""
-    manager = DeviceManager(EventBus())
+    manager = DeviceManager()
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
 
@@ -167,7 +166,7 @@ def test_delete_device_persists_to_db(tmp_path):
     db = StateDB(tmp_path / "state.db")
     asyncio.run(db.open())
 
-    manager = DeviceManager(EventBus())
+    manager = DeviceManager()
     info = DeviceInfo(
         name="Strip1",
         device_type="lifx_strip",
