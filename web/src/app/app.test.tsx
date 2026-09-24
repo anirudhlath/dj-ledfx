@@ -3,13 +3,21 @@ import userEvent from '@testing-library/user-event'
 import { useEffect } from 'react'
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AppError } from '@/pages/app-error'
-import { AppShell } from '@/shell/app-shell'
 import { setViewportWidth } from '@/test/viewport'
 import { routes } from './routes'
 
-/** The real shell around test-only pages. */
-const inShell = (children: RouteObject[]): RouteObject[] => [{ element: <AppShell />, errorElement: <AppError />, children }]
+/** The real routes, with one test-only page beside the real pages. */
+function withPage(page: RouteObject): RouteObject[] {
+  const add = (list: RouteObject[]): RouteObject[] =>
+    list.some((route) => route.path === '*')
+      ? [page, ...list]
+      : list.map((route) => (route.children ? { ...route, children: add(route.children) } : route))
+  return add(routes)
+}
+
+function Broken(): never {
+  throw new Error('boom')
+}
 
 function renderApp(path: string, routeList: RouteObject[] = routes) {
   const router = createMemoryRouter(routeList, { basename: '/next', initialEntries: [path] })
@@ -52,14 +60,29 @@ describe('routes', () => {
     expect(router.state.location.pathname).toBe('/next/live')
   })
 
-  it('shows its own error page when a screen throws', async () => {
+  // Review focus: a page that throws gets a calm error with Reload, and the chrome stays, so the
+  // rest of the app is still a click away.
+  it('shows its own error page inside the shell when a page throws', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    function Broken(): never {
-      throw new Error('boom')
-    }
-    renderApp('/next/broken', inShell([{ path: 'broken', element: <Broken /> }]))
-    expect(await screen.findByRole('heading', { name: 'Something broke' })).toBeInTheDocument()
+    renderApp('/next/broken', withPage({ path: 'broken', element: <Broken /> }))
+    const heading = await screen.findByRole('heading', { name: 'Something broke' })
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(screen.getByRole('main')).toContainElement(heading)
+  })
+
+  // The test above mutes console.error; every later test must get it back.
+  it('leaves console.error unmocked for the tests after it', () => {
+    expect(vi.isMockFunction(console.error)).toBe(false)
+  })
+
+  it('shows a whole-page error, with its own landmark, when the shell itself throws', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    renderApp('/next/live', [{ ...routes[0], element: <Broken /> }])
+    const main = await screen.findByRole('main')
+    expect(within(main).getByRole('heading', { level: 1, name: 'Something broke' })).toBeInTheDocument()
+    expect(within(main).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    expect(document.title).toBe('Something broke · dj-ledfx')
   })
 })
 
@@ -149,7 +172,7 @@ it('swaps the chrome live across the breakpoint without remounting the page', as
     }, [])
     return <p>probe</p>
   }
-  renderApp('/next/live', inShell([{ path: 'live', element: <Probe /> }]))
+  renderApp('/next/probe', withPage({ path: 'probe', element: <Probe /> }))
   expect(await screen.findByText('probe')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'dj-ledfx home' })).toBeInTheDocument()
 

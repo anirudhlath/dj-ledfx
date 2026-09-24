@@ -23,5 +23,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // A spy (a muted console.error, say) ends with the test that made it.
+    restoreMocks: true,
   },
 })
