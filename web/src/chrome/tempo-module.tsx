@@ -42,10 +42,12 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
           <span className="sr-only"> BPM</span>
         </span>
         {pips}
+        {/* The face is Phone-Live.png's. ::before stretches the hit area to --touch-min (§6); its
+            box is the padding box, inside the border, so the overhang is measured from 100%. */}
         <button
           type="button"
           onClick={onTap}
-          className="h-10 rounded-[9px] border border-line-strong bg-control-hover px-4 text-size-control font-bold tracking-[0.06em] uppercase"
+          className="relative h-10 rounded-[9px] border border-line-strong bg-control-hover px-4 text-size-control font-bold tracking-[0.06em] uppercase before:absolute before:inset-x-0 before:inset-y-[calc((100%_-_var(--touch-min))/2)]"
         >
           Tap
         </button>

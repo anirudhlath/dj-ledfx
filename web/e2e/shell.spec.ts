@@ -144,3 +144,21 @@ test('the tempo module keeps TAP inside, whatever the source', async ({ page }, 
     expect(await spill(group), `Tempo group ${i + 1}`).toBeLessThanOrEqual(0)
   }
 })
+
+// §6: touch targets are at least 44 px on phone. TAP keeps Phone-Live.png's 40 px face, and its
+// hit area fills a 44 px band centred on it.
+test('TAP answers a touch anywhere in a 44 px band on phone', async ({ page }, { project }) => {
+  test.skip(project.name !== 'phone', 'the 44 px minimum is a phone rule')
+  await open(page, '/next/live')
+  const box = await page.getByRole('group', { name: 'Tempo' }).getByRole('button', { name: 'Tap' }).boundingBox()
+  if (!box) throw new Error('TAP is not on screen')
+  const [x, middle] = [box.x + box.width / 2, box.y + box.height / 2]
+  const hits = await page.evaluate(
+    (points) => points.map(([px, py]) => document.elementFromPoint(px, py)?.closest('button')?.textContent ?? null),
+    [
+      [x, middle - 21.5],
+      [x, middle + 21.5],
+    ],
+  )
+  expect(hits).toEqual(['Tap', 'Tap'])
+})
