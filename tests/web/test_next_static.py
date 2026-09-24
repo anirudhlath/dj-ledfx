@@ -78,6 +78,21 @@ def test_other_files_in_dist_are_served(tree: Path) -> None:
     response = _client(tree).get("/next/favicon.svg")
     assert response.status_code == 200
     assert response.text == "<svg/>"
+    assert response.headers["cache-control"] == "no-cache"
+
+
+# A NUL byte can't name a file. It gets the app, like any other unknown path, not a 500.
+def test_a_nul_byte_gets_the_index(tree: Path) -> None:
+    response = _client(tree).get("/next/%00")
+    assert response.status_code == 200
+    assert response.text == NEW_INDEX
+
+
+# The cache rule follows the file served, not the path that reached it.
+def test_the_index_reached_through_assets_is_not_cached(tree: Path) -> None:
+    response = _client(tree).get("/next/assets/..%2findex.html")
+    assert response.text == NEW_INDEX
+    assert response.headers["cache-control"] == "no-cache"
 
 
 @pytest.mark.parametrize(

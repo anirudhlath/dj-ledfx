@@ -26,9 +26,12 @@ if TYPE_CHECKING:
 
 
 def _file_within(root: Path, relative: str) -> Path | None:
-    """The file at root/relative, or None when it is missing or the path leaves root."""
+    """The file at root/relative, or None when it is missing, leaves root or can't be a path."""
     base = root.resolve()
-    candidate = (base / relative).resolve()
+    try:
+        candidate = (base / relative).resolve()
+    except ValueError:  # A NUL byte, or a name the filesystem can't encode.
+        return None
     if candidate.is_relative_to(base) and candidate.is_file():
         return candidate
     return None
@@ -49,8 +52,11 @@ def _next_response(dist: Path, path: str) -> FileResponse:
     if path:
         found = _file_within(dist, path)
         if found is not None:
-            cache = _IMMUTABLE if path.startswith("assets/") else "no-cache"
-            return FileResponse(found, headers={"Cache-Control": cache})
+            # Judged by the file served: assets/..%2findex.html is still the index.
+            hashed = found.is_relative_to(dist.resolve() / "assets")
+            return FileResponse(
+                found, headers={"Cache-Control": _IMMUTABLE if hashed else "no-cache"}
+            )
         if path.startswith("assets/"):
             raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(index, headers={"Cache-Control": "no-cache"})

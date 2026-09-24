@@ -53,6 +53,13 @@ def test_encoded_dot_segments_fall_back_to_the_app(client: TestClient, path: str
     assert response.text == INDEX
 
 
+def test_a_nul_byte_falls_back_to_the_app(client: TestClient) -> None:
+    """A NUL byte can't name a file, so the path gets the app rather than a 500."""
+    response = client.get("/%00")
+    assert response.status_code == 200
+    assert response.text == INDEX
+
+
 def test_encoded_dot_segments_under_assets_are_not_found(client: TestClient) -> None:
     """/assets is Starlette's StaticFiles mount, which refuses paths that leave it."""
     response = client.get("/assets%2f..%2f..%2f..%2fsecret.txt")
