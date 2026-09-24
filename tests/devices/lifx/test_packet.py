@@ -3,6 +3,7 @@ from __future__ import annotations
 import struct
 
 import numpy as np
+import pytest
 
 from dj_ledfx.devices.lifx.packet import (
     LifxPacket,
@@ -200,34 +201,52 @@ class TestPayloadParsers:
         assert len(colors) == 10
         assert colors[0] == (100, 200, 300, 3500)
 
-    def test_parse_state_device_chain(self) -> None:
-        header = struct.pack("<BB", 0, 1)
-        tile_data = struct.pack(
-            "<hhhh ff BB x III QQ HH I",
-            100,
-            -200,
-            9800,
-            0,
-            1.0,
-            2.5,
-            8,
-            8,
-            1,
-            55,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
-        payload = header + tile_data
+    @staticmethod
+    def _chain_payload(tiles: list[tuple[int, int, float, float]]) -> bytes:
+        """StateDeviceChain as documented: start_index, 16 slots of 55 bytes, count."""
+        slots = b""
+        for width, height, user_x, user_y in tiles:
+            slots += struct.pack(
+                "<hhh2sffBBBII4sQ8sHH4s",
+                10,
+                -20,
+                980,
+                b"\x00\x00",
+                user_x,
+                user_y,
+                width,
+                height,
+                0,
+                1,
+                57,
+                b"\x00" * 4,
+                0,
+                b"\x00" * 8,
+                90,
+                3,
+                b"\x00" * 4,
+            )
+        slots = slots.ljust(16 * 55, b"\x00")
+        return struct.pack("<B", 0) + slots + struct.pack("<B", len(tiles))
+
+    def test_parse_state_device_chain_single_candle(self) -> None:
+        payload = self._chain_payload([(5, 6, 0.0, 0.0)])
+        assert len(payload) == 882
         tiles = parse_state_device_chain(payload)
         assert len(tiles) == 1
-        assert tiles[0].width == 8
-        assert tiles[0].height == 8
-        assert abs(tiles[0].user_x - 1.0) < 0.01
-        assert abs(tiles[0].user_y - 2.5) < 0.01
+        assert (tiles[0].width, tiles[0].height) == (5, 6)
+        assert (tiles[0].accel_x, tiles[0].accel_y, tiles[0].accel_z) == (10, -20, 980)
+
+    def test_parse_state_device_chain_two_tiles(self) -> None:
+        tiles = parse_state_device_chain(self._chain_payload([(8, 8, 0.0, 0.0), (8, 8, 1.0, 0.5)]))
+        assert [(t.width, t.height, t.user_x, t.user_y) for t in tiles] == [
+            (8, 8, 0.0, 0.0),
+            (8, 8, 1.0, 0.5),
+        ]
+
+    def test_parse_state_device_chain_rejects_short_payloads(self) -> None:
+        with pytest.raises(ValueError):
+            parse_state_device_chain(b"\x00\x01" + b"\x00" * 55)
 
 
 class TestColorConversion:

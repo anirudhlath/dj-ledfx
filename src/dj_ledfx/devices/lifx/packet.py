@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -12,6 +14,68 @@ if TYPE_CHECKING:
 
 HEADER_SIZE = 36
 PROTOCOL = 1024
+
+# --- Message types (LIFX LAN protocol) ---
+GET_HOST_FIRMWARE = 14
+STATE_HOST_FIRMWARE = 15
+GET_VERSION = 32
+STATE_VERSION = 33
+GET_COLOR = 101
+SET_COLOR = 102
+SET_WAVEFORM = 103
+LIGHT_STATE = 107
+SET_LIGHT_POWER = 117
+STATE_UNHANDLED = 223
+GET_MULTIZONE_EFFECT = 507
+SET_MULTIZONE_EFFECT = 508
+STATE_MULTIZONE_EFFECT = 509
+SET_EXTENDED_COLOR_ZONES = 510
+GET_DEVICE_CHAIN = 701
+STATE_DEVICE_CHAIN = 702
+GET_TILE_EFFECT = 718
+SET_TILE_EFFECT = 719
+STATE_TILE_EFFECT = 720
+
+HSBK = tuple[int, int, int, int]
+TILE_EFFECT_PALETTE_MAX = 16
+DEVICE_CHAIN_SLOTS = 16
+TILE_ENTRY_SIZE = 55
+
+
+class TileEffectType(IntEnum):
+    OFF = 0
+    MORPH = 2
+    FLAME = 3
+    SKY = 5
+
+
+class MultiZoneEffectType(IntEnum):
+    OFF = 0
+    MOVE = 1
+
+
+class Waveform(IntEnum):
+    SAW = 0
+    SINE = 1
+    HALF_SINE = 2
+    TRIANGLE = 3
+    PULSE = 4
+
+
+@dataclass(frozen=True, slots=True)
+class TileEffectState:
+    instance_id: int
+    effect: int  # a TileEffectType value; unknown values are kept as they are
+    speed_ms: int
+    palette: tuple[HSBK, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MultiZoneEffectState:
+    instance_id: int
+    effect: int  # a MultiZoneEffectType value
+    speed_ms: int
+    reverse: bool
 
 
 @dataclass
@@ -150,6 +214,66 @@ def build_set_extended_color_zones(
     return header + color_data
 
 
+def build_set_tile_effect(
+    effect: TileEffectType,
+    speed_ms: int,
+    palette: Sequence[HSBK] = (),
+    *,
+    instance_id: int = 0,
+    duration_ns: int = 0,
+) -> bytes:
+    """SetTileEffect(719) payload, 188 bytes. Flame ignores the palette; Morph uses it."""
+    colors = list(palette)[:TILE_EFFECT_PALETTE_MAX]
+    head = struct.pack("<BBIBIQII", 0, 0, instance_id, int(effect), speed_ms, duration_ns, 0, 0)
+    body = b"".join(struct.pack("<4H", *c) for c in colors)
+    return (
+        head
+        + bytes(32)
+        + struct.pack("<B", len(colors))
+        + body.ljust(TILE_EFFECT_PALETTE_MAX * 8, b"\x00")
+    )
+
+
+def build_get_tile_effect() -> bytes:
+    """GetTileEffect(718) payload: two reserved bytes."""
+    return b"\x00\x00"
+
+
+def build_set_multizone_effect(
+    effect: MultiZoneEffectType,
+    speed_ms: int,
+    *,
+    reverse: bool = False,
+    instance_id: int = 0,
+    duration_ns: int = 0,
+) -> bytes:
+    """SetMultiZoneEffect(508) payload, 59 bytes. Move's direction: 0 reversed, 1 forward."""
+    parameters = struct.pack("<II", 0, 0 if reverse else 1) + bytes(24)
+    head = struct.pack("<IBHIQII", instance_id, int(effect), 0, speed_ms, duration_ns, 0, 0)
+    return head + parameters
+
+
+def build_set_waveform(
+    hsbk: HSBK,
+    period_ms: int,
+    cycles: float,
+    waveform: Waveform,
+    *,
+    transient: bool = True,
+    skew_ratio: float = 0.5,
+) -> bytes:
+    """SetWaveform(103) payload, 21 bytes. skew_ratio 0..1 is PULSE's duty cycle."""
+    skew = max(-32768, min(32767, round(skew_ratio * 65535) - 32768))
+    return struct.pack(
+        "<BB4HIfhB", 0, int(transient), *hsbk, period_ms, cycles, skew, int(waveform)
+    )
+
+
+def build_set_light_power(on: bool, duration_ms: int = 0) -> bytes:
+    """SetLightPower(117) payload, 6 bytes."""
+    return struct.pack("<HI", 65535 if on else 0, duration_ms)
+
+
 # --- Payload parsers ---
 
 
@@ -185,37 +309,73 @@ def parse_state_extended_color_zones(
     return zone_count, zone_index, colors
 
 
-def parse_state_device_chain(
-    payload: bytes,
-) -> list[TileInfo]:
-    """Parse StateDeviceChain(702) → list of TileInfo."""
+def parse_state_device_chain(payload: bytes) -> list[TileInfo]:
+    """StateDeviceChain(702): start_index, 16 tile slots of 55 bytes, then the tile count."""
     from dj_ledfx.devices.lifx.types import TileInfo as TileInfoCls
 
-    _start_index = payload[0]
-    total_count = payload[1]
+    expected = 1 + DEVICE_CHAIN_SLOTS * TILE_ENTRY_SIZE + 1
+    if len(payload) < expected:
+        raise ValueError(f"StateDeviceChain payload too short: {len(payload)} < {expected}")
+    count = min(payload[expected - 1], DEVICE_CHAIN_SLOTS)
     tiles: list[TileInfoCls] = []
-    offset = 2
-    TILE_ENTRY_SIZE = 55
-    for _ in range(total_count):
-        if offset + TILE_ENTRY_SIZE > len(payload):
-            break
-        entry = payload[offset : offset + TILE_ENTRY_SIZE]
-        accel_x, accel_y, accel_z, _reserved = struct.unpack("<hhhh", entry[0:8])
+    for index in range(count):
+        start = 1 + index * TILE_ENTRY_SIZE
+        entry = payload[start : start + TILE_ENTRY_SIZE]
+        accel_x, accel_y, accel_z = struct.unpack("<hhh", entry[0:6])
         user_x, user_y = struct.unpack("<ff", entry[8:16])
-        width, height = entry[16], entry[17]
         tiles.append(
             TileInfoCls(
                 user_x=user_x,
                 user_y=user_y,
-                width=width,
-                height=height,
+                width=entry[16],
+                height=entry[17],
                 accel_x=accel_x,
                 accel_y=accel_y,
                 accel_z=accel_z,
             )
         )
-        offset += TILE_ENTRY_SIZE
     return tiles
+
+
+def parse_state_tile_effect(payload: bytes) -> TileEffectState:
+    """StateTileEffect(720), 187 bytes."""
+    if len(payload) < 187:
+        raise ValueError(f"StateTileEffect payload too short: {len(payload)} < 187")
+    _reserved, instance_id, effect, speed_ms, _duration, _r1, _r2 = struct.unpack(
+        "<BIBIQII", payload[:26]
+    )
+    count = min(payload[58], TILE_EFFECT_PALETTE_MAX)
+    palette: list[HSBK] = []
+    for index in range(count):
+        start = 59 + index * 8
+        hue, sat, bri, kelvin = struct.unpack("<4H", payload[start : start + 8])
+        palette.append((hue, sat, bri, kelvin))
+    return TileEffectState(int(instance_id), int(effect), int(speed_ms), tuple(palette))
+
+
+def parse_state_multizone_effect(payload: bytes) -> MultiZoneEffectState:
+    """StateMultiZoneEffect(509), 59 bytes."""
+    if len(payload) < 59:
+        raise ValueError(f"StateMultiZoneEffect payload too short: {len(payload)} < 59")
+    instance_id, effect, _r, speed_ms, _duration, _r1, _r2 = struct.unpack(
+        "<IBHIQII", payload[:27]
+    )
+    (direction,) = struct.unpack("<I", payload[31:35])
+    return MultiZoneEffectState(
+        int(instance_id), int(effect), int(speed_ms), reverse=direction == 0
+    )
+
+
+def parse_state_host_firmware(payload: bytes) -> tuple[int, int]:
+    """StateHostFirmware(15) -> (major, minor)."""
+    _build, _reserved, minor, major = struct.unpack("<QQHH", payload[:20])
+    return int(major), int(minor)
+
+
+def parse_state_unhandled(payload: bytes) -> int:
+    """StateUnhandled(223) -> the message type the light didn't handle."""
+    (unhandled,) = struct.unpack("<H", payload[:2])
+    return int(unhandled)
 
 
 # --- Color conversion ---
