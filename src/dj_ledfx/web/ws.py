@@ -15,7 +15,7 @@ from dj_ledfx.events import TransportStateChangedEvent
 from dj_ledfx.transport import TransportState
 from dj_ledfx.web import contract
 from dj_ledfx.web.state import ClientSubscription
-from dj_ledfx.zones.model import ZonesChanged
+from dj_ledfx.zones.model import AttentionChanged, LightsChanged, ZonesChanged
 
 
 def _get_connected(app: Any) -> set[WebSocket]:
@@ -82,9 +82,39 @@ def _running_message(app: Any) -> dict[str, Any] | None:
     return {"channel": "running", **running.model_dump(mode="json", by_alias=True)}
 
 
+def _lights_message(app: Any) -> dict[str, Any] | None:
+    monitor = getattr(app.state, "light_monitor", None)
+    if monitor is None:
+        return None
+    lights = [contract.light_update_out(state) for state in monitor.states()]
+    return {
+        "channel": "lights",
+        "lights": [light.model_dump(mode="json", by_alias=True) for light in lights],
+    }
+
+
+def _attention_message(app: Any) -> dict[str, Any] | None:
+    feed = getattr(app.state, "attention_feed", None)
+    if feed is None:
+        return None
+    items = [contract.attention_out(item) for item in feed.items()]
+    return {
+        "channel": "attention",
+        "items": [item.model_dump(mode="json", by_alias=True) for item in items],
+    }
+
+
 # Each pushed channel's snapshot, and the events that make a channel stale.
-_SNAPSHOTS: dict[str, Callable[[Any], dict[str, Any] | None]] = {"running": _running_message}
-_STALE_ON: dict[type[Any], str] = {ZonesChanged: "running"}
+_SNAPSHOTS: dict[str, Callable[[Any], dict[str, Any] | None]] = {
+    "running": _running_message,
+    "lights": _lights_message,
+    "attention": _attention_message,
+}
+_STALE_ON: dict[type[Any], str] = {
+    ZonesChanged: "running",
+    LightsChanged: "lights",
+    AttentionChanged: "attention",
+}
 
 
 def initial_messages(app: Any) -> list[dict[str, Any]]:
@@ -184,9 +214,11 @@ async def _stats_poll(ws: WebSocket, app: Any) -> None:
                 "devices": [
                     {
                         "name": s.device_name,
+                        "id": s.device_id,
                         "fps": s.send_fps,
                         "latency_ms": s.effective_latency_ms,
                         "frames_dropped": s.frames_dropped,
+                        "dropped_pct": s.dropped_pct,
                         "connected": s.connected,
                         "status": status_by_name.get(s.device_name, "online"),
                     }

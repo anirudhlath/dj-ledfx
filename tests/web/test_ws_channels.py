@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -77,3 +78,39 @@ async def test_a_client_that_connects_gets_the_current_state(api: Api) -> None:
     messages = {message["channel"]: message for message in initial_messages(api.app)}
 
     assert [zone["zoneId"] for zone in messages["running"]["zones"]] == ["desk"]
+
+
+async def test_light_statuses_are_pushed_when_they_change(api: Api, socket: FakeSocket) -> None:
+    await api.client.post("/api/zones/desk/start", json={"lookId": "classic-breathe"})
+    await until(lambda: bool(socket.on("lights")))
+
+    assert socket.on("lights")[-1]["lights"] == [
+        {
+            "id": "a",
+            "status": "streaming",
+            "statusSince": "2026-09-24T19:00:00Z",
+            "ownEffect": None,
+            "power": None,
+            "colour": None,
+        }
+    ]
+
+
+async def test_attention_is_pushed_when_the_list_changes(api: Api, socket: FakeSocket) -> None:
+    await api.client.post("/api/zones/desk/start", json={"lookId": "classic-breathe"})
+    api.home.devices.demote_device("a")
+    api.monitor.refresh()
+    api.home.clock[0] += timedelta(minutes=2)
+    api.feed.update()
+    await until(lambda: bool(socket.on("attention")))
+
+    [message] = socket.on("attention")
+    assert [item["kind"] for item in message["items"]] == ["light-offline"]
+
+
+async def test_a_client_that_connects_gets_every_pushed_channel(api: Api) -> None:
+    api.monitor.refresh()
+
+    channels = [message["channel"] for message in initial_messages(api.app)]
+
+    assert channels == ["running", "lights", "attention"]

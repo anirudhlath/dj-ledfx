@@ -124,9 +124,11 @@ def create_app(
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    from dj_ledfx.web.router_attention import router as attention_router
     from dj_ledfx.web.router_config import router as config_router
     from dj_ledfx.web.router_devices import router as devices_router
     from dj_ledfx.web.router_effects import router as effects_router
+    from dj_ledfx.web.router_lights import router as lights_router
     from dj_ledfx.web.router_looks import router as looks_router
     from dj_ledfx.web.router_scene import router as scene_router
     from dj_ledfx.web.router_scene import router_scenes
@@ -141,6 +143,8 @@ def create_app(
     app.include_router(transport_router, prefix="/api")
     app.include_router(looks_router, prefix="/api")
     app.include_router(zones_router, prefix="/api")
+    app.include_router(lights_router, prefix="/api")
+    app.include_router(attention_router, prefix="/api")
 
     from dj_ledfx.web.ws import ws_endpoint
 

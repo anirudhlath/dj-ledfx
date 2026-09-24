@@ -13,7 +13,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.devices.manager import ManagedDevice
+from dj_ledfx.effects.firmware import FirmwareEffect
+from dj_ledfx.effects.registry import get_effect_classes
 from dj_ledfx.looks import model as looks
+from dj_ledfx.types import DeviceStats
+from dj_ledfx.zones import attention
+from dj_ledfx.zones.lights import LightState, LightStatus
 from dj_ledfx.zones.model import RunningZoneInfo, StartResult, ZoneRecord
 
 InputKind = Literal["tempo", "music", "home-assistant", "sun"]
@@ -245,3 +252,157 @@ def start_out(result: StartResult) -> StartResponse:
     ]
     fields = {**_running_fields(result.running), "take_overs": take_overs}
     return StartResponse.model_validate(fields)
+
+
+# --- lights and attention ----------------------------------------------------------
+
+
+class LightLatency(ContractModel):
+    measured_ms: float | None
+    override_ms: float | None = None  # overrides move to PUT /lights/{id}/latency (F6)
+    estimated: bool  # the light can't be probed: the type's heuristic
+
+
+class LightPart(ContractModel):
+    name: str
+    leds: int
+
+
+class Light(ContractModel):
+    id: str
+    name: str
+    room: str | None = None  # placement fields arrive with the home map (M2)
+    sub_zone: str | None = None
+    model: str
+    protocol: Literal["LIFX", "Govee", "OpenRGB"]
+    leds: int
+    capabilities: list[Literal["colour", "multizone", "matrix", "effects"]]
+    built_in_effects: list[str]
+    parts: list[LightPart] | None = None
+    shape: dict[str, Any] | None = None
+    led_order: str = ""
+    confirmed: bool = False
+    status: LightStatus  # the contract's LightStatus plus "idle"
+    status_since: datetime
+    own_effect: str | None = None
+    latency: LightLatency
+    send_fps: float
+    dropped_pct: float
+    address: str
+    mac: str | None = None
+    firmware: str | None = None
+    power: bool | None = None  # as last read; not in the contract
+    colour: str | None = None  # "#RRGGBB" as last read; not in the contract
+
+
+class LightUpdate(ContractModel):
+    """A light's entry on the `lights` channel."""
+
+    id: str
+    status: LightStatus
+    status_since: datetime
+    own_effect: str | None = None
+    power: bool | None = None
+    colour: str | None = None
+
+
+class AttentionSubject(ContractModel):
+    type: Literal["light", "zone", "input"]
+    id: str
+
+
+class AttentionItem(ContractModel):
+    id: str
+    severity: Literal["high", "normal"]
+    kind: Literal[
+        "light-offline",
+        "zone-crashed",
+        "zone-slow",
+        "input-disconnected",
+        "input-stale",
+        "frames-dropping",
+    ]
+    subject: AttentionSubject
+    title: str
+    detail: str
+    since: datetime
+    actions: list[Literal["restart", "details", "retry", "open"]]
+
+
+def _hex(colour: tuple[int, int, int] | None) -> str | None:
+    if colour is None:
+        return None
+    red, green, blue = colour
+    return f"#{red:02X}{green:02X}{blue:02X}"
+
+
+def built_in_effects(caps: DeviceCapabilities) -> list[str]:
+    """The firmware effects a light can run itself (web spec §11.2)."""
+    return [
+        cls.display_name
+        for cls in get_effect_classes().values()
+        if issubclass(cls, FirmwareEffect) and cls().supports(caps)
+    ]
+
+
+def light_out(managed: ManagedDevice, state: LightState, stats: DeviceStats | None) -> Light:
+    adapter, tracker = managed.adapter, managed.tracker
+    info, caps = adapter.device_info, adapter.capabilities
+    effects = built_in_effects(caps)
+    flags = {
+        "colour": caps.colour,
+        "multizone": caps.multizone,
+        "matrix": caps.matrix,
+        "effects": bool(effects),
+    }
+    return Light.model_validate(
+        {
+            "id": state.device_id,
+            "name": info.name,
+            "model": caps.model or info.device_type,
+            "protocol": caps.protocol,
+            "leds": adapter.led_count,
+            "capabilities": [name for name, on in flags.items() if on],
+            "built_in_effects": effects,
+            "status": state.status,
+            "status_since": state.since,
+            "own_effect": state.own_effect,
+            "latency": {
+                "measured_ms": round(tracker.effective_latency_ms - tracker.manual_offset_ms, 1),
+                "estimated": not adapter.supports_latency_probing,
+            },
+            "send_fps": round(stats.send_fps, 1) if stats else 0.0,
+            "dropped_pct": round(stats.dropped_pct, 2) if stats else 0.0,
+            "address": info.address,
+            "mac": info.mac,
+            "firmware": caps.firmware_version,
+            "power": state.power,
+            "colour": _hex(state.colour),
+        }
+    )
+
+
+def light_update_out(state: LightState) -> LightUpdate:
+    return LightUpdate(
+        id=state.device_id,
+        status=state.status,
+        status_since=state.since,
+        own_effect=state.own_effect,
+        power=state.power,
+        colour=_hex(state.colour),
+    )
+
+
+def attention_out(item: attention.AttentionItem) -> AttentionItem:
+    return AttentionItem.model_validate(
+        {
+            "id": item.id,
+            "severity": item.severity,
+            "kind": item.kind,
+            "subject": {"type": item.subject_type, "id": item.subject_id},
+            "title": item.title,
+            "detail": item.detail,
+            "since": item.since,
+            "actions": list(item.actions),
+        }
+    )
