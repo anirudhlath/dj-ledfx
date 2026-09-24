@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in Dallas (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -24,6 +24,14 @@ const ROUTES = [
 async function open(page: Page, path: string) {
   await page.goto(path)
   await page.evaluate(() => document.fonts.ready)
+}
+
+/** How far a Tempo group's children reach past its right edge; 0 or less means TAP stays inside. */
+function spill(group: Locator): Promise<number> {
+  return group.evaluate((element) => {
+    const rights = [...element.children].map((child) => child.getBoundingClientRect().right)
+    return Math.max(...rights) - element.getBoundingClientRect().right
+  })
 }
 
 test.beforeEach(async ({ page }) => {
@@ -119,11 +127,20 @@ for (const width of [320, 360, 390, 768, 1024, 1199, 1440]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     if (width < 768) {
       // The phone tempo strip is fluid: TAP must stay inside it down to 320 px (WCAG reflow).
-      const spill = await page.getByRole('group', { name: 'Tempo' }).evaluate((group) => {
-        const rights = [...group.children].map((child) => child.getBoundingClientRect().right)
-        return Math.max(...rights) - group.getBoundingClientRect().right
-      })
-      expect(spill).toBeLessThanOrEqual(0)
+      expect(await spill(page.getByRole('group', { name: 'Tempo' }))).toBeLessThanOrEqual(0)
     }
   })
 }
+
+// The hero's "Music" is the shortest source label. The specimen draws the longer ones, a
+// three-digit bar, and the strip at a 320 px phone's width; TAP stays inside every one.
+test('the tempo module keeps TAP inside, whatever the source', async ({ page }, { project }) => {
+  test.skip(project.name !== 'desktop', 'one project is enough; the specimen fixes the widths')
+  await open(page, '/next/system')
+  await expect(page.getByText('Always within reach')).toBeVisible()
+  const groups = await page.getByRole('group', { name: 'Tempo' }).all()
+  expect(groups).toHaveLength(7) // the top bar's, and the specimen's three bars and three strips
+  for (const [i, group] of groups.entries()) {
+    expect(await spill(group), `Tempo group ${i + 1}`).toBeLessThanOrEqual(0)
+  }
+})

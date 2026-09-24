@@ -40,7 +40,8 @@ export function SystemPage() {
         <Button>Change</Button>
         <Button variant="outline">Tweak</Button>
         <Button variant="ghost">Cancel</Button>
-        <Button variant="danger" icon="power">Off</Button>
+        <Button variant="outline" icon="power">Off</Button>
+        <Button variant="danger" icon="trash">Remove light…</Button>
         <Button size="sm">Stop ripple</Button>
         <Button variant="primary" size="lg">Start</Button>
         <Button disabled>Restart</Button>
@@ -99,8 +100,17 @@ export function SystemPage() {
       <Row label="Always within reach">
         <TempoModule variant="bar" {...tempo} />
         <TempoModule variant="bar" source="internal" bpm={118} beat={2} bar={7} stale />
+        {/* The longest source label and a three-digit bar. */}
+        <TempoModule variant="bar" {...tempo} source="prodjlink" bar={128} />
         <div className="w-89.5">
           <TempoModule variant="strip" {...tempo} />
+        </div>
+        {/* The strip at its narrowest, on a 320 px phone, with the longer source labels. */}
+        <div className="w-72">
+          <TempoModule variant="strip" {...tempo} source="internal" />
+        </div>
+        <div className="w-72">
+          <TempoModule variant="strip" {...tempo} source="prodjlink" />
         </div>
         <PreviewOnlySwitch variant="bar" on={false} />
         <PreviewOnlySwitch variant="bar" on />

@@ -31,9 +31,10 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
         // At 320 px (the WCAG reflow width) the gaps tighten so TAP stays inside the strip.
         className="flex h-(--phone-tempo-h) items-center gap-3 rounded-card border border-line bg-raised pr-1 pl-3 max-[22.5rem]:gap-2"
       >
-        <span className={cx('inline-flex items-center gap-1.5 text-data font-semibold', stale ? 'text-signal' : 'text-text-2')}>
+        {/* The label gives way first, so a long source ("Pro DJ Link") never pushes TAP out. */}
+        <span className={cx('inline-flex min-w-0 items-center gap-1.5 text-data font-semibold', stale ? 'text-signal' : 'text-text-2')}>
           <Icon name={icon} size={16} />
-          {label}
+          <span className="min-w-0 truncate">{label}</span>
           {staleNote}
         </span>
         <span className="num text-bpm font-semibold tracking-[-0.02em]">
@@ -56,7 +57,9 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
     <div
       role="group"
       aria-label="Tempo"
-      className="flex h-10 w-95 items-center justify-between gap-3 rounded-tile border border-line bg-raised px-1.5 tablet:w-auto"
+      // Main.png's width is a floor: a longer source or bar number widens the module, and the
+      // top bar's title truncates before TAP leaves it.
+      className="flex h-10 min-w-95 items-center justify-between gap-3 rounded-tile border border-line bg-raised px-1.5 tablet:min-w-0"
     >
       <button
         type="button"
