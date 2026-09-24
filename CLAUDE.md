@@ -65,6 +65,7 @@ cd web && npm run e2e            # Playwright: screenshots, axe on every route, 
 
 - The app runs on this host as `dj-ledfx-app-1` (compose project `dj-ledfx`, from the committed `Dockerfile` and `docker-compose.yml`), with host networking: it serves 8080 and binds Pro DJ Link's 50001/udp itself. No `--demo`.
 - After merging a deploy change: `docker compose up -d --build` in the main checkout `~/code/private/dj-ledfx`. The container mounts that checkout's `config.toml`; `state.db` stays in the `dj-ledfx_state` volume and zones resume.
+- The app runs as uid 10001 (`dj-ledfx`). `docker/entrypoint.sh` starts as root only to hand `/app/state` to that user (a volume from before it existed is root-owned), then drops to it with `setpriv`. The image's HEALTHCHECK polls `/api/running` on 8080.
 - UFW governs 8080: the LAN is allowed, and `tailscale0` has its own 8080 rule. Ask the owner before changing UFW.
 - Check it: `docker compose ps`, `curl -s http://127.0.0.1:8080/api/running`, `/api/lights`, `/api/attention`.
 
