@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -160,6 +161,31 @@ class StateDB:
             assert self._conn is not None
             self._conn.executemany(sql, params_seq)
             self._conn.commit()
+
+        async with self._lock:
+            await asyncio.to_thread(_run)
+
+    async def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+        """Run a read query and return every row."""
+        return await self._execute_read(sql, params)
+
+    async def write(self, sql: str, params: tuple[Any, ...] = ()) -> None:
+        """Run one write statement and commit it."""
+        await self._execute_write(sql, params)
+
+    async def write_many(self, statements: Sequence[tuple[str, tuple[Any, ...]]]) -> None:
+        """Run several write statements as one transaction: all of them or none."""
+
+        def _run() -> None:
+            assert self._conn is not None
+            self._conn.execute("BEGIN")
+            try:
+                for sql, params in statements:
+                    self._conn.execute(sql, params)
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
 
         async with self._lock:
             await asyncio.to_thread(_run)
@@ -477,3 +503,7 @@ class StateDB:
         """Return all saved device states as a mapping of stable_id -> state_bytes."""
         rows = await self._execute_read("SELECT stable_id, state_bytes FROM device_saved_state")
         return {row[0]: bytes(row[1]) for row in rows}
+
+    async def delete_device_state(self, stable_id: str) -> None:
+        """Forget a device's captured state (it has been restored or released)."""
+        await self._execute_write("DELETE FROM device_saved_state WHERE stable_id=?", (stable_id,))

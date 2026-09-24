@@ -164,7 +164,7 @@ async def test_startup_with_fresh_db(tmp_path: Path) -> None:
     db = StateDB(tmp_path / "state.db")
     await db.open()
     version = await db.get_schema_version()
-    assert version == 3
+    assert version == 4
     devices = await db.load_devices()
     assert devices == []
     scenes = await db.load_scenes()
