@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from dj_ledfx.web.app import create_app
+from tests.web.conftest import static_client, write_dist
 
 INDEX = "<!doctype html><title>old</title>"
 SECRET = "not for the web"
@@ -19,23 +18,8 @@ def client(tmp_path: Path) -> TestClient:
     """frontend/dist with an index, a hashed asset and a favicon, and a secret beside it."""
     (tmp_path / "secret.txt").write_text(SECRET)
     dist = tmp_path / "frontend" / "dist"
-    (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text(INDEX)
-    (dist / "assets" / "index-abc123.js").write_text("console.log('built')")
-    (dist / "favicon.svg").write_text("<svg/>")
-    app = create_app(
-        beat_clock=MagicMock(),
-        effect_engine=MagicMock(),
-        device_manager=MagicMock(),
-        scheduler=MagicMock(),
-        preset_store=MagicMock(),
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"], static_dir=None)),
-        config_path=None,
-        web_static_dir=str(dist),
-    )
-    return TestClient(app)
+    write_dist(dist, INDEX)
+    return static_client(dist)
 
 
 @pytest.mark.parametrize(
@@ -44,10 +28,13 @@ def client(tmp_path: Path) -> TestClient:
         "/..%2f..%2fsecret.txt",
         "/%2e%2e/%2e%2e/secret.txt",
         "/favicon.svg%2f..%2f..%2f..%2fsecret.txt",
+        # A NUL byte can't name a file, so the path gets the app rather than a 500.
+        pytest.param("/%00", id="nul-byte"),
     ],
 )
 def test_encoded_dot_segments_fall_back_to_the_app(client: TestClient, path: str) -> None:
     response = client.get(path)
+    assert response.status_code == 200
     assert SECRET not in response.text
     assert response.text == INDEX
 

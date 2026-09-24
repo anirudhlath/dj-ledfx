@@ -1,0 +1,102 @@
+/*
+ * The app's one stylesheet. Every design value comes from tokens.css, a byte-for-byte copy of
+ * docs/design/web-app/tokens.css (src/design/payload.node.test.ts fails if it drifts), which also
+ * imports the self-hosted fonts. theme(static) emits every token as a CSS variable, so code can
+ * read any token at runtime.
+ */
+@import "tailwindcss";
+@import "./tokens.css" theme(static);
+
+/*
+ * tokens.css names both a font size and a colour "control", and Tailwind resolves `text-control` to the
+ * colour. This is the font size.
+ */
+@utility text-size-control {
+  font-size: var(--text-control);
+  line-height: var(--tw-leading, var(--text-control--line-height));
+}
+
+/*
+ * §6: touch targets are at least --touch-min. This grows a control's hit area to it and leaves the
+ * face alone: ::before overhangs the padding box on each axis that falls short, and never shrinks
+ * a larger control.
+ */
+@utility touch-target {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: min(0px, calc((100% - var(--touch-min)) / 2));
+  }
+}
+
+@layer base {
+  /* The reference pages keep the browser's normal line height (Tailwind's preflight sets 1.5). */
+  html {
+    line-height: normal;
+  }
+  /* The reference pages give buttons a pointer cursor; Tailwind v4's preflight removes it. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* §6.1 Slider: a real range input. <Slider> sets --v to the filled share. */
+@layer components {
+  .slider {
+    appearance: none;
+    background: transparent;
+    height: 20px;
+    margin: 0;
+    cursor: pointer;
+  }
+  .slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(
+      to right,
+      var(--color-text) 0 var(--v),
+      var(--color-control-hover) var(--v) 100%
+    );
+  }
+  .slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: var(--color-text);
+    box-shadow: 0 0 0 3px var(--color-bg);
+  }
+  .slider::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(
+      to right,
+      var(--color-text) 0 var(--v),
+      var(--color-control-hover) var(--v) 100%
+    );
+  }
+  .slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--color-text);
+  }
+}
+
+/* Spec §4.4's middle band keeps the desktop structure, so the top bar drops its optional text. */
+@custom-variant tablet (@media (width >= 48rem) and (width < 75rem));
+
+/* §6.2 ConnectionIndicator: the live dot's pulse, as in the reference pages. The spinner is Tailwind's spin. */
+@keyframes livedot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
