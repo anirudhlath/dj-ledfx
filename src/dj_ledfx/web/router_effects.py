@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from dj_ledfx.effects.presets import Preset
-from dj_ledfx.effects.registry import create_effect, get_effect_schemas
+from dj_ledfx.effects.registry import create_strip_effect, get_effect_schemas
 from dj_ledfx.web.schemas import (
     ActiveEffectResponse,
     CreatePresetRequest,
@@ -111,7 +111,7 @@ async def load_preset(request: Request, name: str) -> ActiveEffectResponse:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Preset not found: {name}") from exc
     try:
-        new_effect = create_effect(preset.effect_class, **preset.params)
+        new_effect = create_strip_effect(preset.effect_class, **preset.params)
         deck.swap_effect(new_effect)
     except KeyError as exc:
         raise HTTPException(

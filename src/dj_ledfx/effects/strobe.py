@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.color import hex_to_rgb, rgb_to_hex
 from dj_ledfx.effects.easing import lerp
 from dj_ledfx.effects.energy import bpm_energy
@@ -16,7 +16,7 @@ from dj_ledfx.types import BeatContext
 _DEFAULT_PALETTE = ["#ffffff"]
 
 
-class Strobe(Effect):
+class Strobe(StripEffect):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {

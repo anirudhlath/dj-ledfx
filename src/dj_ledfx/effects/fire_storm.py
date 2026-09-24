@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.color import hex_to_rgb, palette_lerp, rgb_to_hex
 from dj_ledfx.effects.energy import bpm_energy
 from dj_ledfx.effects.params import EffectParam
@@ -14,7 +14,7 @@ from dj_ledfx.types import BeatContext
 _DEFAULT_PALETTE = ["#ff1500", "#ff6600", "#ff9900", "#ffcc00"]
 
 
-class FireStorm(Effect):
+class FireStorm(StripEffect):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
@@ -57,6 +57,10 @@ class FireStorm(Effect):
             self._intensity = float(kwargs["intensity"])
         if "smoothing" in kwargs:
             self._smoothing = float(kwargs["smoothing"])
+
+    def reseed(self, seed: int) -> None:
+        self._rng = np.random.default_rng(seed)
+        self._prev_frame = None
 
     def render(self, ctx: BeatContext, led_count: int) -> NDArray[np.uint8]:
         energy = bpm_energy(ctx.bpm)

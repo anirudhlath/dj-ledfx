@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.base import Effect, StripEffect
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import BeatContext
 
 
-class DummyEffect(Effect):
+class DummyEffect(StripEffect):
     @classmethod
     def parameters(cls):
         return {"speed": EffectParam(type="float", default=1.0, min=0.1, max=10.0)}
@@ -78,6 +78,7 @@ from dj_ledfx.effects.registry import (  # noqa: E402
     create_effect,
     get_effect_classes,
     get_effect_schemas,
+    get_strip_effect_classes,
 )
 
 
@@ -105,7 +106,7 @@ def test_create_effect_unknown():
 def test_all_registered_effects_render_with_defaults():
     """Smoke test: instantiate every registered effect with defaults, render one frame."""
     ctx = BeatContext(beat_phase=0.5, bar_phase=0.25, bpm=128.0, dt=0.016)
-    for name, cls in get_effect_classes().items():
+    for name, cls in get_strip_effect_classes().items():
         if name == "dummy_effect":
             continue
         effect = cls()
@@ -117,7 +118,7 @@ def test_all_registered_effects_render_with_defaults():
 def test_all_registered_effects_render_with_zero_bpm():
     """Edge case: bpm=0 should not crash any effect."""
     ctx = BeatContext(beat_phase=0.0, bar_phase=0.0, bpm=0.0, dt=0.016)
-    for name, cls in get_effect_classes().items():
+    for name, cls in get_strip_effect_classes().items():
         if name == "dummy_effect":
             continue
         effect = cls()
@@ -128,7 +129,7 @@ def test_all_registered_effects_render_with_zero_bpm():
 def test_all_registered_effects_render_with_zero_leds():
     """Edge case: led_count=0 should return empty array, not crash."""
     ctx = BeatContext(beat_phase=0.0, bar_phase=0.0, bpm=128.0, dt=0.016)
-    for name, cls in get_effect_classes().items():
+    for name, cls in get_strip_effect_classes().items():
         if name == "dummy_effect":
             continue
         effect = cls()

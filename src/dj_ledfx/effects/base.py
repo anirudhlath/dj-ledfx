@@ -1,4 +1,4 @@
-"""Effect abstract base class with parameter introspection and auto-registry."""
+"""Effect base classes with parameter introspection and auto-registry."""
 
 from __future__ import annotations
 
@@ -19,27 +19,32 @@ def _to_snake_case(name: str) -> str:
     return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
 
 
-class Effect(ABC):
-    """Base class for all LED effects."""
+class Effect(ABC):  # noqa: B024
+    """Registry and parameters shared by every effect kind (strip, field, firmware).
+
+    The kinds below declare the abstract methods, so this class has none of its own.
+    Concrete subclasses register under their snake_case class name unless the name
+    starts with "_" or the class is declared with `register=False`.
+    """
 
     _registry: ClassVar[dict[str, type[Effect]]] = {}
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
+    def __init_subclass__(cls, register: bool = True, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        if not inspect.isabstract(cls):
-            params = cls.parameters()
-            if params:
-                sig = inspect.signature(cls.__init__)
-                init_params = {p for p in sig.parameters if p != "self"}
-                missing = set(params.keys()) - init_params
-                if missing:
-                    raise TypeError(
-                        f"{cls.__name__} parameters() declares {missing} "
-                        f"but __init__ does not accept them"
-                    )
-            if not cls.__name__.startswith("_"):
-                name = _to_snake_case(cls.__name__)
-                Effect._registry[name] = cls
+        if inspect.isabstract(cls):
+            return
+        params = cls.parameters()
+        if params:
+            sig = inspect.signature(cls.__init__)
+            init_params = {p for p in sig.parameters if p != "self"}
+            missing = set(params.keys()) - init_params
+            if missing:
+                raise TypeError(
+                    f"{cls.__name__} parameters() declares {missing} "
+                    f"but __init__ does not accept them"
+                )
+        if register and not cls.__name__.startswith("_"):
+            Effect._registry[_to_snake_case(cls.__name__)] = cls
 
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
@@ -66,10 +71,13 @@ class Effect(ABC):
     def _apply_params(self, **kwargs: Any) -> None:  # noqa: B027
         pass
 
+    def reseed(self, seed: int) -> None:  # noqa: B027
+        """Make the effect's randomness repeatable. Default: it has none."""
+
+
+class StripEffect(Effect):
+    """Today's 1D effects: a strip of `led_count` LEDs in 8-bit RGB."""
+
     @abstractmethod
-    def render(
-        self,
-        ctx: BeatContext,
-        led_count: int,
-    ) -> NDArray[np.uint8]:
+    def render(self, ctx: BeatContext, led_count: int) -> NDArray[np.uint8]:
         """Return shape (led_count, 3) uint8 RGB array."""
