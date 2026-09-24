@@ -89,7 +89,6 @@ class AttentionFeed:
 
     def update(self) -> None:
         """Derive the list again. Emits AttentionChanged when it changed."""
-        self._zones.watch_states()
         now = self._now()
         items = [*self._offline_lights(now), *self._zone_items(), *self._dropping(now)]
         items.sort(key=lambda item: (item.severity != "high", -item.since.timestamp()))

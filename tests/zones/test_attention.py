@@ -122,7 +122,7 @@ async def test_crashed_zones_come_first_and_slow_zones_after(make_home: HomeFact
     feed.update()
     feed.update()
 
-    assert len(home.changes) == zone_events + 1  # the running channel hears about it once
+    assert len(home.changes) == zone_events  # the crashes told the running channel already
     porch, desk, kitchen = feed.items()
     assert (porch.kind, desk.kind, kitchen.kind) == ("zone-crashed", "zone-crashed", "zone-slow")
     assert (desk.severity, desk.title, desk.actions) == (
@@ -141,6 +141,23 @@ async def test_crashed_zones_come_first_and_slow_zones_after(make_home: HomeFact
         "Kitchen is running slow",
         "kitchen",
     )
+
+
+# B21: a crash reaches the running channel as it happens, with no attention tick.
+async def test_a_crash_reaches_the_running_channel_without_an_attention_tick(
+    make_home: HomeFactory,
+) -> None:
+    home = await make_home([FakeLight("a")], [_zone("desk", "Desk", "a")])
+    await home.manager.start("desk", SPARKS)
+    before = len(home.changes)
+
+    home.host.runtimes["desk"].tick(100.0)  # raises: the zone crashes now
+
+    assert len(home.changes) == before + 1
+    info = home.manager.running_info("desk")
+    assert info is not None and info.state == "crashed"
+    home.host.runtimes["desk"].tick(100.1)  # still crashed: nothing new to say
+    assert len(home.changes) == before + 1
 
 
 async def test_a_light_dropping_frames_for_a_minute_needs_attention(

@@ -93,8 +93,12 @@ class ZoneRuntime:
         seed: int = 0,
         timer: Callable[[], float] = time.perf_counter,
         now: Callable[[], datetime] = _utcnow,
+        on_state_change: Callable[[ZoneRuntime], None] | None = None,
     ) -> None:
         self.zone_id = zone_id
+        # Called when the zone crashes, turns slow or recovers by itself; the zone
+        # manager tells the running channel.
+        self._on_state_change = on_state_change
         self.look = look
         self.brightness = brightness
         self.generation = 0  # _compile draws the first
@@ -334,6 +338,7 @@ class ZoneRuntime:
 
     def _fail(self, layer: str, message: str) -> None:
         self.crash = CrashInfo(layer=layer, message=message, at=self._now())
+        self._state_changed()
         stamp = time.monotonic()
         if stamp - self._last_crash_log >= CRASH_LOG_INTERVAL_S:
             self._last_crash_log = stamp
@@ -355,6 +360,13 @@ class ZoneRuntime:
                 self._below_since = now
             if self.slow_since is None and now - self._below_since >= SLOW_AFTER_S:
                 self.slow_since = self._now()
+                self._state_changed()
         else:
             self._below_since = None
-            self.slow_since = None
+            if self.slow_since is not None:
+                self.slow_since = None
+                self._state_changed()
+
+    def _state_changed(self) -> None:
+        if self._on_state_change is not None:
+            self._on_state_change(self)

@@ -43,7 +43,7 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
     ZonesChanged,
 )
-from dj_ledfx.zones.runtime import LightMode, ZoneLight, ZoneRuntime, ZoneState
+from dj_ledfx.zones.runtime import LightMode, ZoneLight, ZoneRuntime
 from dj_ledfx.zones.store import new_group_id
 
 if TYPE_CHECKING:
@@ -152,7 +152,6 @@ class ZoneManager:
         self._power_versions: dict[str, int] = {}  # moves on with every change to _power
         self._versions = itertools.count(1)
         self._deferred_power_on: set[str] = set()
-        self._seen_states: dict[str, ZoneState] = {}
         self._lock = asyncio.Lock()
 
     async def load(self) -> None:
@@ -189,11 +188,10 @@ class ZoneManager:
         return None
 
     def light_mode(self, device_id: str) -> LightMode | None:
-        """How a light shows its zone's look; None when no running zone owns it."""
-        if self.owner_of(device_id) is None:
-            return None
+        """How a light shows its zone's look. None when no look drives it: no running zone
+        owns it, or its zone's saved look can't be read, which leaves it as it is."""
         runtime = self._runtime_of(device_id)
-        return "streaming" if runtime is None else runtime.mode_of(device_id)
+        return None if runtime is None else runtime.mode_of(device_id)
 
     def effect_name(self, device_id: str) -> str | None:
         """The firmware effect a light runs, or streams a copy of."""
@@ -264,21 +262,6 @@ class ZoneManager:
             info = self._info(zone_id, running)
         self._event_bus.emit(ZonesChanged())
         return info
-
-    def watch_states(self) -> None:
-        """Emit ZonesChanged when a running zone changed state by itself (crashed, slow).
-
-        A zone not seen yet counts as running: every zone starts that way, or its start
-        already announced it.
-        """
-        states = {
-            zone_id: self._info(zone_id, running).state
-            for zone_id, running in self._running.items()
-        }
-        changed = any(self._seen_states.get(z, "running") != state for z, state in states.items())
-        self._seen_states = states
-        if changed:
-            self._event_bus.emit(ZonesChanged())
 
     async def resume(self) -> None:
         """Bring back the zones that were running when the app stopped (spec §4.3, §6.4).
@@ -617,7 +600,14 @@ class ZoneManager:
             max_lookahead_s=self._max_lookahead_s,
             brightness=brightness,
             now=self._now,
+            on_state_change=self._state_changed,
         )
+
+    def _state_changed(self, runtime: ZoneRuntime) -> None:
+        """A running zone crashed, turned slow or recovered by itself (spec §8)."""
+        running = self._running.get(runtime.zone_id)
+        if running is not None and running.runtime is runtime:  # not one still starting
+            self._event_bus.emit(ZonesChanged())
 
     def _rebuild_broken(self, zone_id: str, running: _Running) -> bool:
         """A zone whose saved look can't be read tries the look saved under its id."""

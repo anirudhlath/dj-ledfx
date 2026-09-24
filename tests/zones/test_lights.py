@@ -135,6 +135,24 @@ async def test_a_light_that_did_not_answer_the_poll_is_not_asked_about_its_effec
     assert tile.firmware_checks == 0
 
 
+# B15: a zone whose saved look can't be read leaves its lights alone: they show idle.
+async def test_the_lights_of_a_zone_whose_look_cannot_be_read_show_idle(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp")
+    home = await make_home([lamp], [_zone("z", "lamp")])
+    await home.manager.start("z", home.look("classic-breathe"))
+    await home.db.write("UPDATE zone_assignments SET look='{not json' WHERE zone_id='z'")
+    home = await home.restart()
+    monitor = _monitor(home)
+
+    monitor.refresh()
+
+    info = home.manager.running_info("z")
+    assert info is not None and info.state == "crashed"
+    assert _status(monitor) == {"lamp": ("idle", None)}
+
+
 async def test_status_since_moves_only_when_the_status_changes(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp")
     home = await make_home([lamp], [_zone("z", "lamp")])

@@ -215,6 +215,25 @@ def test_a_slow_zone_drops_its_frame_rate_and_shows_slow_after_30_s() -> None:
     assert runtime.slow_since is not None
 
 
+# B21: the runtime says when its state changes by itself, so no one has to poll it.
+def test_a_zone_reports_slow_and_crashed_as_they_happen() -> None:
+    changes: list[str] = []
+    timer = itertools.count(0.0, 0.006).__next__  # every render "takes" 6 ms
+    runtime = _runtime(
+        _look(_field()), timer=timer, on_state_change=lambda zone: changes.append(zone.state)
+    )
+    now = 100.0
+    for _ in range(31 * 60):
+        runtime.tick(now)
+        now += 1 / 60
+    assert changes == ["slow"]
+
+    FlatField.mode = "raise"
+    runtime.tick(now)
+    runtime.tick(now + 0.1)
+    assert changes == ["slow", "crashed"]
+
+
 def test_a_waiting_look_renders_dark_and_claims_nothing() -> None:
     runtime = _runtime(_look(_field(), _glow(), needs=("music",)))
     assert runtime.state == "waiting"
