@@ -2,7 +2,7 @@ import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect } from 'react'
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setViewportWidth } from '@/test/viewport'
 import { routerBasename } from './router'
 import { routes } from './routes'
@@ -27,13 +27,10 @@ function renderApp(path: string, routeList: RouteObject[] = routes) {
   return router
 }
 
+// The hero moment; the shared setup puts the real clock back after each test.
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(2026, 8, 23, 19, 14))
-})
-
-afterEach(() => {
-  vi.useRealTimers()
 })
 
 describe('routes', () => {
@@ -88,31 +85,20 @@ describe('routes', () => {
   })
 })
 
+// What the shell adds to the chrome's parts (shell.test.tsx): which chrome each width gets, the
+// page's titles and context, and the hero's state reaching them.
 describe('desktop chrome (Main.png)', () => {
-  it('has the rail, the page title and context, and the cluster', async () => {
+  it('has the rail and the top bar, with the page title and context', async () => {
     renderApp('/next/live')
     const rail = await screen.findByRole('navigation', { name: 'Main' })
-    const links = within(rail).getAllByRole('link')
-    expect(links.map((link) => link.textContent)).toEqual([
-      '',
-      'Live',
-      'Looks',
-      'Map',
-      'Devices, needs attention',
-      'Inputs',
-      'Settings',
-    ])
-    expect(within(rail).getByRole('link', { name: 'dj-ledfx home' })).toHaveAttribute('href', '/next/live')
-    expect(within(rail).getByRole('link', { name: 'Live' })).toHaveAttribute('aria-current', 'page')
-    expect(rail).toHaveTextContent('dj-ledfx · homeserver')
+    expect(within(rail).getByRole('link', { name: 'dj-ledfx home' })).toBeInTheDocument()
+    // The hero's offline light puts the dot on Devices.
+    expect(within(rail).getByRole('link', { name: 'Devices, needs attention' })).toBeInTheDocument()
 
     const header = screen.getByRole('banner')
     expect(within(header).getByRole('heading', { level: 1 })).toHaveTextContent('Live')
     expect(header).toHaveTextContent('Wed 23 Sep · 19:14')
     expect(within(header).getByRole('group', { name: 'Tempo' })).toHaveTextContent('121.8')
-    expect(within(header).getByRole('switch', { name: 'Preview only' })).toBeInTheDocument()
-    expect(within(header).getByRole('button', { name: '1 needs attention' })).toBeInTheDocument()
-    expect(header).toHaveTextContent('Live60 fps')
   })
 
   it('moves the current page with navigation', async () => {
@@ -122,7 +108,6 @@ describe('desktop chrome (Main.png)', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Map' })).toBeInTheDocument()
     expect(screen.getByText('Place lights, anchors and sub-zones')).toBeInTheDocument()
     expect(within(rail).getByRole('link', { name: 'Map' })).toHaveAttribute('aria-current', 'page')
-    expect(within(rail).getByRole('link', { name: 'Live' })).not.toHaveAttribute('aria-current')
   })
 })
 
@@ -136,19 +121,12 @@ describe('phone chrome (Phone-Live.png)', () => {
     const header = await screen.findByRole('banner')
     expect(within(header).getByRole('heading', { level: 1 })).toHaveTextContent('Home')
     expect(header).toHaveTextContent('Wed 19:14 · sun sets 19:26')
-    expect(within(header).getByRole('switch', { name: 'Preview only' })).toBeInTheDocument()
-    expect(within(header).getByRole('button', { name: '1 needs attention' })).toBeInTheDocument()
-    expect(screen.getByRole('group', { name: 'Tempo' })).toBeInTheDocument()
+    expect(within(header).getByRole('group', { name: 'Tempo' })).toBeInTheDocument()
 
     const tabs = screen.getByRole('navigation', { name: 'Main' })
-    expect(within(tabs).getAllByRole('link').map((link) => link.textContent)).toEqual([
-      'Live',
-      'Looks',
-      'Devices, needs attention',
-      'Tempo',
-      'Settings',
-    ])
-    expect(within(tabs).getByRole('link', { name: 'Tempo' })).toHaveAttribute('href', '/next/inputs')
+    // The hero's offline light puts the dot on Devices.
+    expect(within(tabs).getByRole('link', { name: 'Devices, needs attention' })).toBeInTheDocument()
+    expect(within(tabs).getByRole('link', { name: 'Tempo' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'dj-ledfx home' })).toBeNull()
   })
 

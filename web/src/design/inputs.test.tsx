@@ -36,7 +36,7 @@ describe('Select', () => {
   ])('opens its list inside the %s around it', async (role, wrap) => {
     render(wrap(<Transition />))
     await userEvent.click(screen.getByRole('combobox', { name: 'Transition' }))
-    expect(screen.getByRole(role === 'main' ? 'main' : 'dialog')).toContainElement(await screen.findByRole('listbox'))
+    expect(screen.getByRole(role)).toContainElement(await screen.findByRole('listbox'))
   })
 })
 

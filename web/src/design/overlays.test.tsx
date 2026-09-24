@@ -5,26 +5,18 @@ import { Button } from './button'
 import { Dialog, Popover, Sheet, Tooltip } from './overlays'
 
 describe('overlays', () => {
-  it('Tooltip shows on keyboard focus', async () => {
-    render(
-      <Tooltip content="Fit the home">
-        <button type="button" aria-label="Fit">x</button>
-      </Tooltip>,
-    )
-    await userEvent.tab()
-    expect(await screen.findByText('Fit the home')).toBeVisible()
-  })
-
   // The tooltip is visual only: the trigger's own label names it, and the popup, loose in <body>,
   // stays out of the accessibility tree (and out of axe's region rule).
-  it('keeps the Tooltip out of the accessibility tree', async () => {
+  it('Tooltip shows on keyboard focus, out of the accessibility tree', async () => {
     render(
       <Tooltip content="Fit the home">
         <button type="button" aria-label="Fit">x</button>
       </Tooltip>,
     )
     await userEvent.tab()
-    expect((await screen.findByText('Fit the home')).closest('[aria-hidden="true"]')).not.toBeNull()
+    const tip = await screen.findByText('Fit the home')
+    expect(tip).toBeVisible()
+    expect(tip.closest('[aria-hidden="true"]')).not.toBeNull()
   })
 
   it('Popover opens as a named dialog and closes on Escape', async () => {

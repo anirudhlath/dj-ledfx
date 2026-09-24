@@ -1,25 +1,22 @@
-// jsdom has no matchMedia. This stand-in evaluates the width queries the app uses,
-// "(width < Nrem)" and "(width >= Nrem)", and fires "change" when a test resizes.
+// jsdom has no matchMedia. This stand-in answers the one kind of query the app asks,
+// "(width < Nrem)", and fires "change" when a test resizes across it.
 type Listener = () => void
 
 let width = 1440
 const subscribed = new Map<string, Set<Listener>>()
 
 function evaluate(query: string): boolean {
-  const match = /^\(width (<|>=) ([\d.]+)rem\)$/.exec(query)
+  const match = /^\(width < ([\d.]+)rem\)$/.exec(query)
   if (!match) throw new Error(`the test matchMedia can't evaluate "${query}"`)
-  const px = Number(match[2]) * 16
-  return match[1] === '<' ? width < px : width >= px
+  return width < Number(match[1]) * 16
 }
 
 export function installMatchMedia(): void {
   window.matchMedia = (query: string) =>
     ({
-      media: query,
       get matches() {
         return evaluate(query)
       },
-      onchange: null,
       addEventListener: (_type: string, listener: Listener) => {
         const set = subscribed.get(query) ?? new Set<Listener>()
         set.add(listener)
@@ -28,9 +25,6 @@ export function installMatchMedia(): void {
       removeEventListener: (_type: string, listener: Listener) => {
         subscribed.get(query)?.delete(listener)
       },
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
     }) as unknown as MediaQueryList
 }
 

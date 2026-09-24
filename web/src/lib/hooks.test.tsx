@@ -1,5 +1,5 @@
 import { act, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { setViewportWidth } from '@/test/viewport'
 import { formatTime } from './format'
 import { useIsPhone } from './use-media-query'
@@ -25,10 +25,6 @@ describe('useIsPhone', () => {
 })
 
 describe('useNow', () => {
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
   it('ticks over on the minute', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 8, 23, 19, 14, 30))

@@ -1,23 +1,11 @@
-import { render, screen, within } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { MemoryRouter } from 'react-router'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { HERO_CHROME } from '@/chrome/state'
+import { linkNames, renderAt as at } from '@/test/router'
 import { PhoneHeader } from './phone-header'
 import { Rail } from './rail'
 import { TabBar } from './tab-bar'
 import { TopBar } from './top-bar'
-
-/** Renders `ui` as if the app were at /next{path}. */
-function at(path: string, ui: ReactNode) {
-  return render(
-    <MemoryRouter basename="/next" initialEntries={[`/next${path}`]}>
-      {ui}
-    </MemoryRouter>,
-  )
-}
-
-const linkNames = (nav: HTMLElement) => within(nav).getAllByRole('link').map((link) => link.textContent)
 
 describe('Rail', () => {
   it('has the logo, then the six places in order, and the server in the footer', () => {

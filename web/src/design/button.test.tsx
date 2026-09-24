@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
+import { renderAt } from '@/test/router'
 import { Button, ButtonLink, IconButton } from './button'
 
 describe('Button', () => {
@@ -40,11 +40,7 @@ describe('Button', () => {
   })
 
   it('renders as a link when it navigates', () => {
-    render(
-      <MemoryRouter basename="/next" initialEntries={['/next/looks']}>
-        <ButtonLink to="/live" variant="outline">Go to Live</ButtonLink>
-      </MemoryRouter>,
-    )
+    renderAt('/looks', <ButtonLink to="/live" variant="outline">Go to Live</ButtonLink>)
     expect(screen.getByRole('link', { name: 'Go to Live' })).toHaveAttribute('href', '/next/live')
   })
 })
