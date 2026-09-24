@@ -8,10 +8,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
-    from dj_ledfx.types import FloatRGB
+    from dj_ledfx.types import RGB, FloatRGB
 
 
-def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+def hex_to_rgb(hex_color: str) -> RGB:
     h = hex_color.lstrip("#")
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
@@ -88,7 +88,7 @@ def hsv_to_rgb_array(
 
 
 def palette_lerp(
-    palette: list[tuple[int, int, int]],
+    palette: list[RGB],
     positions: NDArray[np.float64],
 ) -> NDArray[np.uint8]:
     """Interpolate between palette colors at 0-1 positions."""

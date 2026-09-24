@@ -15,11 +15,12 @@ from pydantic.alias_generators import to_camel
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities, LightProtocol
 from dj_ledfx.devices.manager import ManagedDevice
+from dj_ledfx.effects.color import rgb_to_hex
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.registry import get_effect_classes
 from dj_ledfx.looks import model as looks
 from dj_ledfx.looks.model import Blend, Category, InputKind, LayerType, Scope, TransitionKind
-from dj_ledfx.types import DeviceStats
+from dj_ledfx.types import RGB, DeviceStats
 from dj_ledfx.zones import attention
 from dj_ledfx.zones.attention import AttentionAction, AttentionKind, Severity, SubjectType
 from dj_ledfx.zones.lights import LightState, LightStatus
@@ -322,11 +323,8 @@ class AttentionItem(ContractModel):
     actions: list[AttentionAction]
 
 
-def _hex(colour: tuple[int, int, int] | None) -> str | None:
-    if colour is None:
-        return None
-    red, green, blue = colour
-    return f"#{red:02X}{green:02X}{blue:02X}"
+def _hex(colour: RGB | None) -> str | None:
+    return None if colour is None else rgb_to_hex(*colour).upper()
 
 
 def built_in_effects(caps: DeviceCapabilities) -> list[str]:

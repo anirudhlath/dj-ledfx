@@ -28,6 +28,7 @@ from dj_ledfx.zones.runtime import LightMode
 if TYPE_CHECKING:
     from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
     from dj_ledfx.events import EventBus
+    from dj_ledfx.types import RGB
     from dj_ledfx.zones.manager import ZoneManager
 
 LightStatus = Literal[LightMode, "offline", "switched-off", "reconnecting", "idle"]
@@ -44,7 +45,7 @@ class LightState:
     since: datetime  # when the light got this status
     own_effect: str | None = None  # the firmware effect it runs, or streams a copy of
     power: bool | None = None  # as last read
-    colour: tuple[int, int, int] | None = None  # as last read
+    colour: RGB | None = None  # as last read
 
 
 class LightMonitor:

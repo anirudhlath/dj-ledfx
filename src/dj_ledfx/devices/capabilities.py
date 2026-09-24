@@ -9,6 +9,7 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from dj_ledfx.devices.adapter import DeviceAdapter
+    from dj_ledfx.types import RGB
 
 LightProtocol = Literal["LIFX", "Govee", "OpenRGB"]
 
@@ -34,7 +35,7 @@ class LightReading:
     UNKNOWN: ClassVar[LightReading]  # it answered, but can't say (or can't be read at all)
 
     power: bool | None  # None: the light can't tell us
-    colour: tuple[int, int, int] | None  # 8-bit sRGB, None when unknown
+    colour: RGB | None  # 8-bit sRGB, None when unknown
 
 
 LightReading.UNKNOWN = LightReading(power=None, colour=None)

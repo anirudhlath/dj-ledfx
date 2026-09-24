@@ -17,7 +17,7 @@ from dj_ledfx.devices.capabilities import (
     LightReading,
     NoAnswer,
 )
-from dj_ledfx.types import DeviceInfo, clamp01
+from dj_ledfx.types import RGB, DeviceInfo, clamp01
 
 try:
     from openrgb import OpenRGBClient
@@ -49,7 +49,7 @@ class OpenRGBAdapter(DeviceAdapter):
         self._led_count = 0
         self._device_name = ""
         self._modes: tuple[str, ...] = ()
-        self._last_read: tuple[float, tuple[str, list[tuple[int, int, int]]]] | None = None
+        self._last_read: tuple[float, tuple[str, list[RGB]]] | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -188,7 +188,7 @@ class OpenRGBAdapter(DeviceAdapter):
         except (ConnectionError, OSError) as exc:
             raise NoAnswer(f"{self._device_name} didn't take mode '{name}': {exc}") from exc
 
-    async def _read(self) -> tuple[str, list[tuple[int, int, int]]] | None:
+    async def _read(self) -> tuple[str, list[RGB]] | None:
         """The active mode's name and the LED colours from the server, at most
         READ_FRESH_S old; any change dj-ledfx makes asks afresh."""
         device = self._device
@@ -198,7 +198,7 @@ class OpenRGBAdapter(DeviceAdapter):
         if self._last_read is not None and now - self._last_read[0] < READ_FRESH_S:
             return self._last_read[1]
 
-        def _update() -> tuple[str, list[tuple[int, int, int]]]:
+        def _update() -> tuple[str, list[RGB]]:
             device.update()
             colours = [(int(c.red), int(c.green), int(c.blue)) for c in device.colors]
             return str(device.modes[device.active_mode].name), colours

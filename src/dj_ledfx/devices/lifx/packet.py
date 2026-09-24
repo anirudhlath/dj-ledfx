@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from dj_ledfx.devices.lifx.types import TileInfo
+    from dj_ledfx.types import RGB
 
 HEADER_SIZE = 36
 PROTOCOL = 1024
@@ -413,7 +414,7 @@ def rgb_to_hsbk(
     return (h, s, v, kelvin)
 
 
-def hsbk_to_rgb(hsbk: HSBK) -> tuple[int, int, int]:
+def hsbk_to_rgb(hsbk: HSBK) -> RGB:
     """LIFX HSBK to 8-bit RGB. Kelvin is ignored, so a white shows as plain white."""
     hue, sat, bri, _kelvin = hsbk
     red, green, blue = colorsys.hsv_to_rgb(hue / 65535, sat / 65535, bri / 65535)
