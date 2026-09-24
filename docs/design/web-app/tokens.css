@@ -1,0 +1,175 @@
+/*
+ * dj-ledfx design tokens — direction "Dollhouse"
+ * Tailwind CSS v4 (CSS-first config). Import once from src/styles/app.css:
+ *
+ *   @import "tailwindcss";
+ *   @import "../../docs/design/web-app/tokens.css";   // or copy this file into src/styles/
+ *
+ * Fonts are self-hosted (the app runs on a LAN home server; no runtime Google Fonts):
+ *   npm i @fontsource/instrument-sans @fontsource/instrument-serif @fontsource-variable/jetbrains-mono
+ *
+ * Rule of the system: the interface is neutral. Every chromatic pixel is a light's
+ * real colour. --color-signal is the only UI colour and means "needs you".
+ */
+
+@import "@fontsource/instrument-sans/400.css";
+@import "@fontsource/instrument-sans/500.css";
+@import "@fontsource/instrument-sans/600.css";
+@import "@fontsource/instrument-sans/700.css";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
+@import "@fontsource-variable/jetbrains-mono";
+
+@theme {
+  /* ---- surfaces (warm neutral, dark only) ---- */
+  --color-bg: #0d0c0b;            /* page, stage */
+  --color-panel: #131210;         /* side panels, sheets */
+  --color-raised: #1a1916;        /* cards, popovers, tooltips */
+  --color-control: #24221f;       /* inputs, secondary buttons, active nav */
+  --color-control-hover: #2e2c28; /* hover, slider track, pips at rest */
+  --color-line: #2a2824;          /* borders */
+  --color-line-soft: #1f1d1a;     /* dividers, table rules */
+  --color-line-strong: #3a3732;   /* popover borders, outline buttons */
+
+  /* ---- text ---- */
+  --color-text: #f2eee6;          /* primary · also "primary button" fill */
+  --color-text-2: #b3ada2;        /* secondary · ~9:1 on bg */
+  --color-text-3: #8a857b;        /* tertiary · ~5:1 on bg (never smaller than 11px) */
+  --color-on-text: #141311;       /* text on a --color-text fill */
+
+  /* ---- signal: needs attention, nothing else ---- */
+  --color-signal: #ff6b3d;
+  --color-signal-ink: #1a0d08;                  /* text on a signal fill */
+  --color-signal-bg: rgb(255 107 61 / 0.12);
+  --color-signal-line: rgb(255 107 61 / 0.45);
+
+  /* ---- stage (3D home) ---- */
+  --color-stage-floor: #161412;
+  --color-stage-floor-edge: #28251f;
+  --color-stage-wall-top: #4a453e;
+  --color-stage-wall-side: #1f1d1a;
+  --color-stage-wall-side-2: #191715;
+  --color-stage-column-top: #625d54;
+  --color-stage-furniture-top: #23211d;
+  --color-stage-courtyard: #0f0e0d;
+  --color-stage-light-off: #45413b;             /* a light's core when dark */
+
+  /* ---- type ---- */
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  /* display (serif, weight 400): look names, page heads, empty states */
+  --text-display-2xl: 64px;  --text-display-2xl--line-height: 1;
+  --text-display-xl: 56px;   --text-display-xl--line-height: 1;
+  --text-display-lg: 40px;   --text-display-lg--line-height: 1;
+  --text-display-md: 30px;   --text-display-md--line-height: 1.05;   /* look name in a zone card */
+  --text-display-sm: 26px;   --text-display-sm--line-height: 1.05;   /* compact card, phone */
+  --text-display-xs: 20px;   --text-display-xs--line-height: 1.1;    /* look name in a grid */
+
+  /* ui (sans) */
+  --text-title: 17px;    --text-title--line-height: 1.2;    /* page title, weight 600 */
+  --text-section: 15px;  --text-section--line-height: 1.3;  /* panel/section heads, 600 */
+  --text-body: 13.5px;   --text-body--line-height: 1.5;
+  --text-control: 13px;  --text-control--line-height: 1.3;
+  --text-meta: 12px;     --text-meta--line-height: 1.45;
+  --text-label: 11px;    --text-label--line-height: 1.2;    /* 600, uppercase, tracking 0.09em */
+
+  /* numbers (mono) */
+  --text-bpm-xl: 80px;   --text-bpm-xl--line-height: 1;     /* phone tempo */
+  --text-bpm-lg: 64px;   --text-bpm-lg--line-height: 1;     /* inputs tempo card */
+  --text-bpm: 20px;      --text-bpm--line-height: 1;        /* tempo module */
+  --text-data: 12.5px;   --text-data--line-height: 1.3;
+
+  /* ---- spacing: 4px base (Tailwind v4 multiplies --spacing) ---- */
+  --spacing: 4px;
+
+  /* ---- radii ---- */
+  --radius-chip: 6px;
+  --radius-control: 8px;
+  --radius-tile: 10px;
+  --radius-card: 12px;
+  --radius-panel: 14px;
+  --radius-sheet: 20px;
+  --radius-pill: 999px;
+
+  /* ---- elevation: only floating things get shadows ---- */
+  --shadow-pop: 0 20px 50px rgb(0 0 0 / 0.6);
+  --shadow-tip: 0 12px 30px rgb(0 0 0 / 0.5);
+  --shadow-sheet: 0 -20px 50px rgb(0 0 0 / 0.5);
+
+  /* ---- motion ---- */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.6, 0, 0.4, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* preview-only tape: black/white hazard stripes, the only way preview-only is shown */
+  --tape: repeating-linear-gradient(135deg, var(--color-text) 0 9px, var(--color-bg) 9px 18px);
+
+  /* layout constants (desktop, designed at 1440 x 900) */
+  --rail-w: 72px;
+  --topbar-h: 60px;
+  --live-panel-w: 404px;
+  --map-outliner-w: 280px;
+  --map-inspector-w: 340px;
+  --editor-left-w: 330px;
+  --editor-right-w: 370px;
+  --content-max-w: 1288px;
+
+  /* layout constants (phone, designed at 390 x 844) */
+  --phone-header-h: 52px;
+  --phone-tempo-h: 48px;
+  --tabbar-h: 60px; /* + env(safe-area-inset-bottom) */
+  --touch-min: 44px;
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-text);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-text);
+    color: var(--color-on-text);
+  }
+}
+
+@utility tape {
+  background: var(--tape);
+}
+
+@utility label-caps {
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-3);
+}
+
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

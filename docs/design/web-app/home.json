@@ -1,0 +1,1908 @@
+{
+  "$comment": "Seed geometry for the dj-ledfx home, derived from the owner's floor plan (59 px per metre). Units are metres. Plan coordinates: x = east, y = south, z = up; origin at the plan's north-west corner. In three.js use (x, z, y) -> (x, y_up, z_south). Every light, anchor and furniture position is an estimate from the plan and starts unconfirmed; LED counts marked estimated must be replaced by discovery data.",
+  "units": "m",
+  "axes": {
+    "x": "east",
+    "y": "south",
+    "z": "up"
+  },
+  "northOffsetDeg": 0,
+  "size": {
+    "eastWest": 14.8,
+    "northSouth": 14.5
+  },
+  "ceiling": 3.35,
+  "beams": 3.1,
+  "wallCutHeight": 0.85,
+  "location": {
+    "name": "Dallas, TX",
+    "lat": 32.78,
+    "lon": -96.8,
+    "confirmed": false
+  },
+  "outline": [
+    [
+      0.034,
+      0.881
+    ],
+    [
+      3.814,
+      0.881
+    ],
+    [
+      3.983,
+      1.22
+    ],
+    [
+      9.61,
+      0.119
+    ],
+    [
+      9.61,
+      0.915
+    ],
+    [
+      11.932,
+      0.915
+    ],
+    [
+      11.932,
+      7.068
+    ],
+    [
+      14.61,
+      7.017
+    ],
+    [
+      14.695,
+      14.102
+    ],
+    [
+      8.508,
+      14.102
+    ],
+    [
+      8.508,
+      14.407
+    ],
+    [
+      5.254,
+      14.407
+    ],
+    [
+      5.254,
+      14.102
+    ],
+    [
+      0.373,
+      14.102
+    ],
+    [
+      0.661,
+      12.576
+    ],
+    [
+      9.661,
+      12.576
+    ],
+    [
+      9.729,
+      7.458
+    ],
+    [
+      0.034,
+      7.458
+    ]
+  ],
+  "rooms": [
+    {
+      "id": "bedroom",
+      "name": "Bedroom",
+      "polygon": [
+        [
+          0.034,
+          0.881
+        ],
+        [
+          3.525,
+          0.915
+        ],
+        [
+          4.814,
+          7.458
+        ],
+        [
+          0.034,
+          7.458
+        ]
+      ],
+      "labelAt": [
+        1.55,
+        3.3
+      ],
+      "hasLights": true
+    },
+    {
+      "id": "bathroom",
+      "name": "Bathroom",
+      "polygon": [
+        [
+          3.525,
+          0.915
+        ],
+        [
+          3.814,
+          0.881
+        ],
+        [
+          3.983,
+          1.22
+        ],
+        [
+          6.373,
+          0.746
+        ],
+        [
+          6.932,
+          3.864
+        ],
+        [
+          4.254,
+          4.441
+        ]
+      ],
+      "labelAt": [
+        5.2,
+        2.6
+      ],
+      "hasLights": false
+    },
+    {
+      "id": "wardrobe",
+      "name": "Wardrobe",
+      "polygon": [
+        [
+          6.373,
+          0.746
+        ],
+        [
+          9.61,
+          0.119
+        ],
+        [
+          9.61,
+          0.915
+        ],
+        [
+          9.966,
+          0.915
+        ],
+        [
+          9.966,
+          3.237
+        ],
+        [
+          6.932,
+          3.864
+        ]
+      ],
+      "labelAt": [
+        8.1,
+        2.0
+      ],
+      "hasLights": false
+    },
+    {
+      "id": "kitchen",
+      "name": "Kitchen",
+      "polygon": [
+        [
+          4.254,
+          4.441
+        ],
+        [
+          9.966,
+          3.237
+        ],
+        [
+          9.966,
+          7.458
+        ],
+        [
+          4.814,
+          7.458
+        ]
+      ],
+      "labelAt": [
+        7.4,
+        5.5
+      ],
+      "hasLights": true
+    },
+    {
+      "id": "corridor",
+      "name": "Corridor",
+      "polygon": [
+        [
+          9.966,
+          0.915
+        ],
+        [
+          11.932,
+          0.915
+        ],
+        [
+          11.932,
+          7.102
+        ],
+        [
+          9.966,
+          7.102
+        ]
+      ],
+      "labelAt": [
+        10.95,
+        3.7
+      ],
+      "hasLights": true
+    },
+    {
+      "id": "living",
+      "name": "Living room",
+      "polygon": [
+        [
+          9.729,
+          7.102
+        ],
+        [
+          14.61,
+          7.017
+        ],
+        [
+          14.695,
+          14.102
+        ],
+        [
+          11.186,
+          14.102
+        ],
+        [
+          10.339,
+          12.712
+        ],
+        [
+          9.729,
+          12.576
+        ]
+      ],
+      "labelAt": [
+        12.75,
+        12.75
+      ],
+      "hasLights": true
+    },
+    {
+      "id": "study",
+      "name": "Study",
+      "polygon": [
+        [
+          5.153,
+          12.576
+        ],
+        [
+          9.661,
+          12.576
+        ],
+        [
+          10.339,
+          12.712
+        ],
+        [
+          11.186,
+          14.102
+        ],
+        [
+          8.508,
+          14.102
+        ],
+        [
+          8.508,
+          14.407
+        ],
+        [
+          5.254,
+          14.407
+        ],
+        [
+          5.254,
+          14.102
+        ],
+        [
+          5.153,
+          14.102
+        ]
+      ],
+      "labelAt": [
+        7.2,
+        13.5
+      ],
+      "hasLights": false
+    },
+    {
+      "id": "sunroom",
+      "name": "Sunroom",
+      "polygon": [
+        [
+          0.661,
+          12.576
+        ],
+        [
+          5.153,
+          12.576
+        ],
+        [
+          5.153,
+          14.102
+        ],
+        [
+          0.373,
+          14.102
+        ]
+      ],
+      "labelAt": [
+        2.9,
+        13.4
+      ],
+      "hasLights": false
+    }
+  ],
+  "subZones": [
+    {
+      "id": "office",
+      "name": "Office desk",
+      "room": "bedroom",
+      "polygon": [
+        [
+          0.068,
+          6.508
+        ],
+        [
+          4.644,
+          6.508
+        ],
+        [
+          4.797,
+          7.424
+        ],
+        [
+          0.068,
+          7.424
+        ]
+      ]
+    },
+    {
+      "id": "counter",
+      "name": "Kitchen counter",
+      "room": "kitchen",
+      "polygon": [
+        [
+          4.305,
+          4.492
+        ],
+        [
+          9.966,
+          3.288
+        ],
+        [
+          9.966,
+          3.932
+        ],
+        [
+          4.441,
+          5.136
+        ]
+      ]
+    }
+  ],
+  "outdoor": {
+    "courtyard": [
+      [
+        -1.153,
+        7.458
+      ],
+      [
+        9.729,
+        7.458
+      ],
+      [
+        9.661,
+        12.576
+      ],
+      [
+        -1.153,
+        12.576
+      ]
+    ],
+    "balcony": [
+      [
+        0.881,
+        10.763
+      ],
+      [
+        5.593,
+        10.763
+      ],
+      [
+        5.593,
+        12.407
+      ],
+      [
+        0.881,
+        12.407
+      ]
+    ],
+    "courtyardOpensTo": "west",
+    "balconyOffRoom": "sunroom"
+  },
+  "walls": [
+    {
+      "a": [
+        0.034,
+        0.881
+      ],
+      "b": [
+        3.814,
+        0.881
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        3.814,
+        0.881
+      ],
+      "b": [
+        3.983,
+        1.22
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        3.983,
+        1.22
+      ],
+      "b": [
+        9.61,
+        0.119
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.61,
+        0.119
+      ],
+      "b": [
+        9.61,
+        0.915
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.61,
+        0.915
+      ],
+      "b": [
+        11.932,
+        0.915
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        11.932,
+        0.915
+      ],
+      "b": [
+        11.932,
+        7.068
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        11.932,
+        7.068
+      ],
+      "b": [
+        14.61,
+        7.017
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        14.61,
+        7.017
+      ],
+      "b": [
+        14.695,
+        14.102
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        14.695,
+        14.102
+      ],
+      "b": [
+        8.508,
+        14.102
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        8.508,
+        14.102
+      ],
+      "b": [
+        8.508,
+        14.407
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        8.508,
+        14.407
+      ],
+      "b": [
+        5.254,
+        14.407
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        5.254,
+        14.407
+      ],
+      "b": [
+        5.254,
+        14.102
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        5.254,
+        14.102
+      ],
+      "b": [
+        0.373,
+        14.102
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        0.373,
+        14.102
+      ],
+      "b": [
+        0.661,
+        12.576
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        0.661,
+        12.576
+      ],
+      "b": [
+        1.525,
+        12.576
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        1.525,
+        12.576
+      ],
+      "b": [
+        4.492,
+        12.576
+      ],
+      "kind": "glass-door",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        4.492,
+        12.576
+      ],
+      "b": [
+        6.119,
+        12.576
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        6.119,
+        12.576
+      ],
+      "b": [
+        7.339,
+        12.576
+      ],
+      "kind": "window",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        7.339,
+        12.576
+      ],
+      "b": [
+        7.898,
+        12.576
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        7.898,
+        12.576
+      ],
+      "b": [
+        9.119,
+        12.576
+      ],
+      "kind": "window",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.119,
+        12.576
+      ],
+      "b": [
+        9.661,
+        12.576
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.661,
+        12.576
+      ],
+      "b": [
+        9.674,
+        11.627
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.674,
+        11.627
+      ],
+      "b": [
+        9.69,
+        10.407
+      ],
+      "kind": "window",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.69,
+        10.407
+      ],
+      "b": [
+        9.701,
+        9.525
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.701,
+        9.525
+      ],
+      "b": [
+        9.718,
+        8.305
+      ],
+      "kind": "window",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.718,
+        8.305
+      ],
+      "b": [
+        9.729,
+        7.458
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.729,
+        7.458
+      ],
+      "b": [
+        9.119,
+        7.458
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        9.119,
+        7.458
+      ],
+      "b": [
+        7.898,
+        7.458
+      ],
+      "kind": "window",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        7.898,
+        7.458
+      ],
+      "b": [
+        7.339,
+        7.458
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        7.339,
+        7.458
+      ],
+      "b": [
+        6.119,
+        7.458
+      ],
+      "kind": "window",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        6.119,
+        7.458
+      ],
+      "b": [
+        4.254,
+        7.458
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        4.254,
+        7.458
+      ],
+      "b": [
+        3.034,
+        7.458
+      ],
+      "kind": "window",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        3.034,
+        7.458
+      ],
+      "b": [
+        2.441,
+        7.458
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        2.441,
+        7.458
+      ],
+      "b": [
+        1.22,
+        7.458
+      ],
+      "kind": "window",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        1.22,
+        7.458
+      ],
+      "b": [
+        0.034,
+        7.458
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        0.034,
+        7.458
+      ],
+      "b": [
+        0.034,
+        6.339
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        0.034,
+        6.339
+      ],
+      "b": [
+        0.034,
+        5.119
+      ],
+      "kind": "window",
+      "westFacing": true,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        0.034,
+        5.119
+      ],
+      "b": [
+        0.034,
+        4.61
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        0.034,
+        4.61
+      ],
+      "b": [
+        0.034,
+        3.39
+      ],
+      "kind": "window",
+      "westFacing": true,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        0.034,
+        3.39
+      ],
+      "b": [
+        0.034,
+        2.915
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        0.034,
+        2.915
+      ],
+      "b": [
+        0.034,
+        1.695
+      ],
+      "kind": "window",
+      "westFacing": true,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        0.034,
+        1.695
+      ],
+      "b": [
+        0.034,
+        0.881
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": true,
+      "thickness": 0.24
+    },
+    {
+      "a": [
+        3.525,
+        0.915
+      ],
+      "b": [
+        3.616,
+        1.373
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": false,
+      "thickness": 0.12
+    },
+    {
+      "a": [
+        3.77,
+        2.158
+      ],
+      "b": [
+        4.401,
+        5.364
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": false,
+      "thickness": 0.12
+    },
+    {
+      "a": [
+        4.659,
+        6.673
+      ],
+      "b": [
+        4.814,
+        7.458
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": false,
+      "thickness": 0.12
+    },
+    {
+      "a": [
+        4.254,
+        4.441
+      ],
+      "b": [
+        9.966,
+        3.237
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": false,
+      "thickness": 0.12
+    },
+    {
+      "a": [
+        6.373,
+        0.746
+      ],
+      "b": [
+        6.585,
+        1.931
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": false,
+      "thickness": 0.12
+    },
+    {
+      "a": [
+        6.731,
+        2.742
+      ],
+      "b": [
+        6.932,
+        3.864
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": false,
+      "thickness": 0.12
+    },
+    {
+      "a": [
+        9.966,
+        0.915
+      ],
+      "b": [
+        9.966,
+        3.237
+      ],
+      "kind": "wall",
+      "westFacing": false,
+      "exterior": false,
+      "thickness": 0.12
+    }
+  ],
+  "columns": [
+    {
+      "min": [
+        -0.085,
+        0.508
+      ],
+      "max": [
+        0.424,
+        1.22
+      ]
+    },
+    {
+      "min": [
+        -0.085,
+        6.814
+      ],
+      "max": [
+        0.644,
+        7.525
+      ]
+    },
+    {
+      "min": [
+        4.831,
+        6.78
+      ],
+      "max": [
+        5.593,
+        7.525
+      ]
+    },
+    {
+      "min": [
+        9.729,
+        6.814
+      ],
+      "max": [
+        10.492,
+        7.576
+      ]
+    },
+    {
+      "min": [
+        9.627,
+        12.288
+      ],
+      "max": [
+        10.373,
+        13.051
+      ]
+    },
+    {
+      "min": [
+        4.864,
+        12.627
+      ],
+      "max": [
+        5.593,
+        13.136
+      ]
+    },
+    {
+      "min": [
+        0.203,
+        12.458
+      ],
+      "max": [
+        1.153,
+        13.136
+      ]
+    },
+    {
+      "min": [
+        14.102,
+        12.237
+      ],
+      "max": [
+        14.814,
+        13.017
+      ]
+    }
+  ],
+  "furniture": [
+    {
+      "id": "sofa",
+      "name": "Sofa",
+      "height": 0.72,
+      "z0": 0,
+      "confirmed": false,
+      "box": [
+        10.95,
+        9.15,
+        11.9,
+        11.65
+      ]
+    },
+    {
+      "id": "coffee",
+      "name": "Coffee table",
+      "height": 0.4,
+      "z0": 0,
+      "confirmed": false,
+      "box": [
+        12.35,
+        9.85,
+        13.2,
+        10.95
+      ]
+    },
+    {
+      "id": "console",
+      "name": "TV console",
+      "height": 0.5,
+      "z0": 0,
+      "confirmed": false,
+      "box": [
+        14.1,
+        9.0,
+        14.55,
+        11.8
+      ]
+    },
+    {
+      "id": "tv",
+      "name": "TV",
+      "height": 1.55,
+      "z0": 0.55,
+      "confirmed": false,
+      "box": [
+        14.3,
+        9.55,
+        14.42,
+        11.25
+      ]
+    },
+    {
+      "id": "spk_l",
+      "name": "Speaker",
+      "height": 1.05,
+      "z0": 0,
+      "confirmed": false,
+      "box": [
+        14.2,
+        8.55,
+        14.5,
+        8.85
+      ]
+    },
+    {
+      "id": "spk_r",
+      "name": "Speaker",
+      "height": 1.05,
+      "z0": 0,
+      "confirmed": false,
+      "box": [
+        14.2,
+        11.95,
+        14.5,
+        12.25
+      ]
+    },
+    {
+      "id": "bed",
+      "name": "Bed",
+      "height": 0.55,
+      "z0": 0,
+      "confirmed": false,
+      "box": [
+        0.95,
+        0.95,
+        2.75,
+        3.15
+      ]
+    },
+    {
+      "id": "desk",
+      "name": "Desk",
+      "height": 0.74,
+      "z0": 0,
+      "confirmed": false,
+      "box": [
+        0.35,
+        6.65,
+        4.35,
+        7.3
+      ]
+    },
+    {
+      "id": "counter",
+      "name": "Counter",
+      "height": 0.92,
+      "z0": 0,
+      "confirmed": false,
+      "polygon": [
+        [
+          4.305,
+          4.492
+        ],
+        [
+          9.966,
+          3.288
+        ],
+        [
+          9.966,
+          3.932
+        ],
+        [
+          4.441,
+          5.136
+        ]
+      ]
+    },
+    {
+      "id": "island",
+      "name": "Table",
+      "height": 0.92,
+      "z0": 0,
+      "confirmed": false,
+      "box": [
+        6.3,
+        5.4,
+        8.3,
+        6.1
+      ]
+    }
+  ],
+  "anchors": [
+    {
+      "id": "tv",
+      "name": "TV",
+      "position": [
+        14.36,
+        10.4,
+        1.3
+      ],
+      "confirmed": false
+    },
+    {
+      "id": "sofa",
+      "name": "Sofa",
+      "position": [
+        11.4,
+        10.4,
+        0.6
+      ],
+      "confirmed": false
+    },
+    {
+      "id": "coffee",
+      "name": "Coffee table",
+      "position": [
+        12.78,
+        10.4,
+        0.45
+      ],
+      "confirmed": false
+    },
+    {
+      "id": "speakers",
+      "name": "Speakers",
+      "position": [
+        14.35,
+        10.4,
+        0.9
+      ],
+      "confirmed": false,
+      "points": [
+        [
+          14.35,
+          8.7,
+          0.9
+        ],
+        [
+          14.35,
+          12.1,
+          0.9
+        ]
+      ]
+    },
+    {
+      "id": "door",
+      "name": "Front door",
+      "position": [
+        10.95,
+        0.95,
+        1.0
+      ],
+      "confirmed": false
+    }
+  ],
+  "lights": [
+    {
+      "id": "rcl",
+      "name": "Right Corner Lamp",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Colour",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        14.25,
+        13.6,
+        1.6
+      ]
+    },
+    {
+      "id": "lcl",
+      "name": "Left Corner Lamp",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Colour",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        14.25,
+        7.55,
+        1.6
+      ]
+    },
+    {
+      "id": "rope",
+      "name": "Rope",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Lightstrip",
+      "protocol": "LIFX",
+      "leds": 60,
+      "ledsEstimated": true,
+      "capabilities": [
+        "Colour",
+        "Multizone"
+      ],
+      "shape": "bent-line",
+      "confirmed": false,
+      "path": [
+        [
+          10.2,
+          12.4,
+          0.12
+        ],
+        [
+          10.2,
+          13.85,
+          0.12
+        ],
+        [
+          12.9,
+          13.85,
+          0.12
+        ]
+      ],
+      "ledOrder": "along-path"
+    },
+    {
+      "id": "ikea1",
+      "name": "Ikea Lamp 1",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Colour",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        10.45,
+        7.95,
+        1.25
+      ]
+    },
+    {
+      "id": "ikea2",
+      "name": "Ikea Lamp 2",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Colour",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        11.4,
+        12.35,
+        0.75
+      ]
+    },
+    {
+      "id": "ikea3",
+      "name": "Ikea Lamp 3",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Colour",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        13.15,
+        7.75,
+        1.45
+      ]
+    },
+    {
+      "id": "candle1",
+      "name": "Candle 1",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Candle",
+      "protocol": "LIFX",
+      "leds": 26,
+      "ledsEstimated": true,
+      "capabilities": [
+        "Colour",
+        "Matrix",
+        "Effects"
+      ],
+      "shape": "cylinder",
+      "confirmed": false,
+      "base": [
+        12.55,
+        10.25,
+        2.45
+      ],
+      "height": 0.12,
+      "radius": 0.02,
+      "ledOrder": "bottom-to-top"
+    },
+    {
+      "id": "candle2",
+      "name": "Candle 2",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Candle",
+      "protocol": "LIFX",
+      "leds": 26,
+      "ledsEstimated": true,
+      "capabilities": [
+        "Colour",
+        "Matrix",
+        "Effects"
+      ],
+      "shape": "cylinder",
+      "confirmed": false,
+      "base": [
+        12.95,
+        10.2,
+        2.45
+      ],
+      "height": 0.12,
+      "radius": 0.02,
+      "ledOrder": "bottom-to-top"
+    },
+    {
+      "id": "candle3",
+      "name": "Candle 3",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Candle",
+      "protocol": "LIFX",
+      "leds": 26,
+      "ledsEstimated": true,
+      "capabilities": [
+        "Colour",
+        "Matrix",
+        "Effects"
+      ],
+      "shape": "cylinder",
+      "confirmed": false,
+      "base": [
+        12.78,
+        10.6,
+        2.45
+      ],
+      "height": 0.12,
+      "radius": 0.02,
+      "ledOrder": "bottom-to-top"
+    },
+    {
+      "id": "rlamp",
+      "name": "Right Lamp",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Mini",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        11.25,
+        8.75,
+        0.95
+      ]
+    },
+    {
+      "id": "tube",
+      "name": "TV Lamp",
+      "room": "living",
+      "subZone": null,
+      "model": "LIFX Tube",
+      "protocol": "LIFX",
+      "leds": 52,
+      "ledsEstimated": true,
+      "capabilities": [
+        "Colour",
+        "Multizone",
+        "Matrix",
+        "Effects"
+      ],
+      "shape": "cylinder",
+      "confirmed": false,
+      "base": [
+        14.3,
+        12.75,
+        0.0
+      ],
+      "height": 0.62,
+      "radius": 0.04,
+      "ledOrder": "bottom-to-top"
+    },
+    {
+      "id": "kcorner",
+      "name": "Corner Lamp",
+      "room": "kitchen",
+      "subZone": null,
+      "model": "Govee floor lamp",
+      "protocol": "Govee",
+      "leds": 13,
+      "ledsEstimated": true,
+      "capabilities": [
+        "Colour",
+        "Multizone"
+      ],
+      "shape": "line",
+      "confirmed": false,
+      "path": [
+        [
+          9.45,
+          6.75,
+          0.1
+        ],
+        [
+          9.45,
+          6.75,
+          1.55
+        ]
+      ],
+      "ledOrder": "along-path"
+    },
+    {
+      "id": "kfloor",
+      "name": "Floor Lamp",
+      "room": "kitchen",
+      "subZone": null,
+      "model": "LIFX Mini",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        5.35,
+        6.65,
+        1.5
+      ]
+    },
+    {
+      "id": "bedl",
+      "name": "Bed Left",
+      "room": "bedroom",
+      "subZone": null,
+      "model": "LIFX Colour",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        0.55,
+        1.2,
+        0.62
+      ]
+    },
+    {
+      "id": "bedr",
+      "name": "Bed Right",
+      "room": "bedroom",
+      "subZone": null,
+      "model": "LIFX Colour",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        3.15,
+        1.2,
+        0.62
+      ]
+    },
+    {
+      "id": "deskl",
+      "name": "Desk Left",
+      "room": "bedroom",
+      "subZone": "office",
+      "model": "LIFX Colour",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        0.6,
+        6.95,
+        1.15
+      ]
+    },
+    {
+      "id": "deskr",
+      "name": "Desk Right",
+      "room": "bedroom",
+      "subZone": "office",
+      "model": "LIFX Colour",
+      "protocol": "LIFX",
+      "leds": 1,
+      "ledsEstimated": false,
+      "capabilities": [
+        "Colour",
+        "Effects"
+      ],
+      "shape": "point",
+      "confirmed": false,
+      "position": [
+        4.0,
+        6.95,
+        1.15
+      ]
+    },
+    {
+      "id": "pc",
+      "name": "PC",
+      "room": "bedroom",
+      "subZone": "office",
+      "model": "OpenRGB · 5 parts",
+      "protocol": "OpenRGB",
+      "leds": 150,
+      "ledsEstimated": true,
+      "capabilities": [
+        "Colour",
+        "Multizone",
+        "Matrix",
+        "Effects"
+      ],
+      "shape": "grid",
+      "confirmed": false,
+      "center": [
+        2.35,
+        6.85,
+        0.78
+      ],
+      "width": 0.9,
+      "depth": 0.3,
+      "parts": [
+        {
+          "name": "Keyboard",
+          "leds": 104
+        },
+        {
+          "name": "RAM sticks",
+          "leds": 16
+        },
+        {
+          "name": "GPU",
+          "leds": 16
+        },
+        {
+          "name": "Motherboard",
+          "leds": 12
+        },
+        {
+          "name": "Mouse",
+          "leds": 2
+        }
+      ]
+    },
+    {
+      "id": "neon",
+      "name": "Neon Indoor",
+      "room": "corridor",
+      "subZone": null,
+      "model": "LIFX Neon",
+      "protocol": "LIFX",
+      "leds": 48,
+      "ledsEstimated": true,
+      "capabilities": [
+        "Colour",
+        "Multizone",
+        "Effects"
+      ],
+      "shape": "bent-line",
+      "confirmed": false,
+      "path": [
+        [
+          10.35,
+          1.08,
+          2.15
+        ],
+        [
+          11.8,
+          1.08,
+          2.15
+        ],
+        [
+          11.8,
+          6.7,
+          2.15
+        ]
+      ],
+      "ledOrder": "along-path"
+    }
+  ],
+  "totals": {
+    "lights": 19,
+    "leds": 412
+  }
+}

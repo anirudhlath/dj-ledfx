@@ -16,6 +16,22 @@ Beat-synced LED effect engine driven by Pro DJ Link network data with per-device
 - Add claude md skill as a task to improve and revise claude context, memories etc.
 - Finally create a PR with the changes.
 
+## Redesign in Progress
+
+- Engine: `docs/superpowers/specs/2026-09-23-home-effects-engine-design.md`, milestones M1–M8, one plan each.
+- Web app: `docs/superpowers/specs/2026-09-23-web-app-rebuild-design.md` (the Claude Design handoff), milestones F0–F11, built in `web/` beside `frontend/` and served at `/next` until the F11 cut-over. The engine spec's §10 says how the two tracks meet.
+
+## Web App Design
+
+The Claude Design handoff is the only source of design truth. Don't work from memory, a summary or an earlier conversation.
+
+- Behaviour, structure, data contract and copy: the web app spec. Look and layout: the reference renders in `docs/design/web-app/reference/`.
+- The renders are not in git. They live in the main checkout, `/home/anirudhlath/code/private/dj-ledfx/docs/design/web-app/reference/`; read them there from a worktree. If they're missing, extract them from `.superpowers/design-handoff/2026-09-23-dj-ledfx-web-handoff.zip` in the main checkout.
+- `docs/design/web-app/HANDOFF.sha256` pins every design file, renders included. Check with `sha256sum -c --ignore-missing HANDOFF.sha256` in that directory.
+- Use `tokens.css`, `icons.ts`, `looks.json` and `home.json` as they are: import them, or copy them byte for byte with a test that fails when the copy differs. Never retype a token, colour, size, icon path or look description, and never restate design values in docs or in this file.
+- Before each web app task, re-read the spec sections and look at the renders that the task names.
+- A new handoff replaces `docs/design/web-app/` and the web app spec wholesale. Don't hand-edit the design files.
+
 
 ## Commands
 
