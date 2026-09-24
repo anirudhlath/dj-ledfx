@@ -184,6 +184,19 @@ def test_hidden_field_layers_and_firmware_layers_are_fine() -> None:
     assert [layer.id for layer in firmware_layers(look)] == ["c", "d"]
 
 
+# B12: a hidden firmware layer is left out, as a hidden field layer is.
+def test_hidden_firmware_layers_are_left_out() -> None:
+    look = look_from_dict(
+        _look(
+            layers=[
+                _layer(id="c", type="firmware", kind="lifx_flame", settings={}, visible=False),
+                _layer(id="d", type="firmware", kind="openrgb_mode", settings={}),
+            ]
+        )
+    )
+    assert [layer.id for layer in firmware_layers(look)] == ["d"]
+
+
 def test_a_firmware_only_look_has_no_field_layer() -> None:
     look = look_from_dict(_look(layers=[_layer(type="firmware", kind="lifx_flame", settings={})]))
     validate_look(look)

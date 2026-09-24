@@ -271,7 +271,7 @@ def visible_field_layer(look: Look) -> Layer | None:
 
 
 def firmware_layers(look: Look) -> list[Layer]:
-    return [layer for layer in look.layers if layer.type == "firmware"]
+    return [layer for layer in look.layers if layer.type == "firmware" and layer.visible]
 
 
 def validate_look(look: Look) -> None:
