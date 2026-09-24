@@ -31,10 +31,15 @@ from dj_ledfx.devices.lifx.packet import (
     STATE_VERSION,
     LifxPacket,
 )
+from dj_ledfx.devices.lifx.transport import LifxTransport
 
 
-class FakeLifxTransport:
-    """Records every packet. Requests get the reply a light would send, or None when silent."""
+class FakeLifxTransport(LifxTransport):
+    """Records every packet. Requests get the reply a light would send, or None when silent.
+
+    Only the socket is faked (send_packet, request_response); asking, parsing and the
+    queries are LifxTransport's own. It never opens and never probes.
+    """
 
     def __init__(
         self,
@@ -49,7 +54,9 @@ class FakeLifxTransport:
         unhandled: Collection[int] = (),
         silent: bool = False,
     ) -> None:
-        self.source_id = 4242
+        super().__init__()
+        self._source_id = 4242
+        self._is_open = True
         self.power = power
         self.hsbk = hsbk
         self.label = label
@@ -61,25 +68,7 @@ class FakeLifxTransport:
         self.multizone_effect: tuple[int, int, bool] = (0, 0, False)
         self.unhandled = set(unhandled)
         self.silent = silent
-        self.is_open = True
         self.sent: list[LifxPacket] = []
-        self._sequence = 0
-
-    def next_sequence(self) -> int:
-        self._sequence += 1
-        return self._sequence
-
-    def make_request(self, mac: bytes, msg_type: int, payload: bytes = b"") -> LifxPacket:
-        return LifxPacket(
-            tagged=False,
-            source=self.source_id,
-            target=mac + b"\x00\x00",
-            ack_required=False,
-            res_required=True,
-            sequence=0,
-            msg_type=msg_type,
-            payload=payload,
-        )
 
     def send_packet(self, packet: LifxPacket, addr: tuple[str, int]) -> None:
         self.sent.append(packet)
@@ -100,24 +89,8 @@ class FakeLifxTransport:
         self._apply(packet)
         return self._state_for(packet.msg_type)
 
-    async def query_version(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
-        reply = await self.request_response(
-            self.make_request(mac, GET_VERSION), (ip, port), STATE_VERSION
-        )
-        return (1, self.product) if reply is not None and reply.msg_type == STATE_VERSION else None
-
-    async def query_host_firmware(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
-        request = self.make_request(mac, GET_HOST_FIRMWARE)
-        reply = await self.request_response(request, (ip, port), STATE_HOST_FIRMWARE)
-        return (
-            self.firmware if reply is not None and reply.msg_type == STATE_HOST_FIRMWARE else None
-        )
-
-    def register_device(self, *args: object, **kwargs: object) -> None:
-        pass
-
     def start_probing(self, interval_s: float = 2.0) -> None:
-        pass
+        pass  # the real one would send echo requests from a background task
 
     def types(self) -> list[int]:
         return [packet.msg_type for packet in self.sent]

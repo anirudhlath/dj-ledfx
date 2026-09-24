@@ -60,16 +60,15 @@ async def _record(transport: LifxTransport, record: LifxDeviceRecord) -> None:
     slug = re.sub(r"[^a-z0-9]+", "-", product.name.lower()).strip("-")
     version = f"{firmware[0]}.{firmware[1]}" if firmware else "unknown"
     for get, payload, state in _queries(product):
-        request = transport.make_request(record.mac, get, payload)
-        reply = await transport.request_response(request, (record.ip, record.port), state)
-        if reply is None or reply.msg_type != state:
-            got = "nothing" if reply is None else f"type {reply.msg_type}"
-            print(f"{product.name}: no {NAMES[state]} ({got})")
+        addr = (record.ip, record.port)
+        reply = await transport.query(record.mac, addr, get, payload, state, bytes, timeout=1.0)
+        if reply is None:
+            print(f"{product.name}: no {NAMES[state]}")
             continue
         path = OUT / f"{product.pid}-{slug}-{NAMES[state]}.hex"
         path.write_text(
             f"# {NAMES[state]} ({state}) from {product.name} (pid {product.pid}), "
-            f"firmware {version}, recorded {date.today()}.\n{reply.payload.hex()}\n"
+            f"firmware {version}, recorded {date.today()}.\n{reply.hex()}\n"
         )
         print(f"wrote {path.relative_to(ROOT)}")
 

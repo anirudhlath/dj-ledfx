@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeVar
 
 from loguru import logger
 
@@ -31,6 +31,18 @@ from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.types import DeviceInfo
 
 LIFX_PORT = 56700
+
+T = TypeVar("T")
+
+
+def _label_of(payload: bytes) -> str:
+    *_colour, label = parse_light_state(payload)
+    return label.strip()
+
+
+def _zone_count_of(payload: bytes) -> int:
+    zone_count, _index, _colours = parse_state_extended_color_zones(payload)
+    return zone_count
 
 
 class LifxBackend(DeviceBackend):
@@ -220,47 +232,37 @@ class LifxBackend(DeviceBackend):
         self._names[name] = stable_id
         return name
 
-    async def _query_label(self, record: LifxDeviceRecord) -> str | None:
+    async def _query(
+        self,
+        record: LifxDeviceRecord,
+        msg_type: int,
+        reply_type: int,
+        parse: Callable[[bytes], T],
+        timeout: float,
+    ) -> T | None:
         assert self._transport is not None
-        request = self._transport.make_request(record.mac, GET_COLOR)
-        reply = await self._transport.request_response(
-            request, (record.ip, record.port), LIGHT_STATE, 0.5
+        return await self._transport.query(
+            record.mac, (record.ip, record.port), msg_type, b"", reply_type, parse, timeout=timeout
         )
-        if reply is None or reply.msg_type != LIGHT_STATE:
-            return None
-        try:
-            *_colour, label = parse_light_state(reply.payload)
-        except ValueError:
-            return None
-        return label.strip() or None
+
+    async def _query_label(self, record: LifxDeviceRecord) -> str | None:
+        label = await self._query(record, GET_COLOR, LIGHT_STATE, _label_of, 0.5)
+        return label or None
 
     async def _query_chain(self, record: LifxDeviceRecord) -> list[TileInfo]:
-        assert self._transport is not None
-        request = self._transport.make_request(record.mac, GET_DEVICE_CHAIN)
-        reply = await self._transport.request_response(
-            request, (record.ip, record.port), STATE_DEVICE_CHAIN
+        tiles = await self._query(
+            record, GET_DEVICE_CHAIN, STATE_DEVICE_CHAIN, parse_state_device_chain, 1.0
         )
-        if reply is None or reply.msg_type != STATE_DEVICE_CHAIN:
-            return []
-        try:
-            return parse_state_device_chain(reply.payload)
-        except ValueError:
-            return []
+        return tiles or []
 
     async def _query_zone_count(self, record: LifxDeviceRecord) -> int:
-        assert self._transport is not None
-        request = self._transport.make_request(record.mac, GET_EXTENDED_COLOR_ZONES)
-        reply = await self._transport.request_response(
-            request, (record.ip, record.port), STATE_EXTENDED_COLOR_ZONES
+        count = await self._query(
+            record, GET_EXTENDED_COLOR_ZONES, STATE_EXTENDED_COLOR_ZONES, _zone_count_of, 1.0
         )
-        if reply is None or reply.msg_type != STATE_EXTENDED_COLOR_ZONES:
+        if count is None:
             logger.warning("LIFX {} didn't report its zone count; assuming 1", record.ip)
             return 1
-        try:
-            zone_count, _index, _colours = parse_state_extended_color_zones(reply.payload)
-        except ValueError:
-            return 1
-        return max(1, zone_count)
+        return max(1, count)
 
     def _create_tracker(self, config: AppConfig) -> LatencyTracker:
         lifx = config.devices.lifx

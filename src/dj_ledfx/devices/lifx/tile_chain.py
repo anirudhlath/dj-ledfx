@@ -111,13 +111,9 @@ class LifxTileChainAdapter(LifxAdapterBase):
         )
 
     async def tile_effect(self) -> TileEffectState | None:
-        reply = await self._ask(GET_TILE_EFFECT, build_get_tile_effect(), STATE_TILE_EFFECT)
-        if reply is None or reply.msg_type != STATE_TILE_EFFECT:
-            return None
-        try:
-            return parse_state_tile_effect(reply.payload)
-        except ValueError:
-            return None
+        return await self._query(
+            GET_TILE_EFFECT, build_get_tile_effect(), STATE_TILE_EFFECT, parse_state_tile_effect
+        )
 
     async def _stop_effect(self) -> None:
         await self.start_tile_effect(TileEffectType.OFF, 0)

@@ -34,6 +34,11 @@ if TYPE_CHECKING:
 MAX_ZONES_PER_PACKET = 82
 
 
+def _colours_of_zones(payload: bytes) -> list[HSBK]:
+    _count, _index, colours = parse_state_extended_color_zones(payload)
+    return colours
+
+
 class LifxStripAdapter(LifxAdapterBase):
     """Extended-multizone lights: Z, Beam, Neon, String."""
 
@@ -96,13 +101,9 @@ class LifxStripAdapter(LifxAdapterBase):
         )
 
     async def multizone_effect(self) -> MultiZoneEffectState | None:
-        reply = await self._ask(GET_MULTIZONE_EFFECT, b"", STATE_MULTIZONE_EFFECT)
-        if reply is None or reply.msg_type != STATE_MULTIZONE_EFFECT:
-            return None
-        try:
-            return parse_state_multizone_effect(reply.payload)
-        except ValueError:
-            return None
+        return await self._query(
+            GET_MULTIZONE_EFFECT, b"", STATE_MULTIZONE_EFFECT, parse_state_multizone_effect
+        )
 
     async def _stop_effect(self) -> None:
         await self.start_multizone_effect(MultiZoneEffectType.OFF, 0)
@@ -115,14 +116,9 @@ class LifxStripAdapter(LifxAdapterBase):
         )
 
     async def _zone_colours(self) -> list[HSBK] | None:
-        reply = await self._ask(GET_EXTENDED_COLOR_ZONES, b"", STATE_EXTENDED_COLOR_ZONES)
-        if reply is None or reply.msg_type != STATE_EXTENDED_COLOR_ZONES:
-            return None
-        try:
-            _count, _index, colours = parse_state_extended_color_zones(reply.payload)
-        except ValueError:
-            return None
-        return colours
+        return await self._query(
+            GET_EXTENDED_COLOR_ZONES, b"", STATE_EXTENDED_COLOR_ZONES, _colours_of_zones
+        )
 
     async def _capture_extra(self) -> dict[str, Any]:
         extra: dict[str, Any] = {}

@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import itertools
 import json
-from typing import TYPE_CHECKING, Any, ClassVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from loguru import logger
 
@@ -40,6 +41,13 @@ if TYPE_CHECKING:
 
 CAPTURE_VERSION = 1
 RESTORE_FADE_MS = 500
+
+T = TypeVar("T")
+
+
+def _colour_and_power(payload: bytes) -> tuple[HSBK, bool]:
+    hue, sat, bri, kelvin, power, _label = parse_light_state(payload)
+    return (hue, sat, bri, kelvin), power != 0
 
 
 def hsbk_from_json(values: object) -> HSBK:
@@ -114,14 +122,17 @@ class LifxAdapterBase(DeviceAdapter):
         self, msg_type: int, payload: bytes, reply_type: int, *, timeout: float = 0.5
     ) -> LifxPacket | None:
         """Send a request and wait for its reply, retrying once. The reply may be 223."""
-        request = self._transport.make_request(self._target_mac, msg_type, payload)
-        for _attempt in range(2):
-            reply = await self._transport.request_response(
-                request, self._addr, reply_type, timeout
-            )
-            if reply is not None:
-                return reply
-        return None
+        return await self._transport.ask(
+            self._target_mac, self._addr, msg_type, payload, reply_type, tries=2, timeout=timeout
+        )
+
+    async def _query(
+        self, msg_type: int, payload: bytes, reply_type: int, parse: Callable[[bytes], T]
+    ) -> T | None:
+        """Ask, retrying once, and parse the reply: None if there's none that parses."""
+        return await self._transport.query(
+            self._target_mac, self._addr, msg_type, payload, reply_type, parse, tries=2
+        )
 
     async def _command(self, msg_type: int, payload: bytes, reply_type: int) -> LifxPacket:
         """A command the light must confirm. Raises NoAnswer when it stays silent, and
@@ -135,22 +146,16 @@ class LifxAdapterBase(DeviceAdapter):
 
     # --- reading ---
 
-    async def _light_state(self) -> tuple[HSBK, bool, str] | None:
-        reply = await self._ask(GET_COLOR, b"", LIGHT_STATE)
-        if reply is None or reply.msg_type != LIGHT_STATE:
-            return None
-        try:
-            hue, sat, bri, kelvin, power, label = parse_light_state(reply.payload)
-        except ValueError:
-            return None
-        return (hue, sat, bri, kelvin), power != 0, label
+    async def _light_state(self) -> tuple[HSBK, bool] | None:
+        """Its colour and power, or None if it doesn't answer."""
+        return await self._query(GET_COLOR, b"", LIGHT_STATE, _colour_and_power)
 
     async def read_light(self) -> LightReading:
         """Raises NoAnswer when the light is silent: unplugged, or cut at the wall."""
         state = await self._light_state()
         if state is None:
             raise NoAnswer(f"{self._device_info.name} didn't answer GetColor")
-        hsbk, power, _label = state
+        hsbk, power = state
         return LightReading(power=power, colour=hsbk_to_rgb(hsbk))
 
     # --- control ---
@@ -194,7 +199,7 @@ class LifxAdapterBase(DeviceAdapter):
                 "LIFX '{}' didn't answer; its state isn't captured", self._device_info.name
             )
             return None
-        hsbk, power, _label = state
+        hsbk, power = state
         snapshot: dict[str, Any] = {"v": CAPTURE_VERSION, "power": power, "hsbk": list(hsbk)}
         snapshot.update(await self._capture_extra())
         return json.dumps(snapshot).encode()

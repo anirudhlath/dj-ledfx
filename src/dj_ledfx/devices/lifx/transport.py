@@ -5,6 +5,7 @@ import dataclasses
 import random
 import time
 from collections.abc import Callable, Collection
+from typing import TypeVar
 
 from loguru import logger
 
@@ -21,6 +22,8 @@ from dj_ledfx.devices.lifx.packet import (
     parse_state_version,
 )
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
+
+T = TypeVar("T")
 
 PacketListener = Callable[[LifxPacket, tuple[str, int]], None]
 _Waiter = tuple[frozenset[int], "asyncio.Future[LifxPacket]"]
@@ -153,6 +156,50 @@ class LifxTransport:
             return None
         finally:
             self._waiters.pop(key, None)
+
+    async def ask(
+        self,
+        mac: bytes,
+        addr: tuple[str, int],
+        msg_type: int,
+        payload: bytes,
+        reply_type: int,
+        *,
+        tries: int = 1,
+        timeout: float = 0.5,
+    ) -> LifxPacket | None:
+        """Ask a light, up to `tries` times: its reply, which may be StateUnhandled (223),
+        or None when it stays silent."""
+        request = self.make_request(mac, msg_type, payload)
+        for _attempt in range(tries):
+            reply = await self.request_response(request, addr, reply_type, timeout)
+            if reply is not None:
+                return reply
+        return None
+
+    async def query(
+        self,
+        mac: bytes,
+        addr: tuple[str, int],
+        msg_type: int,
+        payload: bytes,
+        reply_type: int,
+        parse: Callable[[bytes], T],
+        *,
+        tries: int = 1,
+        timeout: float = 0.5,
+    ) -> T | None:
+        """Ask a light and parse its reply. None when it stays silent, answers something
+        else (StateUnhandled) or sends a reply that doesn't parse."""
+        reply = await self.ask(
+            mac, addr, msg_type, payload, reply_type, tries=tries, timeout=timeout
+        )
+        if reply is None or reply.msg_type != reply_type:
+            return None
+        try:
+            return parse(reply.payload)
+        except ValueError:
+            return None
 
     def start_probing(self, interval_s: float = 2.0) -> None:
         if self._probe_task is None or self._probe_task.done():
@@ -295,13 +342,10 @@ class LifxTransport:
 
     async def query_version(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
         """(vendor, product), or None if the light doesn't answer two tries."""
-        request = self.make_request(mac, GET_VERSION)
-        for _attempt in range(2):
-            reply = await self.request_response(request, (ip, port), STATE_VERSION, timeout=0.5)
-            if reply is not None and reply.msg_type == STATE_VERSION:
-                vendor, product, _version = parse_state_version(reply.payload)
-                return int(vendor), int(product)
-        return None
+        version = await self.query(
+            mac, (ip, port), GET_VERSION, b"", STATE_VERSION, parse_state_version, tries=2
+        )
+        return None if version is None else (int(version[0]), int(version[1]))
 
     async def _query_version(self, mac: bytes, ip: str, port: int) -> tuple[int, int]:
         """Query a device's vendor and product. Returns (1, 0) if it never answers."""
@@ -313,12 +357,9 @@ class LifxTransport:
 
     async def query_host_firmware(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
         """(major, minor) of the light's firmware, or None if it doesn't answer."""
-        reply = await self.request_response(
-            self.make_request(mac, GET_HOST_FIRMWARE), (ip, port), STATE_HOST_FIRMWARE, 0.5
+        return await self.query(
+            mac, (ip, port), GET_HOST_FIRMWARE, b"", STATE_HOST_FIRMWARE, parse_state_host_firmware
         )
-        if reply is None or reply.msg_type != STATE_HOST_FIRMWARE:
-            return None
-        return parse_state_host_firmware(reply.payload)
 
     def _on_packet_received(self, data: bytes, addr: tuple[str, int]) -> None:
         try:
