@@ -19,6 +19,21 @@ def test_slices_follow_source_order() -> None:
     assert leds.slice_for("missing") is None
 
 
+def test_a_subset_is_drawn_as_the_whole_set_would_draw_it() -> None:
+    leds = build_ledset([LedSource("a", 3), LedSource("b", 5), LedSource("c", 2)])
+    where, sub = leds.subset({"a", "c"})
+    assert where.tolist() == [0, 1, 2, 8, 9]
+    assert [(s.device_id, s.start, s.stop) for s in sub.slices] == [
+        ("a", 0, 3),
+        ("b", 3, 3),
+        ("c", 3, 5),
+    ]
+    assert sub.count == 5
+    for name in ("pos", "npos", "local", "local_u", "room", "device"):
+        assert np.array_equal(getattr(sub, name), getattr(leds, name)[where]), name
+    assert sub.device.tolist() == [0, 0, 0, 2, 2]  # still indexes sub.slices
+
+
 def test_arrays_have_the_documented_shapes_and_types() -> None:
     leds = build_ledset([LedSource("a", 4), LedSource("b", 2)])
     for name in ("pos", "npos", "local"):

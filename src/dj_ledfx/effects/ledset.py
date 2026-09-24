@@ -8,8 +8,9 @@ M2 replaces the layout with home-map placements; the arrays stay the same.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from functools import cached_property
 from types import MappingProxyType
 
 import numpy as np
@@ -61,11 +62,37 @@ class LedSet:
     def count(self) -> int:
         return int(self.pos.shape[0])
 
+    @cached_property
+    def _by_device(self) -> Mapping[str, DeviceSlice]:
+        return {piece.device_id: piece for piece in self.slices}
+
     def slice_for(self, device_id: str) -> DeviceSlice | None:
-        for device_slice in self.slices:
-            if device_slice.device_id == device_id:
-                return device_slice
-        return None
+        return self._by_device.get(device_id)
+
+    def subset(self, device_ids: Collection[str]) -> tuple[NDArray[np.intp], LedSet]:
+        """Some devices' LEDs, in this set's order, and where they sit in it. Positions keep
+        this set's normalisation, and a device left out keeps an empty slice, so `device`
+        still indexes `slices`: an effect draws them as it would in the whole set."""
+        parts: list[NDArray[np.intp]] = []
+        slices: list[DeviceSlice] = []
+        start = 0
+        for piece in self.slices:
+            count = piece.count if piece.device_id in device_ids else 0
+            if count:
+                parts.append(np.arange(piece.start, piece.stop, dtype=np.intp))
+            slices.append(DeviceSlice(piece.device_id, start, start + count))
+            start += count
+        index = np.concatenate(parts) if parts else np.zeros(0, dtype=np.intp)
+        return index, LedSet(
+            pos=self.pos[index],
+            npos=self.npos[index],
+            local=self.local[index],
+            local_u=self.local_u[index],
+            room=self.room[index],
+            device=self.device[index],
+            anchors=self.anchors,
+            slices=tuple(slices),
+        )
 
 
 def build_ledset(sources: Sequence[LedSource], gap_m: float = DEVICE_GAP_M) -> LedSet:

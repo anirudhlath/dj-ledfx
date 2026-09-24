@@ -16,7 +16,7 @@ from loguru import logger
 
 from dj_ledfx.effects.context import render_context
 from dj_ledfx.effects.firmware import FirmwareEffect
-from dj_ledfx.effects.ledset import DeviceSlice, LedSource, build_ledset
+from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
 from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.looks.model import (
     Layer,
@@ -32,6 +32,8 @@ from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.model import CrashInfo
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
     from dj_ledfx.beat.clock import BeatClock
     from dj_ledfx.devices.capabilities import DeviceCapabilities
     from dj_ledfx.effects.context import RenderContext
@@ -113,8 +115,10 @@ class ZoneRuntime:
         self._claims: dict[str, int] = {}  # light -> firmware layer it runs itself
         self._copies: dict[str, int] = {}  # light -> firmware layer streamed as a copy
         self._emulated: set[str] = set()  # lights that rejected their firmware effect
+        # Each firmware layer with lights, and those lights' LEDs: where they sit in the
+        # zone's frame and the LED set its streamed copy is drawn on.
+        self._copy_targets: list[tuple[int, NDArray[np.intp], LedSet]] = []
         self._lights: tuple[ZoneLight, ...] = ()
-        self._slices: dict[str, DeviceSlice] = {}
         self._rendering = ""
         self._last_crash_log = float("-inf")
         self._render_s = 0.0  # moving average of the render time
@@ -122,9 +126,10 @@ class ZoneRuntime:
         self._ticks = 0
         self._rendered: deque[float] = deque()
         self._below_since: float | None = None
-        self.ring = RingBuffer(capacity=int(max_lookahead_s * fps) + 2)
-        self.leds = build_ledset([])
-        self.set_lights(lights)
+        self._capacity = int(max_lookahead_s * fps) + 2
+        self.ring: RingBuffer
+        self.leds: LedSet
+        self._place(lights)
         self._compile()
 
     # --- what the zone looks like from outside -------------------------------------
@@ -186,7 +191,7 @@ class ZoneRuntime:
         return None if index is None else self._firmware[index][1].display_name
 
     def route_for(self, device_id: str) -> DeviceRoute | None:
-        piece = self._slices.get(device_id)
+        piece = self.leds.slice_for(device_id)
         if piece is None or piece.count == 0:
             return None
         return DeviceRoute(
@@ -200,13 +205,7 @@ class ZoneRuntime:
 
     def set_lights(self, lights: Sequence[ZoneLight]) -> None:
         """Rebuild the LED set and start a fresh ring, so no route outlives its frames."""
-        self._lights = tuple(lights)
-        self.leds = build_ledset(
-            [LedSource(light.device_id, light.led_count, light.geometry) for light in self._lights]
-        )
-        self._slices = {piece.device_id: piece for piece in self.leds.slices}
-        self.ring = RingBuffer(capacity=self.ring.capacity)
-        self._emulated &= set(self._slices)
+        self._place(lights)
         self._plan_claims()
 
     def set_brightness(self, value: float) -> None:
@@ -279,22 +278,18 @@ class ZoneRuntime:
         self._track_speed(now, elapsed)
 
     def _render(self, ctx: RenderContext) -> FloatRGB:
-        frame = np.zeros((self.leds.count, 3), dtype=np.float32)
-        if self.waiting_for or self.leds.count == 0:
-            return frame
-        if self._field is not None:
+        """A new frame every tick: the ring keeps it. Waiting, no firmware layer has lights."""
+        if self._field is None or self.waiting_for or self.leds.count == 0:
+            frame = np.zeros((self.leds.count, 3), dtype=np.float32)
+        else:
             layer, effect = self._field
             self._rendering = layer.name
-            frame[:] = _finite(effect.render(ctx, self.leds)) * np.float32(layer.opacity)
-        assigned = [*self._claims.items(), *self._copies.items()]
-        for index in sorted({owner for _, owner in assigned}):
+            colors = _finite(effect.render(ctx, self.leds))
+            frame = np.multiply(colors, np.float32(layer.opacity), dtype=np.float32)
+        for index, where, leds in self._copy_targets:
             layer, firmware = self._firmware[index]
             self._rendering = layer.name
-            copy = _finite(firmware.emulate(ctx, self.leds)) * np.float32(layer.opacity)
-            for device_id, owner in assigned:
-                if owner == index:
-                    piece = self._slices[device_id]
-                    frame[piece.start : piece.stop] = copy[piece.start : piece.stop]
+            frame[where] = _finite(firmware.emulate(ctx, leds)) * np.float32(layer.opacity)
         frame *= np.float32(self.brightness)
         return frame
 
@@ -321,9 +316,20 @@ class ZoneRuntime:
                 self._field = (layer, effect)
         self._plan_claims()
 
+    def _place(self, lights: Sequence[ZoneLight]) -> None:
+        self._lights = tuple(lights)
+        self.leds = build_ledset(
+            [LedSource(light.device_id, light.led_count, light.geometry) for light in self._lights]
+        )
+        self.ring = RingBuffer(self._capacity)
+        self._emulated &= {light.device_id for light in self._lights}
+
     def _plan_claims(self) -> None:
+        """Which firmware layer each light runs itself or takes a copy of. A light that
+        refuses its effect later (mark_emulated) keeps its layer, so the copies' LEDs stay."""
         self._claims = {}
         self._copies = {}
+        self._copy_targets = []
         if self.crash is not None or self.waiting_for or not self._firmware:
             return
         for light in self._lights:
@@ -338,6 +344,11 @@ class ZoneRuntime:
                 self._copies[light.device_id] = index
             else:
                 self._claims[light.device_id] = index
+        layer_of = {**self._claims, **self._copies}
+        for index in sorted(set(layer_of.values())):
+            where, leds = self.leds.subset({d for d, i in layer_of.items() if i == index})
+            if len(where):
+                self._copy_targets.append((index, where, leds))
 
     def _fail(self, layer: str, message: str) -> None:
         self.crash = CrashInfo(layer=layer, message=message, at=self._now())

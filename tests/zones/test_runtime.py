@@ -11,12 +11,13 @@ from loguru import logger
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.base import Effect
-from dj_ledfx.effects.context import RenderContext
+from dj_ledfx.effects.context import RenderContext, render_context
 from dj_ledfx.effects.field import FieldEffect
+from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.model import Layer, Look
-from dj_ledfx.types import FloatRGB
+from dj_ledfx.types import FloatRGB, RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
 TILE = DeviceCapabilities(protocol="LIFX", matrix=True)
@@ -136,6 +137,32 @@ def test_a_rejected_firmware_effect_falls_back_to_its_streamed_copy() -> None:
     assert runtime.mode_of("tile") == "streamed-copy"
     route = runtime.route_for("tile")
     assert route is not None and route.streaming
+
+
+# E3: a layer's copy is drawn on its own lights only, as the whole zone would draw it.
+def test_a_streamed_copy_is_drawn_as_on_the_whole_zone() -> None:
+    flame = Layer(id="flame", name="Flame", type="firmware", kind="lifx_flame")
+    lights = (ZoneLight("bulb", 1, BULB), ZoneLight("tile", 4, TILE), ZoneLight("lamp", 3, LAMP))
+    runtime = _runtime(_look(_field(), flame), lights)
+    runtime.mark_emulated("tile")
+    runtime.tick(100.0)
+    frame = runtime.ring.find_nearest(1e9)
+    assert frame is not None
+    ctx = render_context(BeatClock(), frame.target_time, 1 / 60)
+    whole = LifxFlame().emulate(ctx, runtime.leds)
+    assert np.array_equal(frame.colors[1:5], whole[1:5])
+    assert np.allclose(frame.colors[[0, 5, 6, 7]], 0.5)  # the field on the others
+
+
+# E11: the ring keeps every frame, so each tick renders a new array.
+def test_each_tick_renders_a_new_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = _runtime(_look(_field()))
+    written: list[RenderedFrame] = []
+    monkeypatch.setattr(runtime.ring, "write", written.append)
+    runtime.tick(100.0)
+    runtime.tick(100.1)
+    assert len(written) == 2
+    assert not np.shares_memory(written[0].colors, written[1].colors)
 
 
 def test_frames_are_rendered_for_now_plus_the_horizon() -> None:
