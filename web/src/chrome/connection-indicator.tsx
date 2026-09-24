@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Icon } from '@/design/icon'
 import type { Connection } from './state'
 
@@ -10,31 +9,11 @@ export interface ConnectionIndicatorProps {
 
 const SPIN = 'animate-[spin_1.4s_linear_infinite]'
 
-/** §6.2 ConnectionIndicator: "● Live 60 fps" or "⟳ Reconnecting · try 3". */
-export function ConnectionIndicator({ connection, variant }: ConnectionIndicatorProps) {
-  return (
-    <>
-      <span role="status" className="sr-only">
-        {useNews(connection.status)}
-      </span>
-      <Face connection={connection} variant={variant} />
-    </>
-  )
-}
-
 /**
- * What the status region says. Screen readers read changes inside a live region, but often not a
- * region that arrives with its text, so the region is always there: empty at first, "Reconnecting"
- * when the link drops, "Live again" when it's back. The attempt count is noise; it stays out.
+ * §6.2 ConnectionIndicator: "● Live 60 fps" or "⟳ Reconnecting · try 3". It only draws; the
+ * shell's one status region says the news (useConnectionNews).
  */
-function useNews(status: Connection['status']): string {
-  const [dropped, setDropped] = useState(status === 'reconnecting')
-  if (status === 'reconnecting' && !dropped) setDropped(true)
-  if (status === 'reconnecting') return 'Reconnecting'
-  return dropped ? 'Live again' : ''
-}
-
-function Face({ connection, variant }: ConnectionIndicatorProps) {
+export function ConnectionIndicator({ connection, variant }: ConnectionIndicatorProps) {
   if (connection.status === 'live') {
     if (variant === 'header') return null
     return (

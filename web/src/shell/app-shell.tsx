@@ -1,7 +1,9 @@
 import { Outlet } from 'react-router'
 import { documentTitle, usePageMeta } from '@/app/page-meta'
+import { useConnectionNews } from '@/chrome/connection-news'
 import { useChrome } from '@/chrome/state'
 import { TempoModule } from '@/chrome/tempo-module'
+import { Announcer } from '@/design/announcer'
 import { cx } from '@/design/cx'
 import { useIsPhone } from '@/lib/use-media-query'
 import { useNow } from '@/lib/use-now'
@@ -15,40 +17,44 @@ import { TopBar } from './top-bar'
  * `<main>` keeps its place in the tree, so crossing the breakpoint swaps the chrome without
  * remounting the page. The root alone keeps everything out of the safe-area insets (index.html
  * sets viewport-fit=cover): a notch, a home indicator, a phone turned sideways, in either layout.
+ * The page's one status region sits outside the swapped chrome, so it's there before any news.
  */
 export function AppShell() {
   const isPhone = useIsPhone()
   const meta = usePageMeta()
   const chrome = useChrome()
+  const news = useConnectionNews(chrome.connection.status)
   const now = useNow()
   const at = { now, chrome }
 
   return (
-    <div
-      className={cx(
-        'h-dvh pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]',
-        isPhone ? 'flex flex-col' : 'grid grid-cols-[var(--rail-w)_minmax(0,1fr)] grid-rows-[var(--topbar-h)_minmax(0,1fr)]',
-      )}
-    >
-      <title>{documentTitle(meta.title)}</title>
-      {isPhone ? (
-        <PhoneHeader title={meta.phoneTitle ?? meta.title} context={meta.phoneContext?.(at)} chrome={chrome}>
-          {meta.tempoStrip && (
-            <div className="mx-4 mt-1.5">
-              <TempoModule variant="strip" {...chrome.tempo} />
-            </div>
-          )}
-        </PhoneHeader>
-      ) : (
-        <div className="row-span-2">
-          <Rail attention={chrome.attention} server={chrome.server} />
-        </div>
-      )}
-      {!isPhone && <TopBar title={meta.title} context={meta.context?.(at)} chrome={chrome} />}
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <Outlet />
-      </main>
-      {isPhone && <TabBar attention={chrome.attention} />}
-    </div>
+    <Announcer news={news}>
+      <div
+        className={cx(
+          'h-dvh pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]',
+          isPhone ? 'flex flex-col' : 'grid grid-cols-[var(--rail-w)_minmax(0,1fr)] grid-rows-[var(--topbar-h)_minmax(0,1fr)]',
+        )}
+      >
+        <title>{documentTitle(meta.title)}</title>
+        {isPhone ? (
+          <PhoneHeader title={meta.phoneTitle ?? meta.title} context={meta.phoneContext?.(at)} chrome={chrome}>
+            {meta.tempoStrip && (
+              <div className="mx-4 mt-1.5">
+                <TempoModule variant="strip" {...chrome.tempo} />
+              </div>
+            )}
+          </PhoneHeader>
+        ) : (
+          <div className="row-span-2">
+            <Rail attention={chrome.attention} server={chrome.server} />
+          </div>
+        )}
+        {!isPhone && <TopBar title={meta.title} context={meta.context?.(at)} chrome={chrome} />}
+        <main className="min-h-0 flex-1 overflow-y-auto">
+          <Outlet />
+        </main>
+        {isPhone && <TabBar attention={chrome.attention} />}
+      </div>
+    </Announcer>
   )
 }

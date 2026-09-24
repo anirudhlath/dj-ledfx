@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { useAnnounce } from './announce'
 import { Icon } from './icon'
 import type { IconName } from './icons'
 
@@ -17,11 +18,15 @@ export interface ToastProps {
 }
 
 /**
- * §6.1 Toast: a 44 px pill for moments, not errors. It isn't a live region of its own: a region
- * that arrives with its text often goes unannounced, so whatever shows toasts keeps one lasting
- * polite status region and puts the toast's words there.
+ * §6.1 Toast: a 44 px pill for moments, not errors. It isn't a live region of its own (a region
+ * that arrives with its text often goes unannounced): it says its title and detail through the
+ * page's lasting status region, the Announcer around it.
  */
 export function Toast({ title, detail, readout, icon, tint, action }: ToastProps) {
+  const announce = useAnnounce()
+  useEffect(() => {
+    announce(detail ? `${title}, ${detail}` : title)
+  }, [announce, title, detail])
   return (
     <div
       className="inline-flex h-11 items-center gap-3 rounded-pill border border-line-strong bg-raised/95 pr-2 pl-3.5 whitespace-nowrap shadow-tip"

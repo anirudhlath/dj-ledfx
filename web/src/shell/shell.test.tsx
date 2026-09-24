@@ -74,7 +74,6 @@ describe('PhoneHeader', () => {
     expect(within(header).getByRole('switch', { name: 'Preview only' })).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: '1 needs attention' })).toBeInTheDocument()
     expect(within(header).queryByText(/Reconnecting/)).toBeNull()
-    expect(within(header).getByRole('status')).toBeEmptyDOMElement()
   })
 
   it('puts the reconnect pill first while reconnecting', () => {

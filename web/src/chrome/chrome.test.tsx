@@ -1,9 +1,11 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { Announcer } from '@/design/announcer'
 import { Popover } from '@/design/overlays'
 import { AttentionButton } from './attention-button'
 import { ConnectionIndicator } from './connection-indicator'
+import { useConnectionNews } from './connection-news'
 import { HERO_CHROME, type Connection, type TempoState } from './state'
 import { PreviewOnlySwitch } from './preview-only-switch'
 import { TempoModule } from './tempo-module'
@@ -135,18 +137,32 @@ describe('ConnectionIndicator', () => {
     expect(screen.getByText('Reconnecting · try 3')).toHaveClass('sr-only')
   })
 
+  // The shell's one status region says the news (below); the indicator only draws.
+  it.each(['bar', 'header'] as const)('is not a live region of its own (%s)', (variant) => {
+    const { rerender } = render(<ConnectionIndicator variant={variant} connection={live} />)
+    expect(screen.queryByRole('status')).toBeNull()
+    rerender(<ConnectionIndicator variant={variant} connection={reconnecting} />)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+})
+
+describe('connection news', () => {
+  function Region({ connection }: { connection: Connection }) {
+    return <Announcer news={useConnectionNews(connection.status)} />
+  }
+
   // A screen reader reads changes inside a live region, but often not a region that arrives with
   // its text. So one status region is always there, and it carries the news, not every retry.
-  it.each(['bar', 'header'] as const)('announces a drop and a recovery through one lasting status region (%s)', (variant) => {
-    const { rerender } = render(<ConnectionIndicator variant={variant} connection={live} />)
+  it('announces a drop and a recovery through one lasting status region', () => {
+    const { rerender } = render(<Region connection={{ status: 'live', fps: 60 }} />)
     const status = screen.getByRole('status')
     expect(status).toBeEmptyDOMElement()
-    rerender(<ConnectionIndicator variant={variant} connection={{ status: 'reconnecting', attempt: 1 }} />)
+    rerender(<Region connection={{ status: 'reconnecting', attempt: 1 }} />)
     expect(status).toHaveTextContent(/^Reconnecting$/)
-    rerender(<ConnectionIndicator variant={variant} connection={{ status: 'reconnecting', attempt: 2 }} />)
+    rerender(<Region connection={{ status: 'reconnecting', attempt: 2 }} />)
     expect(status).toHaveTextContent(/^Reconnecting$/)
-    rerender(<ConnectionIndicator variant={variant} connection={live} />)
+    rerender(<Region connection={{ status: 'live', fps: 60 }} />)
     expect(status).toHaveTextContent(/^Live again$/)
-    expect(screen.getAllByRole('status')).toEqual([status])
+    expect(screen.getByRole('status')).toBe(status)
   })
 })

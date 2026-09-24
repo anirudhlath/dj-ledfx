@@ -143,6 +143,17 @@ describe('phone chrome (Phone-Live.png)', () => {
   })
 })
 
+// The connection's news and the toasts speak through one status region, which must already be
+// there when they do: it belongs to the shell, not to the chrome that swaps at 768 px.
+it('keeps one status region, empty while live, across the breakpoint', async () => {
+  renderApp('/next/live')
+  const status = await screen.findByRole('status')
+  expect(status).toBeEmptyDOMElement()
+  act(() => setViewportWidth(390))
+  // The same node, and still the only one (toEqual would only compare their contents).
+  expect(screen.getByRole('status')).toBe(status)
+})
+
 // Review focus: crossing 768 px swaps the chrome in place; the page is not remounted.
 it('swaps the chrome live across the breakpoint without remounting the page', async () => {
   let mounts = 0

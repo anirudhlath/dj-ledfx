@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { Announcer } from './announcer'
 import { Chip, Label, Tag } from './chip'
 import { Toast } from './toast'
 
@@ -34,10 +35,19 @@ describe('Toast', () => {
     expect(screen.getByText('2 s').getAttribute('style')).toBeNull()
   })
 
-  // A live region that arrives with its text often goes unannounced. Whatever shows toasts keeps
-  // one lasting status region for their words instead.
+  // A live region that arrives with its text often goes unannounced, so a toast isn't one: it
+  // speaks through the lasting status region around it, and later news takes over the region.
   it('is not a live region of its own', () => {
     render(<Toast title="Doorbell" />)
     expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('says its words through the status region around it', () => {
+    const doorbell = <Toast title="Doorbell" detail="Front door · 19:16" readout="1.8 s" />
+    const { rerender } = render(<Announcer news="">{doorbell}</Announcer>)
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent(/^Doorbell, Front door · 19:16$/)
+    rerender(<Announcer news="Reconnecting">{doorbell}</Announcer>)
+    expect(status).toHaveTextContent(/^Reconnecting$/)
   })
 })
