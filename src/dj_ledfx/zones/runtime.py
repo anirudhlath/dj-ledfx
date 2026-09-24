@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 import time
 from collections import deque
@@ -42,6 +43,10 @@ SLOW_RATIO = 0.8
 SLOW_AFTER_S = 30.0
 CRASH_LOG_INTERVAL_S = 60.0
 ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5.2)
+
+# Process-wide, so no two runtimes ever share a generation: a light applied for one
+# runtime always sees a new look as new.
+_GENERATIONS = itertools.count(1)
 
 ZoneState = Literal["running", "slow", "crashed", "waiting"]
 LightMode = Literal["streaming", "own-effect", "streamed-copy"]
@@ -92,7 +97,7 @@ class ZoneRuntime:
         self.zone_id = zone_id
         self.look = look
         self.brightness = brightness
-        self.generation = 0
+        self.generation = 0  # _compile draws the first
         self.crash: CrashInfo | None = None
         self.slow_since: datetime | None = None
         self._clock = clock
@@ -200,7 +205,7 @@ class ZoneRuntime:
     def set_brightness(self, value: float) -> None:
         self.brightness = value
         if self._claims:
-            self.generation += 1  # firmware effects take the brightness when they start
+            self.generation = next(_GENERATIONS)  # firmware effects take it when they start
 
     def update_look(self, look: Look) -> None:
         """Take new settings in place when the layers are the same, else rebuild the look.
@@ -224,7 +229,7 @@ class ZoneRuntime:
                 resend = True
             self._firmware[index] = (layer, effect)
         if resend:
-            self.generation += 1
+            self.generation = next(_GENERATIONS)
 
     def restart(self) -> None:
         """Re-create the look (spec §8), and give rejected firmware effects another try."""
@@ -287,7 +292,7 @@ class ZoneRuntime:
         return frame
 
     def _compile(self) -> None:
-        self.generation += 1
+        self.generation = next(_GENERATIONS)
         self.crash = None
         self._field = None
         self._firmware = []

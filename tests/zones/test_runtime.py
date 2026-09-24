@@ -245,9 +245,10 @@ def test_update_look_keeps_the_effect_when_the_layers_match() -> None:
     assert effect is not None and effect.get_params() == {"level": 0.7}
     assert runtime.generation == generation  # the firmware layer didn't change
     runtime.update_look(_look(_field(0.7), _glow(level=0.9)))
-    assert runtime.generation == generation + 1  # firmware lights get the new settings
+    assert runtime.generation > generation  # firmware lights get the new settings
+    generation = runtime.generation
     runtime.update_look(_look(_glow(level=0.9)))
-    assert runtime.field_effect is None and runtime.generation == generation + 2
+    assert runtime.field_effect is None and runtime.generation > generation
 
 
 def test_brightness_resends_firmware_only_when_lights_run_it() -> None:
@@ -258,4 +259,4 @@ def test_brightness_resends_firmware_only_when_lights_run_it() -> None:
     firmware = _runtime(_look(_field(), _glow()))
     generation = firmware.generation
     firmware.set_brightness(0.3)
-    assert firmware.generation == generation + 1
+    assert firmware.generation > generation

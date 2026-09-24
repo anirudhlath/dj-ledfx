@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from dj_ledfx.beat.clock import BeatClock
     from dj_ledfx.devices.adapter import DeviceAdapter
     from dj_ledfx.devices.manager import DeviceManager
+    from dj_ledfx.effects.field import FieldEffect
     from dj_ledfx.events import EventBus
     from dj_ledfx.looks.model import Look
     from dj_ledfx.looks.store import LookStore
@@ -56,9 +57,9 @@ if TYPE_CHECKING:
     from dj_ledfx.scheduling.route import DeviceRoute
     from dj_ledfx.zones.store import ZoneStore
 
-# What a light was last given: the runtime it belongs to, that runtime's generation, and
-# the firmware layer it runs (None: it streams).
-AppliedKey = tuple[int, int, str | None]
+# What a light was last given: its runtime's generation (unique across runtimes) and the
+# firmware layer it runs (None: it streams).
+AppliedKey = tuple[int, str | None]
 
 
 class RuntimeHost(Protocol):
@@ -81,6 +82,12 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _brightness_of(running: _Running) -> float:
+    if running.runtime is not None:
+        return running.runtime.brightness
+    return running.saved.brightness if running.saved is not None else 1.0
+
+
 def _with_settings(look: Look, changes: Mapping[str, Any]) -> Look:
     """The look with new settings on its visible field layer."""
     field = visible_field_layer(look)
@@ -95,15 +102,11 @@ def _with_settings(look: Look, changes: Mapping[str, Any]) -> Look:
 
 @dataclass
 class _Running:
-    look_id: str
-    look_name: str
-    look_json: str  # the look as it was started, as saved in state.db
-    brightness: float
     since: datetime
     lights: list[str]  # the lights the zone owns after take-overs, in zone order
-    runtime: ZoneRuntime | None  # None when the saved look can't be read (Task 17)
-    epoch: int  # tells runtimes apart, so a new look always reaches the lights
-    broken: CrashInfo | None = None
+    runtime: ZoneRuntime | None  # None while the saved look can't be read (spec §8)
+    saved: Assignment | None = None  # the assignment as saved, while runtime is None
+    broken: CrashInfo | None = None  # why runtime is None
 
 
 class ZoneManager:
@@ -141,7 +144,6 @@ class ZoneManager:
         self._applied: dict[str, AppliedKey] = {}
         self._power: dict[str, bool | None] = {}
         self._deferred_power_on: set[str] = set()
-        self._epochs = 0
         self._seen_states: dict[str, ZoneState] = {}
         self._lock = asyncio.Lock()
         routes.set_preview_only(preview_only)
@@ -181,16 +183,14 @@ class ZoneManager:
 
     def light_mode(self, device_id: str) -> LightMode | None:
         """How a light shows its zone's look; None when no running zone owns it."""
-        zone_id = self.owner_of(device_id)
-        if zone_id is None:
+        if self.owner_of(device_id) is None:
             return None
-        runtime = self._running[zone_id].runtime
+        runtime = self._runtime_of(device_id)
         return "streaming" if runtime is None else runtime.mode_of(device_id)
 
     def effect_name(self, device_id: str) -> str | None:
         """The firmware effect a light runs, or streams a copy of."""
-        zone_id = self.owner_of(device_id)
-        runtime = self._running[zone_id].runtime if zone_id is not None else None
+        runtime = self._runtime_of(device_id)
         return None if runtime is None else runtime.effect_name(device_id)
 
     def power_of(self, device_id: str) -> bool | None:
@@ -202,32 +202,7 @@ class ZoneManager:
         """Put a look on a zone. It takes its lights over from running zones (spec §4.3)."""
         validate_look(look)
         async with self._lock:
-            zone = self.get_zone(zone_id)
-            lights = [light for light in zone.lights if self._adapter(light) is not None]
-            if not lights:
-                raise ZoneError(f"{zone.name} has no lights")
-            take_overs, touched = await self._take_over(zone_id, lights)
-            previous = self._running.pop(zone_id, None)
-            if previous is not None:
-                self._host.remove_runtime(zone_id)
-            brightness = previous.brightness if previous is not None else 1.0
-            runtime = self._new_runtime(zone_id, look, lights, brightness)
-            running = _Running(
-                look_id=look.id,
-                look_name=look.name,
-                look_json=look_body(look),
-                brightness=brightness,
-                since=self._now(),
-                lights=lights,
-                runtime=runtime,
-                epoch=self._next_epoch(),
-            )
-            self._running[zone_id] = running
-            self._host.add_runtime(runtime)
-            await self._persist(zone_id)
-            released = [x for x in previous.lights if x not in lights] if previous else []
-            await self._sync([*lights, *touched, *released], power_on=lights)
-            result = StartResult(self._info(zone_id, running), tuple(take_overs))
+            result = await self._start(zone_id, look)
         self._event_bus.emit(ZonesChanged())
         return result
 
@@ -257,9 +232,10 @@ class ZoneManager:
             raise ZoneError("Brightness must be between 0 and 1")
         async with self._lock:
             running = self._require_running(zone_id)
-            running.brightness = value
             if running.runtime is not None:
                 running.runtime.set_brightness(value)
+            elif running.saved is not None:
+                running.saved = replace(running.saved, brightness=value)
             await self._persist(zone_id)
             await self._sync(running.lights)
             info = self._info(zone_id, running)
@@ -406,12 +382,12 @@ class ZoneManager:
             self._applied.pop(device_id, None)
             self._power.pop(device_id, None)
             zone_id = self.owner_of(device_id)
-            running = self._running[zone_id] if zone_id is not None else None
-            if running is not None and running.runtime is not None:
-                lights = self._zone_lights(running.lights)
-                if list(running.runtime.lights) != lights:
-                    running.runtime.set_lights(lights)
-                    await self._sync(running.lights)
+            runtime = self._runtime_of(device_id)
+            if zone_id is not None and runtime is not None:
+                lights = self._zone_lights(self._running[zone_id].lights)
+                if list(runtime.lights) != lights:
+                    runtime.set_lights(lights)
+                    await self._sync(self._running[zone_id].lights)
                     return
             await self._sync([device_id])
 
@@ -422,9 +398,7 @@ class ZoneManager:
             if zone_id is None or self.owner_of(device_id) is not None:
                 return
             running = self._running[zone_id]
-            running.lights.append(device_id)
-            if running.runtime is not None:
-                running.runtime.set_lights(self._zone_lights(running.lights))
+            self._set_lights(running, [*running.lights, device_id])
             await self._persist(zone_id)
             await self._sync(running.lights)
         self._event_bus.emit(ZonesChanged())
@@ -497,9 +471,7 @@ class ZoneManager:
         added = [light for light in members if light not in running.lights]
         removed = [light for light in running.lights if light not in members]
         _, touched = await self._take_over(zone_id, added)
-        running.lights = members
-        if running.runtime is not None:
-            running.runtime.set_lights(self._zone_lights(members))
+        self._set_lights(running, members)
         await self._persist(zone_id)
         await self._sync([*members, *touched, *removed], power_on=added)
 
@@ -507,14 +479,11 @@ class ZoneManager:
 
     def classic_layer(self, zone_id: str) -> tuple[str, dict[str, Any]] | None:
         """The classic effect a running zone plays, and its current settings."""
-        running = self._running.get(zone_id)
-        runtime = running.runtime if running is not None else None
-        if runtime is None or runtime.field_effect is None:
+        classic = self._classic(zone_id)
+        if classic is None:
             return None
-        layer = visible_field_layer(runtime.look)
-        if layer is None or layer.kind not in get_strip_effect_classes():
-            return None
-        return layer.kind, runtime.field_effect.get_params()
+        _, kind, effect = classic
+        return kind, effect.get_params()
 
     async def set_classic_effect(
         self, zone_id: str, effect: str | None, params: Mapping[str, Any]
@@ -522,29 +491,38 @@ class ZoneManager:
         """Tune the classic effect a zone plays in place, or start another one's look."""
         async with self._lock:
             zone = self.get_zone(zone_id)
-            current = self.classic_layer(zone_id)
-            kind = effect or (current[0] if current is not None else None)
+            classic = self._classic(zone_id)
+            kind = effect or (classic[1] if classic is not None else None)
             if kind is None:
                 raise ZoneNotRunningError(f"{zone.name} isn't playing a classic effect")
-            running = self._running.get(zone_id)
-            runtime = running.runtime if running is not None else None
-            in_place = current is not None and current[0] == kind
-            if in_place and running is not None and runtime is not None:
+            if classic is not None and classic[1] == kind:
+                runtime = classic[0]
                 look = _with_settings(runtime.look, params)
                 validate_look(look)
                 runtime.update_look(look)
-                running.look_json = look_body(look)
                 await self._persist(zone_id)
-                await self._sync(running.lights)
-        if in_place:
-            self._event_bus.emit(ZonesChanged())
-        else:
-            look = _with_settings(self._looks.get(classic_look_id(kind)), params)
-            await self.start(zone_id, look)
-        result = self.classic_layer(zone_id)
-        if result is None:  # only if the zone was changed meanwhile
+                await self._sync(self._running[zone_id].lights)
+            else:
+                await self._start(
+                    zone_id, _with_settings(self._looks.get(classic_look_id(kind)), params)
+                )
+            result = self.classic_layer(zone_id)
+        self._event_bus.emit(ZonesChanged())
+        if result is None:  # the classic look crashed as it started
             raise ZoneNotRunningError(f"{zone.name} isn't playing a classic effect")
         return result
+
+    def _classic(self, zone_id: str) -> tuple[ZoneRuntime, str, FieldEffect] | None:
+        """A running zone's runtime, its classic effect's kind, and the effect."""
+        running = self._running.get(zone_id)
+        runtime = running.runtime if running is not None else None
+        effect = runtime.field_effect if runtime is not None else None
+        if runtime is None or effect is None:
+            return None
+        layer = visible_field_layer(runtime.look)
+        if layer is None or layer.kind not in get_strip_effect_classes():
+            return None
+        return runtime, layer.kind, effect
 
     # --- running zones ----------------------------------------------------------------
 
@@ -555,9 +533,25 @@ class ZoneManager:
             raise ZoneNotRunningError(f"{zone.name} isn't running")
         return running
 
-    def _next_epoch(self) -> int:
-        self._epochs += 1
-        return self._epochs
+    async def _start(self, zone_id: str, look: Look) -> StartResult:
+        validate_look(look)
+        zone = self.get_zone(zone_id)
+        lights = [light for light in zone.lights if self._adapter(light) is not None]
+        if not lights:
+            raise ZoneError(f"{zone.name} has no lights")
+        take_overs, touched = await self._take_over(zone_id, lights)
+        previous = self._running.pop(zone_id, None)
+        if previous is not None:
+            self._host.remove_runtime(zone_id)
+        brightness = _brightness_of(previous) if previous is not None else 1.0
+        runtime = self._new_runtime(zone_id, look, lights, brightness)
+        running = _Running(since=self._now(), lights=lights, runtime=runtime)
+        self._running[zone_id] = running
+        self._host.add_runtime(runtime)
+        await self._persist(zone_id)
+        released = [x for x in previous.lights if x not in lights] if previous else []
+        await self._sync([*lights, *touched, *released], power_on=lights)
+        return StartResult(self._info(zone_id, running), tuple(take_overs))
 
     def _new_runtime(
         self, zone_id: str, look: Look, lights: Iterable[str], brightness: float
@@ -576,43 +570,35 @@ class ZoneManager:
 
     def _rebuild_broken(self, zone_id: str, running: _Running) -> bool:
         """A zone whose saved look can't be read tries the look saved under its id."""
+        saved = running.saved
+        if saved is None:
+            return False
         try:
-            look = self._looks.get(running.look_id)
+            look = self._looks.get(saved.look_id)
         except LookNotFoundError:
             return False
-        running.runtime = self._new_runtime(zone_id, look, running.lights, running.brightness)
-        running.epoch = self._next_epoch()
-        running.broken = None
-        running.look_name = look.name
-        running.look_json = look_body(look)
+        running.runtime = self._new_runtime(zone_id, look, running.lights, saved.brightness)
+        running.saved = running.broken = None
         self._host.add_runtime(running.runtime)
         return True
 
     def _resumed(self, saved: Assignment, lights: list[str]) -> _Running:
         """A running zone rebuilt from its saved assignment (spec §8 for bad looks)."""
-        running = _Running(
-            look_id=saved.look_id,
-            look_name=self._look_name(saved.look_id),
-            look_json=saved.look_json,
-            brightness=saved.brightness,
-            since=saved.started_at,
-            lights=lights,
-            runtime=None,
-            epoch=self._next_epoch(),
-        )
         try:
             look = replace(look_from_dict(json.loads(saved.look_json)), id=saved.look_id)
         except Exception as exc:  # a bad saved look never stops the app
             logger.error("Zone {}: the saved look can't be read: {}", saved.zone_id, exc)
-            running.broken = CrashInfo(
+            broken = CrashInfo(
                 layer="", message=f"The saved look can't be read: {exc}", at=self._now()
             )
-            return running
-        running.look_name = look.name
-        running.runtime = self._new_runtime(saved.zone_id, look, lights, saved.brightness)
-        return running
+            return _Running(saved.started_at, lights, None, saved=saved, broken=broken)
+        runtime = self._new_runtime(saved.zone_id, look, lights, saved.brightness)
+        return _Running(saved.started_at, lights, runtime)
 
-    def _look_name(self, look_id: str) -> str:
+    def _look_name(self, running: _Running) -> str:
+        if running.runtime is not None:
+            return running.runtime.look.name
+        look_id = running.saved.look_id if running.saved is not None else ""
         try:
             return self._looks.get(look_id).name
         except LookNotFoundError:
@@ -641,17 +627,16 @@ class ZoneManager:
             lost = [x for x in other.lights if x in wanted_set] if other_id != zone_id else []
             if not lost:
                 continue
-            other.lights = [x for x in other.lights if x not in wanted_set]
-            stopped = not other.lights
+            kept = [x for x in other.lights if x not in wanted_set]
             zone_name = self._zones[other_id].name
-            take_overs.append(TakeOver(other_id, zone_name, other.look_name, tuple(lost), stopped))
-            if stopped:
+            look_name = self._look_name(other)
+            take_overs.append(TakeOver(other_id, zone_name, look_name, tuple(lost), not kept))
+            if not kept:
                 await self._stop(other_id)
                 continue
-            if other.runtime is not None:
-                other.runtime.set_lights(self._zone_lights(other.lights))
+            self._set_lights(other, kept)
             await self._persist(other_id)
-            touched += other.lights
+            touched += kept
         return take_overs, touched
 
     async def _stop(self, zone_id: str) -> list[str]:
@@ -663,38 +648,53 @@ class ZoneManager:
         await self._store.delete_assignment(zone_id)
         return running.lights
 
+    def _set_lights(self, running: _Running, lights: list[str]) -> None:
+        running.lights = lights
+        if running.runtime is not None:
+            running.runtime.set_lights(self._zone_lights(lights))
+
+    def _runtime_of(self, device_id: str) -> ZoneRuntime | None:
+        """The runtime of the zone that owns a light; None if none does, or it's broken."""
+        zone_id = self.owner_of(device_id)
+        return None if zone_id is None else self._running[zone_id].runtime
+
     async def _persist(self, zone_id: str) -> None:
         running = self._running[zone_id]
-        await self._store.save_assignment(
-            Assignment(
+        lights, since = tuple(running.lights), running.since
+        if running.saved is not None:  # kept as saved, so a later version may read it
+            assignment = replace(running.saved, lights=lights, started_at=since)
+        else:
+            assert running.runtime is not None
+            look = running.runtime.look
+            assignment = Assignment(
                 zone_id=zone_id,
-                look_id=running.look_id,
-                look_json=running.look_json,
-                brightness=running.brightness,
-                lights=tuple(running.lights),
-                started_at=running.since,
+                look_id=look.id,
+                look_json=look_body(look),
+                brightness=running.runtime.brightness,
+                lights=lights,
+                started_at=since,
             )
-        )
+        await self._store.save_assignment(assignment)
 
     def _info(self, zone_id: str, running: _Running) -> RunningZoneInfo:
         runtime = running.runtime
         if runtime is None:
             return RunningZoneInfo(
                 zone_id=zone_id,
-                look_id=running.look_id,
-                look_name=running.look_name,
+                look_id=running.saved.look_id if running.saved is not None else "",
+                look_name=self._look_name(running),
                 since=running.since,
-                brightness=running.brightness,
+                brightness=_brightness_of(running),
                 lights=tuple(running.lights),
                 state="crashed",
                 error=running.broken,
             )
         return RunningZoneInfo(
             zone_id=zone_id,
-            look_id=running.look_id,
-            look_name=running.look_name,
+            look_id=runtime.look.id,
+            look_name=runtime.look.name,
             since=running.since,
-            brightness=running.brightness,
+            brightness=runtime.brightness,
             lights=tuple(running.lights),
             state=runtime.state,
             fps_actual=runtime.fps_actual,
@@ -756,8 +756,7 @@ class ZoneManager:
             if adapter is not None and not self._preview_only:
                 await self._release(device_id, adapter)
             return
-        running = self._running[zone_id]
-        runtime = running.runtime
+        runtime = self._running[zone_id].runtime
         if runtime is None:  # the saved look can't be read: leave the light alone
             self._routes.set_route(device_id, None)
             return
@@ -779,15 +778,13 @@ class ZoneManager:
             self._routes.set_route(device_id, None)
             self._applied.pop(device_id, None)
             return
-        await self._apply(device_id, adapter, running, runtime)
+        await self._apply(device_id, adapter, runtime)
         self._routes.set_route(device_id, runtime.route_for(device_id))
 
-    async def _apply(
-        self, device_id: str, adapter: DeviceAdapter, running: _Running, runtime: ZoneRuntime
-    ) -> None:
+    async def _apply(self, device_id: str, adapter: DeviceAdapter, runtime: ZoneRuntime) -> None:
         """Start the light's firmware layer, or get it ready to stream, once per change."""
         claim = runtime.claim_for(device_id)
-        key: AppliedKey = (running.epoch, runtime.generation, claim[0].id if claim else None)
+        key: AppliedKey = (runtime.generation, claim[0].id if claim else None)
         if self._applied.get(device_id) == key:
             return
         if claim is not None:
@@ -804,7 +801,7 @@ class ZoneManager:
                 )
                 runtime.mark_emulated(device_id)
                 claim = None
-                key = (running.epoch, runtime.generation, None)
+                key = (runtime.generation, None)
         if claim is None:
             try:
                 await adapter.prepare_stream()
