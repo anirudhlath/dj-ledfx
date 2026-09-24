@@ -12,15 +12,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from loguru import logger
 
 from dj_ledfx.devices.capabilities import LightReading
-from dj_ledfx.looks.model import LookNotFoundError, look_from_dict, validate_look
+from dj_ledfx.effects.registry import get_strip_effect_classes
+from dj_ledfx.looks.builtin import classic_look_id
+from dj_ledfx.looks.model import (
+    LookNotFoundError,
+    look_from_dict,
+    validate_look,
+    visible_field_layer,
+)
 from dj_ledfx.looks.store import look_body
 from dj_ledfx.zones.model import (
     Assignment,
@@ -36,6 +43,7 @@ from dj_ledfx.zones.model import (
     ZonesChanged,
 )
 from dj_ledfx.zones.runtime import LightMode, ZoneLight, ZoneRuntime
+from dj_ledfx.zones.store import new_group_id
 
 if TYPE_CHECKING:
     from dj_ledfx.beat.clock import BeatClock
@@ -71,6 +79,18 @@ class RouteTable(Protocol):
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _with_settings(look: Look, changes: Mapping[str, Any]) -> Look:
+    """The look with new settings on its visible field layer."""
+    field = visible_field_layer(look)
+    return replace(
+        look,
+        layers=tuple(
+            replace(layer, settings={**layer.settings, **changes}) if layer is field else layer
+            for layer in look.layers
+        ),
+    )
 
 
 @dataclass
@@ -392,6 +412,123 @@ class ZoneManager:
             await self._persist(zone_id)
             await self._sync(running.lights)
         self._event_bus.emit(ZonesChanged())
+
+    # --- groups (web spec §11.3) --------------------------------------------------------
+
+    async def create_group(self, name: str, lights: Sequence[str]) -> ZoneRecord:
+        async with self._lock:
+            zone = ZoneRecord(
+                id=new_group_id(), name=self._group_name(name), lights=self._group_lights(lights)
+            )
+            await self._store.save_zone(zone)
+            self._zones[zone.id] = zone
+        self._event_bus.emit(ZonesChanged())
+        return zone
+
+    async def update_group(
+        self, zone_id: str, *, name: str | None = None, lights: Sequence[str] | None = None
+    ) -> ZoneRecord:
+        """Rename a group or change its lights. A running group applies the change at once."""
+        async with self._lock:
+            zone = self._group(zone_id)
+            if name is not None:
+                zone = replace(zone, name=self._group_name(name))
+            if lights is not None:
+                zone = replace(zone, lights=self._group_lights(lights), all_lights=False)
+            await self._store.save_zone(zone)
+            self._zones[zone_id] = zone
+            if lights is not None and zone_id in self._running:
+                await self._regroup(zone_id, list(zone.lights))
+        self._event_bus.emit(ZonesChanged())
+        return self.get_zone(zone_id)
+
+    async def delete_group(self, zone_id: str) -> None:
+        """Delete a group. A running group is turned off first."""
+        async with self._lock:
+            self._group(zone_id)
+            released = await self._stop(zone_id)
+            await self._store.delete_zone(zone_id)
+            del self._zones[zone_id]
+            await self._sync(released)
+        self._event_bus.emit(ZonesChanged())
+
+    def _group(self, zone_id: str) -> ZoneRecord:
+        zone = self._zones.get(zone_id)
+        if zone is None:
+            raise ZoneNotFoundError(zone_id)
+        if zone.kind != "group":
+            raise ZoneError(f"{zone.name} isn't a group; rooms come from the home map")
+        return zone
+
+    @staticmethod
+    def _group_name(name: str) -> str:
+        if not name.strip():
+            raise ZoneError("A group needs a name")
+        return name.strip()
+
+    def _group_lights(self, lights: Sequence[str]) -> tuple[str, ...]:
+        unique = tuple(dict.fromkeys(lights))
+        if not unique:
+            raise ZoneError("A group needs at least one light")
+        for light in unique:
+            if self._adapter(light) is None:
+                raise ZoneError(f"Unknown light '{light}'")
+        return unique
+
+    async def _regroup(self, zone_id: str, members: list[str]) -> None:
+        """A running group's lights changed: take over, apply and release as a start would."""
+        running = self._running[zone_id]
+        added = [light for light in members if light not in running.lights]
+        removed = [light for light in running.lights if light not in members]
+        _, touched = await self._take_over(zone_id, added)
+        running.lights = members
+        if running.runtime is not None:
+            running.runtime.set_lights(self._zone_lights(members))
+        await self._persist(zone_id)
+        await self._sync([*members, *touched, *removed], power_on=added)
+
+    # --- the old UI's effect deck, until F11 ---------------------------------------------
+
+    def classic_layer(self, zone_id: str) -> tuple[str, dict[str, Any]] | None:
+        """The classic effect a running zone plays, and its current settings."""
+        running = self._running.get(zone_id)
+        runtime = running.runtime if running is not None else None
+        if runtime is None or runtime.field_effect is None:
+            return None
+        layer = visible_field_layer(runtime.look)
+        if layer is None or layer.kind not in get_strip_effect_classes():
+            return None
+        return layer.kind, runtime.field_effect.get_params()
+
+    async def set_classic_effect(
+        self, zone_id: str, effect: str | None, params: Mapping[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
+        """Tune the classic effect a zone plays in place, or start another one's look."""
+        async with self._lock:
+            zone = self.get_zone(zone_id)
+            current = self.classic_layer(zone_id)
+            kind = effect or (current[0] if current is not None else None)
+            if kind is None:
+                raise ZoneNotRunningError(f"{zone.name} isn't playing a classic effect")
+            running = self._running.get(zone_id)
+            runtime = running.runtime if running is not None else None
+            in_place = current is not None and current[0] == kind
+            if in_place and running is not None and runtime is not None:
+                look = _with_settings(runtime.look, params)
+                validate_look(look)
+                runtime.update_look(look)
+                running.look_json = look_body(look)
+                await self._persist(zone_id)
+                await self._sync(running.lights)
+        if in_place:
+            self._event_bus.emit(ZonesChanged())
+        else:
+            look = _with_settings(self._looks.get(classic_look_id(kind)), params)
+            await self.start(zone_id, look)
+        result = self.classic_layer(zone_id)
+        if result is None:  # only if the zone was changed meanwhile
+            raise ZoneNotRunningError(f"{zone.name} isn't playing a classic effect")
+        return result
 
     # --- running zones ----------------------------------------------------------------
 
