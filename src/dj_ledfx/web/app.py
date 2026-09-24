@@ -25,6 +25,15 @@ if TYPE_CHECKING:
     from dj_ledfx.spatial.pipeline_manager import PipelineManager
 
 
+def _file_within(root: Path, relative: str) -> Path | None:
+    """The file at root/relative, or None when it is missing or the path leaves root."""
+    base = root.resolve()
+    candidate = (base / relative).resolve()
+    if candidate.is_relative_to(base) and candidate.is_file():
+        return candidate
+    return None
+
+
 def _resolve_static_dir(explicit: str | None, config_dir: str | None) -> Path | None:
     """4-tier static directory resolution."""
     for candidate in [
@@ -134,9 +143,7 @@ def create_app(
             """Serve index.html for all non-API routes (SPA client-side routing)."""
             if full_path.startswith("api/"):
                 raise HTTPException(status_code=404, detail="Not found")
-            file_path = static_dir / full_path
-            if full_path and file_path.is_file():
-                return FileResponse(str(file_path))
-            return FileResponse(str(index_html))
+            file_path = _file_within(static_dir, full_path) if full_path else None
+            return FileResponse(file_path or index_html)
 
     return app
