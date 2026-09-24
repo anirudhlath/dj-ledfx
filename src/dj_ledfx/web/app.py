@@ -20,9 +20,13 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.engine import EffectEngine
     from dj_ledfx.effects.presets import PresetStore
     from dj_ledfx.events import EventBus
+    from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
     from dj_ledfx.spatial.pipeline_manager import PipelineManager
+    from dj_ledfx.zones.attention import AttentionFeed
+    from dj_ledfx.zones.lights import LightMonitor
+    from dj_ledfx.zones.manager import ZoneManager
 
 
 def _file_within(root: Path, relative: str) -> Path | None:
@@ -69,8 +73,13 @@ def create_app(
     state_db: StateDB | None = None,
     event_bus: EventBus | None = None,
     pipeline_manager: PipelineManager | None = None,
+    look_store: LookStore | None = None,
+    zone_manager: ZoneManager | None = None,
+    light_monitor: LightMonitor | None = None,
+    attention_feed: AttentionFeed | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="dj-ledfx")
+    # One schema per type, under the contract's name (not Look-Input / Look-Output).
+    app = FastAPI(title="dj-ledfx", separate_input_output_schemas=False)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.web.cors_origins,
@@ -92,6 +101,10 @@ def create_app(
     app.state.state_db = state_db
     app.state.event_bus = event_bus
     app.state.pipeline_manager = pipeline_manager
+    app.state.look_store = look_store
+    app.state.zone_manager = zone_manager
+    app.state.light_monitor = light_monitor
+    app.state.attention_feed = attention_feed
     app.state.connected_websockets: set = set()
 
     @app.on_event("startup")
@@ -114,6 +127,7 @@ def create_app(
     from dj_ledfx.web.router_config import router as config_router
     from dj_ledfx.web.router_devices import router as devices_router
     from dj_ledfx.web.router_effects import router as effects_router
+    from dj_ledfx.web.router_looks import router as looks_router
     from dj_ledfx.web.router_scene import router as scene_router
     from dj_ledfx.web.router_scene import router_scenes
     from dj_ledfx.web.router_transport import router as transport_router
@@ -124,6 +138,7 @@ def create_app(
     app.include_router(scene_router, prefix="/api")
     app.include_router(router_scenes, prefix="/api")
     app.include_router(transport_router, prefix="/api")
+    app.include_router(looks_router, prefix="/api")
 
     from dj_ledfx.web.ws import ws_endpoint
 
