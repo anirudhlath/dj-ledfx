@@ -21,6 +21,7 @@ from dj_ledfx.looks.model import Layer, Look
 from dj_ledfx.looks.store import LookStore
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.route import DeviceRoute
+from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.manager import ZoneManager
 from dj_ledfx.zones.model import ZoneRecord, ZonesChanged
 from dj_ledfx.zones.runtime import ZoneRuntime
@@ -91,13 +92,25 @@ class Home:
     def look(self, look_id: str) -> Look:
         return self.looks.get(look_id)
 
-    async def restart(self, *, preview_only: bool = False) -> Home:
-        """The app starting again on the same state.db and lights, then resuming."""
+    async def restart(self, *, preview_only: bool = False, ghosts: bool = False) -> Home:
+        """The app starting again on the same state.db and lights, then resuming.
+
+        With ghosts, as main does it: every light is registered offline from what
+        state.db knows, and resume runs before any of them connects (see come_online).
+        """
         for light in self.lights.values():
             light.calls.clear()
-        home = await assemble(self.db, list(self.lights.values()), self.clock, preview_only)
+        home = await assemble(
+            self.db, list(self.lights.values()), self.clock, preview_only, ghosts=ghosts
+        )
         await home.manager.resume()
         return home
+
+    async def come_online(self, device_id: str) -> None:
+        """A light connecting after a restart, as main wires it: its ghost is promoted,
+        then the zone manager gets one online event."""
+        self.devices.promote_device(device_id, self.lights[device_id])
+        await self.manager.on_device_online(device_id)
 
 
 HomeFactory = Callable[..., Awaitable[Home]]
@@ -119,13 +132,30 @@ async def build_home(
 
 
 async def assemble(
-    db: StateDB, lights: Sequence[FakeLight], clock: list[datetime], preview_only: bool
+    db: StateDB,
+    lights: Sequence[FakeLight],
+    clock: list[datetime],
+    preview_only: bool,
+    *,
+    ghosts: bool = False,
 ) -> Home:
     """The app's objects around an open state.db and a set of lights."""
     bus = EventBus()
     devices = DeviceManager(event_bus=bus)
     for light in lights:
-        devices.add_device(light, LatencyTracker(strategy=StaticLatency(20.0)))
+        tracker = LatencyTracker(strategy=StaticLatency(20.0))
+        if not ghosts:
+            devices.add_device(light, tracker)
+            continue
+        info = light.device_info  # a ghost knows only state.db's row, as in main
+        row = DeviceInfo(
+            name=info.name,
+            device_type=info.backend or "",
+            led_count=info.led_count,
+            address="",
+            stable_id=info.stable_id,
+        )
+        devices.add_device_from_info(row, tracker, status="offline")
     looks = LookStore(db)
     await looks.load()
     store = ZoneStore(db)

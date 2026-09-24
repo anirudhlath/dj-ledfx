@@ -47,6 +47,42 @@ async def test_resume_never_powers_on_and_switched_off_lights_rejoin(
     assert home.host.runtimes["z"].leds.count == 8  # it kept its LEDs while it was off
 
 
+# Review focus 2 in the production order (B18): resume runs over ghost adapters before any
+# light connects, then each light comes online, one event at a time, with its real
+# capabilities.
+async def test_resume_over_ghosts_then_each_light_online_never_powers_on(
+    make_home: HomeFactory,
+) -> None:
+    a, b, tile = FakeLight("a"), FakeLight("b"), FakeLight("tile", caps=TILE)
+    home = await make_home([a, b, tile], [_zone("z", "a", "b", "tile")])
+    await home.manager.start("z", BREATHE_AND_GLOW)
+    a.power = False  # switched off at the wall while the app was down
+
+    home = await home.restart(ghosts=True)
+
+    info = home.manager.running_info("z")
+    assert info is not None and info.lights == ("a", "b", "tile") and info.state == "running"
+    assert not any(route.streaming for route in home.routes.routes.values())
+    assert home.manager.light_mode("tile") == "streaming"  # its ghost can't say it's a matrix
+    for device_id in ("a", "b", "tile"):
+        await home.come_online(device_id)
+
+    assert a.calls == []  # not captured again, not switched on
+    assert b.names() == ["prepare_stream"]
+    assert tile.names() == ["firmware"]  # Glow, once the tile says it's a matrix
+    assert home.manager.light_mode("tile") == "own-effect"
+    assert home.routes.routes["b"].streaming
+    assert "a" not in home.routes.routes or not home.routes.routes["a"].streaming
+    assert home.manager.power_of("a") is False
+
+    a.power = True
+    await home.manager.on_power_reading("a", True)  # the light monitor sees it back on
+
+    assert a.names() == ["prepare_stream"]
+    assert home.routes.routes["a"].streaming
+    assert home.host.runtimes["z"].leds.count == 12
+
+
 async def test_resume_replays_take_overs_oldest_first(make_home: HomeFactory) -> None:
     a, b, c = FakeLight("a"), FakeLight("b"), FakeLight("c")
     home = await make_home([a, b, c], [_zone("left", "a", "b"), _zone("right", "b", "c")])
