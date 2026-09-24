@@ -13,7 +13,7 @@ import pytest_asyncio
 from api_home import Api, api_home
 from conftest import FakeLight
 
-from dj_ledfx.web.ws import event_broadcast, initial_messages
+from dj_ledfx.web.ws import Session, event_broadcast, initial_messages
 from dj_ledfx.zones.model import ZoneRecord, ZonesChanged
 
 
@@ -45,7 +45,7 @@ async def api(tmp_path: Path) -> AsyncIterator[Api]:
 async def socket(api: Api) -> AsyncIterator[FakeSocket]:
     """A connected client, with the app's event broadcaster running."""
     fake = FakeSocket()
-    api.app.state.connected_websockets.add(fake)
+    api.app.state.ws_sessions.add(Session(fake))  # type: ignore[arg-type]
     task = asyncio.create_task(event_broadcast(api.app))
     await asyncio.sleep(0)  # let it subscribe
     yield fake

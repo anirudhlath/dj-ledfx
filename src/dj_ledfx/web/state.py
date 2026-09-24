@@ -25,13 +25,7 @@ class ClientSubscription:
 
 
 def get_db(request: Request) -> StateDB:
-    """Return StateDB from request app state or raise 503."""
-    from fastapi import HTTPException
-
-    db = getattr(request.app.state, "state_db", None)
-    if db is None:
-        raise HTTPException(503, "StateDB not available")
-    return db  # type: ignore[return-value]
+    return cast("StateDB", _required(request, "state_db", "Saved settings"))
 
 
 def _required(request: Request, name: str, what: str) -> Any:

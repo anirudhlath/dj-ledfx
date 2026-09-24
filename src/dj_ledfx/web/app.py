@@ -127,8 +127,7 @@ def create_app(
     app.state.zone_manager = zone_manager
     app.state.light_monitor = light_monitor
     app.state.attention_feed = attention_feed
-    app.state.connected_websockets: set = set()
-    app.state.ws_sessions = set()  # open /ws sessions, which ws.close_all ends
+    app.state.ws_sessions = set()  # open /ws sessions: pushes go to them, ws.close_all ends them
     app.state.ws_closing = False
 
     @app.on_event("startup")
@@ -136,14 +135,14 @@ def create_app(
         if app.state.event_bus is not None:
             from dj_ledfx.web.ws import event_broadcast
 
-            app.state.broadcast_tasks = [asyncio.create_task(event_broadcast(app))]
+            app.state.broadcast_task = asyncio.create_task(event_broadcast(app))
 
     @app.on_event("shutdown")
     async def _stop_broadcasts() -> None:
-        tasks = getattr(app.state, "broadcast_tasks", [])
-        for task in tasks:
+        task = getattr(app.state, "broadcast_task", None)
+        if task is not None:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(task, return_exceptions=True)
 
     from dj_ledfx.web.router_attention import router as attention_router
     from dj_ledfx.web.router_config import router as config_router

@@ -15,20 +15,16 @@ from dj_ledfx.web import contract
 from dj_ledfx.web.state import ClientSubscription
 from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
 
-
-def _get_connected(app: Any) -> set[WebSocket]:
-    """Return the per-app connected websockets set (initialized in create_app)."""
-    return app.state.connected_websockets
-
-
 _GOING_AWAY = 1001  # RFC 6455 close code: the server is going down
 
 
-class _Session:
-    """An open /ws connection that close_all can end, and that says when it has ended."""
+class Session:
+    """An open /ws connection: pushed channels go to its websocket, close_all can end it,
+    and it says when it has ended."""
 
-    def __init__(self) -> None:
+    def __init__(self, websocket: WebSocket) -> None:
         loop = asyncio.get_running_loop()
+        self.websocket = websocket
         self.stop: asyncio.Future[None] = loop.create_future()
         self.ended: asyncio.Future[None] = loop.create_future()
 
@@ -40,7 +36,7 @@ async def close_all(app: Any, *, timeout: float = 1.0) -> None:
     final cancel then logs a traceback, so each session ends itself here first.
     """
     app.state.ws_closing = True
-    sessions: set[_Session] = app.state.ws_sessions
+    sessions: set[Session] = app.state.ws_sessions
     for session in sessions:
         if not session.stop.done():
             session.stop.set_result(None)
@@ -79,10 +75,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     sub = ClientSubscription()
     tasks: list[asyncio.Task[None]] = []
-    session = _Session()
-    sessions: set[_Session] = app.state.ws_sessions
+    session = Session(websocket)
+    sessions: set[Session] = app.state.ws_sessions
     sessions.add(session)
-    _get_connected(app).add(websocket)
 
     try:
         for message in initial_messages(app):
@@ -108,7 +103,6 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     finally:
         sessions.discard(session)
         session.ended.set_result(None)
-        _get_connected(app).discard(websocket)
         for t in tasks:
             t.cancel()
         if tasks:
@@ -127,7 +121,8 @@ async def _send_json(ws: WebSocket, data: dict[str, Any]) -> None:
 
 async def _broadcast_json(app: Any, data: dict[str, Any]) -> None:
     """Broadcast JSON message to all connected WebSocket clients."""
-    clients = list(_get_connected(app))
+    sessions: set[Session] = app.state.ws_sessions
+    clients = [session.websocket for session in sessions]
     if clients:
         await asyncio.gather(*(_send_json(ws, data) for ws in clients))
 
@@ -162,16 +157,12 @@ def _attention_message(app: Any) -> dict[str, Any] | None:
     }
 
 
-def _transport_state(zones: Any) -> str:
-    """Preview-only in the contract's transport terms (web spec §12.4)."""
-    return "simulating" if zones.preview_only else "playing"
-
-
 def _transport_message(app: Any) -> dict[str, Any] | None:
+    """Preview-only in the contract's transport terms (web spec §12.4)."""
     zones = getattr(app.state, "zone_manager", None)
     if zones is None:
         return None
-    return {"channel": "transport", "state": _transport_state(zones)}
+    return {"channel": "transport", "state": "simulating" if zones.preview_only else "playing"}
 
 
 # Each pushed channel's snapshot, and the events that make a channel stale.
@@ -294,7 +285,7 @@ async def _status_poll(ws: WebSocket, app: Any) -> None:
     while True:
         await asyncio.sleep(10.0)
         engine = app.state.effect_engine
-        zones = getattr(app.state, "zone_manager", None)
+        transport = _transport_message(app)
         scheduler = app.state.scheduler
         stats = scheduler.get_device_stats()
         status_data: dict[str, Any] = {
@@ -302,7 +293,7 @@ async def _status_poll(ws: WebSocket, app: Any) -> None:
             "ok": True,
             "device_count": len(stats),
             "avg_render_ms": engine.avg_render_time_ms,
-            "transport": _transport_state(zones) if zones is not None else "playing",
+            "transport": transport["state"] if transport is not None else "playing",
         }
         await _send_json(ws, status_data)
 
