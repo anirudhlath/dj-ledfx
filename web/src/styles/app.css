@@ -1,0 +1,29 @@
+/*
+ * The app's one stylesheet. Every design value comes from tokens.css, a byte-for-byte copy of
+ * docs/design/web-app/tokens.css (src/design/payload.node.test.ts fails if it drifts), which also
+ * imports the self-hosted fonts. theme(static) emits every token as a CSS variable, so code can
+ * read any token at runtime.
+ */
+@import "tailwindcss";
+@import "./tokens.css" theme(static);
+
+/*
+ * tokens.css names both a font size and a colour "control", and Tailwind resolves `text-control` to the
+ * colour. This is the font size.
+ */
+@utility text-size-control {
+  font-size: var(--text-control);
+  line-height: var(--tw-leading, var(--text-control--line-height));
+}
+
+@layer base {
+  /* The reference pages keep the browser's normal line height (Tailwind's preflight sets 1.5). */
+  html {
+    line-height: normal;
+  }
+  /* The reference pages give buttons a pointer cursor; Tailwind v4's preflight removes it. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
