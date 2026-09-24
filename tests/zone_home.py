@@ -1,0 +1,144 @@
+"""A home for ZoneManager tests: real stores on a temporary state.db, FakeLights, and
+fakes for the engine (it hosts runtimes) and the scheduler (it holds routes)."""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+
+from conftest import FakeLight
+
+from dj_ledfx.beat.clock import BeatClock
+from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.devices.manager import DeviceManager
+from dj_ledfx.events import EventBus
+from dj_ledfx.latency.strategies import StaticLatency
+from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.looks.store import LookStore
+from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.scheduling.route import DeviceRoute
+from dj_ledfx.zones.manager import ZoneManager
+from dj_ledfx.zones.model import ZoneRecord, ZonesChanged
+from dj_ledfx.zones.runtime import ZoneRuntime
+from dj_ledfx.zones.store import ZoneStore
+
+TILE = DeviceCapabilities(protocol="LIFX", matrix=True)
+GLOW_LAYER = Layer(id="glow", name="Glow", type="firmware", kind="glow_firmware")
+GLOW = Look(id="glow", name="Glow look", category="firmware", layers=(GLOW_LAYER,))
+BREATHE_AND_GLOW = Look(
+    id="breathe-glow",
+    name="Breathe and glow",
+    category="ambient",
+    layers=(Layer(id="field", name="Breathe", type="field", kind="breathe"), GLOW_LAYER),
+)
+START = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+
+
+class FakeHost:
+    """Stands in for the engine: it only keeps the runtimes it is given."""
+
+    def __init__(self) -> None:
+        self.runtimes: dict[str, ZoneRuntime] = {}
+
+    def add_runtime(self, runtime: ZoneRuntime) -> None:
+        self.runtimes[runtime.zone_id] = runtime
+
+    def remove_runtime(self, zone_id: str) -> None:
+        self.runtimes.pop(zone_id, None)
+
+
+class FakeRoutes:
+    """Stands in for the scheduler: it only keeps each light's route."""
+
+    def __init__(self) -> None:
+        self.routes: dict[str, DeviceRoute] = {}
+        self.preview_only = False
+
+    def set_route(self, device_id: str, route: DeviceRoute | None) -> None:
+        if route is None:
+            self.routes.pop(device_id, None)
+        else:
+            self.routes[device_id] = route
+
+    def set_preview_only(self, on: bool) -> None:
+        self.preview_only = on
+
+
+@dataclass
+class Home:
+    db: StateDB
+    lights: dict[str, FakeLight]
+    devices: DeviceManager
+    store: ZoneStore
+    looks: LookStore
+    host: FakeHost
+    routes: FakeRoutes
+    bus: EventBus
+    manager: ZoneManager
+    clock: list[datetime]  # the manager's "now"; tests move it
+    changes: list[ZonesChanged] = field(default_factory=list)
+
+    def look(self, look_id: str) -> Look:
+        return self.looks.get(look_id)
+
+
+HomeFactory = Callable[..., Awaitable[Home]]
+
+
+async def build_home(
+    tmp_path: Path,
+    lights: Sequence[FakeLight],
+    zones: Sequence[ZoneRecord],
+    *,
+    preview_only: bool = False,
+) -> Home:
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    store = ZoneStore(db)
+    for zone in zones:
+        await store.save_zone(zone)
+    return await assemble(db, lights, [START], preview_only)
+
+
+async def assemble(
+    db: StateDB, lights: Sequence[FakeLight], clock: list[datetime], preview_only: bool
+) -> Home:
+    """The app's objects around an open state.db and a set of lights."""
+    bus = EventBus()
+    devices = DeviceManager(event_bus=bus)
+    for light in lights:
+        devices.add_device(light, LatencyTracker(strategy=StaticLatency(20.0)))
+    looks = LookStore(db)
+    await looks.load()
+    store = ZoneStore(db)
+    host, routes = FakeHost(), FakeRoutes()
+    manager = ZoneManager(
+        store=store,
+        looks=looks,
+        devices=devices,
+        db=db,
+        host=host,
+        routes=routes,
+        event_bus=bus,
+        clock=BeatClock(),
+        preview_only=preview_only,
+        now=lambda: clock[0],
+    )
+    home = Home(
+        db=db,
+        lights={light.stable_id: light for light in lights},
+        devices=devices,
+        store=store,
+        looks=looks,
+        host=host,
+        routes=routes,
+        bus=bus,
+        manager=manager,
+        clock=clock,
+    )
+    bus.subscribe(ZonesChanged, home.changes.append)
+    await manager.load()
+    return home
