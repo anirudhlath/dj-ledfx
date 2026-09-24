@@ -13,6 +13,7 @@ import re
 from datetime import date
 from pathlib import Path
 
+from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.lifx.packet import (
     GET_DEVICE_CHAIN,
     GET_HOST_FIRMWARE,
@@ -26,7 +27,7 @@ from dj_ledfx.devices.lifx.packet import (
     STATE_VERSION,
     build_get_tile_effect,
 )
-from dj_ledfx.devices.lifx.products import LifxProduct, lifx_product
+from dj_ledfx.devices.lifx.products import lifx_capabilities
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
@@ -41,33 +42,32 @@ NAMES = {
 }
 
 
-def _queries(product: LifxProduct) -> list[tuple[int, bytes, int]]:
+def _queries(caps: DeviceCapabilities) -> list[tuple[int, bytes, int]]:
     queries = [(GET_HOST_FIRMWARE, b"", STATE_HOST_FIRMWARE), (GET_VERSION, b"", STATE_VERSION)]
-    if product.matrix:
+    if caps.matrix:
         queries.append((GET_DEVICE_CHAIN, b"", STATE_DEVICE_CHAIN))
         queries.append((GET_TILE_EFFECT, build_get_tile_effect(), STATE_TILE_EFFECT))
-    if product.multizone:
+    if caps.multizone:
         queries.append((GET_MULTIZONE_EFFECT, b"", STATE_MULTIZONE_EFFECT))
     return queries
 
 
 async def _record(transport: LifxTransport, record: LifxDeviceRecord) -> None:
     firmware = await transport.query_host_firmware(record.mac, record.ip, record.port)
-    product = lifx_product(record.product, firmware, record.vendor)
-    if product is None:
-        print(f"skipped unknown product {record.product}")
-        return
-    slug = re.sub(r"[^a-z0-9]+", "-", product.name.lower()).strip("-")
+    # An unknown product records as "LIFX product <pid>", with firmware and version only.
+    caps, _relays = lifx_capabilities(record.product, firmware, record.vendor)
+    name, pid = caps.model, record.product
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     version = f"{firmware[0]}.{firmware[1]}" if firmware else "unknown"
-    for get, payload, state in _queries(product):
+    for get, payload, state in _queries(caps):
         addr = (record.ip, record.port)
         reply = await transport.query(record.mac, addr, get, payload, state, bytes, timeout=1.0)
         if reply is None:
-            print(f"{product.name}: no {NAMES[state]}")
+            print(f"{name}: no {NAMES[state]}")
             continue
-        path = OUT / f"{product.pid}-{slug}-{NAMES[state]}.hex"
+        path = OUT / f"{pid}-{slug}-{NAMES[state]}.hex"
         path.write_text(
-            f"# {NAMES[state]} ({state}) from {product.name} (pid {product.pid}), "
+            f"# {NAMES[state]} ({state}) from {name} (pid {pid}), "
             f"firmware {version}, recorded {date.today()}.\n{reply.hex()}\n"
         )
         print(f"wrote {path.relative_to(ROOT)}")

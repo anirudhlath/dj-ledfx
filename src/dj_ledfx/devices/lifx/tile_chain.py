@@ -34,6 +34,13 @@ DEFAULT_TILE_SIZE = (8, 8)
 PIXEL_PITCH_M = 0.03
 
 
+def tile_sizes(tiles: Sequence[TileInfo], tile_count: int) -> list[tuple[int, int]]:
+    """Each tile's (width, height): as the chain reports them, else tile_count 8x8 tiles."""
+    if tiles:
+        return [(tile.width, tile.height) for tile in tiles]
+    return [DEFAULT_TILE_SIZE] * tile_count
+
+
 class LifxTileChainAdapter(LifxAdapterBase):
     """Matrix lights: Tile, Candle, Tube, Spot, Path, Ceiling. Sized from StateDeviceChain."""
 
@@ -58,25 +65,21 @@ class LifxTileChainAdapter(LifxAdapterBase):
             caps=caps or DeviceCapabilities(protocol="LIFX", matrix=True),
         )
         self._tiles: list[TileInfo] = list(tiles)
-        self._tile_count = len(self._tiles) or tile_count
+        self._sizes = tile_sizes(self._tiles, tile_count)
+        self._led_count = sum(width * height for width, height in self._sizes)
 
     @property
     def tiles(self) -> list[TileInfo]:
         return self._tiles
 
-    def _tile_sizes(self) -> list[tuple[int, int]]:
-        if self._tiles:
-            return [(tile.width, tile.height) for tile in self._tiles]
-        return [DEFAULT_TILE_SIZE] * self._tile_count
-
     @property
     def led_count(self) -> int:
-        return sum(width * height for width, height in self._tile_sizes())
+        return self._led_count
 
     @property
     def geometry(self) -> MatrixGeometry:
         layouts: list[TileLayout] = []
-        for index, (width, height) in enumerate(self._tile_sizes()):
+        for index, (width, height) in enumerate(self._sizes):
             if index < len(self._tiles):
                 tile = self._tiles[index]
                 offset = (
@@ -91,7 +94,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         hsbk = rgb_array_to_hsbk(colors, kelvin=self._kelvin)
         start = 0
-        for tile_index, (width, height) in enumerate(self._tile_sizes()):
+        for tile_index, (width, height) in enumerate(self._sizes):
             rows_per_packet = max(1, PIXELS_PER_PACKET // width)
             for row in range(0, height, rows_per_packet):
                 rows = min(rows_per_packet, height - row)

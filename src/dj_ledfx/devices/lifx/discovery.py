@@ -21,9 +21,9 @@ from dj_ledfx.devices.lifx.packet import (
     parse_state_device_chain,
     parse_state_extended_color_zones,
 )
-from dj_ledfx.devices.lifx.products import lifx_capabilities, lifx_product
+from dj_ledfx.devices.lifx.products import lifx_capabilities
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
-from dj_ledfx.devices.lifx.tile_chain import DEFAULT_TILE_SIZE, LifxTileChainAdapter
+from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter, tile_sizes
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord, TileInfo
 from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
@@ -171,11 +171,10 @@ class LifxBackend(DeviceBackend):
         assert self._transport is not None
         transport = self._transport
         firmware = await transport.query_host_firmware(record.mac, record.ip, record.port)
-        product = lifx_product(record.product, firmware, record.vendor)
-        if product is not None and product.relays:
-            logger.debug("Skipping LIFX switch {} ({})", record.ip, product.name)
+        caps, relays = lifx_capabilities(record.product, firmware, record.vendor)
+        if relays:
+            logger.debug("Skipping LIFX switch {} ({})", record.ip, caps.model)
             return None
-        caps = lifx_capabilities(record.product, firmware, record.vendor)
         stable_id = f"lifx:{record.mac.hex()}"
         label = await self._query_label(record)
         name = self._unique_name(label or f"{caps.model} ({record.ip})", stable_id)
@@ -196,14 +195,13 @@ class LifxBackend(DeviceBackend):
             tiles = await self._query_chain(record)
             if not tiles:
                 logger.warning("LIFX '{}' didn't report its matrix size; assuming 8x8 tiles", name)
-            tile_count = len(tiles) or (5 if caps.chain else 1)
-            width, height = DEFAULT_TILE_SIZE
-            led_count = sum(t.width * t.height for t in tiles) or tile_count * width * height
+            sizes = tile_sizes(tiles, 5 if caps.chain else 1)
+            led_count = sum(width * height for width, height in sizes)
             return LifxTileChainAdapter(
                 transport,
                 _info("lifx_tile", led_count),
                 record.mac,
-                tile_count=tile_count,
+                tile_count=len(sizes),
                 kelvin=kelvin,
                 tiles=tiles,
                 caps=caps,
