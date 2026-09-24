@@ -10,11 +10,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, tzinfo
+from datetime import datetime, timedelta, tzinfo
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
+from dj_ledfx.timing import utcnow
 from dj_ledfx.zones.model import AttentionChanged
 
 if TYPE_CHECKING:
@@ -40,10 +41,6 @@ AttentionAction = Literal["restart", "details", "retry", "open"]
 OFFLINE_AFTER = timedelta(minutes=2)
 DROPPING_AFTER = timedelta(minutes=1)
 DROPPING_PCT = 5.0
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +69,7 @@ class AttentionFeed:
         stats: Callable[[], Sequence[DeviceStats]],
         event_bus: EventBus,
         interval_s: float = 1.0,
-        now: Callable[[], datetime] = _utcnow,
+        now: Callable[[], datetime] = utcnow,
         tz: tzinfo | None = None,
     ) -> None:
         self._zones = zones

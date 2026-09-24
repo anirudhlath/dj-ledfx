@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import time
 from collections import deque
 from typing import TYPE_CHECKING
@@ -8,6 +7,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from dj_ledfx import metrics
+from dj_ledfx.timing import paced
 
 if TYPE_CHECKING:
     from dj_ledfx.zones.runtime import ZoneRuntime
@@ -60,14 +60,5 @@ class EffectEngine:
         self._running = True
         metrics.RENDER_FPS.set(self._fps)
         logger.info("EffectEngine started: {} fps", self._fps)
-        next_tick = time.monotonic()
-        while self._running:
-            self.tick(time.monotonic())
-            next_tick += self._frame_period
-            delay = next_tick - time.monotonic()
-            if delay > 0:
-                await asyncio.sleep(delay)
-            else:  # fell behind: count from now rather than burst to catch up
-                next_tick = time.monotonic()
-                await asyncio.sleep(0)
+        await paced(self._frame_period, self.tick, lambda: self._running)
         logger.info("EffectEngine stopped")

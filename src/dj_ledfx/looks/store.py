@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -19,6 +18,7 @@ from dj_ledfx.looks.model import (
     look_to_dict,
     validate_look,
 )
+from dj_ledfx.timing import utcnow
 
 if TYPE_CHECKING:
     from dj_ledfx.persistence.state_db import StateDB
@@ -31,10 +31,6 @@ UPSERT_LOOK = (
     "DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at"
 )
 STAR_LOOK = "INSERT INTO look_stars (look_id) VALUES (?) ON CONFLICT(look_id) DO NOTHING"
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def look_body(look: Look) -> str:
@@ -80,7 +76,7 @@ class LookStore:
         """Save a look as a new one ("Mine"). Built-ins are never overwritten."""
         saved = replace(look, id=f"mine-{uuid.uuid4().hex[:8]}", built_in=False)
         validate_look(saved)
-        now = _now()
+        now = utcnow().isoformat()
         await self._db.write(INSERT_LOOK, (saved.id, look_body(saved), now, now))
         self._saved[saved.id] = saved
         return saved
@@ -91,7 +87,7 @@ class LookStore:
         validate_look(updated)
         await self._db.write(
             "UPDATE looks SET body=?, updated_at=? WHERE id=?",
-            (look_body(updated), _now(), look_id),
+            (look_body(updated), utcnow().isoformat(), look_id),
         )
         self._saved[look_id] = updated
         return updated

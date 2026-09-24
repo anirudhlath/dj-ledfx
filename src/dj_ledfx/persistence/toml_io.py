@@ -23,7 +23,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import tomllib
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, get_args
 
@@ -33,6 +33,7 @@ from loguru import logger
 from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.looks.store import STAR_LOOK, UPSERT_LOOK
 from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.timing import as_utc, utcnow
 from dj_ledfx.types import clamp01
 from dj_ledfx.zones.model import Assignment, ZoneKind, ZoneRecord
 from dj_ledfx.zones.store import ZoneStore
@@ -414,7 +415,7 @@ def _assignment(zone_id: str, info: dict[str, Any]) -> Assignment | None:
         look_json=look,
         brightness=clamp01(float(brightness)),
         lights=_strings(info.get("lights")),
-        started_at=started_at if started_at.tzinfo else started_at.replace(tzinfo=UTC),
+        started_at=as_utc(started_at),
     )
 
 
@@ -424,7 +425,7 @@ async def _import_zones_and_looks(db: StateDB, data: dict[str, Any]) -> None:
         await store.save_zone(_zone(zone_id, info))
 
     built_in = {look.id for look in builtin_looks()}
-    now = datetime.now(UTC).isoformat()
+    now = utcnow().isoformat()
     for look_id, info in _tables(data, "looks").items():
         body = info.get("body")
         if look_id in built_in or not isinstance(body, str):

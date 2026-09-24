@@ -15,7 +15,7 @@ import itertools
 import json
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from loguru import logger
@@ -30,6 +30,7 @@ from dj_ledfx.looks.model import (
     visible_field_layer,
 )
 from dj_ledfx.looks.store import look_body
+from dj_ledfx.timing import utcnow
 from dj_ledfx.zones.model import (
     Assignment,
     CrashInfo,
@@ -76,10 +77,6 @@ class RouteTable(Protocol):
     """Sends each light its slice of its zone's frames: the scheduler."""
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None: ...
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _applied_key(runtime: ZoneRuntime, device_id: str) -> AppliedKey:
@@ -130,7 +127,7 @@ class ZoneManager:
         fps: int = 60,
         max_lookahead_s: float = 1.0,
         preview_only: bool = False,
-        now: Callable[[], datetime] = _utcnow,
+        now: Callable[[], datetime] = utcnow,
     ) -> None:
         self._store = store
         self._looks = looks

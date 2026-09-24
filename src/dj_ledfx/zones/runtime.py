@@ -8,7 +8,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -27,6 +27,7 @@ from dj_ledfx.looks.model import (
     visible_field_layer,
 )
 from dj_ledfx.scheduling.route import DeviceRoute
+from dj_ledfx.timing import trim_window, utcnow
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.model import CrashInfo
 
@@ -50,10 +51,6 @@ _GENERATIONS = itertools.count(1)
 
 ZoneState = Literal["running", "slow", "crashed", "waiting"]
 LightMode = Literal["streaming", "own-effect", "streamed-copy"]
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _finite(colors: FloatRGB) -> FloatRGB:
@@ -92,7 +89,7 @@ class ZoneRuntime:
         brightness: float = 1.0,
         seed: int = 0,
         timer: Callable[[], float] = time.perf_counter,
-        now: Callable[[], datetime] = _utcnow,
+        now: Callable[[], datetime] = utcnow,
         on_state_change: Callable[[ZoneRuntime], None] | None = None,
     ) -> None:
         self.zone_id = zone_id
@@ -359,8 +356,7 @@ class ZoneRuntime:
         self._render_s = elapsed if self._render_s == 0.0 else 0.9 * self._render_s + 0.1 * elapsed
         self._stride = max(1, min(self._fps, math.ceil(self._render_s / FRAME_BUDGET_S)))
         self._rendered.append(now)
-        while now - self._rendered[0] > 1.0:
-            self._rendered.popleft()
+        trim_window(self._rendered, now)
         if len(self._rendered) < SLOW_RATIO * self._fps:
             if self._below_since is None:
                 self._below_since = now

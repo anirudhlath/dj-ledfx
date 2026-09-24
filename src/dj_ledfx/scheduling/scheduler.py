@@ -15,14 +15,13 @@ from numpy.typing import NDArray
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.events import DeviceOfflineEvent, EventBus
+from dj_ledfx.timing import paced, trim_window
 from dj_ledfx.types import DeviceStats
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from dj_ledfx.scheduling.route import DeviceRoute
-
-RATE_WINDOW_S = 1.0  # send_fps and dropped_pct cover the last second
 
 
 class FrameSlot:
@@ -56,11 +55,6 @@ class FrameSlot:
     @property
     def put_count(self) -> int:
         return self._put_count
-
-
-def _trim(sent_at: deque[float], now: float) -> None:
-    while sent_at and now - sent_at[0] > RATE_WINDOW_S:
-        sent_at.popleft()
 
 
 @dataclass
@@ -152,16 +146,7 @@ class LookaheadScheduler:
         for key, state in list(self._device_state.items()):
             state.send_task = asyncio.create_task(self._send_loop(state, key))
         try:
-            last_tick = time.monotonic()
-            while self._running:
-                self._distribute(time.monotonic())
-                last_tick += self._frame_period
-                sleep_time = last_tick - time.monotonic()
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-                else:
-                    last_tick = time.monotonic()
-                    await asyncio.sleep(0)
+            await paced(self._frame_period, self._distribute, lambda: self._running)
         finally:
             # Runs on normal exit and on cancellation. Snapshot: devices may come and go.
             all_states = list(self._device_state.values())
@@ -240,7 +225,7 @@ class LookaheadScheduler:
                     device.tracker.update((sent - send_start) * 1000.0)
                 state.send_count += 1
                 state.sent_at.append(sent)
-                _trim(state.sent_at, sent)
+                trim_window(state.sent_at, sent)
                 metrics.DEVICE_LATENCY.labels(device=key).set(device.tracker.effective_latency_s)
                 metrics.DEVICE_FPS.labels(device=key).set(device.max_fps)
 
@@ -263,7 +248,7 @@ class LookaheadScheduler:
         stats: list[DeviceStats] = []
         for key, state in self._device_state.items():
             device = state.managed
-            _trim(state.sent_at, now)
+            trim_window(state.sent_at, now)
             send_fps = float(len(state.sent_at))
             stats.append(
                 DeviceStats(

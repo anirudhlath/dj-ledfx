@@ -14,13 +14,14 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
 from dj_ledfx.devices.capabilities import LightReading, try_read
 from dj_ledfx.events import DeviceOfflineEvent
+from dj_ledfx.timing import utcnow
 from dj_ledfx.zones.model import LightsChanged, ZonesChanged
 from dj_ledfx.zones.runtime import LightMode
 
@@ -34,10 +35,6 @@ LightStatus = Literal[LightMode, "offline", "switched-off", "reconnecting", "idl
 ZONE_POLL_S = 5.0
 IDLE_POLL_S = 30.0
 MISSED_POLLS_OFFLINE = 3
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +56,7 @@ class LightMonitor:
         event_bus: EventBus,
         zone_poll_s: float = ZONE_POLL_S,
         idle_poll_s: float = IDLE_POLL_S,
-        now: Callable[[], datetime] = _utcnow,
+        now: Callable[[], datetime] = utcnow,
     ) -> None:
         self._devices = devices
         self._zones = zones

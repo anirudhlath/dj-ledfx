@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
+from dj_ledfx.timing import as_utc, utcnow
 from dj_ledfx.zones.model import ALL_LIGHTS_ZONE_ID, Assignment, ZoneKind, ZoneRecord
 
 if TYPE_CHECKING:
@@ -40,8 +41,8 @@ def _time(text: str, zone_id: str) -> datetime:
         value = datetime.fromisoformat(text)
     except ValueError:
         logger.warning("Zone {}: unreadable start time {!r}; using now", zone_id, text)
-        return datetime.now(UTC)
-    return value if value.tzinfo else value.replace(tzinfo=UTC)
+        return utcnow()
+    return as_utc(value)
 
 
 class ZoneStore:
