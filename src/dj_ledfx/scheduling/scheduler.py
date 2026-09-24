@@ -1,8 +1,11 @@
+"""Sends each light its slice of its zone's frames, ahead by the light's latency (spec §4.1)."""
+
 from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -11,16 +14,15 @@ from numpy.typing import NDArray
 
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
-from dj_ledfx.effects.engine import RingBuffer
-from dj_ledfx.events import DeviceOfflineEvent, EventBus, TransportStateChangedEvent
-from dj_ledfx.spatial.compositor import SpatialCompositor
-from dj_ledfx.transport import TransportState
+from dj_ledfx.events import DeviceOfflineEvent, EventBus
 from dj_ledfx.types import DeviceStats
 
 if TYPE_CHECKING:
-    from dj_ledfx.devices.adapter import DeviceAdapter
-    from dj_ledfx.persistence.state_db import StateDB
-    from dj_ledfx.spatial.pipeline import ScenePipeline
+    from collections.abc import Sequence
+
+    from dj_ledfx.scheduling.route import DeviceRoute
+
+RATE_WINDOW_S = 1.0  # send_fps and dropped_pct cover the last second
 
 
 class FrameSlot:
@@ -56,6 +58,11 @@ class FrameSlot:
         return self._put_count
 
 
+def _trim(sent_at: deque[float], now: float) -> None:
+    while sent_at and now - sent_at[0] > RATE_WINDOW_S:
+        sent_at.popleft()
+
+
 @dataclass
 class DeviceSendState:
     """Per-device send state, keyed by stable_id."""
@@ -64,40 +71,36 @@ class DeviceSendState:
     slot: FrameSlot
     send_count: int = 0
     send_task: asyncio.Task[None] | None = None
-    pipeline: ScenePipeline | None = None
+    sent_at: deque[float] = field(default_factory=deque)  # send times in the last second
 
 
 class LookaheadScheduler:
+    """Sends each device the slice its route points at, for now plus the device's latency.
+
+    The zone manager sets the routes: this is its RouteTable. A device with no route gets
+    nothing. A light running its own effect, and every light while preview-only is on,
+    gets no frames either, but its slice still reaches the web preview.
+    """
+
     def __init__(
         self,
-        ring_buffer: RingBuffer,
-        devices: list[ManagedDevice],
+        devices: Sequence[ManagedDevice] = (),
         fps: int = 60,
         disconnect_backoff_s: float = 1.0,
-        compositor: SpatialCompositor | None = None,
         event_bus: EventBus | None = None,
-        state_db: StateDB | None = None,
     ) -> None:
-        self._ring_buffer = ring_buffer
+        self._fps = fps
         self._frame_period = 1.0 / fps
         self._disconnect_backoff_s = disconnect_backoff_s
         self._running = False
-        self._start_time: float = 0.0
-        self._compositor = compositor
         self._event_bus = event_bus
-        self._state_db = state_db
+        self._routes: dict[str, DeviceRoute] = {}
+        self._preview_only = False
         self._frame_snapshots: dict[str, tuple[NDArray[np.uint8], int]] = {}
         self._frame_seq: dict[str, int] = {}
-        self._transport_state = TransportState.STOPPED
-        self._resume_event = asyncio.Event()
-        self._restore_task: asyncio.Task[None] | None = None
-        if event_bus is not None:
-            event_bus.subscribe(TransportStateChangedEvent, self._on_transport_changed)
-
-        # Dict-based device state, keyed by stable_id (or name as fallback)
         self._device_state: dict[str, DeviceSendState] = {}
         for device in devices:
-            key = device.adapter.device_info.effective_id
+            key = self._device_key(device)
             self._device_state[key] = DeviceSendState(managed=device, slot=FrameSlot())
 
     @staticmethod
@@ -109,68 +112,27 @@ class LookaheadScheduler:
         return self._frame_snapshots
 
     @property
-    def compositor(self) -> SpatialCompositor | None:
-        return self._compositor
+    def preview_only(self) -> bool:
+        return self._preview_only
 
-    @compositor.setter
-    def compositor(self, value: SpatialCompositor | None) -> None:
-        self._compositor = value
-
-    @property
-    def transport_state(self) -> TransportState:
-        return self._transport_state
-
-    def _on_transport_changed(self, event: TransportStateChangedEvent) -> None:
-        self._transport_state = event.new_state
-        if event.new_state.is_active:
-            self._resume_event.set()
+    def set_route(self, device_id: str, route: DeviceRoute | None) -> None:
+        """Where a device's frames come from; None stops them."""
+        if route is None:
+            self._routes.pop(device_id, None)
         else:
-            self._resume_event.clear()
-            # Restore saved device states when transitioning from active -> STOPPED
-            if event.old_state.is_active and self._state_db is not None:
-                if self._restore_task is not None and not self._restore_task.done():
-                    self._restore_task.cancel()
-                self._restore_task = asyncio.create_task(self._restore_device_states())
+            self._routes[device_id] = route
 
-    async def _restore_device_states(self) -> None:
-        """Restore all connected devices to their saved pre-effect states."""
-        assert self._state_db is not None
-        saved_states = await self._state_db.load_all_device_states()
-        if not saved_states:
-            return
+    def set_preview_only(self, on: bool) -> None:
+        """Frames reach the web preview only and nothing is sent (spec §6.4)."""
+        self._preview_only = on
 
-        async def _restore_one(adapter: DeviceAdapter, state_bytes: bytes) -> None:
-            try:
-                await adapter.restore_state(state_bytes)
-                logger.debug(
-                    "Restored state for device '{}' (stable_id={})",
-                    adapter.device_info.name,
-                    adapter.device_info.effective_id,
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to restore state for device '{}'",
-                    adapter.device_info.name,
-                )
-
-        tasks = []
-        for state in self._device_state.values():
-            adapter = state.managed.adapter
-            if not adapter.is_connected:
-                continue
-            state_bytes = saved_states.get(adapter.device_info.effective_id)
-            if state_bytes is not None:
-                tasks.append(_restore_one(adapter, state_bytes))
-        if tasks:
-            await asyncio.gather(*tasks)
-
-    def add_device(self, managed: ManagedDevice, pipeline: ScenePipeline | None = None) -> None:
+    def add_device(self, managed: ManagedDevice) -> None:
         """Add a device dynamically. Spawns a send task if the scheduler is running."""
         key = self._device_key(managed)
         if key in self._device_state:
             logger.warning("Device '{}' already in scheduler, skipping add", key)
             return
-        state = DeviceSendState(managed=managed, slot=FrameSlot(), pipeline=pipeline)
+        state = DeviceSendState(managed=managed, slot=FrameSlot())
         self._device_state[key] = state
         if self._running:
             state.send_task = asyncio.create_task(self._send_loop(state, key))
@@ -186,81 +148,49 @@ class LookaheadScheduler:
             state.send_task.cancel()
         logger.info("Scheduler: removed device '{}'", stable_id)
 
-    def set_device_pipeline(self, stable_id: str, pipeline: ScenePipeline | None) -> None:
-        """Assign (or clear) a per-device ScenePipeline by stable_id."""
-        state = self._device_state.get(stable_id)
-        if state is None:
-            logger.warning("Scheduler: set_device_pipeline called for unknown key '{}'", stable_id)
-            return
-        state.pipeline = pipeline
-
     def has_device(self, stable_id: str) -> bool:
-        """Check if a device is registered in the scheduler."""
         return stable_id in self._device_state
-
-    def remove_pipeline_refs(self, scene_id: str) -> None:
-        """Null out pipeline for all devices referencing the given scene."""
-        for state in self._device_state.values():
-            if state.pipeline is not None and state.pipeline.scene_id == scene_id:
-                state.pipeline = None
 
     def stop(self) -> None:
         self._running = False
-        self._resume_event.set()
 
     async def run(self) -> None:
         self._running = True
-        self._start_time = time.monotonic()
-        logger.info(
-            "LookaheadScheduler started with {} devices",
-            len(self._device_state),
-        )
-
-        # Spawn per-device send loops (snapshot to avoid mutation during iteration)
+        logger.info("LookaheadScheduler started with {} devices", len(self._device_state))
         for key, state in list(self._device_state.items()):
             state.send_task = asyncio.create_task(self._send_loop(state, key))
-
         try:
-            # Run distributor loop — gated by transport state
+            last_tick = time.monotonic()
             while self._running:
-                await self._resume_event.wait()
-                last_tick = time.monotonic()
-                while self._running and self._resume_event.is_set():
-                    now = time.monotonic()
-                    for state in self._device_state.values():
-                        slot = state.slot
-                        device = state.managed
-                        if slot.has_pending:
-                            logger.trace(
-                                "Frame overwritten for '{}' — device draining slower than engine",
-                                device.adapter.device_info.name,
-                            )
-                            metrics.FRAMES_DROPPED.labels(
-                                device=device.adapter.device_info.name
-                            ).inc()
-                        target_time = now + device.tracker.effective_latency_s
-                        slot.put(target_time)
-
-                    last_tick += self._frame_period
-                    sleep_time = last_tick - time.monotonic()
-                    if sleep_time > 0:
-                        await asyncio.sleep(sleep_time)
-                    else:
-                        last_tick = time.monotonic()
-                        await asyncio.sleep(0)
+                self._distribute(time.monotonic())
+                last_tick += self._frame_period
+                sleep_time = last_tick - time.monotonic()
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
+                else:
+                    last_tick = time.monotonic()
+                    await asyncio.sleep(0)
         finally:
-            # Clean up child tasks — runs on both normal exit and CancelledError
-            # Snapshot to guard against concurrent add_device/remove_device calls
+            # Runs on normal exit and on cancellation. Snapshot: devices may come and go.
             all_states = list(self._device_state.values())
             all_tasks = [s.send_task for s in all_states if s.send_task is not None]
             for task in all_tasks:
                 task.cancel()
             await asyncio.gather(*all_tasks, return_exceptions=True)
-            # Clear task refs
             for state in all_states:
                 state.send_task = None
-
         logger.info("LookaheadScheduler stopped")
+
+    def _distribute(self, now: float) -> None:
+        """Tell each routed device which moment its next frame is for: now + its latency."""
+        for key, state in self._device_state.items():
+            if key not in self._routes:
+                continue
+            name = state.managed.adapter.device_info.name
+            if state.slot.has_pending:
+                logger.trace("Frame overwritten for '{}': it drains slower than the engine", name)
+                metrics.FRAMES_DROPPED.labels(device=name).inc()
+            state.slot.put(now + state.managed.tracker.effective_latency_s)
 
     async def _send_loop(self, state: DeviceSendState, key: str) -> None:
         device = state.managed
@@ -269,16 +199,9 @@ class LookaheadScheduler:
         last_send_time = time.monotonic()
 
         while self._running and key in self._device_state:
-            if not self._resume_event.is_set():
-                await self._resume_event.wait()
-                if not self._running:
-                    break
             if not device.adapter.is_connected:
                 if was_connected:
-                    logger.warning(
-                        "Device '{}' disconnected",
-                        device.adapter.device_info.name,
-                    )
+                    logger.warning("Device '{}' disconnected", device.adapter.device_info.name)
                     if self._event_bus is not None:
                         self._event_bus.emit(
                             DeviceOfflineEvent(
@@ -290,12 +213,8 @@ class LookaheadScheduler:
                 await asyncio.sleep(self._disconnect_backoff_s)
                 continue
 
-            # Reconnection detection
             if not was_connected:
-                logger.info(
-                    "Device '{}' reconnected",
-                    device.adapter.device_info.name,
-                )
+                logger.info("Device '{}' reconnected", device.adapter.device_info.name)
                 device.tracker.reset()
                 was_connected = True
 
@@ -304,82 +223,76 @@ class LookaheadScheduler:
             except TimeoutError:
                 continue
 
-            # Use pipeline's ring buffer if available, else scheduler's
-            ring_buf = (
-                state.pipeline.ring_buffer if state.pipeline is not None else self._ring_buffer
-            )
-            frame = ring_buf.find_nearest(target_time)
-            if frame is None:
-                logger.warning(
-                    "No frame in ring buffer for '{}' (target_time={:.3f})",
-                    device.adapter.device_info.name,
-                    target_time,
-                )
+            route = self._routes.get(key)
+            if route is None:
+                continue
+            colors = route.colors_at(target_time, device.adapter.led_count)
+            device_name = device.adapter.device_info.name
+            if colors is None:
+                logger.trace("No frame yet for '{}' (target {:.3f})", device_name, target_time)
                 continue
 
-            colors = frame.colors
-            compositor = (
-                state.pipeline.compositor if state.pipeline is not None else self._compositor
-            )
-            if compositor is not None:
-                mapped = compositor.composite(frame.colors, device.adapter.device_info.name)
-                if mapped is not None:
-                    colors = mapped
-
-            device_name = device.adapter.device_info.name
-
-            # Gate actual device send on transport state
-            if self._transport_state == TransportState.PLAYING:
+            if route.streaming and not self._preview_only:
                 send_start = time.monotonic()
                 try:
                     await device.adapter.send_frame(colors)
                 except Exception:
                     logger.warning("Send failed for '{}'", device_name)
                     continue
-
-                send_elapsed = time.monotonic() - send_start
-                metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(send_elapsed)
-
+                sent = time.monotonic()
+                metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(sent - send_start)
                 if device.adapter.supports_latency_probing:
-                    rtt_ms = send_elapsed * 1000.0
-                    device.tracker.update(rtt_ms)
-
+                    device.tracker.update((sent - send_start) * 1000.0)
                 state.send_count += 1
+                state.sent_at.append(sent)
+                _trim(state.sent_at, sent)
                 metrics.DEVICE_LATENCY.labels(device=device_name).set(
                     device.tracker.effective_latency_s
                 )
                 metrics.DEVICE_FPS.labels(device=device_name).set(device.max_fps)
 
-            # Always update frame snapshots (needed for WS preview in SIMULATING mode)
+            # The web preview shows every routed device's slice, sent or not.
             seq = self._frame_seq.get(device_name, 0) + 1
             self._frame_seq[device_name] = seq
             self._frame_snapshots[device_name] = (colors, seq)
 
-            min_frame_interval = 1.0 / device.max_fps
-            last_send_time += min_frame_interval
+            last_send_time += 1.0 / device.max_fps
             remaining = last_send_time - time.monotonic()
             if remaining > 0:
                 await asyncio.sleep(remaining)
-            else:
-                # Fell behind — snap to now to avoid burst catch-up
+            else:  # fell behind: snap to now rather than burst to catch up
                 last_send_time = time.monotonic()
 
     def get_device_stats(self) -> list[DeviceStats]:
-        """Snapshot of per-device send statistics."""
+        """Per-device send statistics; rates cover the last second."""
         now = time.monotonic()
-        elapsed = now - self._start_time if self._start_time > 0 else 1.0
         stats: list[DeviceStats] = []
-        for state in self._device_state.values():
+        for key, state in self._device_state.items():
             device = state.managed
-            send_fps = state.send_count / elapsed if elapsed > 0 else 0.0
-            frames_dropped = state.slot.put_count - state.send_count
+            _trim(state.sent_at, now)
+            send_fps = float(len(state.sent_at))
             stats.append(
                 DeviceStats(
                     device_name=device.adapter.device_info.name,
                     effective_latency_ms=device.tracker.effective_latency_ms,
                     send_fps=send_fps,
-                    frames_dropped=max(0, frames_dropped),
+                    frames_dropped=max(0, state.slot.put_count - state.send_count),
                     connected=device.adapter.is_connected,
+                    device_id=key,
+                    dropped_pct=self._dropped_pct(key, state, send_fps),
                 )
             )
         return stats
+
+    def _dropped_pct(self, key: str, state: DeviceSendState, send_fps: float) -> float:
+        """How far a streaming light falls short of the frames it should get, in percent."""
+        route = self._routes.get(key)
+        if (
+            route is None
+            or not route.streaming
+            or self._preview_only
+            or not state.managed.adapter.is_connected
+        ):
+            return 0.0
+        expected = min(self._fps, state.managed.max_fps)
+        return max(0.0, 1.0 - send_fps / expected) * 100.0

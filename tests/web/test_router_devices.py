@@ -21,7 +21,6 @@ def client():
     scheduler.get_device_stats.return_value = []
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,
@@ -58,7 +57,6 @@ def client_with_device():
     scheduler.get_device_stats.return_value = []
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,
@@ -105,7 +103,6 @@ def test_scan_endpoint_fallback():
     manager.rediscover = AsyncMock(return_value=[])
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,
@@ -133,7 +130,6 @@ def test_scan_endpoint_with_orchestrator():
 
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,
@@ -192,7 +188,6 @@ def test_delete_device_persists_to_db(tmp_path):
     scheduler.get_device_stats.return_value = []
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,9 +27,7 @@ class DeviceInfo:
 
 @dataclass(slots=True)
 class RenderedFrame:
-    # uint8 from the legacy scene pipelines, float32 (FloatRGB) from zone runtimes, until
-    # the cut-over (Task 24) makes every frame FloatRGB.
-    colors: NDArray[Any]  # shape (n_leds, 3)
+    colors: FloatRGB  # shape (n_leds, 3), linear 0..1
     target_time: float  # monotonic time when this should be displayed
     beat_phase: float
     bar_phase: float

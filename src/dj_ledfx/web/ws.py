@@ -11,11 +11,9 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from dj_ledfx.events import TransportStateChangedEvent
-from dj_ledfx.transport import TransportState
 from dj_ledfx.web import contract
 from dj_ledfx.web.state import ClientSubscription
-from dj_ledfx.zones.model import AttentionChanged, LightsChanged, ZonesChanged
+from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
 
 
 def _get_connected(app: Any) -> set[WebSocket]:
@@ -104,16 +102,30 @@ def _attention_message(app: Any) -> dict[str, Any] | None:
     }
 
 
+def _transport_state(zones: Any) -> str:
+    """Preview-only in the contract's transport terms (web spec §12.4)."""
+    return "simulating" if zones.preview_only else "playing"
+
+
+def _transport_message(app: Any) -> dict[str, Any] | None:
+    zones = getattr(app.state, "zone_manager", None)
+    if zones is None:
+        return None
+    return {"channel": "transport", "state": _transport_state(zones)}
+
+
 # Each pushed channel's snapshot, and the events that make a channel stale.
 _SNAPSHOTS: dict[str, Callable[[Any], dict[str, Any] | None]] = {
     "running": _running_message,
     "lights": _lights_message,
     "attention": _attention_message,
+    "transport": _transport_message,
 }
 _STALE_ON: dict[type[Any], str] = {
     ZonesChanged: "running",
     LightsChanged: "lights",
     AttentionChanged: "attention",
+    PreviewOnlyChanged: "transport",
 }
 
 
@@ -151,23 +163,6 @@ async def event_broadcast(app: Any) -> None:
     finally:
         for event_type in _STALE_ON:
             event_bus.unsubscribe(event_type, mark)
-
-
-async def transport_broadcast(app: Any) -> None:
-    """Listen for TransportStateChangedEvent and broadcast to all WS clients."""
-    event_bus = app.state.event_bus
-    queue: asyncio.Queue[str] = asyncio.Queue()
-
-    def on_change(event: TransportStateChangedEvent) -> None:
-        queue.put_nowait(event.new_state.value)
-
-    event_bus.subscribe(TransportStateChangedEvent, on_change)
-    try:
-        while True:
-            state_value = await queue.get()
-            await _broadcast_json(app, {"channel": "transport", "state": state_value})
-    finally:
-        event_bus.unsubscribe(TransportStateChangedEvent, on_change)
 
 
 async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
@@ -235,6 +230,7 @@ async def _status_poll(ws: WebSocket, app: Any) -> None:
     while True:
         await asyncio.sleep(10.0)
         engine = app.state.effect_engine
+        zones = getattr(app.state, "zone_manager", None)
         scheduler = app.state.scheduler
         stats = scheduler.get_device_stats()
         status_data: dict[str, Any] = {
@@ -242,7 +238,7 @@ async def _status_poll(ws: WebSocket, app: Any) -> None:
             "ok": True,
             "device_count": len(stats),
             "avg_render_ms": engine.avg_render_time_ms,
-            "transport": engine.transport_state.value,
+            "transport": _transport_state(zones) if zones is not None else "playing",
         }
         await _send_json(ws, status_data)
 
@@ -295,30 +291,6 @@ async def _handle_command(
             task.set_name("frame_poll")
             tasks.append(task)
         await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
-
-    elif action == "set_effect":
-        scene_id = msg.get("scene_id")
-        try:
-            if scene_id and app.state.pipeline_manager is not None:
-                app.state.pipeline_manager.set_scene_effect(
-                    scene_id, msg.get("effect"), msg.get("params", {})
-                )
-            else:
-                deck = app.state.effect_deck
-                deck.apply_update(msg.get("effect"), msg.get("params", {}))
-            await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
-        except (KeyError, ValueError, TypeError) as e:
-            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(e)})
-
-    elif action == "set_transport":
-        engine = app.state.effect_engine
-        state_str = msg.get("state", "")
-        try:
-            new_state = TransportState(state_str)
-            engine.set_transport_state(new_state)
-            await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
-        except (ValueError, KeyError) as e:
-            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(e)})
 
     else:
         await _send_json(

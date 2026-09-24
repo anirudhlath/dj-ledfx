@@ -16,14 +16,12 @@ if TYPE_CHECKING:
     from dj_ledfx.beat.clock import BeatClock
     from dj_ledfx.config import AppConfig
     from dj_ledfx.devices.manager import DeviceManager
-    from dj_ledfx.effects.deck import EffectDeck
     from dj_ledfx.effects.engine import EffectEngine
     from dj_ledfx.effects.presets import PresetStore
     from dj_ledfx.events import EventBus
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
-    from dj_ledfx.spatial.pipeline_manager import PipelineManager
     from dj_ledfx.zones.attention import AttentionFeed
     from dj_ledfx.zones.lights import LightMonitor
     from dj_ledfx.zones.manager import ZoneManager
@@ -60,7 +58,6 @@ def _resolve_static_dir(explicit: str | None, config_dir: str | None) -> Path | 
 def create_app(
     *,
     beat_clock: BeatClock,
-    effect_deck: EffectDeck,
     effect_engine: EffectEngine,
     device_manager: DeviceManager,
     scheduler: LookaheadScheduler,
@@ -72,7 +69,6 @@ def create_app(
     web_static_dir: str | None = None,
     state_db: StateDB | None = None,
     event_bus: EventBus | None = None,
-    pipeline_manager: PipelineManager | None = None,
     look_store: LookStore | None = None,
     zone_manager: ZoneManager | None = None,
     light_monitor: LightMonitor | None = None,
@@ -89,7 +85,6 @@ def create_app(
 
     # Store references for routers
     app.state.beat_clock = beat_clock
-    app.state.effect_deck = effect_deck
     app.state.effect_engine = effect_engine
     app.state.device_manager = device_manager
     app.state.scheduler = scheduler
@@ -100,7 +95,6 @@ def create_app(
     app.state.config_path = config_path
     app.state.state_db = state_db
     app.state.event_bus = event_bus
-    app.state.pipeline_manager = pipeline_manager
     app.state.look_store = look_store
     app.state.zone_manager = zone_manager
     app.state.light_monitor = light_monitor
@@ -110,12 +104,9 @@ def create_app(
     @app.on_event("startup")
     async def _start_broadcasts() -> None:
         if app.state.event_bus is not None:
-            from dj_ledfx.web.ws import event_broadcast, transport_broadcast
+            from dj_ledfx.web.ws import event_broadcast
 
-            app.state.broadcast_tasks = [
-                asyncio.create_task(transport_broadcast(app)),
-                asyncio.create_task(event_broadcast(app)),
-            ]
+            app.state.broadcast_tasks = [asyncio.create_task(event_broadcast(app))]
 
     @app.on_event("shutdown")
     async def _stop_broadcasts() -> None:
@@ -131,16 +122,12 @@ def create_app(
     from dj_ledfx.web.router_lights import router as lights_router
     from dj_ledfx.web.router_looks import router as looks_router
     from dj_ledfx.web.router_scene import router as scene_router
-    from dj_ledfx.web.router_scene import router_scenes
-    from dj_ledfx.web.router_transport import router as transport_router
     from dj_ledfx.web.router_zones import router as zones_router
 
     app.include_router(effects_router, prefix="/api")
     app.include_router(devices_router, prefix="/api")
     app.include_router(config_router, prefix="/api")
     app.include_router(scene_router, prefix="/api")
-    app.include_router(router_scenes, prefix="/api")
-    app.include_router(transport_router, prefix="/api")
     app.include_router(looks_router, prefix="/api")
     app.include_router(zones_router, prefix="/api")
     app.include_router(lights_router, prefix="/api")

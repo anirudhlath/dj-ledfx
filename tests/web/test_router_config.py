@@ -14,7 +14,6 @@ def client(tmp_path):
     config = AppConfig()
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=MagicMock(),
@@ -34,7 +33,6 @@ def client_with_db(tmp_path):
     asyncio.run(db.open())
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=MagicMock(),

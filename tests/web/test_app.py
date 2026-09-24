@@ -6,7 +6,6 @@ from dj_ledfx.web.app import create_app
 def _mock_deps():
     return {
         "beat_clock": MagicMock(),
-        "effect_deck": MagicMock(),
         "effect_engine": MagicMock(),
         "device_manager": MagicMock(),
         "scheduler": MagicMock(),

@@ -113,4 +113,11 @@ async def test_a_client_that_connects_gets_every_pushed_channel(api: Api) -> Non
 
     channels = [message["channel"] for message in initial_messages(api.app)]
 
-    assert channels == ["running", "lights", "attention"]
+    assert channels == ["running", "lights", "attention", "transport"]
+
+
+async def test_preview_only_is_pushed_as_the_transport_state(api: Api, socket: FakeSocket) -> None:
+    await api.home.manager.set_preview_only(True)
+    await until(lambda: bool(socket.on("transport")))
+
+    assert socket.on("transport") == [{"channel": "transport", "state": "simulating"}]

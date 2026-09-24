@@ -54,7 +54,6 @@ async def api_home(
     )
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=home.devices,
         scheduler=MagicMock(get_device_stats=lambda: stats),

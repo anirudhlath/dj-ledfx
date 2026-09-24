@@ -25,7 +25,6 @@ def client(tmp_path: Path) -> TestClient:
     (dist / "favicon.svg").write_text("<svg/>")
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=MagicMock(),

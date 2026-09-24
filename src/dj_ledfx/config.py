@@ -13,7 +13,6 @@ from loguru import logger
 class EngineConfig:
     fps: int = 60
     max_lookahead_ms: int = 1000
-    unassigned_device_mode: str = "default_effect"  # "default_effect" | "idle"
     # Looks run and show in the web app; the lights are left alone (spec §6.4).
     preview_only: bool = False
 

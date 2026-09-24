@@ -4,8 +4,6 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from dj_ledfx.effects.beat_pulse import BeatPulse
-from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.types import BeatState
 from dj_ledfx.web.app import create_app
 
@@ -24,14 +22,12 @@ def ws_app():
     clock.last_deck_number = 1
     clock.last_deck_name = "CDJ-3000"
 
-    deck = EffectDeck(BeatPulse())
     scheduler = MagicMock()
     scheduler.frame_snapshots = {}
     scheduler.get_device_stats.return_value = []
 
     app = create_app(
         beat_clock=clock,
-        effect_deck=deck,
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=scheduler,
@@ -71,46 +67,14 @@ def test_ws_subscribe_beat_command(client):
                 break
 
 
-def test_ws_set_effect_with_scene_id(client):
-    """set_effect with scene_id targets that scene's pipeline."""
-    mock_pm = MagicMock()
-    client.app.state.pipeline_manager = mock_pm
-
+def test_ws_the_old_deck_and_transport_commands_are_gone(client):
+    """set_effect and set_transport went with the global deck and transport (M1)."""
     with client.websocket_connect("/ws") as ws:
-        ws.receive_text()  # drain beat
-
-        ws.send_json(
-            {
-                "action": "set_effect",
-                "id": "test1",
-                "scene_id": "scene1",
-                "effect": "rainbow_wave",
-                "params": {},
-            }
-        )
+        ws.send_json({"action": "set_transport", "id": "t1", "state": "playing"})
         for _ in range(10):
-            data = ws.receive_text()
-            msg = json.loads(data)
-            if msg.get("channel") == "ack" and msg.get("id") == "test1":
+            msg = json.loads(ws.receive_text())
+            if msg.get("channel") == "error" and msg.get("id") == "t1":
+                assert msg["detail"] == "Unknown action: set_transport"
                 break
-        mock_pm.set_scene_effect.assert_called_once_with("scene1", "rainbow_wave", {})
-
-
-def test_ws_set_effect_without_scene_id(client):
-    """set_effect without scene_id targets the global deck (backward compat)."""
-    with client.websocket_connect("/ws") as ws:
-        ws.receive_text()  # drain beat
-        ws.send_json(
-            {
-                "action": "set_effect",
-                "id": "test2",
-                "effect": "beat_pulse",
-                "params": {},
-            }
-        )
-        for _ in range(10):
-            data = ws.receive_text()
-            msg = json.loads(data)
-            if msg.get("channel") == "ack" and msg.get("id") == "test2":
-                break
-        assert client.app.state.effect_deck.effect_name == "beat_pulse"
+        else:
+            pytest.fail("no error for set_transport")
