@@ -48,7 +48,6 @@ def _utcnow() -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class AttentionItem:
-    id: str
     severity: Severity
     kind: AttentionKind
     subject_type: SubjectType
@@ -57,6 +56,10 @@ class AttentionItem:
     detail: str
     since: datetime
     actions: tuple[AttentionAction, ...]
+
+    @property
+    def id(self) -> str:
+        return f"{self.kind}:{self.subject_id}"
 
 
 class AttentionFeed:
@@ -123,7 +126,6 @@ class AttentionFeed:
             at = state.since.astimezone(self._tz).strftime("%H:%M")
             items.append(
                 AttentionItem(
-                    id=f"light-offline:{state.device_id}",
                     severity="normal",
                     kind="light-offline",
                     subject_type="light",
@@ -145,7 +147,6 @@ class AttentionFeed:
             elif info.state == "slow" and info.slow_since is not None:
                 items.append(
                     AttentionItem(
-                        id=f"zone-slow:{info.zone_id}",
                         severity="normal",
                         kind="zone-slow",
                         subject_type="zone",
@@ -169,7 +170,6 @@ class AttentionFeed:
         if error is not None:
             reason = f" {error.layer}: {error.message}" if error.layer else f" {error.message}"
         return AttentionItem(
-            id=f"zone-crashed:{info.zone_id}",
             severity="high",
             kind="zone-crashed",
             subject_type="zone",
@@ -193,7 +193,6 @@ class AttentionFeed:
             name = self._name(stat.device_id)
             items.append(
                 AttentionItem(
-                    id=f"frames-dropping:{stat.device_id}",
                     severity="normal",
                     kind="frames-dropping",
                     subject_type="light",

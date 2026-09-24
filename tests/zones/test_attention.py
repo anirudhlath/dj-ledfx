@@ -93,7 +93,6 @@ async def test_an_offline_zone_light_needs_attention_after_two_minutes(
 
     assert feed.items() == [
         AttentionItem(
-            id="light-offline:rope",
             severity="normal",
             kind="light-offline",
             subject_type="light",
