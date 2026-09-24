@@ -34,6 +34,28 @@ def _file_within(root: Path, relative: str) -> Path | None:
     return None
 
 
+# The rebuilt web app (web/), served at /next beside the old UI until the F11 cut-over.
+_NEXT_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
+_IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+def _next_response(dist: Path, path: str) -> FileResponse:
+    """A file from web/dist, or its index.html for the app's own routes."""
+    index = _file_within(dist, "index.html")
+    if index is None:
+        raise HTTPException(
+            status_code=404, detail="The new web app isn't built: cd web && npm run build"
+        )
+    if path:
+        found = _file_within(dist, path)
+        if found is not None:
+            cache = _IMMUTABLE if path.startswith("assets/") else "no-cache"
+            return FileResponse(found, headers={"Cache-Control": cache})
+        if path.startswith("assets/"):
+            raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})
+
+
 def _resolve_static_dir(explicit: str | None, config_dir: str | None) -> Path | None:
     """4-tier static directory resolution."""
     for candidate in [
@@ -66,6 +88,7 @@ def create_app(
     config: AppConfig,
     config_path: Path | None,
     web_static_dir: str | None = None,
+    next_static_dir: Path | None = None,
     state_db: StateDB | None = None,
     event_bus: EventBus | None = None,
     pipeline_manager: PipelineManager | None = None,
@@ -128,6 +151,17 @@ def create_app(
     from dj_ledfx.web.ws import ws_endpoint
 
     app.add_api_websocket_route("/ws", ws_endpoint)
+
+    next_dist = next_static_dir or _NEXT_DIST
+
+    # Registered before the old UI's catch-all below, which would otherwise answer /next.
+    @app.get("/next", include_in_schema=False)
+    async def next_index() -> FileResponse:
+        return _next_response(next_dist, "")
+
+    @app.get("/next/{path:path}", include_in_schema=False)
+    async def next_app(path: str) -> FileResponse:
+        return _next_response(next_dist, path)
 
     static_dir = _resolve_static_dir(web_static_dir, config.web.static_dir)
     if static_dir and static_dir.is_dir():
