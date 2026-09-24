@@ -203,8 +203,8 @@ def setting_schema(kind: str) -> list[dict[str, Any]]:
     return [_schema_entry(key, param) for key, param in params.items()]
 
 
-def _layer_to_dict(layer: Layer) -> dict[str, Any]:
-    return {
+def _layer_to_dict(layer: Layer, *, for_storage: bool) -> dict[str, Any]:
+    data: dict[str, Any] = {
         "id": layer.id,
         "name": layer.name,
         "type": layer.type,
@@ -213,15 +213,21 @@ def _layer_to_dict(layer: Layer) -> dict[str, Any]:
         "blend": layer.blend,
         "opacity": layer.opacity,
         "settings": {key: {"value": value} for key, value in layer.settings.items()},
-        "schema": setting_schema(layer.kind),
         "mask": None,
         "mirror": None,
         "transform": None,
     }
+    if not for_storage:
+        data["schema"] = setting_schema(layer.kind)
+    return data
 
 
-def look_to_dict(look: Look, *, starred: bool = False) -> dict[str, Any]:
-    return {
+def look_to_dict(
+    look: Look, *, starred: bool = False, for_storage: bool = False
+) -> dict[str, Any]:
+    """The look in the contract's shape. For storage, without the star (kept apart) and
+    the layers' setting schemas (worked out from the effect kind when read)."""
+    data: dict[str, Any] = {
         "id": look.id,
         "name": look.name,
         "category": look.category,
@@ -232,8 +238,7 @@ def look_to_dict(look: Look, *, starred: bool = False) -> dict[str, Any]:
         "scope": look.scope,
         "needs": list(look.needs),
         "uses": list(look.uses),
-        "starred": starred,
-        "layers": [_layer_to_dict(layer) for layer in look.layers],
+        "layers": [_layer_to_dict(layer, for_storage=for_storage) for layer in look.layers],
         "modifiers": {
             "trailsS": look.modifiers.trails_s,
             "downbeatFlash": look.modifiers.downbeat_flash,
@@ -242,6 +247,9 @@ def look_to_dict(look: Look, *, starred: bool = False) -> dict[str, Any]:
         },
         "transition": {"kind": look.transition.kind, "durationS": look.transition.duration_s},
     }
+    if not for_storage:
+        data["starred"] = starred
+    return data
 
 
 def make_effect(layer: Layer) -> FieldEffect | FirmwareEffect:
@@ -266,8 +274,13 @@ def make_effect(layer: Layer) -> FieldEffect | FirmwareEffect:
     raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a field effect")
 
 
+def _visible_fields(look: Look) -> list[Layer]:
+    return [layer for layer in look.layers if layer.type == "field" and layer.visible]
+
+
 def visible_field_layer(look: Look) -> Layer | None:
-    return next((layer for layer in look.layers if layer.type == "field" and layer.visible), None)
+    fields = _visible_fields(look)
+    return fields[0] if fields else None
 
 
 def firmware_layers(look: Look) -> list[Layer]:
@@ -284,5 +297,5 @@ def validate_look(look: Look) -> None:
         raise LookError("Look modifiers arrive in M4")
     for layer in look.layers:
         make_effect(layer)
-    if sum(1 for layer in look.layers if layer.type == "field" and layer.visible) > 1:
+    if len(_visible_fields(look)) > 1:
         raise LookError("M1 plays one streamed layer; layer blending arrives in M2")

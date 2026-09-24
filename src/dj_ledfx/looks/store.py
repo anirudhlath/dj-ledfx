@@ -30,11 +30,7 @@ def _now() -> str:
 
 def look_body(look: Look) -> str:
     """A look as saved in state.db: its contract shape, without schema or star."""
-    data = look_to_dict(look)
-    data.pop("starred")
-    for layer in data["layers"]:
-        layer.pop("schema")
-    return json.dumps(data)
+    return json.dumps(look_to_dict(look, for_storage=True))
 
 
 class LookStore:
