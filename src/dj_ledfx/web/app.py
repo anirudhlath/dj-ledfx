@@ -26,13 +26,15 @@ if TYPE_CHECKING:
 
 
 def _file_within(root: Path, relative: str) -> Path | None:
-    """The file at root/relative, or None when it is missing, leaves root or can't be a path."""
-    base = root.resolve()
+    """The file at root/relative, or None when it is missing, leaves root or can't be a path.
+
+    root must already be resolved: callers resolve it once, when the app is built.
+    """
     try:
-        candidate = (base / relative).resolve()
+        candidate = (root / relative).resolve()
     except ValueError:  # A NUL byte, or a name the filesystem can't encode.
         return None
-    if candidate.is_relative_to(base) and candidate.is_file():
+    if candidate.is_relative_to(root) and candidate.is_file():
         return candidate
     return None
 
@@ -42,23 +44,20 @@ _NEXT_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
 _IMMUTABLE = "public, max-age=31536000, immutable"
 
 
-def _next_response(dist: Path, path: str) -> FileResponse:
-    """A file from web/dist, or its index.html for the app's own routes."""
-    index = _file_within(dist, "index.html")
-    if index is None:
+def _next_response(root: Path, assets: Path, path: str) -> FileResponse:
+    """A file from web/dist (root, resolved), or its index.html for the app's own routes."""
+    found = _file_within(root, path)
+    if found is not None:
+        # Judged by the file served: assets/..%2findex.html is still the index.
+        hashed = found.is_relative_to(assets)
+        return FileResponse(found, headers={"Cache-Control": _IMMUTABLE if hashed else "no-cache"})
+    if path.startswith("assets/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    index = root / "index.html"
+    if not index.is_file():
         raise HTTPException(
             status_code=404, detail="The new web app isn't built: cd web && npm run build"
         )
-    if path:
-        found = _file_within(dist, path)
-        if found is not None:
-            # Judged by the file served: assets/..%2findex.html is still the index.
-            hashed = found.is_relative_to(dist.resolve() / "assets")
-            return FileResponse(
-                found, headers={"Cache-Control": _IMMUTABLE if hashed else "no-cache"}
-            )
-        if path.startswith("assets/"):
-            raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
@@ -94,7 +93,7 @@ def create_app(
     config: AppConfig,
     config_path: Path | None,
     web_static_dir: str | None = None,
-    next_static_dir: Path | None = None,
+    next_static_dir: Path = _NEXT_DIST,
     state_db: StateDB | None = None,
     event_bus: EventBus | None = None,
     pipeline_manager: PipelineManager | None = None,
@@ -158,19 +157,21 @@ def create_app(
 
     app.add_api_websocket_route("/ws", ws_endpoint)
 
-    next_dist = next_static_dir or _NEXT_DIST
+    next_root = next_static_dir.resolve()
+    next_assets = next_root / "assets"
 
     # Registered before the old UI's catch-all below, which would otherwise answer /next.
     @app.get("/next", include_in_schema=False)
     async def next_index() -> FileResponse:
-        return _next_response(next_dist, "")
+        return _next_response(next_root, next_assets, "")
 
     @app.get("/next/{path:path}", include_in_schema=False)
     async def next_app(path: str) -> FileResponse:
-        return _next_response(next_dist, path)
+        return _next_response(next_root, next_assets, path)
 
     static_dir = _resolve_static_dir(web_static_dir, config.web.static_dir)
     if static_dir and static_dir.is_dir():
+        static_root = static_dir.resolve()
         index_html = static_dir / "index.html"
 
         # Mount assets directory for hashed static files
@@ -183,7 +184,7 @@ def create_app(
             """Serve index.html for all non-API routes (SPA client-side routing)."""
             if full_path.startswith("api/"):
                 raise HTTPException(status_code=404, detail="Not found")
-            file_path = _file_within(static_dir, full_path) if full_path else None
+            file_path = _file_within(static_root, full_path) if full_path else None
             return FileResponse(file_path or index_html)
 
     return app

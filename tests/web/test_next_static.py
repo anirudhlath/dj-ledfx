@@ -3,55 +3,44 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from dj_ledfx.web.app import create_app
+from tests.web.conftest import static_client, write_dist
 
 NEW_INDEX = "<!doctype html><title>next</title>"
 OLD_INDEX = "<!doctype html><title>old</title>"
 SECRET = "not for the web"
 
 
-def _dist(root: Path, index: str) -> None:
-    (root / "assets").mkdir(parents=True)
-    (root / "index.html").write_text(index)
-    (root / "assets" / "index-abc123.js").write_text("console.log('built')")
-    (root / "favicon.svg").write_text("<svg/>")
-
-
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     """A checkout-like tree: web/dist (new), frontend/dist (old) and a file outside both."""
     (tmp_path / "secret.txt").write_text(SECRET)
-    _dist(tmp_path / "web" / "dist", NEW_INDEX)
-    _dist(tmp_path / "frontend" / "dist", OLD_INDEX)
+    write_dist(tmp_path / "web" / "dist", NEW_INDEX)
+    write_dist(tmp_path / "frontend" / "dist", OLD_INDEX)
     return tmp_path
 
 
 def _client(tree: Path, next_dir: Path | None = None) -> TestClient:
-    app = create_app(
-        beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
-        effect_engine=MagicMock(),
-        device_manager=MagicMock(),
-        scheduler=MagicMock(),
-        preset_store=MagicMock(),
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"], static_dir=None)),
-        config_path=None,
-        web_static_dir=str(tree / "frontend" / "dist"),
-        next_static_dir=next_dir or tree / "web" / "dist",
-    )
-    return TestClient(app)
+    return static_client(tree / "frontend" / "dist", next_dir or tree / "web" / "dist")
 
 
 # Review focus: /next without a trailing slash, and reloaded deep links, load the app.
 @pytest.mark.parametrize(
-    "path", ["/next", "/next/", "/next/live", "/next/looks/fireflies", "/next/lookz"]
+    "path",
+    [
+        "/next",
+        "/next/",
+        "/next/live",
+        "/next/looks/fireflies",
+        "/next/lookz",
+        # A NUL byte can't name a file, so it gets the app like any unknown path, not a 500.
+        pytest.param("/next/%00", id="nul-byte"),
+        # The cache rule follows the file served, not the path that reached it.
+        pytest.param("/next/assets/..%2findex.html", id="index-reached-through-assets"),
+    ],
 )
 def test_app_paths_get_the_new_index(tree: Path, path: str) -> None:
     response = _client(tree).get(path)
@@ -81,20 +70,6 @@ def test_other_files_in_dist_are_served(tree: Path) -> None:
     assert response.headers["cache-control"] == "no-cache"
 
 
-# A NUL byte can't name a file. It gets the app, like any other unknown path, not a 500.
-def test_a_nul_byte_gets_the_index(tree: Path) -> None:
-    response = _client(tree).get("/next/%00")
-    assert response.status_code == 200
-    assert response.text == NEW_INDEX
-
-
-# The cache rule follows the file served, not the path that reached it.
-def test_the_index_reached_through_assets_is_not_cached(tree: Path) -> None:
-    response = _client(tree).get("/next/assets/..%2findex.html")
-    assert response.text == NEW_INDEX
-    assert response.headers["cache-control"] == "no-cache"
-
-
 @pytest.mark.parametrize(
     "path",
     [
@@ -114,7 +89,12 @@ def test_the_old_ui_keeps_its_paths(tree: Path) -> None:
     assert client.get("/assets/index-abc123.js").status_code == 200
 
 
-def test_an_unbuilt_web_app_says_how_to_build_it(tree: Path) -> None:
-    response = _client(tree, next_dir=tree / "missing").get("/next/live")
+# Unbuilt, the app's routes say how to build it; an asset is simply missing, as it is when built.
+@pytest.mark.parametrize(
+    ("path", "detail"),
+    [("/next/live", "npm run build"), ("/next/assets/index-abc123.js", "Not found")],
+)
+def test_an_unbuilt_web_app_says_how_to_build_it(tree: Path, path: str, detail: str) -> None:
+    response = _client(tree, next_dir=tree / "missing").get(path)
     assert response.status_code == 404
-    assert "npm run build" in response.json()["detail"]
+    assert detail in response.json()["detail"]
