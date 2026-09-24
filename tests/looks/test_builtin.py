@@ -71,13 +71,7 @@ def test_showcase_layers_bottom_to_top() -> None:
 
 def test_classics_cover_the_six_strip_effects() -> None:
     classics = builtin_looks()[1:]
-    # The app's own strip effects: test modules register theirs too (test_registry.py).
-    shipped = {
-        name
-        for name, cls in get_strip_effect_classes().items()
-        if cls.__module__.startswith("dj_ledfx.")
-    }
-    assert set(CLASSIC_NAMES) == shipped
+    assert set(CLASSIC_NAMES) == set(get_strip_effect_classes())
     assert [look.id for look in classics] == [classic_look_id(kind) for kind in CLASSIC_NAMES]
     assert classic_look_id("beat_pulse") == "classic-beat-pulse"
     for look in classics:

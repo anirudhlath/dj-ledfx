@@ -10,6 +10,7 @@ from loguru import logger
 
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.ledset import LedSet
@@ -24,7 +25,7 @@ LAMP = DeviceCapabilities(protocol="Govee")
 LIGHTS = (ZoneLight("tile", 4, TILE), ZoneLight("bulb", 1, BULB), ZoneLight("lamp", 3, LAMP))
 
 
-class FlatField(FieldEffect):
+class FlatField(FieldEffect, register=False):
     """Flat grey at `level`; raises or returns NaN when the test asks it to."""
 
     mode: ClassVar[str] = "ok"
@@ -50,7 +51,8 @@ class FlatField(FieldEffect):
 
 
 @pytest.fixture(autouse=True)
-def _reset_flat_field() -> Iterator[None]:
+def _flat_field() -> Iterator[None]:
+    Effect._registry["flat_field"] = FlatField  # conftest drops it after each test
     FlatField.mode = "ok"
     yield
     FlatField.mode = "ok"

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
@@ -15,6 +16,7 @@ from dj_ledfx.devices.capabilities import (
     LightReading,
     NoAnswer,
 )
+from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.firmware import FirmwareEffect, Params
 from dj_ledfx.effects.ledset import LedSet
@@ -266,3 +268,17 @@ class GlowFirmware(FirmwareEffect):
 
     def emulate(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         return np.full((leds.count, 3), self.level, dtype=np.float32)
+
+
+# The app's effects and GlowFirmware. Every test starts from these, and an effect a test
+# (or its module) registers is gone after it.
+_EFFECTS = dict(Effect._registry)
+
+
+@pytest.fixture(autouse=True)
+def _effect_registry() -> Iterator[None]:
+    Effect._registry.clear()
+    Effect._registry.update(_EFFECTS)
+    yield
+    Effect._registry.clear()
+    Effect._registry.update(_EFFECTS)

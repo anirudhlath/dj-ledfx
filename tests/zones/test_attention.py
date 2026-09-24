@@ -4,9 +4,11 @@ import asyncio
 from collections.abc import Callable, Sequence
 from datetime import UTC, timedelta
 
+import pytest
 from conftest import FakeLight
 from zone_home import START, Home, HomeFactory
 
+from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.ledset import LedSet
@@ -17,11 +19,16 @@ from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.model import AttentionChanged, ZoneRecord
 
 
-class Exploding(FieldEffect):
+class Exploding(FieldEffect, register=False):
     """A field effect whose every frame raises."""
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         raise RuntimeError("boom")
+
+
+@pytest.fixture(autouse=True)
+def _exploding() -> None:
+    Effect._registry["exploding"] = Exploding  # conftest drops it after each test
 
 
 SPARKS = Look(

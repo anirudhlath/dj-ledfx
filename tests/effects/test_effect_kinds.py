@@ -111,7 +111,6 @@ def test_schemas_cover_strip_effects_only() -> None:
     assert get_effect_class("probe_field") is ProbeField
     assert "probe_field" not in get_effect_schemas()
     assert CLASSIC <= set(get_effect_schemas())
-    del Effect._registry["probe_field"]
 
 
 def test_unknown_kinds_raise_key_error() -> None:
@@ -128,7 +127,6 @@ def test_create_strip_effect_refuses_other_kinds() -> None:
 
     with pytest.raises(KeyError, match="strip"):
         create_strip_effect("probe_field2")
-    del Effect._registry["probe_field2"]
 
 
 def test_strip_adapter_plays_the_strip_along_the_leds_in_order() -> None:
