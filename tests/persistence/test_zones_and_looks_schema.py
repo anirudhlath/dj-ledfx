@@ -62,8 +62,8 @@ async def test_write_many_is_one_transaction(db: StateDB) -> None:
 
 
 async def test_delete_device_state(db: StateDB) -> None:
-    await db.save_device_state("lifx:aa", b"x")
-    await db.delete_device_state("lifx:aa")
+    await db.save_device_states({"lifx:aa": b"x"})
+    await db.delete_device_states(["lifx:aa"])
     assert await db.load_device_state("lifx:aa") is None
 
 
@@ -71,7 +71,7 @@ async def test_upgrade_clears_what_the_old_transport_left(tmp_path: Path) -> Non
     path = tmp_path / "state.db"
     db = StateDB(path)
     await db.open()
-    await db.save_device_state("lifx:aa", b"old")
+    await db.save_device_states({"lifx:aa": b"old"})
     await db.save_config_key("engine", "unassigned_device_mode", '"idle"')
     await db.save_config_key("engine", "fps", "60")
     await db.write("UPDATE config SET value='3' WHERE section='_meta' AND key='schema_version'")

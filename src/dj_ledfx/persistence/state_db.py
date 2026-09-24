@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -479,14 +479,14 @@ class StateDB:
         """Delete a preset by name."""
         await self._execute_write("DELETE FROM presets WHERE name=?", (name,))
 
-    async def save_device_state(self, stable_id: str, state_bytes: bytes) -> None:
-        """Upsert the saved LED state for a device."""
-        await self._execute_write(
+    async def save_device_states(self, states: Mapping[str, bytes]) -> None:
+        """Upsert the captured states of several lights in one transaction."""
+        await self._executemany_write(
             "INSERT INTO device_saved_state (stable_id, state_bytes, captured_at) "
             "VALUES (?, ?, datetime('now')) "
             "ON CONFLICT(stable_id) DO UPDATE SET state_bytes=excluded.state_bytes, "
             "captured_at=datetime('now')",
-            (stable_id, state_bytes),
+            list(states.items()),
         )
 
     async def load_device_state(self, stable_id: str) -> bytes | None:
@@ -504,6 +504,8 @@ class StateDB:
         rows = await self._execute_read("SELECT stable_id, state_bytes FROM device_saved_state")
         return {row[0]: bytes(row[1]) for row in rows}
 
-    async def delete_device_state(self, stable_id: str) -> None:
-        """Forget a device's captured state (it has been restored or released)."""
-        await self._execute_write("DELETE FROM device_saved_state WHERE stable_id=?", (stable_id,))
+    async def delete_device_states(self, stable_ids: Iterable[str]) -> None:
+        """Forget several lights' captured states (restored or released) in one transaction."""
+        await self._executemany_write(
+            "DELETE FROM device_saved_state WHERE stable_id=?", [(x,) for x in stable_ids]
+        )

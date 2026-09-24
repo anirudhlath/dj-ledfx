@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from loguru import logger
 
@@ -60,6 +60,7 @@ if TYPE_CHECKING:
 # What a light was last given: its runtime's generation (unique across runtimes) and the
 # firmware layer it runs (None: it streams).
 AppliedKey = tuple[int, str | None]
+T = TypeVar("T")
 
 
 class RuntimeHost(Protocol):
@@ -217,9 +218,7 @@ class ZoneManager:
         async with self._lock:
             if not self._running:
                 return
-            released: list[str] = []
-            for zone_id in list(self._running):
-                released += await self._stop(zone_id)
+            released = await self._stop(*self._running)
             await self._sync(released)
         self._event_bus.emit(ZonesChanged())
 
@@ -287,7 +286,7 @@ class ZoneManager:
                     logger.info(
                         "Zone {} has none of its lights left; not resuming it", saved.zone_id
                     )
-                    await self._store.delete_assignment(saved.zone_id)
+                    await self._store.delete_assignments([saved.zone_id])
                     continue
                 await self._take_over(saved.zone_id, lights)
                 running = self._resumed(saved, lights)
@@ -638,14 +637,16 @@ class ZoneManager:
             touched += kept
         return take_overs, touched
 
-    async def _stop(self, zone_id: str) -> list[str]:
-        """Forget a running zone. Returns its lights, which the caller syncs (releases)."""
-        running = self._running.pop(zone_id, None)
-        if running is None:
-            return []
-        self._host.remove_runtime(zone_id)
-        await self._store.delete_assignment(zone_id)
-        return running.lights
+    async def _stop(self, *zone_ids: str) -> list[str]:
+        """Forget running zones. Returns their lights, which the caller syncs (releases)."""
+        stopped = [zone_id for zone_id in zone_ids if zone_id in self._running]
+        lights: list[str] = []
+        for zone_id in stopped:
+            lights += self._running.pop(zone_id).lights
+            self._host.remove_runtime(zone_id)
+        if stopped:
+            await self._store.delete_assignments(stopped)
+        return lights
 
     def _set_lights(self, running: _Running, lights: list[str]) -> None:
         running.lights = lights
@@ -734,51 +735,95 @@ class ZoneManager:
         return list(dict.fromkeys([*(x for x in ids if x), *self._captured]))
 
     async def _sync(self, device_ids: Iterable[str], power_on: Iterable[str] = ()) -> None:
-        """Bring each light in line with the zone that owns it, or release it."""
+        """Bring each light in line with the zone that owns it, or release it.
+
+        The lights about to get a look are read and, the first time, captured, all at once;
+        the new captures are saved in one transaction before any light is changed (spec
+        §4.3). Then every light is applied or released at once, and the released lights'
+        captures are forgotten together.
+        """
         wanted = set(power_on)
         if self._preview_only:
             self._deferred_power_on |= wanted  # applied when preview-only is turned off
         ids = list(dict.fromkeys(device_ids))
-        results = await asyncio.gather(
-            *(self._sync_device(d, d in wanted) for d in ids), return_exceptions=True
-        )
+        captured = await self._each(ids, lambda d: self._look_at(d, d in wanted))
+        new = {d: state for d, state in zip(ids, captured, strict=True) if state is not None}
+        if new:
+            await self._db.save_device_states(new)
+        released = await self._each(ids, lambda d: self._sync_device(d, d in wanted))
+        gone = [d for d, done in zip(ids, released, strict=True) if done]
+        if gone:
+            await self._db.delete_device_states(gone)
+
+    @staticmethod
+    async def _each(ids: list[str], step: Callable[[str], Awaitable[T]]) -> list[T | None]:
+        """Run step for every light at once. A light that fails is logged and gives None."""
+        results = await asyncio.gather(*(step(d) for d in ids), return_exceptions=True)
+        out: list[T | None] = []
         for device_id, result in zip(ids, results, strict=True):
             if isinstance(result, Exception):
                 logger.opt(exception=result).warning("Couldn't update light {}", device_id)
+                out.append(None)
+            elif isinstance(result, BaseException):
+                raise result
+            else:
+                out.append(result)
+        return out
 
-    async def _sync_device(self, device_id: str, power_on: bool) -> None:
+    def _held(self, runtime: ZoneRuntime, adapter: DeviceAdapter) -> bool:
+        """A zone light that's left as it is for now."""
+        return (
+            self._preview_only  # frames reach the web preview only
+            or runtime.crash is not None  # the light holds the last frame
+            or not adapter.is_connected  # offline: it rejoins when it's back
+        )
+
+    async def _look_at(self, device_id: str, power_on: bool) -> bytes | None:
+        """Read a light about to get its zone's look, and capture it the first time.
+        Returns the new capture, for _sync to save."""
+        runtime = self._runtime_of(device_id)
+        adapter = self._adapter(device_id)
+        if runtime is None or adapter is None or self._held(runtime, adapter):
+            return None
+        if power_on or device_id not in self._power:  # a look being applied reads it afresh
+            self._power[device_id] = (await self._read(adapter)).power
+        if device_id in self._captured:
+            return None
+        state = await self._capture(adapter)
+        self._captured[device_id] = state
+        return state
+
+    async def _sync_device(self, device_id: str, power_on: bool) -> bool:
+        """Apply the owning zone's look to a light, or release it. True: it was released."""
         zone_id = self.owner_of(device_id)
         adapter = self._adapter(device_id)
         if zone_id is None:
             self._routes.set_route(device_id, None)
             self._applied.pop(device_id, None)
-            if adapter is not None and not self._preview_only:
-                await self._release(device_id, adapter)
-            return
+            self._power.pop(device_id, None)  # read afresh when a zone takes it again
+            if adapter is None or self._preview_only:
+                return False
+            return await self._release(device_id, adapter)
         runtime = self._running[zone_id].runtime
         if runtime is None:  # the saved look can't be read: leave the light alone
             self._routes.set_route(device_id, None)
-            return
+            return False
         if (
-            self._preview_only  # frames reach the web preview only
-            or runtime.crash is not None  # the light holds the last frame
-            or adapter is None
-            or not adapter.is_connected  # offline: it rejoins when it's back
+            adapter is None
+            or self._held(runtime, adapter)
+            or device_id not in self._captured  # it came back after _look_at: the next sync
         ):
             self._publish(device_id, runtime)
-            return
-        if power_on or device_id not in self._power:  # a look being applied reads it afresh
-            self._power[device_id] = (await self._read(adapter)).power
-        if device_id not in self._captured:
-            await self._capture(device_id, adapter)
-        if power_on and self._power[device_id] is not True:  # off, or it can't say
+            return False
+        if power_on and self._power.get(device_id) is not True:  # off, or it can't say
             await self._switch_on(device_id, adapter)
-        if self._power[device_id] is False:  # switched off elsewhere: out until it's back on
+        if self._power.get(device_id) is False:  # switched off elsewhere: out until it's on
             self._routes.set_route(device_id, None)
             self._applied.pop(device_id, None)
-            return
+            return False
         await self._apply(device_id, adapter, runtime)
         self._publish(device_id, runtime)
+        return False
 
     def _publish(self, device_id: str, runtime: ZoneRuntime) -> None:
         """Route a light to its zone's frames. They're sent only once _apply has readied the
@@ -827,8 +872,9 @@ class ZoneManager:
             logger.warning("Couldn't read {}: {}", adapter.device_info.name, exc)
             return LightReading(power=None, colour=None)
 
-    async def _capture(self, device_id: str, adapter: DeviceAdapter) -> None:
-        """Capture a light before dj-ledfx first changes it (spec §4.3)."""
+    async def _capture(self, adapter: DeviceAdapter) -> bytes:
+        """Capture a light before dj-ledfx first changes it (spec §4.3). b"": control is
+        taken but nothing was captured, so Off leaves the light alone (spec §8)."""
         try:
             state = await adapter.capture_state()
         except Exception as exc:
@@ -836,8 +882,7 @@ class ZoneManager:
             state = None
         if state is None:
             logger.info("{} can't be captured; Off will leave it alone", adapter.device_info.name)
-        self._captured[device_id] = state or b""
-        await self._db.save_device_state(device_id, state or b"")
+        return state or b""
 
     async def _switch_on(self, device_id: str, adapter: DeviceAdapter) -> None:
         """Only ever called for a look being applied (spec §6.4)."""
@@ -848,18 +893,21 @@ class ZoneManager:
             return
         self._power[device_id] = True
 
-    async def _release(self, device_id: str, adapter: DeviceAdapter) -> None:
-        """Put a light back how it was before dj-ledfx took control, once (spec §4.3)."""
+    async def _release(self, device_id: str, adapter: DeviceAdapter) -> bool:
+        """Put a light back how it was before dj-ledfx took control, once (spec §4.3).
+        True: done, so _sync forgets its capture."""
         state = self._captured.get(device_id)
         if state is None or not adapter.is_connected:
-            return  # nothing to release, or offline: released when it's back
-        if state and self._power.get(device_id) is not False:  # never switch a light on
+            return False  # nothing to release, or offline: released when it's back
+        if state:
+            # Read afresh: the last poll may be 5 s old. A light that reads off gets its
+            # colour and effect back and stays off: Off never switches a light on (§6.4).
+            power = (await self._read(adapter)).power
             try:
                 async with adapter.send_lock:  # the route is gone; no frame lands after this
-                    await adapter.restore_state(state)
+                    await adapter.restore_state(state, power=power is not False)
             except Exception as exc:
                 logger.warning("Couldn't restore {}: {}", adapter.device_info.name, exc)
-                return
-            self._power.pop(device_id, None)  # the restore may have switched it off
+                return False
         del self._captured[device_id]
-        await self._db.delete_device_state(device_id)
+        return True

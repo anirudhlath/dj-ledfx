@@ -4,7 +4,7 @@ capture and restore (spec §6.3, §7.1, §8)."""
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from loguru import logger
 
@@ -46,6 +46,8 @@ def hsbk_from_json(values: object) -> HSBK:
 
 class LifxAdapterBase(DeviceAdapter):
     supports_latency_probing = False
+    # Where a capture keeps the light's own firmware effect; None: it has none (bulbs).
+    _effect_key: ClassVar[str | None] = None
 
     def __init__(
         self,
@@ -186,20 +188,49 @@ class LifxAdapterBase(DeviceAdapter):
         snapshot.update(await self._capture_extra())
         return json.dumps(snapshot).encode()
 
-    async def restore_state(self, state: bytes) -> None:
+    async def restore_state(self, state: bytes, *, power: bool = True) -> None:
+        """Colours, then the light's own effect, then power; power=False leaves power alone.
+
+        A light that had no effect of its own gets the look's effect stopped first, since
+        colours don't stop a Flame or a Move.
+        """
         try:
             snapshot = json.loads(state)
             hsbk = hsbk_from_json(snapshot["hsbk"])
-            power = bool(snapshot["power"])
+            was_on = bool(snapshot["power"])
         except (ValueError, KeyError, TypeError):
             logger.warning(
                 "LIFX '{}': captured state is unreadable, leaving the light alone",
                 self._device_info.name,
             )
             return
+        effect = snapshot.get(self._effect_key) if self._effect_key is not None else None
+        if self._effect_key is not None and not isinstance(effect, dict):
+            await self.prepare_stream()
         await self._restore_colours(snapshot, hsbk)
-        await self._restore_effect(snapshot)
-        await self._set_power(power, RESTORE_FADE_MS)
+        if isinstance(effect, dict):
+            try:
+                await self._start_effect(effect)
+            except (FirmwareRejected, ValueError, KeyError, TypeError):
+                logger.warning("LIFX '{}': couldn't restart its effect", self._device_info.name)
+        if power:
+            await self._set_power(was_on, RESTORE_FADE_MS)
+
+    async def prepare_stream(self) -> None:
+        """Stop the light's own effect, so streamed frames show. Bulbs have none."""
+        if self._effect_key is None:
+            return
+        try:
+            await self._stop_effect()
+        except FirmwareRejected:
+            logger.debug("LIFX '{}' has no effects to stop", self._device_info.name)
+
+    async def _stop_effect(self) -> None:
+        """Stop the light's own firmware effect. Lights with an _effect_key override it."""
+
+    async def _start_effect(self, saved: dict[str, Any]) -> None:
+        """Start a captured firmware effect again. Lights with an _effect_key override it;
+        raises ValueError, KeyError or TypeError when the capture is unreadable."""
 
     async def _capture_extra(self) -> dict[str, Any]:
         """Anything beyond power and colour. Strips add zones, matrices their effect."""
@@ -207,6 +238,3 @@ class LifxAdapterBase(DeviceAdapter):
 
     async def _restore_colours(self, snapshot: dict[str, Any], hsbk: HSBK) -> None:
         await self._ask(SET_COLOR, build_set_color(hsbk, RESTORE_FADE_MS), LIGHT_STATE)
-
-    async def _restore_effect(self, snapshot: dict[str, Any]) -> None:
-        """Restart the firmware effect that ran before. Bulbs have none."""

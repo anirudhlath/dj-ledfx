@@ -207,7 +207,8 @@ class OpenRGBAdapter(DeviceAdapter):
         mode, colours = read
         return json.dumps({"mode": mode, "colors": [list(c) for c in colours]}).encode()
 
-    async def restore_state(self, state: bytes) -> None:
+    async def restore_state(self, state: bytes, *, power: bool = True) -> None:
+        """Mode and colours: OpenRGB has no power to leave alone, so power changes nothing."""
         device = self._device
         try:
             snapshot = json.loads(state)

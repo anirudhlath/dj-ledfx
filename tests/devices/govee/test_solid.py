@@ -115,6 +115,19 @@ class TestGoveeSolidAdapter:
         assert restored.brightness == 50
 
     @pytest.mark.asyncio
+    async def test_restore_without_power_sends_nothing(
+        self, mock_transport: MagicMock, record: GoveeDeviceRecord
+    ) -> None:
+        adapter = GoveeSolidAdapter(mock_transport, record)
+        await adapter.connect()
+        mock_transport.send_command.reset_mock()
+
+        state = GoveeDeviceState(on_off=1, brightness=50, r=10, g=20, b=30)
+        await adapter.restore_state(state.to_bytes(), power=False)
+
+        mock_transport.send_command.assert_not_called()  # a colour command may switch it on
+
+    @pytest.mark.asyncio
     async def test_restore_state_sends_commands(
         self, mock_transport: MagicMock, record: GoveeDeviceRecord
     ) -> None:

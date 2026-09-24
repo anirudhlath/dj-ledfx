@@ -105,6 +105,18 @@ async def test_capture_and_restore_mode_and_colours() -> None:
     assert [(c.red, c.green, c.blue) for c in colours] == [(10, 20, 30), (0, 0, 0)]
 
 
+async def test_restore_without_power_still_restores_mode_and_colours() -> None:
+    device = _device()  # OpenRGB has no power: the mode and colours are all there is
+    adapter = await _connected(device)
+    captured = await adapter.capture_state()
+    assert captured is not None
+
+    await adapter.restore_state(captured, power=False)
+
+    device.set_mode.assert_called_once_with("Static")
+    device.set_colors.assert_called_once()
+
+
 async def test_read_light_reports_the_first_colour() -> None:
     adapter = await _connected(_device())
     assert await adapter.read_light() == LightReading(power=None, colour=(10, 20, 30))

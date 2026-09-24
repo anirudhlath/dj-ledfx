@@ -66,7 +66,9 @@ class GoveeAdapterBase(DeviceAdapter):
         state = await self._status()
         return state.to_bytes() if state is not None else None
 
-    async def restore_state(self, state: bytes) -> None:
+    async def restore_state(self, state: bytes, *, power: bool = True) -> None:
+        if not power:  # a LAN colour command may switch the lamp on: leave it as it is
+            return
         saved = GoveeDeviceState.from_bytes(state)
         ip = self._record.ip
         await self._transport.send_command(

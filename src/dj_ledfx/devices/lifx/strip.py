@@ -37,6 +37,8 @@ MAX_ZONES_PER_PACKET = 82
 class LifxStripAdapter(LifxAdapterBase):
     """Extended-multizone lights: Z, Beam, Neon, String."""
 
+    _effect_key = "multizone_effect"
+
     def __init__(
         self,
         transport: LifxTransport,
@@ -102,11 +104,15 @@ class LifxStripAdapter(LifxAdapterBase):
         except ValueError:
             return None
 
-    async def prepare_stream(self) -> None:
-        try:
-            await self.start_multizone_effect(MultiZoneEffectType.OFF, 0)
-        except FirmwareRejected:
-            logger.debug("LIFX '{}' has no multizone effects to stop", self._device_info.name)
+    async def _stop_effect(self) -> None:
+        await self.start_multizone_effect(MultiZoneEffectType.OFF, 0)
+
+    async def _start_effect(self, saved: dict[str, Any]) -> None:
+        await self.start_multizone_effect(
+            MultiZoneEffectType(int(saved["effect"])),
+            int(saved["speed_ms"]),
+            reverse=bool(saved["reverse"]),
+        )
 
     async def _zone_colours(self) -> list[HSBK] | None:
         reply = await self._ask(GET_EXTENDED_COLOR_ZONES, b"", STATE_EXTENDED_COLOR_ZONES)
@@ -141,16 +147,3 @@ class LifxStripAdapter(LifxAdapterBase):
             except (FirmwareRejected, ValueError):
                 logger.warning("LIFX '{}': couldn't restore its zones", self._device_info.name)
         await super()._restore_colours(snapshot, hsbk)
-
-    async def _restore_effect(self, snapshot: dict[str, Any]) -> None:
-        effect = snapshot.get("multizone_effect")
-        if not isinstance(effect, dict):
-            return
-        try:
-            await self.start_multizone_effect(
-                MultiZoneEffectType(int(effect["effect"])),
-                int(effect["speed_ms"]),
-                reverse=bool(effect["reverse"]),
-            )
-        except (FirmwareRejected, ValueError, KeyError, TypeError):
-            logger.warning("LIFX '{}': couldn't restart its effect", self._device_info.name)

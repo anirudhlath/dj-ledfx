@@ -4,10 +4,9 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from loguru import logger
 from numpy.typing import NDArray
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected
+from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.lifx.base import LifxAdapterBase, hsbk_from_json
 from dj_ledfx.devices.lifx.packet import (
     GET_TILE_EFFECT,
@@ -37,6 +36,8 @@ PIXEL_PITCH_M = 0.03
 
 class LifxTileChainAdapter(LifxAdapterBase):
     """Matrix lights: Tile, Candle, Tube, Spot, Path, Ceiling. Sized from StateDeviceChain."""
+
+    _effect_key = "tile_effect"
 
     def __init__(
         self,
@@ -118,11 +119,15 @@ class LifxTileChainAdapter(LifxAdapterBase):
         except ValueError:
             return None
 
-    async def prepare_stream(self) -> None:
-        try:
-            await self.start_tile_effect(TileEffectType.OFF, 0)
-        except FirmwareRejected:
-            logger.debug("LIFX '{}' has no tile effects to stop", self._device_info.name)
+    async def _stop_effect(self) -> None:
+        await self.start_tile_effect(TileEffectType.OFF, 0)
+
+    async def _start_effect(self, saved: dict[str, Any]) -> None:
+        await self.start_tile_effect(
+            TileEffectType(int(saved["effect"])),
+            int(saved["speed_ms"]),
+            [hsbk_from_json(colour) for colour in saved["palette"]],
+        )
 
     async def _capture_extra(self) -> dict[str, Any]:
         effect = await self.tile_effect()
@@ -135,16 +140,3 @@ class LifxTileChainAdapter(LifxAdapterBase):
                 "palette": [list(colour) for colour in effect.palette],
             }
         }
-
-    async def _restore_effect(self, snapshot: dict[str, Any]) -> None:
-        effect = snapshot.get("tile_effect")
-        if not isinstance(effect, dict):
-            return
-        try:
-            await self.start_tile_effect(
-                TileEffectType(int(effect["effect"])),
-                int(effect["speed_ms"]),
-                [hsbk_from_json(colour) for colour in effect["palette"]],
-            )
-        except (FirmwareRejected, ValueError, KeyError, TypeError):
-            logger.warning("LIFX '{}': couldn't restart its effect", self._device_info.name)

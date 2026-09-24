@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -110,8 +111,10 @@ class ZoneStore:
             ),
         )
 
-    async def delete_assignment(self, zone_id: str) -> None:
-        await self._db.write("DELETE FROM zone_assignments WHERE zone_id=?", (zone_id,))
+    async def delete_assignments(self, zone_ids: Iterable[str]) -> None:
+        await self._db.write_many(
+            [("DELETE FROM zone_assignments WHERE zone_id=?", (zone_id,)) for zone_id in zone_ids]
+        )
 
     async def migrate_scenes_once(self) -> None:
         """Turn each scene into a device-group zone, once (spec §6.5). Nothing runs after."""

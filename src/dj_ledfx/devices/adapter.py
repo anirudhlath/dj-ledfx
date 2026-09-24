@@ -76,7 +76,11 @@ class DeviceAdapter(ABC):
         """Capture how the light looks now, to put it back on Off. None: can't capture."""
         return None
 
-    async def restore_state(self, state: bytes) -> None:
-        """Restore device to a previously captured state. Default: send as RGB frame."""
+    async def restore_state(self, state: bytes, *, power: bool = True) -> None:
+        """Put the light back as captured. power=False: it reads off now, so restore only
+        what doesn't switch it on (spec §6.4). Default: send the bytes as an RGB frame,
+        and nothing without power, since a frame may switch a light on."""
+        if not power:
+            return
         colors = np.frombuffer(state, dtype=np.uint8).reshape(-1, 3)
         await self.send_frame(colors)

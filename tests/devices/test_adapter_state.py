@@ -66,6 +66,13 @@ async def test_restore_state_default_sends_the_bytes_as_a_frame() -> None:
     assert np.all(sent[:, 0] == 255) and np.all(sent[:, 1:] == 0)
 
 
+@pytest.mark.asyncio
+async def test_restore_state_default_without_power_sends_nothing() -> None:
+    adapter = FakeAdapter(led_count=3)  # a frame could switch a switched-off light on
+    await adapter.restore_state(bytes(9), power=False)
+    assert adapter.sent_frames == []
+
+
 def test_default_capabilities_follow_the_device_type() -> None:
     assert FakeAdapter(device_type="govee_segment").capabilities.protocol == "Govee"
     assert FakeAdapter(device_type="lifx").capabilities.protocol == "LIFX"

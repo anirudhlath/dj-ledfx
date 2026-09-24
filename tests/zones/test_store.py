@@ -49,7 +49,7 @@ async def test_assignments_round_trip_oldest_first(db: StateDB) -> None:
     assert await store.load_assignments() == [older, newer]
 
     await store.save_assignment(Assignment("a", "firmware", "{}", 0.25, (), newer.started_at))
-    await store.delete_assignment("b")
+    await store.delete_assignments(["b"])
     assert [(a.zone_id, a.brightness) for a in await store.load_assignments()] == [("a", 0.25)]
 
     await store.delete_zone("a")

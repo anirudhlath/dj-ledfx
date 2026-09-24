@@ -160,9 +160,9 @@ class FakeLight(DeviceAdapter):
         self.calls.append(("capture", None))
         return self.captured
 
-    async def restore_state(self, state: bytes) -> None:
+    async def restore_state(self, state: bytes, *, power: bool = True) -> None:
         self.io()
-        self.calls.append(("restore", state))
+        self.calls.append(("restore" if power else "restore_off", state))
 
     async def read_light(self) -> LightReading:
         self.io()

@@ -106,6 +106,21 @@ async def test_bulb_capture_and_restore_round_trip() -> None:
     assert transport.power is False
 
 
+async def test_restore_without_power_leaves_a_switched_off_bulb_off() -> None:
+    transport = FakeLifxTransport(power=True, hsbk=RED)
+    bulb = _bulb(transport)
+    captured = await bulb.capture_state()
+    assert captured is not None
+    transport.hsbk, transport.power = WHITE, False  # the look ran; then it was switched off
+    transport.sent.clear()
+
+    await bulb.restore_state(captured, power=False)
+
+    assert transport.types() == [SET_COLOR]
+    assert transport.hsbk == RED
+    assert transport.power is False
+
+
 async def test_capture_is_none_when_the_light_is_silent() -> None:
     assert await _bulb(FakeLifxTransport(silent=True)).capture_state() is None
 
@@ -172,13 +187,41 @@ async def test_candle_captures_and_restores_its_flame() -> None:
     assert captured is not None
     assert json.loads(captured)["tile_effect"] == {"effect": 3, "speed_ms": 5000, "palette": []}
 
-    await candle.prepare_stream()
-    assert transport.tile_effect[0] == TileEffectType.OFF
+    await candle.start_tile_effect(TileEffectType.MORPH, 3000)  # the look's own effect
 
     transport.sent.clear()
     await candle.restore_state(captured)
     assert transport.types() == [SET_COLOR, SET_TILE_EFFECT, SET_LIGHT_POWER]
     assert transport.tile_effect[:2] == (3, 5000)
+
+
+async def test_restoring_a_candle_without_an_effect_ends_the_looks_effect() -> None:
+    transport = FakeLifxTransport()
+    candle = _candle(transport)
+    captured = await candle.capture_state()
+    assert captured is not None and "tile_effect" not in json.loads(captured)
+    await candle.start_tile_effect(TileEffectType.FLAME, 5000)  # the look runs Flame
+
+    transport.sent.clear()
+    await candle.restore_state(captured)
+
+    assert transport.types() == [SET_TILE_EFFECT, SET_COLOR, SET_LIGHT_POWER]
+    assert transport.tile_effect[0] == TileEffectType.OFF
+
+
+async def test_restoring_a_strip_without_an_effect_ends_the_looks_effect() -> None:
+    transport = FakeLifxTransport(zones=[RED] * 8)
+    strip = _strip(transport)
+    captured = await strip.capture_state()
+    assert captured is not None and "multizone_effect" not in json.loads(captured)
+    await strip.start_multizone_effect(MultiZoneEffectType.MOVE, 4000)  # the look runs Move
+
+    transport.sent.clear()
+    await strip.restore_state(captured, power=False)
+
+    assert transport.types() == [SET_MULTIZONE_EFFECT, SET_EXTENDED_COLOR_ZONES]
+    assert transport.multizone_effect[0] == MultiZoneEffectType.OFF
+    assert transport.zones == [RED] * 8
 
 
 async def test_firmware_command_rejected_by_the_light() -> None:

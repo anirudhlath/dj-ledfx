@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from conftest import FakeLight
@@ -163,6 +166,76 @@ async def test_a_look_switches_on_a_light_switched_off_while_it_was_idle(
     assert lamp.names()[-2:] == ["power", "prepare_stream"]
     assert lamp.power is True
     assert home.routes.routes["lamp"].zone_id == "z"
+
+
+# B1: Off restores a light switched off meanwhile, and leaves it off.
+async def test_off_restores_a_light_switched_off_during_the_look_and_leaves_it_off(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp", captured=b"l0")
+    home = await make_home([lamp], [_zone("z", "lamp")])
+    await home.manager.start("z", home.look("classic-breathe"))
+    lamp.power = False
+    await home.manager.on_power_reading("lamp", False)  # the light monitor saw it
+
+    await home.manager.off("z")
+
+    assert lamp.calls[-1] == ("restore_off", b"l0")  # colour and effect back, still off
+    assert await home.db.load_device_state("lamp") is None
+
+
+# B3: _power can be up to 5 s old; Off reads the light afresh.
+async def test_a_light_switched_off_just_before_off_is_never_switched_on(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp", captured=b"l0")
+    home = await make_home([lamp], [_zone("z", "lamp")])
+    await home.manager.start("z", home.look("classic-breathe"))
+    lamp.power = False  # switched off at the wall a moment ago: no poll since
+
+    await home.manager.off("z")
+
+    assert lamp.calls[-1] == ("restore_off", b"l0")
+
+
+# B20: a light no zone owns forgets its last power reading.
+async def test_a_released_light_forgets_its_power(make_home: HomeFactory) -> None:
+    lamp = FakeLight("lamp", captured=None)  # Off leaves it as it is
+    home = await make_home([lamp], [_zone("z", "lamp")])
+    await home.manager.start("z", home.look("classic-breathe"))
+    assert home.manager.power_of("lamp") is True
+
+    await home.manager.off("z")
+
+    assert home.manager.power_of("lamp") is None
+
+
+class _Watched(FakeLight):
+    """Notes which captures state.db holds each time it's switched on."""
+
+    def __init__(self, stable_id: str, db_path: Path, seen: list[set[str]]) -> None:
+        super().__init__(stable_id, power=False)
+        self._db_path = db_path
+        self._seen = seen
+
+    async def set_power(self, on: bool) -> None:
+        with closing(sqlite3.connect(self._db_path)) as conn:
+            rows = conn.execute("SELECT stable_id FROM device_saved_state").fetchall()
+        self._seen.append({row[0] for row in rows})
+        await super().set_power(on)
+
+
+# E9: the captures are saved together before any light is changed.
+async def test_captures_are_saved_together_before_any_light_changes(
+    make_home: HomeFactory, tmp_path: Path
+) -> None:
+    seen: list[set[str]] = []
+    lights = [_Watched(x, tmp_path / "state.db", seen) for x in ("a", "b", "c")]
+    home = await make_home(lights, [_zone("z", "a", "b", "c")])
+
+    await home.manager.start("z", home.look("classic-breathe"))
+
+    assert seen == [{"a", "b", "c"}] * 3
 
 
 async def test_off_is_idempotent_and_unknown_zones_raise(make_home: HomeFactory) -> None:
