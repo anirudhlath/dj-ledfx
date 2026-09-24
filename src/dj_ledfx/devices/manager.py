@@ -29,6 +29,7 @@ class DeviceManager:
     def __init__(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus
         self._devices: list[ManagedDevice] = []
+        self._by_id: dict[str | None, ManagedDevice] = {}  # by stable id; see _index
         self._groups: dict[str, DeviceGroup] = {}
         self._device_groups: dict[str, str] = {}  # device_name -> group_name
 
@@ -49,6 +50,7 @@ class DeviceManager:
         max_fps: int = 60,
     ) -> None:
         self._devices.append(ManagedDevice(adapter=adapter, tracker=tracker, max_fps=max_fps))
+        self._index()
         logger.info(
             "Added device '{}' ({} LEDs, latency={:.0f}ms)",
             adapter.device_info.name,
@@ -138,11 +140,18 @@ class DeviceManager:
                 break
 
     def get_by_stable_id(self, stable_id: str) -> ManagedDevice | None:
-        """Return the ManagedDevice whose adapter has the given stable_id, or None."""
+        """Return the ManagedDevice whose adapter has the given stable_id, or None.
+
+        A dict lookup: the render loop asks for each light's latency on every tick, and
+        some adapters build a fresh DeviceInfo on every read.
+        """
+        return self._by_id.get(stable_id)
+
+    def _index(self) -> None:
+        """Re-key the devices by stable id after the list or an adapter changed."""
+        self._by_id = {}
         for d in self._devices:
-            if d.adapter.device_info.stable_id == stable_id:
-                return d
-        return None
+            self._by_id.setdefault(d.adapter.device_info.stable_id, d)  # the first one wins
 
     def add_device_from_info(
         self,
@@ -156,6 +165,7 @@ class DeviceManager:
         self._devices.append(
             ManagedDevice(adapter=ghost, tracker=tracker, max_fps=max_fps, status=status)
         )
+        self._index()
         logger.info(
             "Registered device '{}' as {} (stable_id={})",
             device_info.name,
@@ -180,6 +190,7 @@ class DeviceManager:
         if managed is None:
             raise KeyError(f"Device not found: {stable_id}")
         managed.adapter = adapter
+        self._index()
         if tracker is not None:
             managed.tracker = tracker
         if max_fps is not None:
@@ -230,7 +241,9 @@ class DeviceManager:
     def remove_device(self, stable_id: str) -> None:
         """Remove a device by stable_id."""
         self._devices = [d for d in self._devices if d.adapter.device_info.stable_id != stable_id]
+        self._index()
 
     def remove_by_name(self, name: str) -> None:
         """Remove a device by name."""
         self._devices = [d for d in self._devices if d.adapter.device_info.name != name]
+        self._index()

@@ -762,9 +762,12 @@ class ZoneManager:
     def _zone_lights(self, device_ids: Iterable[str]) -> list[ZoneLight]:
         return [light for d in device_ids if (light := self._zone_light(d)) is not None]
 
-    def _latency_s(self, device_id: str) -> float:
+    def _latency_s(self, device_id: str) -> float | None:
+        """A light's latency, or None while it isn't connected. Asked on every tick."""
         managed = self._devices.get_by_stable_id(device_id)
-        return 0.0 if managed is None else managed.tracker.effective_latency_s
+        if managed is None or not managed.adapter.is_connected:
+            return None
+        return managed.tracker.effective_latency_s
 
     def _lights_of(self, zone: ZoneRecord) -> tuple[str, ...]:
         if not zone.all_lights:

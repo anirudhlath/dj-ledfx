@@ -4,13 +4,17 @@ import sqlite3
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import FakeLight
-from zone_home import GLOW, TILE, HomeFactory
+from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.latency.strategies import StaticLatency
+from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.model import Look, LookError
+from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.model import (
     TakeOver,
     ZoneError,
@@ -159,6 +163,44 @@ async def test_a_firmware_effect_that_got_no_answer_is_tried_again_at_the_next_p
 
     assert tile.names() == ["capture", "firmware"]
     assert home.manager.light_mode("tile") == "own-effect"
+
+
+class _Counted(FakeLight):
+    """Counts reads of its DeviceInfo, which some adapters build afresh on every read."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.info_reads = 0
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        self.info_reads += 1
+        return super().device_info
+
+
+# B13: the horizon follows the lights the zone streams to, and a tick doesn't search the
+# device list for them.
+async def test_the_horizon_follows_connected_streaming_lights_without_a_search(
+    make_home: HomeFactory,
+) -> None:
+    tile, lamp, far = _Counted("tile", caps=TILE), _Counted("lamp"), _Counted("far")
+    home = await make_home([tile, lamp, far], [_zone("z", "tile", "lamp", "far")])
+    for device_id, ms in (("tile", 500.0), ("far", 300.0)):
+        managed = home.devices.get_by_stable_id(device_id)
+        assert managed is not None
+        managed.tracker = LatencyTracker(strategy=StaticLatency(ms))
+    await home.manager.start("z", BREATHE_AND_GLOW)
+    runtime = home.host.runtimes["z"]
+    lights = (tile, lamp, far)
+    for light in lights:
+        light.info_reads = 0
+
+    runtime.tick(100.0)
+
+    assert [light.info_reads for light in lights] == [0, 0, 0]
+    assert runtime.horizon_s == pytest.approx(0.3 + 1 / 60)  # the tile runs Glow itself
+    far.connected = False
+    assert runtime.horizon_s == pytest.approx(0.02 + 1 / 60)
 
 
 async def test_off_leaves_an_uncapturable_light_alone(make_home: HomeFactory) -> None:

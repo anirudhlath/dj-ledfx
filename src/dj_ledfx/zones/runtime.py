@@ -86,7 +86,7 @@ class ZoneRuntime:
         lights: Sequence[ZoneLight],
         *,
         clock: BeatClock,
-        latency_s: Callable[[str], float],
+        latency_s: Callable[[str], float | None],
         fps: int = 60,
         max_lookahead_s: float = 1.0,
         brightness: float = 1.0,
@@ -162,8 +162,15 @@ class ZoneRuntime:
 
     @property
     def horizon_s(self) -> float:
-        """The zone's largest device latency plus one frame, within the lookahead."""
-        latency = max((self._latency_s(light.device_id) for light in self._lights), default=0.0)
+        """The largest latency of the zone's lights that take its frames, plus one frame,
+        within the lookahead. A light running its own effect, or not connected (latency
+        None), takes none."""
+        latency = 0.0
+        for light in self._lights:
+            if light.device_id not in self._claims:
+                light_s = self._latency_s(light.device_id)
+                if light_s is not None and light_s > latency:
+                    latency = light_s
         return min(latency + 1.0 / self._fps, self._max_lookahead_s)
 
     def claim_for(self, device_id: str) -> tuple[Layer, FirmwareEffect] | None:

@@ -80,7 +80,7 @@ def _look(*layers: Layer, needs: tuple[Any, ...] = ()) -> Look:
 def _runtime(
     look: Look,
     lights: Sequence[ZoneLight] = LIGHTS,
-    latencies: dict[str, float] | None = None,
+    latencies: dict[str, float | None] | None = None,
     **kwargs: Any,
 ) -> ZoneRuntime:
     known = latencies or {}
@@ -148,6 +148,15 @@ def test_frames_are_rendered_for_now_plus_the_horizon() -> None:
 def test_the_horizon_is_capped_by_the_lookahead() -> None:
     runtime = _runtime(_look(_field()), latencies={"lamp": 5.0}, max_lookahead_s=1.0)
     assert runtime.horizon_s == 1.0
+
+
+# B13: a light that runs its own effect gets no frames, and a light that isn't connected
+# (None) gets none yet; neither sets how far ahead the zone renders.
+def test_the_horizon_counts_only_connected_lights_that_stream() -> None:
+    latencies: dict[str, float | None] = {"tile": 0.5, "bulb": None, "lamp": 0.1}
+    runtime = _runtime(_look(_field(), _glow()), latencies=latencies)
+    assert runtime.mode_of("tile") == "own-effect"
+    assert runtime.horizon_s == pytest.approx(0.1 + 1 / 60)
 
 
 def test_brightness_and_opacity_scale_the_frame() -> None:
