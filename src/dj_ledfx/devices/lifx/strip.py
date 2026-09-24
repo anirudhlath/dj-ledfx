@@ -1,17 +1,28 @@
 from __future__ import annotations
 
-import struct
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
 
-from dj_ledfx.devices.adapter import DeviceAdapter
+from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected
+from dj_ledfx.devices.lifx.base import RESTORE_FADE_MS, LifxAdapterBase, hsbk_from_json
 from dj_ledfx.devices.lifx.packet import (
-    LifxPacket,
+    GET_EXTENDED_COLOR_ZONES,
+    GET_MULTIZONE_EFFECT,
+    HSBK,
+    SET_EXTENDED_COLOR_ZONES,
+    SET_MULTIZONE_EFFECT,
+    STATE_EXTENDED_COLOR_ZONES,
+    STATE_MULTIZONE_EFFECT,
+    MultiZoneEffectState,
+    MultiZoneEffectType,
     build_set_extended_color_zones,
+    build_set_multizone_effect,
     parse_state_extended_color_zones,
+    parse_state_multizone_effect,
     rgb_array_to_hsbk,
 )
 from dj_ledfx.spatial.geometry import DeviceGeometry, StripGeometry
@@ -23,8 +34,8 @@ if TYPE_CHECKING:
 MAX_ZONES_PER_PACKET = 82
 
 
-class LifxStripAdapter(DeviceAdapter):
-    supports_latency_probing = False
+class LifxStripAdapter(LifxAdapterBase):
+    """Extended-multizone lights: Z, Beam, Neon, String."""
 
     def __init__(
         self,
@@ -33,22 +44,18 @@ class LifxStripAdapter(DeviceAdapter):
         target_mac: bytes,
         zone_count: int = 1,
         kelvin: int = 3500,
+        *,
+        caps: DeviceCapabilities | None = None,
     ) -> None:
-        self._transport = transport
-        self._device_info = device_info
-        self._target_mac = target_mac
+        super().__init__(
+            transport,
+            device_info,
+            target_mac,
+            kelvin=kelvin,
+            caps=caps
+            or DeviceCapabilities(protocol="LIFX", multizone=True, extended_multizone=True),
+        )
         self._zone_count = zone_count
-        self._kelvin = kelvin
-        self._is_connected = False
-        self._addr = (device_info.address.split(":")[0], int(device_info.address.split(":")[1]))
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return self._device_info
-
-    @property
-    def is_connected(self) -> bool:
-        return self._is_connected
 
     @property
     def led_count(self) -> int:
@@ -58,77 +65,92 @@ class LifxStripAdapter(DeviceAdapter):
     def geometry(self) -> DeviceGeometry:
         return StripGeometry(direction=(1, 0, 0), length=1.0)
 
-    def _make_packet(
-        self, msg_type: int, payload: bytes, *, res_required: bool = False
-    ) -> LifxPacket:
-        return LifxPacket(
-            tagged=False,
-            source=self._transport.source_id,
-            target=self._target_mac + b"\x00\x00",
-            ack_required=False,
-            res_required=res_required,
-            sequence=self._transport.next_sequence() % 256,
-            msg_type=msg_type,
-            payload=payload,
-        )
-
-    async def connect(self) -> None:
-        self._is_connected = True
-
-    async def disconnect(self) -> None:
-        self._is_connected = False
-
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         hsbk = rgb_array_to_hsbk(colors, kelvin=self._kelvin)
-        for chunk_start in range(0, len(hsbk), MAX_ZONES_PER_PACKET):
-            chunk = hsbk[chunk_start : chunk_start + MAX_ZONES_PER_PACKET]
-            count = len(chunk)
-            hsbk_tuples: list[tuple[int, int, int, int]] = [
-                (int(c[0]), int(c[1]), int(c[2]), int(c[3])) for c in chunk
-            ]
-            pkt = self._make_packet(
-                510,
-                build_set_extended_color_zones(0, 1, chunk_start, count, hsbk_tuples),
+        for start in range(0, len(hsbk), MAX_ZONES_PER_PACKET):
+            chunk = hsbk[start : start + MAX_ZONES_PER_PACKET]
+            values: list[HSBK] = [(int(c[0]), int(c[1]), int(c[2]), int(c[3])) for c in chunk]
+            self._send(
+                SET_EXTENDED_COLOR_ZONES,
+                build_set_extended_color_zones(0, 1, start, len(values), values),
             )
-            self._transport.send_packet(pkt, self._addr)
 
-    async def capture_state(self) -> bytes | None:
-        """Query strip zones via GetExtendedColorZones(511) → StateExtendedColorZones(512)."""
-        pkt = self._make_packet(511, b"", res_required=True)
-        response = await self._transport.request_response(pkt, self._addr, response_type=512)
-        if response is not None and response.msg_type == 512:
-            try:
-                zone_count, _zone_index, colors = parse_state_extended_color_zones(
-                    response.payload
-                )
-                # Pack as: zone_count(u16) + HSBK tuples (4 x u16 each)
-                data = struct.pack("<H", zone_count)
-                for h, s, b, k in colors:
-                    data += struct.pack("<4H", h, s, b, k)
-                return data
-            except Exception:
-                logger.warning("Failed to parse zone state for '{}'", self._device_info.name)
-        return await super().capture_state()
+    async def set_zone_colours(self, colours: Sequence[HSBK], duration_ms: int = 0) -> None:
+        for start in range(0, len(colours), MAX_ZONES_PER_PACKET):
+            chunk = list(colours[start : start + MAX_ZONES_PER_PACKET])
+            await self._command(
+                SET_EXTENDED_COLOR_ZONES,
+                build_set_extended_color_zones(duration_ms, 1, start, len(chunk), chunk),
+                STATE_EXTENDED_COLOR_ZONES,
+            )
 
-    async def restore_state(self, state: bytes) -> None:
-        """Restore strip zones to captured HSBK state."""
-        if len(state) >= 2:
+    async def start_multizone_effect(
+        self, effect: MultiZoneEffectType, speed_ms: int, *, reverse: bool = False
+    ) -> None:
+        await self._command(
+            SET_MULTIZONE_EFFECT,
+            build_set_multizone_effect(effect, speed_ms, reverse=reverse),
+            STATE_MULTIZONE_EFFECT,
+        )
+
+    async def multizone_effect(self) -> MultiZoneEffectState | None:
+        reply = await self._ask(GET_MULTIZONE_EFFECT, b"", STATE_MULTIZONE_EFFECT)
+        if reply is None or reply.msg_type != STATE_MULTIZONE_EFFECT:
+            return None
+        try:
+            return parse_state_multizone_effect(reply.payload)
+        except ValueError:
+            return None
+
+    async def prepare_stream(self) -> None:
+        try:
+            await self.start_multizone_effect(MultiZoneEffectType.OFF, 0)
+        except FirmwareRejected:
+            logger.debug("LIFX '{}' has no multizone effects to stop", self._device_info.name)
+
+    async def _zone_colours(self) -> list[HSBK] | None:
+        reply = await self._ask(GET_EXTENDED_COLOR_ZONES, b"", STATE_EXTENDED_COLOR_ZONES)
+        if reply is None or reply.msg_type != STATE_EXTENDED_COLOR_ZONES:
+            return None
+        try:
+            _count, _index, colours = parse_state_extended_color_zones(reply.payload)
+        except ValueError:
+            return None
+        return colours
+
+    async def _capture_extra(self) -> dict[str, Any]:
+        extra: dict[str, Any] = {}
+        zones = await self._zone_colours()
+        if zones:
+            extra["zones"] = [list(zone) for zone in zones]
+        effect = await self.multizone_effect()
+        if effect is not None and effect.effect != MultiZoneEffectType.OFF:
+            extra["multizone_effect"] = {
+                "effect": effect.effect,
+                "speed_ms": effect.speed_ms,
+                "reverse": effect.reverse,
+            }
+        return extra
+
+    async def _restore_colours(self, snapshot: dict[str, Any], hsbk: HSBK) -> None:
+        zones = snapshot.get("zones")
+        if isinstance(zones, list) and zones:
             try:
-                zone_count = struct.unpack("<H", state[:2])[0]
-                hsbk_data = state[2:]
-                if len(hsbk_data) >= zone_count * 8:
-                    colors: list[tuple[int, int, int, int]] = []
-                    for i in range(zone_count):
-                        h, s, b, k = struct.unpack("<4H", hsbk_data[i * 8 : i * 8 + 8])
-                        colors.append((h, s, b, k))
-                    for chunk_start in range(0, len(colors), MAX_ZONES_PER_PACKET):
-                        chunk = colors[chunk_start : chunk_start + MAX_ZONES_PER_PACKET]
-                        pkt = self._make_packet(
-                            510,
-                            build_set_extended_color_zones(500, 1, chunk_start, len(chunk), chunk),
-                        )
-                        self._transport.send_packet(pkt, self._addr)
-                    return
-            except Exception:
-                logger.warning("Failed to restore zone state for '{}'", self._device_info.name)
-        await super().restore_state(state)
+                await self.set_zone_colours([hsbk_from_json(z) for z in zones], RESTORE_FADE_MS)
+                return
+            except (FirmwareRejected, ValueError):
+                logger.warning("LIFX '{}': couldn't restore its zones", self._device_info.name)
+        await super()._restore_colours(snapshot, hsbk)
+
+    async def _restore_effect(self, snapshot: dict[str, Any]) -> None:
+        effect = snapshot.get("multizone_effect")
+        if not isinstance(effect, dict):
+            return
+        try:
+            await self.start_multizone_effect(
+                MultiZoneEffectType(int(effect["effect"])),
+                int(effect["speed_ms"]),
+                reverse=bool(effect["reverse"]),
+            )
+        except (FirmwareRejected, ValueError, KeyError, TypeError):
+            logger.warning("LIFX '{}': couldn't restart its effect", self._device_info.name)

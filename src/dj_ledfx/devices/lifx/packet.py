@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 import struct
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -25,13 +26,17 @@ SET_COLOR = 102
 SET_WAVEFORM = 103
 LIGHT_STATE = 107
 SET_LIGHT_POWER = 117
+STATE_LIGHT_POWER = 118
 STATE_UNHANDLED = 223
 GET_MULTIZONE_EFFECT = 507
 SET_MULTIZONE_EFFECT = 508
 STATE_MULTIZONE_EFFECT = 509
 SET_EXTENDED_COLOR_ZONES = 510
+GET_EXTENDED_COLOR_ZONES = 511
+STATE_EXTENDED_COLOR_ZONES = 512
 GET_DEVICE_CHAIN = 701
 STATE_DEVICE_CHAIN = 702
+SET_TILE_STATE_64 = 715
 GET_TILE_EFFECT = 718
 SET_TILE_EFFECT = 719
 STATE_TILE_EFFECT = 720
@@ -293,20 +298,19 @@ def parse_echo_response(payload: bytes) -> bytes:
     return payload[:64]
 
 
-def parse_state_extended_color_zones(
-    payload: bytes,
-) -> tuple[int, int, list[tuple[int, int, int, int]]]:
-    """Parse StateExtendedColorZones(512) → (zone_count, zone_index, list of HSBK)."""
-    zone_count, zone_index = struct.unpack("<HH", payload[:4])
-    colors: list[tuple[int, int, int, int]] = []
-    offset = 4
-    for _ in range(zone_count):
-        if offset + 8 > len(payload):
+def parse_state_extended_color_zones(payload: bytes) -> tuple[int, int, list[HSBK]]:
+    """StateExtendedColorZones(512): zones_count, zone_index, colors_count, then 82 colours."""
+    if len(payload) < 5:
+        raise ValueError(f"StateExtendedColorZones payload too short: {len(payload)} < 5")
+    zone_count, zone_index, colors_count = struct.unpack("<HHB", payload[:5])
+    colors: list[HSBK] = []
+    for index in range(min(colors_count, 82)):
+        start = 5 + index * 8
+        if start + 8 > len(payload):
             break
-        h, s, b, k = struct.unpack("<4H", payload[offset : offset + 8])
-        colors.append((h, s, b, k))
-        offset += 8
-    return zone_count, zone_index, colors
+        hue, sat, bri, kelvin = struct.unpack("<4H", payload[start : start + 8])
+        colors.append((hue, sat, bri, kelvin))
+    return int(zone_count), int(zone_index), colors
 
 
 def parse_state_device_chain(payload: bytes) -> list[TileInfo]:
@@ -413,6 +417,13 @@ def rgb_to_hsbk(
     s = int(sat * 65535) & 0xFFFF
     v = int(bri * 65535) & 0xFFFF
     return (h, s, v, kelvin)
+
+
+def hsbk_to_rgb(hsbk: HSBK) -> tuple[int, int, int]:
+    """LIFX HSBK to 8-bit RGB. Kelvin is ignored, so a white shows as plain white."""
+    hue, sat, bri, _kelvin = hsbk
+    red, green, blue = colorsys.hsv_to_rgb(hue / 65535, sat / 65535, bri / 65535)
+    return round(red * 255), round(green * 255), round(blue * 255)
 
 
 def rgb_array_to_hsbk(

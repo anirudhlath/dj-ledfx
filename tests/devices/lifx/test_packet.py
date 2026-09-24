@@ -192,14 +192,18 @@ class TestPayloadParsers:
         assert parse_echo_response(data) == data
 
     def test_parse_state_extended_color_zones(self) -> None:
-        header = struct.pack("<HH", 10, 0)
+        header = struct.pack("<HHB", 10, 0, 10)
         hsbk_data = struct.pack("<4H", 100, 200, 300, 3500) * 10
-        payload = header + hsbk_data
+        payload = header + hsbk_data.ljust(82 * 8, b"\x00")
         zone_count, zone_index, colors = parse_state_extended_color_zones(payload)
         assert zone_count == 10
         assert zone_index == 0
         assert len(colors) == 10
         assert colors[0] == (100, 200, 300, 3500)
+
+    def test_parse_state_extended_color_zones_rejects_short_payloads(self) -> None:
+        with pytest.raises(ValueError):
+            parse_state_extended_color_zones(b"\x01\x00")
 
     @staticmethod
     def _chain_payload(tiles: list[tuple[int, int, float, float]]) -> bytes:
