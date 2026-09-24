@@ -650,7 +650,7 @@ async def test_migrate_from_config_toml(tmp_path):
     assert engine_cfg.get("fps") == "90"
 
     network_cfg = await db.load_config("network")
-    assert network_cfg.get("interface") == "192.168.1.100"
+    assert json.loads(network_cfg["interface"]) == "192.168.1.100"
 
     scenes = await db.load_scenes()
     assert len(scenes) == 1

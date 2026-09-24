@@ -462,7 +462,8 @@ async def migrate_from_toml(
     """Migrate legacy TOML files into the DB on first launch.
 
     For each provided path:
-    - If the file exists, parse it, import data into DB, rename to .bak.
+    - If the file exists, parse it, import data into DB, rename to .bak (or leave it,
+      with a warning, when it can't be renamed).
     - If the file does not exist, silently skip.
 
     config_path format (old config.toml):
@@ -480,15 +481,23 @@ async def migrate_from_toml(
     """
     if config_path is not None and config_path.exists():
         await _migrate_config_toml(db, config_path)
-        bak = config_path.with_suffix(".toml.bak")
-        config_path.rename(bak)
-        logger.info("migrate_from_toml: migrated config, backed up to {}", bak)
+        _set_aside(config_path)
 
     if presets_path is not None and presets_path.exists():
         await _migrate_presets_toml(db, presets_path)
-        bak = presets_path.with_suffix(".toml.bak")
-        presets_path.rename(bak)
-        logger.info("migrate_from_toml: migrated presets, backed up to {}", bak)
+        _set_aside(presets_path)
+
+
+def _set_aside(path: Path) -> None:
+    """Rename a migrated file to .bak. A file that can't be renamed (config.toml is mounted
+    read-only in the container) stays where it is: the database is the source of truth."""
+    bak = path.with_suffix(".toml.bak")
+    try:
+        path.rename(bak)
+    except OSError as exc:
+        logger.warning("migrate_from_toml: left {} in place ({})", path, exc)
+        return
+    logger.info("migrate_from_toml: migrated {}, backed up to {}", path, bak)
 
 
 async def _migrate_config_toml(db: StateDB, path: Path) -> None:
@@ -500,15 +509,17 @@ async def _migrate_config_toml(db: StateDB, path: Path) -> None:
     for section in _PLAIN_SECTIONS:
         if section not in raw or not isinstance(raw[section], dict):
             continue
-        # Top-level keys (non-dict values)
-        str_kv = {k: str(v) for k, v in raw[section].items() if not isinstance(v, dict)}
+        # Top-level keys (non-dict values), as JSON like every other config write
+        str_kv = {k: json.dumps(v) for k, v in raw[section].items() if not isinstance(v, dict)}
         if str_kv:
             await db.save_config_bulk(section, str_kv)
         # Nested sub-tables: flatten as dotted section keys, e.g. "devices.lifx"
         for sub_key, sub_val in raw[section].items():
             if isinstance(sub_val, dict):
                 nested_section = f"{section}.{sub_key}"
-                nested_kv = {k: str(v) for k, v in sub_val.items() if not isinstance(v, dict)}
+                nested_kv = {
+                    k: json.dumps(v) for k, v in sub_val.items() if not isinstance(v, dict)
+                }
                 if nested_kv:
                     await db.save_config_bulk(nested_section, nested_kv)
 
