@@ -96,7 +96,7 @@ class LifxStripAdapter(DeviceAdapter):
         """Query strip zones via GetExtendedColorZones(511) → StateExtendedColorZones(512)."""
         pkt = self._make_packet(511, b"", res_required=True)
         response = await self._transport.request_response(pkt, self._addr, response_type=512)
-        if response is not None:
+        if response is not None and response.msg_type == 512:
             try:
                 zone_count, _zone_index, colors = parse_state_extended_color_zones(
                     response.payload

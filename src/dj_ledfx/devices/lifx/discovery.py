@@ -241,7 +241,7 @@ class LifxBackend(DeviceBackend):
             resp = await self._transport.request_response(pkt, addr, response_type=702)
             tile_count = 5
             tiles: list[TileInfo] = []
-            if resp:
+            if resp is not None and resp.msg_type == 702:
                 tiles = parse_state_device_chain(resp.payload)
                 tile_count = len(tiles) if tiles else 5
             led_count = tile_count * 64
@@ -277,7 +277,7 @@ class LifxBackend(DeviceBackend):
             )
             resp = await self._transport.request_response(pkt, addr, response_type=512)
             zone_count = 1
-            if resp:
+            if resp is not None and resp.msg_type == 512:
                 zone_count, _, _ = parse_state_extended_color_zones(resp.payload)
             info = DeviceInfo(
                 f"LIFX Strip ({record.ip})",

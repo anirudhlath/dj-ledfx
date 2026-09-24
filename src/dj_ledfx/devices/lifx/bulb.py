@@ -85,7 +85,7 @@ class LifxBulbAdapter(DeviceAdapter):
         """Query bulb's current HSBK + power via GetColor(101) → LightState(107)."""
         pkt = self._make_packet(101, build_get_color(), res_required=True)
         response = await self._transport.request_response(pkt, self._addr, response_type=107)
-        if response is not None:
+        if response is not None and response.msg_type == 107:
             try:
                 h, s, b, k, power, _label = parse_light_state(response.payload)
                 return struct.pack("<4HH", h, s, b, k, power)
