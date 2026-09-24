@@ -25,3 +25,6 @@ state.db
 *.db-wal
 *.db-shm
 *.bak
+
+# Claude Design reference renders: local only, pinned by docs/design/web-app/HANDOFF.sha256
+docs/design/web-app/reference/
