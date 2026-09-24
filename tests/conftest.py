@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
-from dj_ledfx.devices.capabilities import DeviceCapabilities, LightReading
+from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected, LightReading
+from dj_ledfx.effects.context import RenderContext
+from dj_ledfx.effects.firmware import FirmwareEffect, Params
+from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.spatial.geometry import DeviceGeometry
-from dj_ledfx.types import DeviceInfo
+from dj_ledfx.types import DeviceInfo, FloatRGB
 
 
 class MockDeviceAdapter(DeviceAdapter):
@@ -154,3 +160,45 @@ class FakeLight(DeviceAdapter):
 
     def names(self) -> list[str]:
         return [name for name, _ in self.calls]
+
+
+class GlowFirmware(FirmwareEffect):
+    """A firmware effect for FakeLights whose capabilities have matrix=True."""
+
+    display_name = "Glow"
+
+    @classmethod
+    def parameters(cls) -> dict[str, EffectParam]:
+        return {"level": EffectParam(type="float", default=0.5, min=0.0, max=1.0)}
+
+    def __init__(self, level: float = 0.5) -> None:
+        self.level = level
+
+    def get_params(self) -> dict[str, Any]:
+        return {"level": self.level}
+
+    def _apply_params(self, **kwargs: Any) -> None:
+        self.level = float(kwargs.get("level", self.level))
+
+    def supports(self, caps: DeviceCapabilities) -> bool:
+        return caps.matrix
+
+    # cast, not isinstance: pytest imports this file twice (as tests.conftest and as
+    # conftest), so a FakeLight may come from either copy.
+    async def start(self, adapter: DeviceAdapter, params: Params) -> None:
+        light = cast(FakeLight, adapter)
+        if light.reject_firmware:
+            raise FirmwareRejected(f"{light.name} refused Glow")
+        light.calls.append(("firmware", dict(params)))
+        light.firmware_running = True
+
+    async def stop(self, adapter: DeviceAdapter) -> None:
+        light = cast(FakeLight, adapter)
+        light.calls.append(("firmware_stop", None))
+        light.firmware_running = False
+
+    async def is_running(self, adapter: DeviceAdapter) -> bool | None:
+        return cast(FakeLight, adapter).firmware_running
+
+    def emulate(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
+        return np.full((leds.count, 3), self.level, dtype=np.float32)

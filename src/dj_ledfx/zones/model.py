@@ -30,3 +30,12 @@ class Assignment:
     brightness: float
     lights: tuple[str, ...]  # the lights the zone owns after take-overs
     started_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class CrashInfo:
+    """Why a zone's look stopped rendering (spec §8)."""
+
+    layer: str  # the failing layer's name
+    message: str
+    at: datetime
