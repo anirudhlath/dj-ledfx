@@ -10,6 +10,7 @@ from api_home import Api, api_home
 from conftest import FakeLight
 
 from dj_ledfx.config import AppConfig, DiscoveryConfig
+from dj_ledfx.main import _load_config_from_db
 
 
 @pytest_asyncio.fixture
@@ -26,6 +27,17 @@ async def test_preview_only_applies_without_a_restart(api: Api) -> None:
     assert api.home.manager.preview_only
     assert (await api.client.get("/api/config")).json()["engine"]["preview_only"] is True
     assert (await api.home.db.load_config("engine"))["preview_only"] == "true"
+
+
+# B9: preview only is kept in state.db, which the app reads its config from at start, so
+# it survives a restart even where config.toml is mounted read-only.
+async def test_preview_only_survives_a_restart(api: Api) -> None:
+    await api.client.put("/api/config", json={"engine": {"preview_only": True}})
+
+    config = await _load_config_from_db(api.home.db)
+    assert config is not None and config.engine.preview_only is True
+    home = await api.home.restart(preview_only=config.engine.preview_only)
+    assert home.manager.preview_only
 
 
 async def test_preview_only_must_be_true_or_false(api: Api) -> None:

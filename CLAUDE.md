@@ -178,7 +178,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Capture/restore: a light is captured before dj-ledfx first changes it; the capture survives hand-overs between zones and restarts (in state.db) and is released on Off or Stop all. `capture_state()` returns None by default (can't capture: Off leaves it alone)
 - Sharing policy (spec §6.4): dj-ledfx switches a light on only when a look is applied. A zone light switched off elsewhere drops out and rejoins when it's back on; a stopped firmware effect is re-sent at the next 5 s poll while the light is on; idle lights are read every 30 s and never changed
 - Light status: a LIFX light that misses three 5 s polls is `offline` (a wall switch); `switched-off` is a power reading, not an attention item
-- Preview-only (`engine.preview_only`, `PUT /api/config`) applies at once: looks run and stream to the web preview, the lights are left alone
+- Preview-only (`engine.preview_only`, `PUT /api/config`) applies at once: looks run and stream to the web preview, the lights are left alone. It's kept across restarts in state.db's config table
 - Scenes became device-group zones once (migration 004), not running; the old UI's effect endpoints take `?zone=`
 
 ## Logging Discipline
@@ -235,7 +235,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - OpenRGB: parts in an `Off` mode keep a stale colour buffer, so `/api/lights` shows a colour for a dark part; read the mode to know. The Corsair Commander Core reports 0 LEDs
 - Home Assistant's Govee integration holds UDP 4002 on this host, so dj-ledfx can't hear Govee replies here (the log warns `could not bind port 4002`)
 - Without `--demo` (as deployed), classic tempo looks hold still until a DJ plays (M3 adds the internal clock); firmware looks animate
-- The container mounts `config.toml` read-only (a file bind mount: saving logs `Device or resource busy`, and preview-only isn't kept across restarts there); `state.db` lives in the `dj-ledfx_state` volume
+- The container mounts `config.toml` read-only (a file bind mount: saving logs `Device or resource busy`); `state.db` lives in the `dj-ledfx_state` volume. At start the app reads its config from state.db, and config.toml only while state.db has none, so settings saved from the web app, preview-only included, survive a restart
 - `Path.resolve()` raises `ValueError` on a NUL byte (a request for `/%00`); path guards must catch it, as `_file_within` in `web/app.py` does
 - Web app: tokens.css names both a colour and a font size `control`; `text-control` is the colour, `text-size-control` the size
 - Web app: where tokens.css has a token, use its utility (`text-data`, `h-(--touch-min)`), never an arbitrary value equal to it
