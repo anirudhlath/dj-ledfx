@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from loguru import logger
 
 from dj_ledfx.devices.adapter import DeviceAdapter
-from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected, LightReading
+from dj_ledfx.devices.capabilities import (
+    DeviceCapabilities,
+    FirmwareRejected,
+    LightReading,
+    NoAnswer,
+)
 from dj_ledfx.devices.lifx.packet import (
     GET_COLOR,
     HSBK,
@@ -115,10 +120,11 @@ class LifxAdapterBase(DeviceAdapter):
         return None
 
     async def _command(self, msg_type: int, payload: bytes, reply_type: int) -> LifxPacket:
-        """A command the light must confirm. Raises FirmwareRejected when it doesn't."""
+        """A command the light must confirm. Raises NoAnswer when it stays silent, and
+        FirmwareRejected when it answers that it doesn't support the message."""
         reply = await self._ask(msg_type, payload, reply_type)
         if reply is None:
-            raise FirmwareRejected(f"{self._device_info.name} didn't answer message {msg_type}")
+            raise NoAnswer(f"{self._device_info.name} didn't answer message {msg_type}")
         if reply.msg_type == STATE_UNHANDLED:
             raise FirmwareRejected(f"{self._device_info.name} doesn't support message {msg_type}")
         return reply
@@ -206,12 +212,17 @@ class LifxAdapterBase(DeviceAdapter):
             return
         effect = snapshot.get(self._effect_key) if self._effect_key is not None else None
         if self._effect_key is not None and not isinstance(effect, dict):
-            await self.prepare_stream()
+            try:
+                await self.prepare_stream()
+            except NoAnswer:
+                logger.warning(
+                    "LIFX '{}': couldn't stop the look's effect", self._device_info.name
+                )
         await self._restore_colours(snapshot, hsbk)
         if isinstance(effect, dict):
             try:
                 await self._start_effect(effect)
-            except (FirmwareRejected, ValueError, KeyError, TypeError):
+            except (FirmwareRejected, NoAnswer, ValueError, KeyError, TypeError):
                 logger.warning("LIFX '{}': couldn't restart its effect", self._device_info.name)
         if power:
             await self._set_power(was_on, RESTORE_FADE_MS)

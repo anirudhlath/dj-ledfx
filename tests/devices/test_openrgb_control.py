@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dj_ledfx.devices.capabilities import FirmwareRejected, LightReading
+from dj_ledfx.devices.capabilities import FirmwareRejected, LightReading, NoAnswer
 from dj_ledfx.devices.openrgb import HAS_BRIGHTNESS, HAS_PER_LED_COLOR, OpenRGBAdapter
 
 
@@ -83,6 +83,14 @@ async def test_unknown_mode_is_rejected() -> None:
     adapter = await _connected(_device())
     with pytest.raises(FirmwareRejected):
         await adapter.set_mode("Plasma", brightness=1.0)
+
+
+async def test_a_lost_connection_is_no_answer_not_a_refusal() -> None:
+    device = _device()
+    device.set_mode.side_effect = ConnectionError("the SDK server went away")
+    adapter = await _connected(device)
+    with pytest.raises(NoAnswer):
+        await adapter.set_mode("Rainbow Wave", brightness=1.0)
 
 
 async def test_active_mode_name_reads_the_device() -> None:

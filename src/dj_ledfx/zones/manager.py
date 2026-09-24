@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from loguru import logger
 
-from dj_ledfx.devices.capabilities import LightReading
+from dj_ledfx.devices.capabilities import FirmwareRejected, LightReading
 from dj_ledfx.effects.registry import get_strip_effect_classes
 from dj_ledfx.looks.builtin import classic_look_id
 from dj_ledfx.looks.model import (
@@ -79,6 +79,12 @@ class RouteTable(Protocol):
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _applied_key(runtime: ZoneRuntime, device_id: str) -> AppliedKey:
+    """What a light is given once its zone's look is applied to it."""
+    claim = runtime.claim_for(device_id)
+    return runtime.generation, claim[0].id if claim is not None else None
 
 
 def _brightness_of(running: _Running) -> float:
@@ -329,22 +335,23 @@ class ZoneManager:
                 await self._sync([device_id])
 
     async def verify_firmware(self, device_id: str) -> None:
-        """Send a light's firmware effect again if something stopped it, while it's on."""
+        """At each poll of a zone light that's on: apply its look again if the light didn't
+        answer last time, or send its firmware effect again if something stopped it."""
         async with self._lock:
-            zone_id = self.owner_of(device_id)
-            runtime = self._running[zone_id].runtime if zone_id is not None else None
-            claim = runtime.claim_for(device_id) if runtime is not None else None
+            runtime = self._runtime_of(device_id)
             adapter = self._adapter(device_id)
             if (
                 runtime is None
-                or claim is None
-                or runtime.crash is not None
-                or device_id not in self._applied
                 or adapter is None
-                or not adapter.is_connected
-                or self._preview_only
+                or self._held(runtime, adapter)
                 or self._power.get(device_id) is False
             ):
+                return
+            if self._applied.get(device_id) != _applied_key(runtime, device_id):
+                await self._sync([device_id])
+                return
+            claim = runtime.claim_for(device_id)
+            if claim is None:
                 return
             effect = claim[1]
             try:
@@ -838,19 +845,19 @@ class ZoneManager:
 
     async def _apply(self, device_id: str, adapter: DeviceAdapter, runtime: ZoneRuntime) -> None:
         """Start the light's firmware layer, or get it ready to stream, once per change."""
-        claim = runtime.claim_for(device_id)
-        key: AppliedKey = (runtime.generation, claim[0].id if claim else None)
+        key = _applied_key(runtime, device_id)
         if self._applied.get(device_id) == key:
             return
+        claim = runtime.claim_for(device_id)
         if claim is not None:
             layer, effect = claim
             self._routes.set_route(device_id, runtime.route_for(device_id))  # stop frames first
             try:
                 async with adapter.send_lock:
                     await effect.start(adapter, effect.start_params(runtime.brightness))
-            except Exception as exc:  # rejected or no answer: stream a copy (spec §8)
+            except FirmwareRejected as exc:  # it can't run it: stream a copy (spec §8)
                 logger.warning(
-                    "{} didn't start {} ({}); streaming a copy instead",
+                    "{} refused {} ({}); streaming a copy instead",
                     adapter.device_info.name,
                     effect.display_name,
                     exc,
@@ -858,6 +865,14 @@ class ZoneManager:
                 runtime.mark_emulated(device_id)
                 claim = None
                 key = (runtime.generation, None)
+            except Exception as exc:  # no answer: left unapplied, the next poll tries again
+                logger.warning(
+                    "{} didn't start {} ({}); trying again at the next poll",
+                    adapter.device_info.name,
+                    effect.display_name,
+                    exc,
+                )
+                return
         if claim is None:
             try:
                 await adapter.prepare_stream()

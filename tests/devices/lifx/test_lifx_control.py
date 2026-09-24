@@ -7,7 +7,12 @@ import numpy as np
 import pytest
 from lifx_fakes import FakeLifxTransport
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected, LightReading
+from dj_ledfx.devices.capabilities import (
+    DeviceCapabilities,
+    FirmwareRejected,
+    LightReading,
+    NoAnswer,
+)
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.packet import (
     GET_COLOR,
@@ -230,11 +235,12 @@ async def test_firmware_command_rejected_by_the_light() -> None:
         await _candle(transport).start_tile_effect(TileEffectType.FLAME, 5000)
 
 
-async def test_firmware_command_without_an_answer_is_rejected_after_a_retry() -> None:
+async def test_firmware_command_without_an_answer_is_no_answer_not_a_refusal() -> None:
     transport = FakeLifxTransport(silent=True)
-    with pytest.raises(FirmwareRejected):
+    with pytest.raises(NoAnswer) as raised:
         await _candle(transport).start_tile_effect(TileEffectType.FLAME, 5000)
-    assert transport.types() == [SET_TILE_EFFECT, SET_TILE_EFFECT]
+    assert not isinstance(raised.value, FirmwareRejected)
+    assert transport.types() == [SET_TILE_EFFECT, SET_TILE_EFFECT]  # asked twice
 
 
 async def test_prepare_stream_tolerates_lights_without_effects() -> None:

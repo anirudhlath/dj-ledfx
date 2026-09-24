@@ -10,7 +10,12 @@ from loguru import logger
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
-from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected, LightReading
+from dj_ledfx.devices.capabilities import (
+    DeviceCapabilities,
+    FirmwareRejected,
+    LightReading,
+    NoAnswer,
+)
 from dj_ledfx.types import DeviceInfo
 
 try:
@@ -172,8 +177,10 @@ class OpenRGBAdapter(DeviceAdapter):
             chosen.brightness = round(low + (high - low) * max(0.0, min(1.0, brightness)))
         try:
             await asyncio.to_thread(device.set_mode, chosen)
-        except (ValueError, ConnectionError, OSError) as exc:
+        except ValueError as exc:
             raise FirmwareRejected(f"{self._device_name} refused mode '{name}': {exc}") from exc
+        except (ConnectionError, OSError) as exc:
+            raise NoAnswer(f"{self._device_name} didn't take mode '{name}': {exc}") from exc
 
     async def _read(self) -> tuple[str, list[tuple[int, int, int]]] | None:
         """The active mode's name and the LED colours, fresh from the server."""

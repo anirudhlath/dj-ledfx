@@ -29,7 +29,11 @@ class LightReading:
 
 
 class FirmwareRejected(Exception):
-    """The light refused a firmware command, or never acknowledged it."""
+    """The light refused a firmware command: it can't run that effect."""
+
+
+class NoAnswer(Exception):
+    """The light didn't answer a command it must confirm. Not a refusal: ask it again."""
 
 
 def protocol_of(backend_or_type: str) -> LightProtocol:

@@ -26,7 +26,9 @@ class FirmwareEffect(Effect):
 
     @abstractmethod
     async def start(self, adapter: DeviceAdapter, params: Params) -> None:
-        """Start (or restart) the effect. Raise FirmwareRejected if the light refuses."""
+        """Start (or restart) the effect. Raise FirmwareRejected if the light refuses it
+        (the zone streams a copy instead), and NoAnswer if it doesn't answer (it's asked
+        again at the next poll)."""
 
     @abstractmethod
     async def stop(self, adapter: DeviceAdapter) -> None: ...

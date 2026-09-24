@@ -7,7 +7,7 @@ import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected
+from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected, NoAnswer
 from dj_ledfx.devices.lifx.base import RESTORE_FADE_MS, LifxAdapterBase, hsbk_from_json
 from dj_ledfx.devices.lifx.packet import (
     GET_EXTENDED_COLOR_ZONES,
@@ -144,6 +144,6 @@ class LifxStripAdapter(LifxAdapterBase):
             try:
                 await self.set_zone_colours([hsbk_from_json(z) for z in zones], RESTORE_FADE_MS)
                 return
-            except (FirmwareRejected, ValueError):
+            except (FirmwareRejected, NoAnswer, ValueError):
                 logger.warning("LIFX '{}': couldn't restore its zones", self._device_info.name)
         await super()._restore_colours(snapshot, hsbk)

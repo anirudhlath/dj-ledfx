@@ -140,6 +140,27 @@ async def test_a_rejected_firmware_effect_streams_its_copy(make_home: HomeFactor
     assert home.manager.light_mode("tile") == "streamed-copy"
 
 
+# B4: no answer isn't a refusal; the light monitor's next poll tries again.
+async def test_a_firmware_effect_that_got_no_answer_is_tried_again_at_the_next_poll(
+    make_home: HomeFactory,
+) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    tile.silent_firmware = True
+    home = await make_home([tile], [_zone("z", "tile")])
+
+    await home.manager.start("z", GLOW)
+
+    assert home.manager.light_mode("tile") == "own-effect"  # not a streamed copy
+    assert tile.names() == ["capture"]
+    assert not home.routes.routes["tile"].streaming
+
+    tile.silent_firmware = False
+    await home.manager.verify_firmware("tile")  # the next poll
+
+    assert tile.names() == ["capture", "firmware"]
+    assert home.manager.light_mode("tile") == "own-effect"
+
+
 async def test_off_leaves_an_uncapturable_light_alone(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp", captured=None)
     home = await make_home([lamp], [_zone("z", "lamp")])

@@ -7,7 +7,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
-from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected, LightReading
+from dj_ledfx.devices.capabilities import (
+    DeviceCapabilities,
+    FirmwareRejected,
+    LightReading,
+    NoAnswer,
+)
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.firmware import FirmwareEffect, Params
 from dj_ledfx.effects.ledset import LedSet
@@ -102,6 +107,7 @@ class FakeLight(DeviceAdapter):
         self._geometry = geometry
         self.firmware_running = False
         self.reject_firmware = False
+        self.silent_firmware = False  # firmware commands get no answer
         self.calls: list[tuple[str, object]] = []
         self.frames: list[NDArray[np.uint8]] = []
         self.record_frames = False  # log frames in calls too, to check what came first
@@ -207,6 +213,8 @@ class GlowFirmware(FirmwareEffect):
     async def start(self, adapter: DeviceAdapter, params: Params) -> None:
         light = cast(FakeLight, adapter)
         light.io()
+        if light.silent_firmware:
+            raise NoAnswer(f"{light.name} didn't answer")
         if light.reject_firmware:
             raise FirmwareRejected(f"{light.name} refused Glow")
         light.calls.append(("firmware", dict(params)))
