@@ -47,7 +47,7 @@ class GoveeAdapterBase(DeviceAdapter):
     async def disconnect(self) -> None:
         self._is_connected = False
 
-    async def capture_state(self) -> bytes:
+    async def capture_state(self) -> bytes | None:
         if self._original_state is not None:
             return self._original_state.to_bytes()
         return await super().capture_state()

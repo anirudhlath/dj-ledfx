@@ -81,7 +81,7 @@ class LifxBulbAdapter(DeviceAdapter):
         pkt = self._make_packet(102, build_set_color(hsbk))
         self._transport.send_packet(pkt, self._addr)
 
-    async def capture_state(self) -> bytes:
+    async def capture_state(self) -> bytes | None:
         """Query bulb's current HSBK + power via GetColor(101) → LightState(107)."""
         pkt = self._make_packet(101, build_get_color(), res_required=True)
         response = await self._transport.request_response(pkt, self._addr, response_type=107)

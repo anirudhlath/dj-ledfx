@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 from numpy.typing import NDArray
 
+from dj_ledfx.devices.capabilities import DeviceCapabilities, LightReading, protocol_of
 from dj_ledfx.spatial.geometry import DeviceGeometry
 from dj_ledfx.types import DeviceInfo
 
@@ -36,6 +37,22 @@ class DeviceAdapter(ABC):
         """Optional: report device's physical geometry for spatial mapping."""
         return None
 
+    @property
+    def capabilities(self) -> DeviceCapabilities:
+        """What the light can do. Default: a streamed-only colour light."""
+        info = self.device_info
+        return DeviceCapabilities(protocol=protocol_of(info.backend or info.device_type))
+
+    async def read_light(self) -> LightReading:
+        """Read power and colour without changing anything. Default: unknown."""
+        return LightReading(power=None, colour=None)
+
+    async def set_power(self, on: bool) -> None:  # noqa: B027
+        """Switch the light on or off. Default: the protocol can't, so do nothing."""
+
+    async def prepare_stream(self) -> None:  # noqa: B027
+        """Get the light ready for streamed frames (stop its own effects, pick direct mode)."""
+
     @abstractmethod
     async def connect(self) -> None: ...
 
@@ -45,9 +62,9 @@ class DeviceAdapter(ABC):
     @abstractmethod
     async def send_frame(self, colors: NDArray[np.uint8]) -> None: ...
 
-    async def capture_state(self) -> bytes:
-        """Capture current device state. Default: 50% white."""
-        return np.full((self.led_count, 3), 128, dtype=np.uint8).tobytes()
+    async def capture_state(self) -> bytes | None:
+        """Capture how the light looks now, to put it back on Off. None: can't capture."""
+        return None
 
     async def restore_state(self, state: bytes) -> None:
         """Restore device to a previously captured state. Default: send as RGB frame."""

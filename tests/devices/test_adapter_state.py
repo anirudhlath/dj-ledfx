@@ -1,4 +1,4 @@
-"""Tests for DeviceAdapter.capture_state() and restore_state() default implementations."""
+"""Default DeviceAdapter state and control hooks."""
 
 from __future__ import annotations
 
@@ -7,14 +7,16 @@ import pytest
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
+from dj_ledfx.devices.capabilities import LightReading
 from dj_ledfx.types import DeviceInfo
 
 
 class FakeAdapter(DeviceAdapter):
-    """Minimal concrete DeviceAdapter for testing default state methods."""
+    """Minimal concrete DeviceAdapter for testing the default hooks."""
 
-    def __init__(self, led_count: int = 10) -> None:
+    def __init__(self, led_count: int = 10, device_type: str = "fake") -> None:
         self._led_count = led_count
+        self._device_type = device_type
         self._connected = True
         self.sent_frames: list[NDArray[np.uint8]] = []
 
@@ -22,7 +24,7 @@ class FakeAdapter(DeviceAdapter):
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             name="FakeDevice",
-            device_type="fake",
+            device_type=self._device_type,
             led_count=self._led_count,
             address="fake",
         )
@@ -46,50 +48,38 @@ class FakeAdapter(DeviceAdapter):
 
 
 @pytest.mark.asyncio
-async def test_capture_state_default_returns_50pct_white() -> None:
-    adapter = FakeAdapter(led_count=5)
-    state = await adapter.capture_state()
-
-    # Should be led_count * 3 bytes
-    assert len(state) == 5 * 3
-
-    colors = np.frombuffer(state, dtype=np.uint8).reshape(-1, 3)
-    assert colors.shape == (5, 3)
-    assert np.all(colors == 128)
+async def test_capture_state_default_is_none() -> None:
+    """A light that can't be captured says so, so Off leaves it alone."""
+    assert await FakeAdapter().capture_state() is None
 
 
 @pytest.mark.asyncio
-async def test_capture_state_default_shape_matches_led_count() -> None:
-    for led_count in (1, 10, 144):
-        adapter = FakeAdapter(led_count=led_count)
-        state = await adapter.capture_state()
-        assert len(state) == led_count * 3
-
-
-@pytest.mark.asyncio
-async def test_restore_state_calls_send_frame() -> None:
+async def test_restore_state_default_sends_the_bytes_as_a_frame() -> None:
     adapter = FakeAdapter(led_count=3)
-    # Build a custom state: solid red
-    state = np.array([[255, 0, 0], [255, 0, 0], [255, 0, 0]], dtype=np.uint8).tobytes()
+    state = np.array([[255, 0, 0]] * 3, dtype=np.uint8).tobytes()
 
     await adapter.restore_state(state)
 
     assert len(adapter.sent_frames) == 1
     sent = adapter.sent_frames[0]
     assert sent.shape == (3, 3)
-    assert np.all(sent[:, 0] == 255)  # R
-    assert np.all(sent[:, 1] == 0)  # G
-    assert np.all(sent[:, 2] == 0)  # B
+    assert np.all(sent[:, 0] == 255) and np.all(sent[:, 1:] == 0)
+
+
+def test_default_capabilities_follow_the_device_type() -> None:
+    assert FakeAdapter(device_type="govee_segment").capabilities.protocol == "Govee"
+    assert FakeAdapter(device_type="lifx").capabilities.protocol == "LIFX"
+    assert FakeAdapter().capabilities.protocol == "OpenRGB"
 
 
 @pytest.mark.asyncio
-async def test_restore_state_round_trip() -> None:
-    """capture_state bytes can be fed back to restore_state."""
-    adapter = FakeAdapter(led_count=8)
-    state = await adapter.capture_state()
-    await adapter.restore_state(state)
+async def test_default_read_light_is_unknown() -> None:
+    assert await FakeAdapter().read_light() == LightReading(power=None, colour=None)
 
-    assert len(adapter.sent_frames) == 1
-    restored = adapter.sent_frames[0]
-    assert restored.shape == (8, 3)
-    assert np.all(restored == 128)
+
+@pytest.mark.asyncio
+async def test_default_power_and_stream_hooks_do_nothing() -> None:
+    adapter = FakeAdapter()
+    await adapter.set_power(True)
+    await adapter.prepare_stream()
+    assert adapter.sent_frames == []

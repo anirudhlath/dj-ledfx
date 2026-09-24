@@ -92,7 +92,7 @@ class LifxStripAdapter(DeviceAdapter):
             )
             self._transport.send_packet(pkt, self._addr)
 
-    async def capture_state(self) -> bytes:
+    async def capture_state(self) -> bytes | None:
         """Query strip zones via GetExtendedColorZones(511) → StateExtendedColorZones(512)."""
         pkt = self._make_packet(511, b"", res_required=True)
         response = await self._transport.request_response(pkt, self._addr, response_type=512)

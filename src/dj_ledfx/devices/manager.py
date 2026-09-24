@@ -89,6 +89,8 @@ class DeviceManager:
         stable_id = adapter.device_info.effective_id
         try:
             state_bytes = await adapter.capture_state()
+            if state_bytes is None:
+                return
             await self._state_db.save_device_state(stable_id, state_bytes)
             logger.debug(
                 "Captured state for device '{}' (stable_id={})",
