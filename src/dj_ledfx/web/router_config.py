@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from dj_ledfx.config import (
     AppConfig,
     DevicesConfig,
+    DiscoveryConfig,
     EffectConfig,
     EngineConfig,
     GoveeConfig,
@@ -45,6 +46,7 @@ def _merge_config(existing: AppConfig, updates: dict[str, Any]) -> AppConfig:
         "effect": (EffectConfig, existing.effect),
         "network": (NetworkConfig, existing.network),
         "web": (WebConfig, existing.web),
+        "discovery": (DiscoveryConfig, existing.discovery),
     }
     for key, (cls, current) in section_map.items():
         if key in updates:
@@ -75,8 +77,33 @@ def _merge_config(existing: AppConfig, updates: dict[str, Any]) -> AppConfig:
         network=kwargs.get("network", existing.network),
         web=kwargs.get("web", existing.web),
         devices=kwargs.get("devices", existing.devices),
+        discovery=kwargs.get("discovery", existing.discovery),
         scene_config=existing.scene_config,
     )
+
+
+def _check_preview_only(body: dict[str, Any]) -> None:
+    engine = body.get("engine")
+    value = engine.get("preview_only") if isinstance(engine, dict) else None
+    if value is not None and not isinstance(value, bool):
+        raise HTTPException(status_code=400, detail="engine.preview_only must be true or false")
+
+
+def _requires_restart(old: AppConfig, new: AppConfig) -> str:
+    """Preview only applies at once; every other change at the next start."""
+
+    def rest(config: AppConfig) -> AppConfig:
+        return dataclasses.replace(
+            config, engine=dataclasses.replace(config.engine, preview_only=False)
+        )
+
+    return "true" if rest(old) != rest(new) else "false"
+
+
+async def _apply_live(request: Request, config: AppConfig) -> None:
+    zones = getattr(request.app.state, "zone_manager", None)
+    if zones is not None:
+        await zones.set_preview_only(config.engine.preview_only)
 
 
 @router.get("/config")
@@ -89,6 +116,7 @@ async def get_config(request: Request) -> dict[str, Any]:
 
 @router.put("/config")
 async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
+    _check_preview_only(body)
     config = request.app.state.config
     try:
         new_config = _merge_config(config, body)
@@ -110,9 +138,10 @@ async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
                     await db.save_config_bulk(section, str_kv)
     except HTTPException:
         pass
+    await _apply_live(request, new_config)
     return JSONResponse(
         content=result,
-        headers={"X-Requires-Restart": "true"},
+        headers={"X-Requires-Restart": _requires_restart(config, new_config)},
     )
 
 
@@ -132,6 +161,7 @@ async def import_config(request: Request) -> dict[str, Any]:
         data = tomllib.loads(body.decode())
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {e}") from e
+    _check_preview_only(data)
     config = request.app.state.config
     try:
         new_config = _merge_config(config, data)
@@ -142,9 +172,10 @@ async def import_config(request: Request) -> dict[str, Any]:
     request.app.state.config = new_config
     if request.app.state.config_path:
         await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
+    await _apply_live(request, new_config)
     return JSONResponse(
         content=dataclasses.asdict(new_config),
-        headers={"X-Requires-Restart": "true"},
+        headers={"X-Requires-Restart": _requires_restart(config, new_config)},
     )
 
 

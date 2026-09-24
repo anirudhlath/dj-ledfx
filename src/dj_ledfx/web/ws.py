@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import struct
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -12,7 +13,9 @@ from loguru import logger
 
 from dj_ledfx.events import TransportStateChangedEvent
 from dj_ledfx.transport import TransportState
+from dj_ledfx.web import contract
 from dj_ledfx.web.state import ClientSubscription
+from dj_ledfx.zones.model import ZonesChanged
 
 
 def _get_connected(app: Any) -> set[WebSocket]:
@@ -29,6 +32,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     _get_connected(app).add(websocket)
 
     try:
+        for message in initial_messages(app):
+            await _send_json(websocket, message)
+
         # Start polling tasks
         tasks.append(asyncio.create_task(_beat_poll(websocket, app, sub)))
         tasks.append(asyncio.create_task(_stats_poll(websocket, app)))
@@ -66,6 +72,55 @@ async def _broadcast_json(app: Any, data: dict[str, Any]) -> None:
     clients = list(_get_connected(app))
     if clients:
         await asyncio.gather(*(_send_json(ws, data) for ws in clients))
+
+
+def _running_message(app: Any) -> dict[str, Any] | None:
+    zones = getattr(app.state, "zone_manager", None)
+    if zones is None:
+        return None
+    running = contract.running_out(zones.running())
+    return {"channel": "running", **running.model_dump(mode="json", by_alias=True)}
+
+
+# Each pushed channel's snapshot, and the events that make a channel stale.
+_SNAPSHOTS: dict[str, Callable[[Any], dict[str, Any] | None]] = {"running": _running_message}
+_STALE_ON: dict[type[Any], str] = {ZonesChanged: "running"}
+
+
+def initial_messages(app: Any) -> list[dict[str, Any]]:
+    """Every pushed channel's current state, for a client that has just connected."""
+    messages = (snapshot(app) for snapshot in _SNAPSHOTS.values())
+    return [message for message in messages if message is not None]
+
+
+async def event_broadcast(app: Any) -> None:
+    """Push a channel's snapshot to every client when an event makes it stale.
+
+    Changes that arrive while a push goes out coalesce into the next push.
+    """
+    event_bus = app.state.event_bus
+    stale: dict[str, None] = {}  # an ordered set of channels
+    wake = asyncio.Event()
+
+    def mark(event: object) -> None:
+        stale[_STALE_ON[type(event)]] = None
+        wake.set()
+
+    for event_type in _STALE_ON:
+        event_bus.subscribe(event_type, mark)
+    try:
+        while True:
+            await wake.wait()
+            wake.clear()
+            channels = list(stale)
+            stale.clear()
+            for channel in channels:
+                message = _SNAPSHOTS[channel](app)
+                if message is not None:
+                    await _broadcast_json(app, message)
+    finally:
+        for event_type in _STALE_ON:
+            event_bus.unsubscribe(event_type, mark)
 
 
 async def transport_broadcast(app: Any) -> None:

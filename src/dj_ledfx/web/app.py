@@ -108,21 +108,21 @@ def create_app(
     app.state.connected_websockets: set = set()
 
     @app.on_event("startup")
-    async def _start_transport_broadcast() -> None:
+    async def _start_broadcasts() -> None:
         if app.state.event_bus is not None:
-            from dj_ledfx.web.ws import transport_broadcast
+            from dj_ledfx.web.ws import event_broadcast, transport_broadcast
 
-            app.state._transport_broadcast_task = asyncio.create_task(transport_broadcast(app))
+            app.state.broadcast_tasks = [
+                asyncio.create_task(transport_broadcast(app)),
+                asyncio.create_task(event_broadcast(app)),
+            ]
 
     @app.on_event("shutdown")
-    async def _stop_transport_broadcast() -> None:
-        task = getattr(app.state, "_transport_broadcast_task", None)
-        if task is not None:
+    async def _stop_broadcasts() -> None:
+        tasks = getattr(app.state, "broadcast_tasks", [])
+        for task in tasks:
             task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     from dj_ledfx.web.router_config import router as config_router
     from dj_ledfx.web.router_devices import router as devices_router
@@ -131,6 +131,7 @@ def create_app(
     from dj_ledfx.web.router_scene import router as scene_router
     from dj_ledfx.web.router_scene import router_scenes
     from dj_ledfx.web.router_transport import router as transport_router
+    from dj_ledfx.web.router_zones import router as zones_router
 
     app.include_router(effects_router, prefix="/api")
     app.include_router(devices_router, prefix="/api")
@@ -139,6 +140,7 @@ def create_app(
     app.include_router(router_scenes, prefix="/api")
     app.include_router(transport_router, prefix="/api")
     app.include_router(looks_router, prefix="/api")
+    app.include_router(zones_router, prefix="/api")
 
     from dj_ledfx.web.ws import ws_endpoint
 
