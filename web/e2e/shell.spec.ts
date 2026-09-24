@@ -220,3 +220,37 @@ test('TAP answers a touch anywhere in a 44 px band on phone', async ({ page }, {
   )
   expect(hits).toEqual(['Tap', 'Tap'])
 })
+
+// A phone turned sideways (844 × 390) is wider than 768 px, so it gets the rail and the top bar,
+// with the notch on one side (viewport-fit=cover). Chromium's safe-area override stands in for it.
+test('a landscape phone keeps the rail reachable and clear of the notch', async ({ page }, { project }) => {
+  test.skip(project.name !== 'phone', 'a phone turned sideways')
+  const [width, height, notch] = [844, 390, 47]
+  await page.setViewportSize({ width, height })
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: notch, right: notch, bottom: 21 } })
+  await open(page, '/next/live')
+
+  // The page itself never scrolls; the rail and <main> scroll by themselves.
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(height)
+  const rail = page.getByRole('navigation', { name: 'Main' })
+  const settings = rail.getByRole('link', { name: 'Settings' })
+  await settings.scrollIntoViewIfNeeded()
+  await expect(settings).toBeInViewport({ ratio: 1 })
+  for (const link of await rail.getByRole('link').all()) {
+    const box = (await link.boundingBox())!
+    expect(box.x, 'clear of the left inset').toBeGreaterThanOrEqual(notch)
+    expect(box.height, 'still a whole target').toBeGreaterThanOrEqual(44)
+  }
+
+  // The rail's column grows with it, so the top bar starts where the rail ends.
+  const railBox = (await rail.boundingBox())!
+  expect((await page.getByRole('banner').boundingBox())!.x).toBe(railBox.x + railBox.width)
+
+  // The top bar's cluster and the page stop short of the right inset.
+  const reach = await page
+    .getByRole('banner')
+    .evaluate((bar) => Math.max(...[...bar.querySelectorAll('*')].map((el) => el.getBoundingClientRect().right)))
+  expect(reach, 'the top bar clears the right inset').toBeLessThanOrEqual(width - notch)
+  expect(await page.locator('main').evaluate((main) => getComputedStyle(main).paddingRight)).toBe(`${notch}px`)
+})

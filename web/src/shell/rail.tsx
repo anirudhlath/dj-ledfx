@@ -9,21 +9,21 @@ export interface RailProps {
   server: string
 }
 
-/** §4.1 rail (Main.png). */
+/** §4.1 rail (Main.png). On a short screen it scrolls by itself, and its items keep their size. */
 export function Rail({ attention, server }: RailProps) {
   return (
     <nav
       aria-label="Main"
-      className="flex h-full w-(--rail-w) flex-col items-center gap-1.5 border-r border-line-soft bg-bg pt-3.5"
+      className="flex h-full w-[calc(var(--rail-w)+env(safe-area-inset-left))] flex-col items-center gap-1.5 overflow-y-auto border-r border-line-soft bg-bg pt-3.5 pl-[env(safe-area-inset-left)]"
     >
-      <Link to="/live" aria-label="dj-ledfx home" className="mb-3.5 flex size-11 items-center justify-center text-text">
+      <Link to="/live" aria-label="dj-ledfx home" className="mb-3.5 flex size-11 shrink-0 items-center justify-center text-text">
         <Logo />
       </Link>
       {RAIL_ITEMS.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
-          className="relative flex size-14 flex-col items-center justify-center gap-1.25 rounded-tile text-[10.5px] font-semibold tracking-[0.02em] text-text-3 transition-colors duration-(--duration-fast) ease-out hover:text-text-2 aria-[current=page]:bg-control aria-[current=page]:text-text"
+          className="relative flex size-14 shrink-0 flex-col items-center justify-center gap-1.25 rounded-tile text-[10.5px] font-semibold tracking-[0.02em] text-text-3 transition-colors duration-(--duration-fast) ease-out hover:text-text-2 aria-[current=page]:bg-control aria-[current=page]:text-text"
         >
           <Icon name={item.icon} size={20} />
           <span>{item.label}</span>
@@ -36,7 +36,7 @@ export function Rail({ attention, server }: RailProps) {
         </NavLink>
       ))}
       <div className="flex-1" />
-      <p className="num rotate-180 pb-4 text-[9.5px] tracking-[0.08em] text-text-3 [writing-mode:vertical-rl]">
+      <p className="num shrink-0 rotate-180 pb-4 text-[9.5px] tracking-[0.08em] text-text-3 [writing-mode:vertical-rl]">
         dj-ledfx · {server}
       </p>
     </nav>

@@ -12,7 +12,9 @@ import { TopBar } from './top-bar'
 /**
  * §4.1–4.2: rail and top bar on desktop; header (with the tempo strip on Live) and tab bar on phone.
  * `<main>` keeps its place in the tree, so crossing the breakpoint swaps the chrome without
- * remounting the page.
+ * remounting the page. A phone turned sideways is wider than the breakpoint, so it gets the rail;
+ * the rail's column grows with its left safe-area inset, and the top bar and `<main>` keep clear
+ * of the right one.
  */
 export function AppShell() {
   const isPhone = useIsPhone()
@@ -26,7 +28,7 @@ export function AppShell() {
       className={
         isPhone
           ? 'flex h-dvh flex-col pt-[env(safe-area-inset-top)]'
-          : 'grid h-dvh grid-cols-[var(--rail-w)_minmax(0,1fr)] grid-rows-[var(--topbar-h)_minmax(0,1fr)]'
+          : 'grid h-dvh grid-cols-[auto_minmax(0,1fr)] grid-rows-[var(--topbar-h)_minmax(0,1fr)]'
       }
     >
       <title>{`${meta.title} · dj-ledfx`}</title>
@@ -44,7 +46,7 @@ export function AppShell() {
         </div>
       )}
       {!isPhone && <TopBar title={meta.title} context={meta.context?.(at)} chrome={chrome} />}
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      <main className="min-h-0 flex-1 overflow-y-auto pr-[env(safe-area-inset-right)]">
         <Outlet />
       </main>
       {isPhone && <TabBar attention={chrome.attention} />}
