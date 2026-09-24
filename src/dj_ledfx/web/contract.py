@@ -13,18 +13,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.devices.capabilities import DeviceCapabilities, LightProtocol
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.registry import get_effect_classes
 from dj_ledfx.looks import model as looks
+from dj_ledfx.looks.model import Blend, Category, InputKind, LayerType, Scope, TransitionKind
 from dj_ledfx.types import DeviceStats
 from dj_ledfx.zones import attention
+from dj_ledfx.zones.attention import AttentionAction, AttentionKind, Severity, SubjectType
 from dj_ledfx.zones.lights import LightState, LightStatus
-from dj_ledfx.zones.model import RunningZoneInfo, StartResult, ZoneRecord
-
-InputKind = Literal["tempo", "music", "home-assistant", "sun"]
-TransitionKind = Literal["cut", "fade", "wipe", "spread", "dissolve"]
+from dj_ledfx.zones.model import RunningZoneInfo, StartResult, ZoneKind, ZoneRecord
+from dj_ledfx.zones.runtime import ZoneState
 
 
 class ContractModel(BaseModel):
@@ -65,10 +65,10 @@ class SettingSchema(ContractModel):
 class Layer(ContractModel):
     id: str
     name: str
-    type: Literal["field", "particles", "firmware"]
+    type: LayerType
     kind: str
     visible: bool = True
-    blend: Literal["add", "screen", "normal", "multiply", "max"] = "normal"
+    blend: Blend = "normal"
     opacity: float = 1.0
     settings: dict[str, SettingValue] = Field(default_factory=dict)
     setting_schema: list[SettingSchema] = Field(default_factory=list, alias="schema")
@@ -92,12 +92,12 @@ class Transition(ContractModel):
 class Look(ContractModel):
     id: str = ""
     name: str
-    category: Literal["ambient", "tempo", "audio", "home", "firmware"]
+    category: Category
     built_in: bool = False
     derived_from: str | None = None
     description: str = ""
     thumbnail: str = ""
-    scope: Literal["any-zone", "whole-home"] = "any-zone"
+    scope: Scope = "any-zone"
     needs: list[InputKind] = Field(default_factory=list)
     uses: list[InputKind] = Field(default_factory=list)
     starred: bool = False
@@ -125,7 +125,7 @@ def look_in(body: Look) -> looks.Look:
 class Zone(ContractModel):
     id: str
     name: str
-    kind: Literal["home", "room", "sub-zone", "group"]
+    kind: ZoneKind
     lights: list[str]
 
 
@@ -154,7 +154,7 @@ class RunningZone(ContractModel):
     brightness: float
     lights: list[str]  # the lights it owns after take-overs
     covers: list[str] = Field(default_factory=list)  # rooms come with the home map (M2)
-    state: Literal["running", "transition", "slow", "crashed", "waiting"]
+    state: Literal[ZoneState, "transition"]  # transitions arrive in M4
     transition: RunningZoneTransition | None = None  # transitions arrive in M4
     fps: RunningZoneFps | None = None
     error: RunningZoneError | None = None
@@ -274,7 +274,7 @@ class Light(ContractModel):
     room: str | None = None  # placement fields arrive with the home map (M2)
     sub_zone: str | None = None
     model: str
-    protocol: Literal["LIFX", "Govee", "OpenRGB"]
+    protocol: LightProtocol
     leds: int
     capabilities: list[Literal["colour", "multizone", "matrix", "effects"]]
     built_in_effects: list[str]
@@ -307,26 +307,19 @@ class LightUpdate(ContractModel):
 
 
 class AttentionSubject(ContractModel):
-    type: Literal["light", "zone", "input"]
+    type: SubjectType
     id: str
 
 
 class AttentionItem(ContractModel):
     id: str
-    severity: Literal["high", "normal"]
-    kind: Literal[
-        "light-offline",
-        "zone-crashed",
-        "zone-slow",
-        "input-disconnected",
-        "input-stale",
-        "frames-dropping",
-    ]
+    severity: Severity
+    kind: AttentionKind
     subject: AttentionSubject
     title: str
     detail: str
     since: datetime
-    actions: list[Literal["restart", "details", "retry", "open"]]
+    actions: list[AttentionAction]
 
 
 def _hex(colour: tuple[int, int, int] | None) -> str | None:

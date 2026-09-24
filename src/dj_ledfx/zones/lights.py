@@ -22,15 +22,14 @@ from loguru import logger
 from dj_ledfx.devices.capabilities import LightReading, try_read
 from dj_ledfx.events import DeviceOfflineEvent
 from dj_ledfx.zones.model import LightsChanged, ZonesChanged
+from dj_ledfx.zones.runtime import LightMode
 
 if TYPE_CHECKING:
     from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
     from dj_ledfx.events import EventBus
     from dj_ledfx.zones.manager import ZoneManager
 
-LightStatus = Literal[
-    "streaming", "own-effect", "streamed-copy", "offline", "switched-off", "reconnecting", "idle"
-]
+LightStatus = Literal[LightMode, "offline", "switched-off", "reconnecting", "idle"]
 
 ZONE_POLL_S = 5.0
 IDLE_POLL_S = 30.0
