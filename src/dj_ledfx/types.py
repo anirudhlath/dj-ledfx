@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 RGB = tuple[int, int, int]
+FloatRGB = NDArray[np.float32]  # shape (n_leds, 3), linear 0..1 per channel
 
 
 @dataclass(frozen=True, slots=True)
