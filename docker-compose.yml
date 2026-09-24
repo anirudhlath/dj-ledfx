@@ -1,0 +1,17 @@
+# dj-ledfx on this host (engine spec §6.7): docker compose up -d --build
+#
+# Host networking: LIFX broadcast discovery and Pro DJ Link need it. The web UI listens on
+# the host's port 8080, so the host firewall (UFW) decides who reaches it, not Docker.
+name: dj-ledfx  # the same stack from whichever checkout this runs
+
+services:
+  app:
+    build: .
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./config.toml:/app/config/config.toml:ro  # seeds a fresh state.db; never written
+      - state:/app/state                           # state.db, the source of truth
+
+volumes:
+  state:
