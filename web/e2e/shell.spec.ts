@@ -67,6 +67,17 @@ function spill(group: Locator): Promise<number> {
   })
 }
 
+/** Opens the specimen and checks that TAP stays inside each of its Tempo modules. */
+async function expectTapInside(page: Page, modules: number) {
+  await open(page, '/next/system')
+  await expect(page.getByText('Always within reach')).toBeVisible()
+  const groups = await page.getByRole('group', { name: 'Tempo' }).all()
+  expect(groups).toHaveLength(modules)
+  for (const [i, group] of groups.entries()) {
+    expect(await spill(group), `Tempo group ${i + 1}`).toBeLessThanOrEqual(0)
+  }
+}
+
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(HERO_TIME)
 })
@@ -219,13 +230,23 @@ test.describe('desktop', () => {
   // The hero's "Music" is the shortest source label. The specimen draws the longer ones, a
   // three-digit bar, and the strip at a 320 px phone's width; TAP stays inside every one.
   test('the tempo module keeps TAP inside, whatever the source', async ({ page }) => {
+    await expectTapInside(page, 7) // the top bar's, and the specimen's three bars and three strips
+  })
+
+  // The strip's gaps follow its own width, not the window's, so the specimen's 320 px strips are
+  // what a 320 px phone shows under its header.
+  test('the specimen draws the strip as a 320 px phone does', async ({ page }) => {
+    const strips = () =>
+      page
+        .getByRole('group', { name: 'Tempo' })
+        .evaluateAll((groups) => groups.map((g) => ({ width: g.getBoundingClientRect().width, gap: getComputedStyle(g).columnGap })))
+    await page.setViewportSize({ width: 320, height: 900 })
+    await open(page, '/next/live')
+    const [phone] = await strips()
+    await page.setViewportSize({ width: 1440, height: 900 })
     await open(page, '/next/system')
     await expect(page.getByText('Always within reach')).toBeVisible()
-    const groups = await page.getByRole('group', { name: 'Tempo' }).all()
-    expect(groups).toHaveLength(7) // the top bar's, and the specimen's three bars and three strips
-    for (const [i, group] of groups.entries()) {
-      expect(await spill(group), `Tempo group ${i + 1}`).toBeLessThanOrEqual(0)
-    }
+    expect((await strips()).filter((strip) => strip.width === phone.width)).toEqual([phone, phone])
   })
 })
 
@@ -248,6 +269,13 @@ test.describe('phone', () => {
       ],
     )
     expect(hits).toEqual(['Tap', 'Tap'])
+  })
+
+  // At a 320 px phone's width (WCAG reflow), with the longer source labels, and in rows narrower
+  // than the desktop modules: TAP never leaves its module.
+  test('the tempo module keeps TAP inside, whatever the source, on a 320 px phone', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 844 })
+    await expectTapInside(page, 6) // the specimen's three bars and three strips
   })
 
   // Upright, the header clears the notch and the tab bar the home indicator.

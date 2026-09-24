@@ -28,32 +28,35 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
 
   if (variant === 'strip') {
     return (
-      <div
-        role="group"
-        aria-label="Tempo"
-        // At 320 px (the WCAG reflow width) the gaps tighten so TAP stays inside the strip.
-        className="flex h-(--phone-tempo-h) items-center gap-3 rounded-card border border-line bg-raised pr-1 pl-3 max-[22.5rem]:gap-2"
-      >
-        {/* The label gives way first, so a long source ("Pro DJ Link") never pushes TAP out. */}
-        <span className={cx('inline-flex min-w-0 items-center gap-1.5 text-data font-semibold', stale ? 'text-signal' : 'text-text-2')}>
-          <Icon name={icon} size={16} />
-          <span className="min-w-0 truncate">{label}</span>
-          {staleNote}
-        </span>
-        <span className="num text-bpm font-semibold tracking-[-0.02em]">
-          {formatBpm(bpm)}
-          <span className="sr-only"> BPM</span>
-        </span>
-        {pips}
-        {/* The face is Phone-Live.png's. ::before stretches the hit area to --touch-min (§6); its
-            box is the padding box, inside the border, so the overhang is measured from 100%. */}
-        <button
-          type="button"
-          onClick={onTap}
-          className="relative h-10 rounded-[9px] border border-line-strong bg-control-hover px-4 text-size-control font-bold tracking-[0.06em] uppercase before:absolute before:inset-x-0 before:inset-y-[calc((100%_-_var(--touch-min))/2)]"
+      // The strip's own width sets its gaps, not the window's, so the specimen draws what each
+      // phone shows. Narrower than a 360 px phone's strip they tighten, which keeps TAP inside down
+      // to 320 px (the WCAG reflow width).
+      <div className="@container">
+        <div
+          role="group"
+          aria-label="Tempo"
+          className="flex h-(--phone-tempo-h) items-center gap-3 rounded-card border border-line bg-raised pr-1 pl-3 @max-[20.5rem]:gap-2"
         >
-          Tap
-        </button>
+          {/* The label gives way first, so a long source ("Pro DJ Link") never pushes TAP out. */}
+          <span className={cx('inline-flex min-w-0 items-center gap-1.5 text-data font-semibold', stale ? 'text-signal' : 'text-text-2')}>
+            <Icon name={icon} size={16} />
+            <span className="min-w-0 truncate">{label}</span>
+            {staleNote}
+          </span>
+          <span className="num text-bpm font-semibold tracking-[-0.02em]">
+            {formatBpm(bpm)}
+            <span className="sr-only"> BPM</span>
+          </span>
+          {pips}
+          {/* The face is Phone-Live.png's; touch-target grows its hit area to --touch-min (§6). */}
+          <button
+            type="button"
+            onClick={onTap}
+            className="h-10 rounded-[9px] border border-line-strong bg-control-hover px-4 text-size-control font-bold tracking-[0.06em] uppercase max-md:touch-target"
+          >
+            Tap
+          </button>
+        </div>
       </div>
     )
   }
@@ -76,9 +79,9 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
     <div
       role="group"
       aria-label="Tempo"
-      // Main.png's width is a floor: a longer source or bar number widens the module, and the
-      // top bar's title truncates before TAP leaves it.
-      className="flex h-10 min-w-95 items-center justify-between gap-3 rounded-tile border border-line bg-raised px-1.5 tablet:min-w-0"
+      // Sized by its content: a longer source or bar number widens the module, it never squeezes
+      // below its content, and the top bar's title truncates before TAP leaves it.
+      className="flex h-10 items-center gap-3 rounded-tile border border-line bg-raised px-1.5"
     >
       {renderSource ? renderSource(sourceButton) : sourceButton}
       <span className="flex items-baseline gap-1.25">
@@ -98,24 +101,21 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
   )
 }
 
+const PIPS: Record<TempoModuleProps['variant'], { row?: string; pip: string; downbeat: string; beat: string }> = {
+  bar: { pip: 'h-2.5 rounded-[2px]', downbeat: 'w-3.5', beat: 'w-2.5' },
+  strip: { row: 'flex-1', pip: 'h-3 rounded-[3px]', downbeat: 'w-4', beat: 'w-3' },
+}
+
 /** Four beat pips; the downbeat is wider. `beat` null means stopped. */
-function Pips({ beat, variant }: { beat: number | null; variant: 'bar' | 'strip' }) {
-  const strip = variant === 'strip'
+function Pips({ beat, variant }: { beat: number | null; variant: TempoModuleProps['variant'] }) {
+  const size = PIPS[variant]
+  const a11y = beat === null ? { 'aria-hidden': true } : { role: 'img', 'aria-label': `Beat ${beat} of 4` }
   return (
-    <span
-      role={beat === null ? undefined : 'img'}
-      aria-label={beat === null ? undefined : `Beat ${beat} of 4`}
-      aria-hidden={beat === null ? true : undefined}
-      className={cx('flex items-center gap-1.25', strip && 'flex-1')}
-    >
+    <span {...a11y} className={cx('flex items-center gap-1.25', size.row)}>
       {[1, 2, 3, 4].map((n) => (
         <span
           key={n}
-          className={cx(
-            strip ? 'h-3 rounded-[3px]' : 'h-2.5 rounded-[2px]',
-            n === 1 ? (strip ? 'w-4' : 'w-3.5') : strip ? 'w-3' : 'w-2.5',
-            n === beat ? 'bg-text shadow-[0_0_10px] shadow-text/55' : 'bg-control-hover',
-          )}
+          className={cx(size.pip, n === 1 ? size.downbeat : size.beat, n === beat ? 'bg-text shadow-[0_0_10px] shadow-text/55' : 'bg-control-hover')}
         />
       ))}
     </span>

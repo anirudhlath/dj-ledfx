@@ -16,6 +16,20 @@
   line-height: var(--tw-leading, var(--text-control--line-height));
 }
 
+/*
+ * §6: touch targets are at least --touch-min. This grows a control's hit area to it and leaves the
+ * face alone: ::before overhangs the padding box on each axis that falls short, and never shrinks
+ * a larger control.
+ */
+@utility touch-target {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: min(0px, calc((100% - var(--touch-min)) / 2));
+  }
+}
+
 @layer base {
   /* The reference pages keep the browser's normal line height (Tailwind's preflight sets 1.5). */
   html {
