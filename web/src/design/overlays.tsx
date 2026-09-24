@@ -16,7 +16,10 @@ interface OverlayProps {
 
 export interface TooltipProps {
   content: ReactNode
-  /** The element it describes. Give icon-only triggers an aria-label: the tooltip is visual only. */
+  /**
+   * The element it describes. Give icon-only triggers an aria-label: the tooltip is visual only,
+   * and its popup stays out of the accessibility tree.
+   */
   children: ReactElement
   side?: 'top' | 'right' | 'bottom' | 'left'
 }
@@ -28,7 +31,10 @@ export function Tooltip({ content, children, side = 'top' }: TooltipProps) {
       <BaseTooltip.Trigger render={children} />
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side={side} sideOffset={6} className="z-50">
-          <BaseTooltip.Popup className="flex max-w-72 flex-col gap-1.25 rounded-tile border border-line-strong bg-raised/94 px-3 py-2.5 text-meta text-text shadow-tip">
+          <BaseTooltip.Popup
+            aria-hidden="true"
+            className="flex max-w-72 flex-col gap-1.25 rounded-tile border border-line-strong bg-raised/94 px-3 py-2.5 text-meta text-text shadow-tip"
+          >
             {content}
           </BaseTooltip.Popup>
         </BaseTooltip.Positioner>

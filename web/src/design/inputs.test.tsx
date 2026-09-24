@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { Field } from './field'
 import { Select } from './select'
@@ -26,6 +26,17 @@ describe('Select', () => {
     await userEvent.click(await screen.findByRole('option', { name: 'Cut' }))
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('cut'))
     expect(trigger).toHaveTextContent('Cut')
+  })
+
+  // axe's region rule: page content sits in a landmark. The list opens inside its trigger's
+  // landmark, or inside the dialog the trigger is in, rather than loose in <body>.
+  it.each([
+    ['main', (select: ReactNode) => <main>{select}</main>],
+    ['dialog', (select: ReactNode) => <div role="dialog" aria-label="Put a look on">{select}</div>],
+  ])('opens its list inside the %s around it', async (role, wrap) => {
+    render(wrap(<Transition />))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Transition' }))
+    expect(screen.getByRole(role === 'main' ? 'main' : 'dialog')).toContainElement(await screen.findByRole('listbox'))
   })
 })
 

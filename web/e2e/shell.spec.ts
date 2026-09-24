@@ -26,6 +26,12 @@ async function open(page: Page, path: string) {
   await page.evaluate(() => document.fonts.ready)
 }
 
+/** axe's findings for the page as it stands, one line per rule. */
+async function axeViolations(page: Page): Promise<string[]> {
+  const { violations } = await new AxeBuilder({ page }).analyze()
+  return violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)
+}
+
 /** How far a Tempo group's children reach past its right edge; 0 or less means TAP stays inside. */
 function spill(group: Locator): Promise<number> {
   return group.evaluate((element) => {
@@ -57,8 +63,46 @@ for (const path of ROUTES) {
   test(`axe passes on ${path}`, async ({ page }) => {
     await open(page, path)
     await expect(page.locator('h1')).toBeVisible()
-    const { violations } = await new AxeBuilder({ page }).analyze()
-    expect(violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([])
+    expect(await axeViolations(page)).toEqual([])
+  })
+}
+
+// Decision 12: /system is there to run axe over every primitive. Base UI mounts an overlay's popup
+// only while it's open, so each one is opened before axe looks.
+const OVERLAYS: { name: string; open: (page: Page) => Promise<void>; popup: (page: Page) => Locator }[] = [
+  {
+    name: 'Tooltip',
+    open: (page) => page.getByRole('button', { name: 'Fit', exact: true }).hover(),
+    popup: (page) => page.getByText('Fit the home', { exact: true }),
+  },
+  {
+    name: 'Popover',
+    open: (page) => page.getByRole('button', { name: 'Popover', exact: true }).click(),
+    popup: (page) => page.getByRole('dialog', { name: 'Needs attention', exact: true }),
+  },
+  {
+    name: 'Dialog',
+    open: (page) => page.getByRole('button', { name: 'Dialog', exact: true }).click(),
+    popup: (page) => page.getByRole('dialog', { name: 'Restore from a file', exact: true }),
+  },
+  {
+    name: 'Sheet',
+    open: (page) => page.getByRole('button', { name: 'Sheet', exact: true }).click(),
+    popup: (page) => page.getByRole('dialog', { name: 'Put a look on', exact: true }),
+  },
+  {
+    name: 'Select',
+    open: (page) => page.getByRole('combobox', { name: 'Transition', exact: true }).click(),
+    popup: (page) => page.getByRole('listbox'),
+  },
+]
+
+for (const overlay of OVERLAYS) {
+  test(`axe passes with the ${overlay.name} open`, async ({ page }) => {
+    await open(page, '/next/system')
+    await overlay.open(page)
+    await expect(overlay.popup(page)).toBeVisible()
+    expect(await axeViolations(page)).toEqual([])
   })
 }
 

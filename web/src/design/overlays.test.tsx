@@ -15,6 +15,18 @@ describe('overlays', () => {
     expect(await screen.findByText('Fit the home')).toBeVisible()
   })
 
+  // The tooltip is visual only: the trigger's own label names it, and the popup, loose in <body>,
+  // stays out of the accessibility tree (and out of axe's region rule).
+  it('keeps the Tooltip out of the accessibility tree', async () => {
+    render(
+      <Tooltip content="Fit the home">
+        <button type="button" aria-label="Fit">x</button>
+      </Tooltip>,
+    )
+    await userEvent.tab()
+    expect((await screen.findByText('Fit the home')).closest('[aria-hidden="true"]')).not.toBeNull()
+  })
+
   it('Popover opens as a named dialog and closes on Escape', async () => {
     render(
       <Popover trigger={<Button>Open</Button>} title="Needs attention">
