@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from loguru import logger
 
-from dj_ledfx.devices.capabilities import FirmwareRejected, LightReading
+from dj_ledfx.devices.capabilities import FirmwareRejected, LightReading, try_read
 from dj_ledfx.effects.registry import get_strip_effect_classes
 from dj_ledfx.looks.builtin import classic_look_id
 from dj_ledfx.looks.model import (
@@ -881,11 +881,8 @@ class ZoneManager:
         self._applied[device_id] = key
 
     async def _read(self, adapter: DeviceAdapter) -> LightReading:
-        try:
-            return await adapter.read_light()
-        except Exception as exc:
-            logger.warning("Couldn't read {}: {}", adapter.device_info.name, exc)
-            return LightReading(power=None, colour=None)
+        reading = await try_read(adapter)
+        return reading if reading is not None else LightReading.UNKNOWN
 
     async def _capture(self, adapter: DeviceAdapter) -> bytes:
         """Capture a light before dj-ledfx first changes it (spec §4.3). b"": control is

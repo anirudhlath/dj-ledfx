@@ -93,6 +93,17 @@ async def test_a_lost_connection_is_no_answer_not_a_refusal() -> None:
         await adapter.set_mode("Rainbow Wave", brightness=1.0)
 
 
+async def test_a_poll_asks_the_sdk_server_once() -> None:
+    device = _device()
+    adapter = await _connected(device)
+    await adapter.read_light()
+    await adapter.active_mode_name()  # the effect check right after the poll's read
+    assert device.update.call_count == 1
+    await adapter.prepare_stream()  # a change: the next read asks again
+    await adapter.active_mode_name()
+    assert device.update.call_count == 2
+
+
 async def test_active_mode_name_reads_the_device() -> None:
     device = _device()
     adapter = await _connected(device)

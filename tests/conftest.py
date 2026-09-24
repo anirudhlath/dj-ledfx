@@ -108,6 +108,7 @@ class FakeLight(DeviceAdapter):
         self.firmware_running = False
         self.reject_firmware = False
         self.silent_firmware = False  # firmware commands get no answer
+        self.silent = False  # reads get no answer (it's unplugged, or cut at the wall)
         self.calls: list[tuple[str, object]] = []
         self.frames: list[NDArray[np.uint8]] = []
         self.record_frames = False  # log frames in calls too, to check what came first
@@ -172,6 +173,8 @@ class FakeLight(DeviceAdapter):
 
     async def read_light(self) -> LightReading:
         self.io()
+        if self.silent:
+            raise NoAnswer(f"{self.name} didn't answer")
         return LightReading(power=self.power, colour=self.colour)
 
     async def set_power(self, on: bool) -> None:

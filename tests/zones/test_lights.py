@@ -132,23 +132,27 @@ async def test_lights_changed_is_emitted_only_on_change(make_home: HomeFactory) 
     assert len(events) == 2
 
 
-async def test_a_lifx_light_that_misses_three_polls_is_reported_offline(
+async def test_a_light_that_misses_three_reads_is_reported_offline(
     make_home: HomeFactory,
 ) -> None:
     bulb = FakeLight("bulb")
-    lamp = FakeLight("lamp", caps=LAMP, power=None, colour=None)  # Govee that can't say
-    home = await make_home([bulb, lamp], [])
+    lamp = FakeLight("lamp", caps=LAMP)
+    shy = FakeLight("shy", power=None, colour=None)  # answers, but can't say its power
+    home = await make_home([bulb, lamp, shy], [])
     monitor = _monitor(home)
     offline: list[DeviceOfflineEvent] = []
     home.bus.subscribe(DeviceOfflineEvent, offline.append)
-    bulb.power, bulb.colour = None, None  # a LIFX light that no longer answers
+    bulb.silent = lamp.silent = True  # they no longer answer, whatever their protocol
 
     for _ in range(2):
         await monitor.poll_idle_lights()
     assert offline == []
     await monitor.poll_idle_lights()
 
-    assert offline == [DeviceOfflineEvent(stable_id="bulb", name="bulb")]
+    assert offline == [
+        DeviceOfflineEvent(stable_id="bulb", name="bulb"),
+        DeviceOfflineEvent(stable_id="lamp", name="lamp"),
+    ]
 
 
 async def test_run_polls_zone_lights_often_and_idle_lights_rarely(

@@ -52,8 +52,8 @@ class GoveeAdapterBase(DeviceAdapter):
 
     async def read_light(self) -> LightReading:
         state = await self._status()
-        if state is None:
-            return LightReading(power=None, colour=None)
+        if state is None:  # HA holds UDP 4002, or no status came back: it can't say
+            return LightReading.UNKNOWN
         return LightReading(power=bool(state.on_off), colour=(state.r, state.g, state.b))
 
     async def set_power(self, on: bool) -> None:

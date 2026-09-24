@@ -142,9 +142,10 @@ class LifxAdapterBase(DeviceAdapter):
         return (hue, sat, bri, kelvin), power != 0, label
 
     async def read_light(self) -> LightReading:
+        """Raises NoAnswer when the light is silent: unplugged, or cut at the wall."""
         state = await self._light_state()
         if state is None:
-            return LightReading(power=None, colour=None)
+            raise NoAnswer(f"{self._device_info.name} didn't answer GetColor")
         hsbk, power, _label = state
         return LightReading(power=power, colour=hsbk_to_rgb(hsbk))
 

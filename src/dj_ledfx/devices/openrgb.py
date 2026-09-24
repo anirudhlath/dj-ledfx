@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import time
 from typing import Any
 
 import numpy as np
@@ -27,6 +28,7 @@ except ImportError:
 
 HAS_BRIGHTNESS = 1 << 4  # openrgb.utils.ModeFlags.HAS_BRIGHTNESS
 HAS_PER_LED_COLOR = 1 << 5  # openrgb.utils.ModeFlags.HAS_PER_LED_COLOR
+READ_FRESH_S = 1.0  # a poll's read and its effect check share one device.update()
 
 
 class OpenRGBAdapter(DeviceAdapter):
@@ -47,6 +49,7 @@ class OpenRGBAdapter(DeviceAdapter):
         self._led_count = 0
         self._device_name = ""
         self._modes: tuple[str, ...] = ()
+        self._last_read: tuple[float, tuple[str, list[tuple[int, int, int]]]] | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -81,6 +84,7 @@ class OpenRGBAdapter(DeviceAdapter):
             self._client = client
             self._device = device
             self._modes = tuple(str(mode.name) for mode in device.modes)
+            self._last_read = None
             self._led_count = len(device.colors)
             self._device_name = getattr(device, "name", f"Device {self._device_index}")
 
@@ -161,6 +165,7 @@ class OpenRGBAdapter(DeviceAdapter):
     async def prepare_stream(self) -> None:
         device = self._device
         direct = self._find_mode("direct")
+        self._last_read = None
         if device is not None and direct is not None:
             await asyncio.to_thread(device.set_mode, str(direct.name))
 
@@ -170,6 +175,7 @@ class OpenRGBAdapter(DeviceAdapter):
         mode = self._find_mode(name)
         if device is None or mode is None:
             raise FirmwareRejected(f"{self._device_name} has no mode '{name}'")
+        self._last_read = None
         chosen = copy.copy(mode)
         if int(chosen.flags) & HAS_BRIGHTNESS and chosen.brightness_max is not None:
             low = int(chosen.brightness_min or 0)
@@ -183,10 +189,14 @@ class OpenRGBAdapter(DeviceAdapter):
             raise NoAnswer(f"{self._device_name} didn't take mode '{name}': {exc}") from exc
 
     async def _read(self) -> tuple[str, list[tuple[int, int, int]]] | None:
-        """The active mode's name and the LED colours, fresh from the server."""
+        """The active mode's name and the LED colours from the server, at most
+        READ_FRESH_S old; any change dj-ledfx makes asks afresh."""
         device = self._device
         if device is None:
             return None
+        now = time.monotonic()
+        if self._last_read is not None and now - self._last_read[0] < READ_FRESH_S:
+            return self._last_read[1]
 
         def _update() -> tuple[str, list[tuple[int, int, int]]]:
             device.update()
@@ -194,9 +204,11 @@ class OpenRGBAdapter(DeviceAdapter):
             return str(device.modes[device.active_mode].name), colours
 
         try:
-            return await asyncio.to_thread(_update)
+            read = await asyncio.to_thread(_update)
         except (IndexError, ConnectionError, OSError):
             return None
+        self._last_read = (now, read)
+        return read
 
     async def active_mode_name(self) -> str | None:
         read = await self._read()
@@ -226,6 +238,7 @@ class OpenRGBAdapter(DeviceAdapter):
             return
         if device is None or mode is None:
             return
+        self._last_read = None
 
         def _restore() -> None:
             device.set_mode(str(mode.name))

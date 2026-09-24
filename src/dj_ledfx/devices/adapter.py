@@ -54,8 +54,9 @@ class DeviceAdapter(ABC):
         return DeviceCapabilities(protocol=protocol_of(info.backend or info.device_type))
 
     async def read_light(self) -> LightReading:
-        """Read power and colour without changing anything. Default: unknown."""
-        return LightReading(power=None, colour=None)
+        """Read power and colour without changing anything. Raises when the light doesn't
+        answer. Default: unknown."""
+        return LightReading.UNKNOWN
 
     async def set_power(self, on: bool) -> None:  # noqa: B027
         """Switch the light on or off. Default: the protocol can't, so do nothing."""

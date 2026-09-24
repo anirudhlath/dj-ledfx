@@ -196,7 +196,8 @@ def _pc_device() -> MagicMock:
     return device
 
 
-async def test_openrgb_mode_starts_checks_and_stops() -> None:
+async def test_openrgb_mode_starts_checks_and_stops(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("dj_ledfx.devices.openrgb.READ_FRESH_S", 0.0)  # every check is a poll
     device = _pc_device()
     with patch("dj_ledfx.devices.openrgb.OpenRGBClient") as client_cls:
         client_cls.return_value = MagicMock(devices=[device])

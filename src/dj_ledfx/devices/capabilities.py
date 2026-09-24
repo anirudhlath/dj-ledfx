@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
+
+from loguru import logger
+
+if TYPE_CHECKING:
+    from dj_ledfx.devices.adapter import DeviceAdapter
 
 LightProtocol = Literal["LIFX", "Govee", "OpenRGB"]
 
@@ -24,8 +29,24 @@ class DeviceCapabilities:
 
 @dataclass(frozen=True, slots=True)
 class LightReading:
+    """What a light answered. A light that doesn't answer raises from read_light instead."""
+
+    UNKNOWN: ClassVar[LightReading]  # it answered, but can't say (or can't be read at all)
+
     power: bool | None  # None: the light can't tell us
     colour: tuple[int, int, int] | None  # 8-bit sRGB, None when unknown
+
+
+LightReading.UNKNOWN = LightReading(power=None, colour=None)
+
+
+async def try_read(adapter: DeviceAdapter) -> LightReading | None:
+    """Read a light without changing it. None: it didn't answer, or the read failed."""
+    try:
+        return await adapter.read_light()
+    except Exception as exc:
+        logger.debug("Couldn't read {}: {}", adapter.device_info.name, exc)
+        return None
 
 
 class FirmwareRejected(Exception):

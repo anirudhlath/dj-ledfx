@@ -83,9 +83,10 @@ async def test_read_light_reports_power_and_colour() -> None:
     assert transport.types() == [GET_COLOR]
 
 
-async def test_read_light_is_unknown_when_the_light_is_silent() -> None:
+async def test_read_light_raises_when_the_light_is_silent() -> None:
     transport = FakeLifxTransport(silent=True)
-    assert await _bulb(transport).read_light() == LightReading(power=None, colour=None)
+    with pytest.raises(NoAnswer):
+        await _bulb(transport).read_light()
 
 
 async def test_set_power_sends_set_light_power() -> None:
