@@ -8,6 +8,14 @@ function report(e: unknown) {
   toast.error(e instanceof Error ? e.message : String(e))
 }
 
+async function act(fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn()
+  } catch (e) {
+    report(e)
+  }
+}
+
 /** Zones, looks and what runs; the `running` and `transport` channels keep them current. */
 export function useZones() {
   const [zones, setZones] = useState<Zone[]>([])
@@ -36,23 +44,12 @@ export function useZones() {
     }
   }, [])
 
-  const start = useCallback(async (zoneId: string, lookId: string) => {
-    try {
-      await api.startLook(zoneId, lookId)
-      setRunning((await api.getRunning()).zones)
-    } catch (e) {
-      report(e)
-    }
-  }, [])
-
-  const off = useCallback(async (zoneId: string) => {
-    try {
-      await api.turnOff(zoneId)
-      setRunning((await api.getRunning()).zones)
-    } catch (e) {
-      report(e)
-    }
-  }, [])
+  // The `running` channel pushes what runs after a start or an Off.
+  const start = useCallback(
+    (zoneId: string, lookId: string) => act(() => api.startLook(zoneId, lookId)),
+    []
+  )
+  const off = useCallback((zoneId: string) => act(() => api.turnOff(zoneId)), [])
 
   const setPreviewOnly = useCallback(async (on: boolean) => {
     try {

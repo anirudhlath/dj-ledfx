@@ -14,6 +14,16 @@ import type {
 
 const BASE = "/api"
 
+/** A failed request: the server's `detail`, or the HTTP status. */
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
 async function request(path: string, init?: RequestInit): Promise<Response> {
   const resp = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -21,7 +31,8 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   })
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}))
-    throw new Error((body as { detail?: string }).detail || `HTTP ${resp.status}`)
+    const detail = (body as { detail?: string }).detail
+    throw new ApiError(detail || `HTTP ${resp.status}`, resp.status)
   }
   return resp
 }
@@ -43,10 +54,12 @@ export async function getEffects(): Promise<
 }
 
 export async function getActiveEffect(zoneId: string): Promise<ActiveEffect | null> {
-  const resp = await fetch(`${BASE}/effects/active?${zone(zoneId)}`)
-  if (resp.status === 404) return null // the zone isn't playing a classic effect
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-  return resp.json() as Promise<ActiveEffect>
+  try {
+    return await fetchJson<ActiveEffect>(`/effects/active?${zone(zoneId)}`)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null // no classic effect plays here
+    throw e
+  }
 }
 
 export async function setActiveEffect(

@@ -37,6 +37,46 @@ function describe(zone: RunningZone): string {
   }
 }
 
+interface Option {
+  id: string
+  name: string
+}
+
+function Choice({
+  options,
+  value,
+  placeholder,
+  width,
+  onChange,
+}: {
+  options: Option[]
+  value: string | null
+  placeholder: string
+  width: string
+  onChange: (id: string) => void
+}) {
+  return (
+    <Select
+      items={Object.fromEntries(options.map((option) => [option.id, option.name]))}
+      value={value}
+      onValueChange={(v: string | null) => {
+        if (v !== null) onChange(v)
+      }}
+    >
+      <SelectTrigger className={`h-8 ${width} text-sm`}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.id} value={option.id} className="text-sm">
+            {option.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 /** What starting a look here would take from other running zones (web spec §11.3). */
 function consequence(zone: Zone, zones: Zone[], running: RunningZone[]): string | null {
   const parts: string[] = []
@@ -70,45 +110,23 @@ export function LookPicker({
 
   return (
     <div className="flex items-center gap-3 p-3 bg-card ring-1 ring-foreground/10 rounded-xl">
-      <Select
-        items={Object.fromEntries(zones.map((z) => [z.id, z.name]))}
+      <Choice
+        options={zones}
         value={zoneId}
-        onValueChange={(v: string | null) => {
-          if (v === null) return
+        placeholder="Zone"
+        width="w-44"
+        onChange={(id) => {
           setLookChoice(null)
-          onZoneChange(v)
+          onZoneChange(id)
         }}
-      >
-        <SelectTrigger className="h-8 w-44 text-sm">
-          <SelectValue placeholder="Zone" />
-        </SelectTrigger>
-        <SelectContent>
-          {zones.map((z) => (
-            <SelectItem key={z.id} value={z.id} className="text-sm">
-              {z.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select
-        items={Object.fromEntries(looks.map((look) => [look.id, look.name]))}
+      />
+      <Choice
+        options={looks}
         value={lookId}
-        onValueChange={(v: string | null) => {
-          if (v !== null) setLookChoice(v)
-        }}
-      >
-        <SelectTrigger className="h-8 w-52 text-sm">
-          <SelectValue placeholder="Look" />
-        </SelectTrigger>
-        <SelectContent>
-          {looks.map((look) => (
-            <SelectItem key={look.id} value={look.id} className="text-sm">
-              {look.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        placeholder="Look"
+        width="w-52"
+        onChange={setLookChoice}
+      />
 
       <Button
         size="sm"
