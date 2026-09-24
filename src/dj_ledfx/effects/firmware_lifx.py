@@ -272,6 +272,7 @@ class LifxWaveform(FirmwareEffect):
         self._colour = colour
         self._base = base
         self._waveform = waveform
+        self._rgb: tuple[FloatRGB, FloatRGB] | None = None  # base and colour, read once
 
     def get_params(self) -> dict[str, Any]:
         return {
@@ -290,6 +291,7 @@ class LifxWaveform(FirmwareEffect):
             self._base = str(kwargs["base"])
         if "waveform" in kwargs:
             self._waveform = str(kwargs["waveform"])
+        self._rgb = None  # read the colours again at the next frame
 
     def supports(self, caps: DeviceCapabilities) -> bool:
         return caps.protocol == "LIFX" and caps.colour
@@ -326,8 +328,12 @@ class LifxWaveform(FirmwareEffect):
             v = 1.0 if p < 0.5 else 0.0
         else:
             v = 0.5 - 0.5 * math.cos(2.0 * math.pi * p)
-        base = np.array(hex_to_rgb(self._base), dtype=np.float32)
-        target = np.array(hex_to_rgb(self._colour), dtype=np.float32)
+        if self._rgb is None:
+            self._rgb = (
+                np.array(hex_to_rgb(self._base), dtype=np.float32),
+                np.array(hex_to_rgb(self._colour), dtype=np.float32),
+            )
+        base, target = self._rgb
         out = np.empty((leds.count, 3), dtype=np.float32)
         out[:] = (base + (target - base) * np.float32(v)) / np.float32(255.0)
         return out

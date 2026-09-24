@@ -173,6 +173,15 @@ async def test_waveform_sets_the_base_then_runs_a_transient_waveform() -> None:
     assert await wave.is_running(bulb) is None
 
 
+# E10: the streamed copy reads its colours once, and again after a change.
+def test_the_waveform_copy_follows_a_colour_change() -> None:
+    wave = LifxWaveform(period=4.0, colour="#ff0000", base="#000000", waveform="pulse")
+    leds = build_ledset([LedSource("bulb", 1)])
+    assert np.allclose(wave.emulate(_ctx(0.0), leds), [[1.0, 0.0, 0.0]])
+    wave.set_params(colour="#0000ff")
+    assert np.allclose(wave.emulate(_ctx(0.0), leds), [[0.0, 0.0, 1.0]])
+
+
 def _pc_device() -> MagicMock:
     device = MagicMock()
     device.name = "PC"

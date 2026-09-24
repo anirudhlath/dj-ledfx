@@ -11,6 +11,7 @@ from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.looks.builtin import builtin_looks
+from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
@@ -53,18 +54,20 @@ def test_ring_buffer_find_nearest() -> None:
     assert abs(result.target_time - 100.05) < 0.02
 
 
-def test_ring_buffer_returns_copy() -> None:
+# E5: the ring hands out the frame it holds, and a route's colours are a new 8-bit
+# array, so a send never shares the ring's memory.
+def test_ring_buffer_hands_out_its_frame_and_routes_copy_their_slice() -> None:
     buf = RingBuffer(capacity=10)
-    colors = np.full((5, 3), 42, dtype=np.uint8)
+    colors = np.full((5, 3), 0.5, dtype=np.float32)
     frame = RenderedFrame(colors=colors, target_time=100.0, beat_phase=0.0, bar_phase=0.0)
     buf.write(frame)
+    assert buf.find_nearest(100.0) is frame
 
-    result = buf.find_nearest(100.0)
-    assert result is not None
-    result.colors[0, 0] = 0
-    original = buf.find_nearest(100.0)
-    assert original is not None
-    assert original.colors[0, 0] == 42
+    for led_count in (3, 4):  # the slice's size, and a device with more LEDs
+        sent = DeviceRoute(ring=buf, start=1, stop=4, streaming=True).colors_at(100.0, led_count)
+        assert sent is not None and not np.shares_memory(sent, colors)
+        sent[:] = 0
+    assert np.all(colors == 0.5)
 
 
 def test_ring_buffer_empty_returns_none() -> None:

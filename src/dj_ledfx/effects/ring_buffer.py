@@ -43,12 +43,6 @@ class RingBuffer:
                 best_diff = diff
                 best = frame
 
-        if best is None:
-            return None
-
-        return RenderedFrame(
-            colors=best.colors.copy(),
-            target_time=best.target_time,
-            beat_phase=best.beat_phase,
-            bar_phase=best.bar_phase,
-        )
+        # The frame itself: nothing changes a written frame, and a route converts its
+        # slice into a new 8-bit array before any send.
+        return best

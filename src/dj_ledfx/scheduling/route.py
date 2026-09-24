@@ -14,10 +14,13 @@ if TYPE_CHECKING:
 
 
 def to_device_colors(colors: FloatRGB, led_count: int) -> NDArray[np.uint8]:
-    """Clamp float RGB and convert it to 8 bits: the one conversion, at send."""
-    out = np.zeros((led_count, 3), dtype=np.uint8)
+    """Clamp float RGB and convert it to 8 bits: the one conversion, at send. Always a
+    new array, padded with black when the device has more LEDs than the slice."""
     count = min(led_count, colors.shape[0])
     scaled = np.clip(colors[:count], 0.0, 1.0) * np.float32(255.0) + np.float32(0.5)
+    if count == led_count:
+        return scaled.astype(np.uint8)
+    out = np.zeros((led_count, 3), dtype=np.uint8)
     out[:count] = scaled.astype(np.uint8)
     return out
 
