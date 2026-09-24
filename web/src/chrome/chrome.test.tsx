@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AttentionButton } from './attention-button'
 import { ConnectionIndicator } from './connection-indicator'
-import { HERO_CHROME } from './state'
+import { HERO_CHROME, type Connection, type TempoState } from './state'
 import { PreviewOnlySwitch } from './preview-only-switch'
 import { TempoModule } from './tempo-module'
 
@@ -30,7 +30,8 @@ describe('TempoModule', () => {
   })
 
   it('stale: the source turns signal, is named stale, and the pips stop', () => {
-    render(<TempoModule variant="bar" source="internal" bpm={118} beat={2} bar={7} stale />)
+    const stale: TempoState = { source: 'internal', bpm: 118, beat: 2, bar: 7, stale: true }
+    render(<TempoModule variant="bar" {...stale} />)
     const source = screen.getByRole('button', { name: 'Internal, stale' })
     expect(source).toHaveClass('text-signal')
     expect(screen.queryByRole('img')).toBeNull()
@@ -78,23 +79,26 @@ describe('AttentionButton', () => {
 })
 
 describe('ConnectionIndicator', () => {
+  const live: Connection = { status: 'live', fps: 60 }
+  const reconnecting: Connection = { status: 'reconnecting', attempt: 3 }
+
   it('shows Live with the frame rate', () => {
-    render(<ConnectionIndicator variant="bar" connection={{ status: 'live', fps: 60 }} />)
+    render(<ConnectionIndicator variant="bar" connection={live} />)
     expect(screen.getByText('Live')).toBeInTheDocument()
     expect(screen.getByText('60 fps')).toHaveClass('num')
   })
 
   it('shows Reconnecting with the attempt, in signal', () => {
-    render(<ConnectionIndicator variant="bar" connection={{ status: 'reconnecting', attempt: 3 }} />)
+    render(<ConnectionIndicator variant="bar" connection={reconnecting} />)
     const status = screen.getByRole('status')
     expect(status).toHaveTextContent('Reconnecting· try 3')
     expect(status).toHaveClass('text-signal')
   })
 
   it('shows nothing on phone while live, and a reconnect pill otherwise', () => {
-    const { container, rerender } = render(<ConnectionIndicator variant="header" connection={{ status: 'live', fps: 60 }} />)
+    const { container, rerender } = render(<ConnectionIndicator variant="header" connection={live} />)
     expect(container).toBeEmptyDOMElement()
-    rerender(<ConnectionIndicator variant="header" connection={{ status: 'reconnecting', attempt: 3 }} />)
+    rerender(<ConnectionIndicator variant="header" connection={reconnecting} />)
     expect(screen.getByRole('status')).toHaveTextContent('Reconnecting · try 3')
   })
 })

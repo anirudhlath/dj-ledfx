@@ -2,18 +2,7 @@ import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import type { IconName } from '@/design/icons'
 import { formatBpm } from '@/lib/format'
-
-export type TempoSource = 'prodjlink' | 'music' | 'internal'
-
-export interface TempoState {
-  source: TempoSource
-  bpm: number
-  /** Beat in the bar, 1–4. */
-  beat: number
-  bar: number
-  /** §6.2: the source stopped updating; its label turns signal and the pips stop. */
-  stale: boolean
-}
+import type { TempoSource, TempoState } from './state'
 
 export interface TempoModuleProps extends TempoState {
   /** "bar": the desktop top bar. "strip": the phone strip under the header on Live. */

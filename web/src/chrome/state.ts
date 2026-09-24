@@ -1,5 +1,18 @@
-import type { Connection } from './connection-indicator'
-import type { TempoState } from './tempo-module'
+// The chrome's data. F1's stores produce these types; the components in this folder draw them.
+
+export type TempoSource = 'prodjlink' | 'music' | 'internal'
+
+export interface TempoState {
+  source: TempoSource
+  bpm: number
+  /** Beat in the bar, 1–4. */
+  beat: number
+  bar: number
+  /** §6.2: the source stopped updating; its label turns signal and the pips stop. */
+  stale: boolean
+}
+
+export type Connection = { status: 'live'; fps: number } | { status: 'reconnecting'; attempt: number }
 
 export interface AttentionCounts {
   total: number

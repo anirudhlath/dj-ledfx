@@ -1,6 +1,5 @@
 import { Icon } from '@/design/icon'
-
-export type Connection = { status: 'live'; fps: number } | { status: 'reconnecting'; attempt: number }
+import type { Connection } from './state'
 
 export interface ConnectionIndicatorProps {
   connection: Connection
