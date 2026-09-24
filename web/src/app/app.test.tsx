@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setViewportWidth } from '@/test/viewport'
+import { routerBasename } from './router'
 import { routes } from './routes'
 
 /** The real routes, with one test-only page beside the real pages. */
@@ -20,7 +21,8 @@ function Broken(): never {
 }
 
 function renderApp(path: string, routeList: RouteObject[] = routes) {
-  const router = createMemoryRouter(routeList, { basename: '/next', initialEntries: [path] })
+  // Vite's base, as main.tsx gets it. Vitest reports '/' for import.meta.env.BASE_URL, so it's literal.
+  const router = createMemoryRouter(routeList, { basename: routerBasename('/next/'), initialEntries: [path] })
   render(<RouterProvider router={router} />)
   return router
 }
