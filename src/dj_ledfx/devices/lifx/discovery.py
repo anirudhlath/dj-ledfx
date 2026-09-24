@@ -1,4 +1,3 @@
-# src/dj_ledfx/devices/lifx/discovery.py
 from __future__ import annotations
 
 import asyncio
@@ -9,27 +8,44 @@ from loguru import logger
 
 from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
+from dj_ledfx.devices.lifx.base import LifxAdapterBase
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
+from dj_ledfx.devices.lifx.packet import (
+    GET_COLOR,
+    GET_DEVICE_CHAIN,
+    GET_EXTENDED_COLOR_ZONES,
+    LIGHT_STATE,
+    STATE_DEVICE_CHAIN,
+    STATE_EXTENDED_COLOR_ZONES,
+    parse_light_state,
+    parse_state_device_chain,
+    parse_state_extended_color_zones,
+)
+from dj_ledfx.devices.lifx.products import lifx_capabilities, lifx_product
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
-from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
+from dj_ledfx.devices.lifx.tile_chain import DEFAULT_TILE_SIZE, LifxTileChainAdapter
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord, TileInfo
 from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.types import DeviceInfo
 
-# Product IDs with matrix capability (tiles, candle)
-MATRIX_PRODUCTS = {55, 57, 68, 70}
-# Product IDs with extended linear zones (strip, beam, neon)
-MULTIZONE_PRODUCTS = {31, 32, 38, 52, 70, 89, 90, 91, 94}
+LIFX_PORT = 56700
 
 
 class LifxBackend(DeviceBackend):
     def __init__(self) -> None:
         self._transport: LifxTransport | None = None
+        self._names: dict[str, str] = {}  # name -> stable_id, so two lights never share one
 
     def is_enabled(self, config: AppConfig) -> bool:
         return config.devices.lifx.enabled
+
+    async def _open_transport(self) -> LifxTransport:
+        if self._transport is None or not self._transport.is_open:
+            self._transport = LifxTransport()
+            await self._transport.open()
+        return self._transport
 
     async def discover(
         self,
@@ -38,170 +54,83 @@ class LifxBackend(DeviceBackend):
         skip_ids: set[str] | None = None,
     ) -> list[DiscoveredDevice]:
         lifx = config.devices.lifx
-        # Reuse existing transport if already open (e.g. multi-wave discovery)
-        if self._transport is None or not self._transport.is_open:
-            self._transport = LifxTransport()
-            await self._transport.open()
-
+        transport = await self._open_transport()
         results: list[DiscoveredDevice] = []
         setup_tasks: list[asyncio.Task[None]] = []
-        transport = self._transport  # local ref for closure
 
         async def _setup_device(record: LifxDeviceRecord) -> None:
+            if skip_ids and f"lifx:{record.mac.hex()}" in skip_ids:
+                return
             try:
-                stable_id = f"lifx:{record.mac.hex()}"
-                if skip_ids and stable_id in skip_ids:
-                    return
-
-                adapter = await self._create_adapter(record, config)
-                tracker = self._create_tracker(config)
-                await adapter.connect()
+                device = await self._setup(record, config)
             except Exception:
                 logger.exception(
-                    "Failed to set up LIFX device {} (product={})",
-                    record.ip,
-                    record.product,
+                    "Failed to set up LIFX device {} (product={})", record.ip, record.product
                 )
                 return
-
-            # Register for RTT probing
-            transport.register_device(
-                record,
-                rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
-            )
-
-            device = DiscoveredDevice(
-                adapter=adapter,
-                tracker=tracker,
-                max_fps=lifx.max_fps,
-            )
+            if device is None:
+                return
             results.append(device)
             if on_found is not None:
                 on_found(device)
 
         def _on_record(record: LifxDeviceRecord) -> None:
-            task = asyncio.create_task(_setup_device(record))
-            setup_tasks.append(task)
+            setup_tasks.append(asyncio.create_task(_setup_device(record)))
 
-        await self._transport.discover(
-            timeout_s=lifx.discovery_timeout_s,
-            on_record=_on_record,
-        )
-
-        # Wait for any in-flight setup tasks that outlasted the scan timeout
+        await transport.discover(timeout_s=lifx.discovery_timeout_s, on_record=_on_record)
         if setup_tasks:
             await asyncio.gather(*setup_tasks, return_exceptions=True)
 
         logger.info("LIFX discovery found {} devices", len(results))
-
-        # Start probing after all devices registered
         if results:
-            self._transport.start_probing(interval_s=lifx.echo_probe_interval_s)
-
+            transport.start_probing(interval_s=lifx.echo_probe_interval_s)
         return results
 
     async def connect_known(
         self, device_rows: list[dict[str, Any]], config: AppConfig
     ) -> list[DiscoveredDevice]:
-        """Directly connect to known LIFX devices from DB without network scanning."""
-        lifx_rows = [r for r in device_rows if r.get("backend") == "lifx"]
-        if not lifx_rows:
+        """Reconnect known LIFX lights by asking each one what it is.
+
+        A light that doesn't answer stays a ghost until discovery finds it.
+        """
+        rows = [row for row in device_rows if row.get("backend") == "lifx"]
+        if not rows:
             return []
+        transport = await self._open_transport()
 
-        # Open transport if not already open
-        if self._transport is None or not self._transport.is_open:
-            self._transport = LifxTransport()
-            await self._transport.open()
+        async def _reconnect(row: dict[str, Any]) -> DiscoveredDevice | None:
+            ip = row.get("ip") or ""
+            mac_hex = (row.get("mac") or "").replace(":", "")
+            if not ip or not mac_hex:
+                logger.warning(
+                    "Skipping known LIFX device '{}': missing ip or mac", row.get("name")
+                )
+                return None
+            mac = bytes.fromhex(mac_hex)
+            version = await transport.query_version(mac, ip, LIFX_PORT)
+            if version is None:
+                logger.info(
+                    "Known LIFX device '{}' didn't answer; it stays offline", row.get("name")
+                )
+                return None
+            vendor, product = version
+            record = LifxDeviceRecord(
+                mac=mac, ip=ip, port=LIFX_PORT, vendor=vendor, product=product
+            )
+            return await self._setup(record, config)
 
-        lifx_cfg = config.devices.lifx
+        outcomes = await asyncio.gather(*(_reconnect(row) for row in rows), return_exceptions=True)
         results: list[DiscoveredDevice] = []
-        for row in lifx_rows:
-            try:
-                ip = row.get("ip") or ""
-                mac_hex = row.get("mac") or ""
-                device_type = row.get("device_type") or "lifx_bulb"
-                led_count = row.get("led_count") or 1
-                name = row.get("name") or f"LIFX ({ip})"
-                stable_id = row.get("id") or f"lifx:{mac_hex}"
-
-                if not ip or not mac_hex:
-                    logger.warning("Skipping known LIFX device '{}': missing ip or mac", name)
-                    continue
-
-                # MAC bytes: mac_hex is a 12-char hex string (no colons)
-                mac_hex_clean = mac_hex.replace(":", "")
-                target_mac = bytes.fromhex(mac_hex_clean)
-
-                str_addr = f"{ip}:56700"
-                info = DeviceInfo(
-                    name=name,
-                    device_type=device_type,
-                    led_count=led_count,
-                    address=str_addr,
-                    mac=mac_hex,
-                    stable_id=stable_id,
-                    backend="lifx",
-                )
-
-                adapter: LifxBulbAdapter | LifxStripAdapter | LifxTileChainAdapter
-                if device_type == "lifx_tile":
-                    tile_count = max(1, led_count // 64)
-                    adapter = LifxTileChainAdapter(
-                        self._transport,
-                        info,
-                        target_mac,
-                        tile_count=tile_count,
-                        kelvin=lifx_cfg.default_kelvin,
-                    )
-                elif device_type == "lifx_strip":
-                    adapter = LifxStripAdapter(
-                        self._transport,
-                        info,
-                        target_mac,
-                        zone_count=led_count,
-                        kelvin=lifx_cfg.default_kelvin,
-                    )
-                else:
-                    adapter = LifxBulbAdapter(
-                        self._transport,
-                        info,
-                        target_mac,
-                        kelvin=lifx_cfg.default_kelvin,
-                    )
-
-                await adapter.connect()
-
-                tracker = self._create_tracker(config)
-
-                # Register for RTT probing
-                mock_record = LifxDeviceRecord(
-                    ip=ip,
-                    port=56700,
-                    mac=target_mac,
-                    vendor=1,
-                    product=0,
-                )
-                self._transport.register_device(
-                    mock_record,
-                    rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
-                )
-
-                results.append(
-                    DiscoveredDevice(
-                        adapter=adapter,
-                        tracker=tracker,
-                        max_fps=lifx_cfg.max_fps,
-                    )
-                )
-                logger.info("Reconnected known LIFX device '{}' at {}", name, ip)
-            except Exception:
-                logger.exception(
+        for row, outcome in zip(rows, outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                logger.opt(exception=outcome).error(
                     "Failed to reconnect known LIFX device '{}'", row.get("name", "?")
                 )
-
+            elif outcome is not None:
+                logger.info("Reconnected known LIFX device '{}'", outcome.adapter.device_info.name)
+                results.append(outcome)
         if results:
-            self._transport.start_probing(interval_s=lifx_cfg.echo_probe_interval_s)
-
+            transport.start_probing(interval_s=config.devices.lifx.echo_probe_interval_s)
         return results
 
     async def shutdown(self) -> None:
@@ -209,109 +138,129 @@ class LifxBackend(DeviceBackend):
             await self._transport.close()
             self._transport = None
 
-    async def _create_adapter(
-        self,
-        record: LifxDeviceRecord,
-        config: AppConfig,
-    ) -> LifxBulbAdapter | LifxStripAdapter | LifxTileChainAdapter:
-        from dj_ledfx.devices.lifx.packet import (
-            LifxPacket,
-            parse_state_device_chain,
-            parse_state_extended_color_zones,
+    async def _setup(self, record: LifxDeviceRecord, config: AppConfig) -> DiscoveredDevice | None:
+        assert self._transport is not None
+        adapter = await self._create_adapter(record, config)
+        if adapter is None:
+            return None
+        tracker = self._create_tracker(config)
+        await adapter.connect()
+        self._transport.register_device(
+            record,
+            rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
+        )
+        return DiscoveredDevice(
+            adapter=adapter, tracker=tracker, max_fps=config.devices.lifx.max_fps
         )
 
+    async def _create_adapter(
+        self, record: LifxDeviceRecord, config: AppConfig
+    ) -> LifxAdapterBase | None:
         assert self._transport is not None
-        addr = (record.ip, record.port)
-        target = record.mac + b"\x00\x00"
-        str_addr = f"{record.ip}:{record.port}"
+        transport = self._transport
+        firmware = await transport.query_host_firmware(record.mac, record.ip, record.port)
+        product = lifx_product(record.product, firmware, record.vendor)
+        if product is not None and product.relays:
+            logger.debug("Skipping LIFX switch {} ({})", record.ip, product.name)
+            return None
+        caps = lifx_capabilities(record.product, firmware, record.vendor)
+        stable_id = f"lifx:{record.mac.hex()}"
+        label = await self._query_label(record)
+        name = self._unique_name(label or f"{caps.model} ({record.ip})", stable_id)
+        kelvin = config.devices.lifx.default_kelvin
 
-        lifx = config.devices.lifx
-        mac_hex = record.mac.hex()
-        if record.product in MATRIX_PRODUCTS:
-            pkt = LifxPacket(
-                tagged=False,
-                source=self._transport.source_id,
-                target=target,
-                ack_required=False,
-                res_required=True,
-                sequence=self._transport.next_sequence() % 256,
-                msg_type=701,
-                payload=b"",
-            )
-            resp = await self._transport.request_response(pkt, addr, response_type=702)
-            tile_count = 5
-            tiles: list[TileInfo] = []
-            if resp is not None and resp.msg_type == 702:
-                tiles = parse_state_device_chain(resp.payload)
-                tile_count = len(tiles) if tiles else 5
-            led_count = tile_count * 64
-            info = DeviceInfo(
-                f"LIFX Tile ({record.ip})",
-                "lifx_tile",
+        def _info(device_type: str, led_count: int) -> DeviceInfo:
+            return DeviceInfo(
+                name,
+                device_type,
                 led_count,
-                str_addr,
-                mac=mac_hex,
-                stable_id=f"lifx:{mac_hex}",
+                f"{record.ip}:{record.port}",
+                mac=record.mac.hex(),
+                stable_id=stable_id,
                 backend="lifx",
             )
-            adapter = LifxTileChainAdapter(
-                self._transport,
-                info,
+
+        if caps.matrix:
+            tiles = await self._query_chain(record)
+            if not tiles:
+                logger.warning("LIFX '{}' didn't report its matrix size; assuming 8x8 tiles", name)
+            tile_count = len(tiles) or (5 if caps.chain else 1)
+            width, height = DEFAULT_TILE_SIZE
+            led_count = sum(t.width * t.height for t in tiles) or tile_count * width * height
+            return LifxTileChainAdapter(
+                transport,
+                _info("lifx_tile", led_count),
                 record.mac,
                 tile_count=tile_count,
-                kelvin=lifx.default_kelvin,
+                kelvin=kelvin,
+                tiles=tiles,
+                caps=caps,
             )
-            adapter._tiles = tiles
-            return adapter
-
-        elif record.product in MULTIZONE_PRODUCTS:
-            pkt = LifxPacket(
-                tagged=False,
-                source=self._transport.source_id,
-                target=target,
-                ack_required=False,
-                res_required=True,
-                sequence=self._transport.next_sequence() % 256,
-                msg_type=511,
-                payload=b"",
-            )
-            resp = await self._transport.request_response(pkt, addr, response_type=512)
-            zone_count = 1
-            if resp is not None and resp.msg_type == 512:
-                zone_count, _, _ = parse_state_extended_color_zones(resp.payload)
-            info = DeviceInfo(
-                f"LIFX Strip ({record.ip})",
-                "lifx_strip",
-                zone_count,
-                str_addr,
-                mac=mac_hex,
-                stable_id=f"lifx:{mac_hex}",
-                backend="lifx",
-            )
+        if caps.multizone and caps.extended_multizone:
+            zones = await self._query_zone_count(record)
             return LifxStripAdapter(
-                self._transport,
-                info,
+                transport,
+                _info("lifx_strip", zones),
                 record.mac,
-                zone_count=zone_count,
-                kelvin=lifx.default_kelvin,
+                zone_count=zones,
+                kelvin=kelvin,
+                caps=caps,
             )
+        if caps.multizone:
+            logger.info("LIFX '{}' has no extended multizone; it plays as one colour", name)
+        return LifxBulbAdapter(
+            transport, _info("lifx_bulb", 1), record.mac, kelvin=kelvin, caps=caps
+        )
 
-        else:
-            info = DeviceInfo(
-                f"LIFX Bulb ({record.ip})",
-                "lifx_bulb",
-                1,
-                str_addr,
-                mac=mac_hex,
-                stable_id=f"lifx:{mac_hex}",
-                backend="lifx",
-            )
-            return LifxBulbAdapter(
-                self._transport,
-                info,
-                record.mac,
-                kelvin=lifx.default_kelvin,
-            )
+    def _unique_name(self, wanted: str, stable_id: str) -> str:
+        owner = self._names.setdefault(wanted, stable_id)
+        if owner == stable_id:
+            return wanted
+        name = f"{wanted} ({stable_id[-4:]})"
+        self._names[name] = stable_id
+        return name
+
+    async def _query_label(self, record: LifxDeviceRecord) -> str | None:
+        assert self._transport is not None
+        request = self._transport.make_request(record.mac, GET_COLOR)
+        reply = await self._transport.request_response(
+            request, (record.ip, record.port), LIGHT_STATE, 0.5
+        )
+        if reply is None or reply.msg_type != LIGHT_STATE:
+            return None
+        try:
+            *_colour, label = parse_light_state(reply.payload)
+        except ValueError:
+            return None
+        return label.strip() or None
+
+    async def _query_chain(self, record: LifxDeviceRecord) -> list[TileInfo]:
+        assert self._transport is not None
+        request = self._transport.make_request(record.mac, GET_DEVICE_CHAIN)
+        reply = await self._transport.request_response(
+            request, (record.ip, record.port), STATE_DEVICE_CHAIN
+        )
+        if reply is None or reply.msg_type != STATE_DEVICE_CHAIN:
+            return []
+        try:
+            return parse_state_device_chain(reply.payload)
+        except ValueError:
+            return []
+
+    async def _query_zone_count(self, record: LifxDeviceRecord) -> int:
+        assert self._transport is not None
+        request = self._transport.make_request(record.mac, GET_EXTENDED_COLOR_ZONES)
+        reply = await self._transport.request_response(
+            request, (record.ip, record.port), STATE_EXTENDED_COLOR_ZONES
+        )
+        if reply is None or reply.msg_type != STATE_EXTENDED_COLOR_ZONES:
+            logger.warning("LIFX {} didn't report its zone count; assuming 1", record.ip)
+            return 1
+        try:
+            zone_count, _index, _colours = parse_state_extended_color_zones(reply.payload)
+        except ValueError:
+            return 1
+        return max(1, zone_count)
 
     def _create_tracker(self, config: AppConfig) -> LatencyTracker:
         lifx = config.devices.lifx
