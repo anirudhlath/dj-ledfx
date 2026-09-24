@@ -163,13 +163,27 @@ test('resizing across 768 px swaps the chrome without a reload', async ({ page }
   expect(await page.evaluate(() => 'stillHere' in window)).toBe(true)
 })
 
+// Every product page. /next/system is a specimen, and some of its rows are wider than a phone.
+const PAGES = ROUTES.filter((path) => path !== '/next/system')
+
 for (const width of [320, 360, 390, 768, 1024, 1199, 1440]) {
   test(`nothing scrolls sideways at ${width} px`, async ({ page }, { project }) => {
     test.skip(project.name !== 'desktop', 'one project is enough; this test sets the width')
     await page.setViewportSize({ width, height: 900 })
-    await open(page, '/next/live')
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    for (const path of PAGES) {
+      await open(page, path)
+      await expect(page.locator('h1')).toBeVisible()
+      // <main> scrolls by itself (overflow-y: auto makes overflow-x auto too), so the document's
+      // width alone can't see a page that's wider than <main>.
+      const [documentWidth, mainOverflow] = await page.evaluate(() => {
+        const main = document.querySelector('main')!
+        return [document.documentElement.scrollWidth, main.scrollWidth - main.clientWidth]
+      })
+      expect(documentWidth, `${path}: the document`).toBeLessThanOrEqual(width)
+      expect(mainOverflow, `${path}: <main>`).toBeLessThanOrEqual(0)
+    }
     if (width < 768) {
+      await open(page, '/next/live')
       // The phone tempo strip is fluid: TAP must stay inside it down to 320 px (WCAG reflow).
       expect(await spill(page.getByRole('group', { name: 'Tempo' }))).toBeLessThanOrEqual(0)
     }
