@@ -69,6 +69,8 @@ class DeviceStats:
     send_fps: float
     frames_dropped: int
     connected: bool = True
+    device_id: str = ""  # the light's stable id
+    dropped_pct: float = 0.0  # share of frames dropped over the last second, while streaming
 
 
 @dataclass(frozen=True, slots=True)

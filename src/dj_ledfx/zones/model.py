@@ -104,3 +104,8 @@ class PreviewOnlyChanged:
 @dataclass(frozen=True, slots=True)
 class LightsChanged:
     """A light's status, power or colour changed."""
+
+
+@dataclass(frozen=True, slots=True)
+class AttentionChanged:
+    """The attention list changed."""

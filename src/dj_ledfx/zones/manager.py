@@ -42,7 +42,7 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
     ZonesChanged,
 )
-from dj_ledfx.zones.runtime import LightMode, ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import LightMode, ZoneLight, ZoneRuntime, ZoneState
 from dj_ledfx.zones.store import new_group_id
 
 if TYPE_CHECKING:
@@ -142,6 +142,7 @@ class ZoneManager:
         self._power: dict[str, bool | None] = {}
         self._deferred_power_on: set[str] = set()
         self._epochs = 0
+        self._seen_states: dict[str, ZoneState] = {}
         self._lock = asyncio.Lock()
         routes.set_preview_only(preview_only)
 
@@ -277,6 +278,21 @@ class ZoneManager:
             info = self._info(zone_id, running)
         self._event_bus.emit(ZonesChanged())
         return info
+
+    def watch_states(self) -> None:
+        """Emit ZonesChanged when a running zone changed state by itself (crashed, slow).
+
+        A zone not seen yet counts as running: every zone starts that way, or its start
+        already announced it.
+        """
+        states = {
+            zone_id: self._info(zone_id, running).state
+            for zone_id, running in self._running.items()
+        }
+        changed = any(self._seen_states.get(z, "running") != state for z, state in states.items())
+        self._seen_states = states
+        if changed:
+            self._event_bus.emit(ZonesChanged())
 
     async def resume(self) -> None:
         """Bring back the zones that were running when the app stopped (spec §4.3, §6.4).
