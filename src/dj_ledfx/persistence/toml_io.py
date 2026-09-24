@@ -31,6 +31,7 @@ import tomli_w
 from loguru import logger
 
 from dj_ledfx.looks.builtin import builtin_looks
+from dj_ledfx.looks.store import STAR_LOOK, UPSERT_LOOK
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.types import clamp01
 from dj_ledfx.zones.model import Assignment, ZoneKind, ZoneRecord
@@ -327,13 +328,6 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
     await _import_zones_and_looks(db, data)
 
 
-_UPSERT_LOOK = (
-    "INSERT INTO looks (id, body, created_at, updated_at) VALUES (?, ?, ?, ?) "
-    "ON CONFLICT(id) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at"
-)
-_STAR = "INSERT INTO look_stars (look_id) VALUES (?) ON CONFLICT(look_id) DO NOTHING"
-
-
 async def _export_zones_and_looks(db: StateDB) -> dict[str, Any]:
     """Zones, saved looks, stars and what each zone runs (M1)."""
     store = ZoneStore(db)
@@ -437,11 +431,11 @@ async def _import_zones_and_looks(db: StateDB, data: dict[str, Any]) -> None:
             logger.warning("import_toml: skipped look '{}' (built in, or no body)", look_id)
             continue
         created_at = str(info.get("created_at", now))
-        await db.write(_UPSERT_LOOK, (look_id, body, created_at, str(info.get("updated_at", now))))
+        await db.write(UPSERT_LOOK, (look_id, body, created_at, str(info.get("updated_at", now))))
 
     stars = data.get("stars", {})
     starred = _strings(stars.get("looks") if isinstance(stars, dict) else None)
-    await db.write_many([(_STAR, (look_id,)) for look_id in starred])
+    await db.write_many([(STAR_LOOK, (look_id,)) for look_id in starred])
 
     known = {zone.id for zone in await store.load_zones()}
     for zone_id, info in _tables(data, "running").items():

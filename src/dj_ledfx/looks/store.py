@@ -24,6 +24,15 @@ if TYPE_CHECKING:
     from dj_ledfx.persistence.state_db import StateDB
 
 
+# Written here and by the state import (persistence/toml_io.py).
+INSERT_LOOK = "INSERT INTO looks (id, body, created_at, updated_at) VALUES (?, ?, ?, ?)"
+UPSERT_LOOK = (
+    f"{INSERT_LOOK} ON CONFLICT(id) "
+    "DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at"
+)
+STAR_LOOK = "INSERT INTO look_stars (look_id) VALUES (?) ON CONFLICT(look_id) DO NOTHING"
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -72,10 +81,7 @@ class LookStore:
         saved = replace(look, id=f"mine-{uuid.uuid4().hex[:8]}", built_in=False)
         validate_look(saved)
         now = _now()
-        await self._db.write(
-            "INSERT INTO looks (id, body, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (saved.id, look_body(saved), now, now),
-        )
+        await self._db.write(INSERT_LOOK, (saved.id, look_body(saved), now, now))
         self._saved[saved.id] = saved
         return saved
 
@@ -104,10 +110,7 @@ class LookStore:
     async def set_starred(self, look_id: str, starred: bool) -> None:
         self.get(look_id)
         if starred:
-            await self._db.write(
-                "INSERT INTO look_stars (look_id) VALUES (?) ON CONFLICT(look_id) DO NOTHING",
-                (look_id,),
-            )
+            await self._db.write(STAR_LOOK, (look_id,))
             self._stars.add(look_id)
         else:
             await self._db.write("DELETE FROM look_stars WHERE look_id=?", (look_id,))

@@ -18,11 +18,10 @@ from dj_ledfx.looks.model import (
     LookNotFoundError,
     look_to_dict,
 )
-from dj_ledfx.looks.store import LookStore
+from dj_ledfx.looks.store import INSERT_LOOK, LookStore
 from dj_ledfx.persistence.state_db import StateDB
 
 BUILT_INS = len(builtin_looks())
-INSERT_LOOK = "INSERT INTO looks (id, body, created_at, updated_at) VALUES (?, ?, ?, ?)"
 
 
 @pytest_asyncio.fixture
