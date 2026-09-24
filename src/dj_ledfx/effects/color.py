@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from dj_ledfx.types import FloatRGB
 
 
 def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -13,6 +18,13 @@ def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
 
 def rgb_to_hex(r: int, g: int, b: int) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def to_float_rgb(colours: NDArray[np.uint8]) -> FloatRGB:
+    """8-bit colours as the 0..1 floats that field effects render."""
+    out = colours.astype(np.float32)
+    out *= np.float32(1.0 / 255.0)
+    return out
 
 
 def hsv_to_rgb_array(

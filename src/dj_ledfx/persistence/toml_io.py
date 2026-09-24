@@ -32,6 +32,7 @@ from loguru import logger
 
 from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.types import clamp01
 from dj_ledfx.zones.model import Assignment, ZoneKind, ZoneRecord
 from dj_ledfx.zones.store import ZoneStore
 
@@ -417,7 +418,7 @@ def _assignment(zone_id: str, info: dict[str, Any]) -> Assignment | None:
         zone_id=zone_id,
         look_id=look_id,
         look_json=look,
-        brightness=min(max(float(brightness), 0.0), 1.0),
+        brightness=clamp01(float(brightness)),
         lights=_strings(info.get("lights")),
         started_at=started_at if started_at.tzinfo else started_at.replace(tzinfo=UTC),
     )

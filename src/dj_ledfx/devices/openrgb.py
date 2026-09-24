@@ -17,7 +17,7 @@ from dj_ledfx.devices.capabilities import (
     LightReading,
     NoAnswer,
 )
-from dj_ledfx.types import DeviceInfo
+from dj_ledfx.types import DeviceInfo, clamp01
 
 try:
     from openrgb import OpenRGBClient
@@ -180,7 +180,7 @@ class OpenRGBAdapter(DeviceAdapter):
         if int(chosen.flags) & HAS_BRIGHTNESS and chosen.brightness_max is not None:
             low = int(chosen.brightness_min or 0)
             high = int(chosen.brightness_max)
-            chosen.brightness = round(low + (high - low) * max(0.0, min(1.0, brightness)))
+            chosen.brightness = round(low + (high - low) * clamp01(brightness))
         try:
             await asyncio.to_thread(device.set_mode, chosen)
         except ValueError as exc:

@@ -9,8 +9,8 @@ import numpy as np
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected
 from dj_ledfx.devices.openrgb import OpenRGBAdapter
-from dj_ledfx.effects.color import hsv_to_rgb_array
-from dj_ledfx.effects.firmware import FirmwareEffect, Params
+from dj_ledfx.effects.color import hsv_to_rgb_array, to_float_rgb
+from dj_ledfx.effects.firmware import FirmwareEffect, Params, require_adapter
 from dj_ledfx.effects.params import EffectParam
 
 if TYPE_CHECKING:
@@ -24,9 +24,7 @@ COPY_PERIOD_S = 8.0
 
 
 def _openrgb(adapter: DeviceAdapter) -> OpenRGBAdapter:
-    if not isinstance(adapter, OpenRGBAdapter):
-        raise FirmwareRejected(f"{adapter.device_info.name} isn't an OpenRGB device")
-    return adapter
+    return require_adapter(adapter, OpenRGBAdapter, "an OpenRGB device")
 
 
 class OpenrgbMode(FirmwareEffect):
@@ -87,6 +85,4 @@ class OpenrgbMode(FirmwareEffect):
             out[:, 0] = np.float32(level)
             return out
         hues = np.mod(leds.local_u.astype(np.float64) - ctx.t / COPY_PERIOD_S, 1.0)
-        out = hsv_to_rgb_array(hues, 1.0, 1.0).astype(np.float32)
-        out *= np.float32(1.0 / 255.0)
-        return out
+        return to_float_rgb(hsv_to_rgb_array(hues, 1.0, 1.0))

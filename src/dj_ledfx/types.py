@@ -9,6 +9,11 @@ RGB = tuple[int, int, int]
 FloatRGB = NDArray[np.float32]  # shape (n_leds, 3), linear 0..1 per channel
 
 
+def clamp01(value: float) -> float:
+    """A brightness or fraction held within 0..1."""
+    return max(0.0, min(1.0, value))
+
+
 @dataclass(frozen=True, slots=True)
 class DeviceInfo:
     name: str

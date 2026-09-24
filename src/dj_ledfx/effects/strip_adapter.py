@@ -8,8 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-
+from dj_ledfx.effects.color import to_float_rgb
 from dj_ledfx.effects.context import to_beat_context
 from dj_ledfx.effects.field import FieldEffect
 
@@ -34,7 +33,4 @@ class StripAdapter(FieldEffect, register=False):
         self.inner.reseed(seed)
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
-        colors = self.inner.render(to_beat_context(ctx), leds.count)
-        out = colors.astype(np.float32)
-        out *= np.float32(1.0 / 255.0)
-        return out
+        return to_float_rgb(self.inner.render(to_beat_context(ctx), leds.count))

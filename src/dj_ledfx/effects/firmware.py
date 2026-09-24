@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
+from dj_ledfx.devices.capabilities import FirmwareRejected
 from dj_ledfx.effects.base import Effect
 
 if TYPE_CHECKING:
@@ -16,6 +17,14 @@ if TYPE_CHECKING:
     from dj_ledfx.types import FloatRGB
 
 Params = Mapping[str, Any]
+A = TypeVar("A")
+
+
+def require_adapter(adapter: DeviceAdapter, cls: type[A], what: str) -> A:
+    """The adapter as the kind a firmware effect drives; FirmwareRejected if it isn't one."""
+    if not isinstance(adapter, cls):
+        raise FirmwareRejected(f"{adapter.device_info.name} isn't {what}")
+    return adapter
 
 
 class FirmwareEffect(Effect):
