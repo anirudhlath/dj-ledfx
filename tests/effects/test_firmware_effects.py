@@ -6,10 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from lifx_fakes import FakeLifxTransport
+from conftest import render_ctx
+from lifx_fakes import FakeLifxTransport, lifx_bulb, lifx_candle, lifx_strip
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected
-from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.packet import (
     SET_COLOR,
     SET_EXTENDED_COLOR_ZONES,
@@ -20,20 +20,14 @@ from dj_ledfx.devices.lifx.packet import (
     TileEffectType,
     Waveform,
 )
-from dj_ledfx.devices.lifx.strip import LifxStripAdapter
-from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
-from dj_ledfx.devices.lifx.types import TileInfo
 from dj_ledfx.devices.openrgb import HAS_BRIGHTNESS, OpenRGBAdapter
-from dj_ledfx.effects.context import NO_SIGNALS, RenderContext
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.firmware_lifx import LifxFlame, LifxMorph, LifxMove, LifxWaveform
 from dj_ledfx.effects.firmware_openrgb import OpenrgbMode
 from dj_ledfx.effects.ledset import LedSource, build_ledset
 from dj_ledfx.effects.registry import get_effect_class, get_effect_schemas
 from dj_ledfx.spatial.geometry import MatrixGeometry, TileLayout
-from dj_ledfx.types import DeviceInfo
 
-MAC = b"\xd0\x73\xd5\x00\x00\x01"
 CANDLE = DeviceCapabilities(protocol="LIFX", model="LIFX Candle C", matrix=True)
 NEON = DeviceCapabilities(protocol="LIFX", multizone=True, extended_multizone=True)
 BULB = DeviceCapabilities(protocol="LIFX")
@@ -42,38 +36,6 @@ GOVEE = DeviceCapabilities(protocol="Govee")
 PC = DeviceCapabilities(protocol="OpenRGB", openrgb_modes=("Direct", "Static", "Rainbow Wave"))
 PC_PLAIN = DeviceCapabilities(protocol="OpenRGB", openrgb_modes=("Direct", "Static"))
 KINDS = ["lifx_flame", "lifx_morph", "lifx_move", "lifx_waveform", "openrgb_mode"]
-
-
-def _info(kind: str, leds: int) -> DeviceInfo:
-    return DeviceInfo(
-        "Light", f"lifx_{kind}", leds, "10.0.0.5:56700", stable_id="lifx:1", backend="lifx"
-    )
-
-
-def _candle(transport: FakeLifxTransport) -> LifxTileChainAdapter:
-    tile = TileInfo(user_x=0.0, user_y=0.0, width=5, height=6, accel_x=0, accel_y=0, accel_z=0)
-    return LifxTileChainAdapter(transport, _info("tile", 30), MAC, tiles=[tile])  # type: ignore[arg-type]
-
-
-def _strip(transport: FakeLifxTransport) -> LifxStripAdapter:
-    return LifxStripAdapter(transport, _info("strip", 12), MAC, zone_count=12)  # type: ignore[arg-type]
-
-
-def _bulb(transport: FakeLifxTransport) -> LifxBulbAdapter:
-    return LifxBulbAdapter(transport, _info("bulb", 1), MAC)  # type: ignore[arg-type]
-
-
-def _ctx(t: float) -> RenderContext:
-    return RenderContext(
-        t=t,
-        dt=1 / 60,
-        beat_phase=0.0,
-        bar_phase=0.0,
-        bpm=120.0,
-        beat_index=0,
-        bar_index=0,
-        signals=NO_SIGNALS,
-    )
 
 
 def test_firmware_kinds_are_registered_but_not_offered_as_strip_effects() -> None:
@@ -109,7 +71,7 @@ def test_openrgb_mode_can_ask_for_one_mode() -> None:
 
 async def test_flame_sets_a_warm_colour_at_the_zone_brightness_then_starts() -> None:
     transport = FakeLifxTransport()
-    candle = _candle(transport)
+    candle = lifx_candle(transport)
     flame = LifxFlame(period=5.0)
 
     await flame.start(candle, flame.start_params(0.5))
@@ -129,17 +91,17 @@ async def test_flame_sets_a_warm_colour_at_the_zone_brightness_then_starts() -> 
 async def test_flame_is_rejected_by_a_bulb_and_by_a_refusing_light() -> None:
     flame = LifxFlame()
     with pytest.raises(FirmwareRejected):
-        await flame.start(_bulb(FakeLifxTransport()), flame.start_params(1.0))
+        await flame.start(lifx_bulb(FakeLifxTransport()), flame.start_params(1.0))
     with pytest.raises(FirmwareRejected):
         await flame.start(
-            _candle(FakeLifxTransport(unhandled={SET_TILE_EFFECT})), flame.start_params(1.0)
+            lifx_candle(FakeLifxTransport(unhandled={SET_TILE_EFFECT})), flame.start_params(1.0)
         )
 
 
 async def test_morph_sends_its_palette_scaled_by_brightness() -> None:
     transport = FakeLifxTransport()
     morph = LifxMorph(period=6.0, palette=["#ff0000", "#0000ff"])
-    await morph.start(_candle(transport), morph.start_params(0.25))
+    await morph.start(lifx_candle(transport), morph.start_params(0.25))
     effect, speed, palette = transport.tile_effect
     assert (effect, speed) == (TileEffectType.MORPH, 6000)
     assert [colour[2] for colour in palette] == [pytest.approx(65535 * 0.25, abs=2)] * 2
@@ -148,7 +110,7 @@ async def test_morph_sends_its_palette_scaled_by_brightness() -> None:
 async def test_move_paints_a_gradient_then_starts_moving() -> None:
     transport = FakeLifxTransport(zones=[(0, 0, 0, 3500)] * 12)
     move = LifxMove(period=8.0, reverse=True)
-    strip = _strip(transport)
+    strip = lifx_strip(transport, zones=12)
     await move.start(strip, move.start_params(1.0))
     assert transport.types() == [SET_EXTENDED_COLOR_ZONES, SET_MULTIZONE_EFFECT]
     assert transport.multizone_effect == (MultiZoneEffectType.MOVE, 8000, True)
@@ -161,7 +123,7 @@ async def test_move_paints_a_gradient_then_starts_moving() -> None:
 async def test_waveform_sets_the_base_then_runs_a_transient_waveform() -> None:
     transport = FakeLifxTransport()
     wave = LifxWaveform(period=4.0, waveform="triangle")
-    bulb = _bulb(transport)
+    bulb = lifx_bulb(transport)
     await wave.start(bulb, wave.start_params(1.0))
     assert transport.types() == [SET_COLOR, SET_WAVEFORM]
     payload = transport.last(SET_WAVEFORM).payload
@@ -177,9 +139,9 @@ async def test_waveform_sets_the_base_then_runs_a_transient_waveform() -> None:
 def test_the_waveform_copy_follows_a_colour_change() -> None:
     wave = LifxWaveform(period=4.0, colour="#ff0000", base="#000000", waveform="pulse")
     leds = build_ledset([LedSource("bulb", 1)])
-    assert np.allclose(wave.emulate(_ctx(0.0), leds), [[1.0, 0.0, 0.0]])
+    assert np.allclose(wave.emulate(render_ctx(0.0), leds), [[1.0, 0.0, 0.0]])
     wave.set_params(colour="#0000ff")
-    assert np.allclose(wave.emulate(_ctx(0.0), leds), [[0.0, 0.0, 1.0]])
+    assert np.allclose(wave.emulate(render_ctx(0.0), leds), [[0.0, 0.0, 1.0]])
 
 
 def _pc_device() -> MagicMock:
@@ -236,9 +198,9 @@ def test_emulations_are_finite_in_range_and_repeatable(kind: str) -> None:
             LedSource("neon", 12),
         ]
     )
-    first = effect.emulate(_ctx(10.0), leds)  # type: ignore[attr-defined]
-    again = effect.emulate(_ctx(10.0), leds)  # type: ignore[attr-defined]
-    later = effect.emulate(_ctx(11.3), leds)  # type: ignore[attr-defined]
+    first = effect.emulate(render_ctx(10.0), leds)  # type: ignore[attr-defined]
+    again = effect.emulate(render_ctx(10.0), leds)  # type: ignore[attr-defined]
+    later = effect.emulate(render_ctx(11.3), leds)  # type: ignore[attr-defined]
     assert first.shape == (leds.count, 3)
     assert first.dtype == np.float32
     assert np.isfinite(first).all()
@@ -250,6 +212,6 @@ def test_emulations_are_finite_in_range_and_repeatable(kind: str) -> None:
 def test_flame_copy_is_hotter_at_the_bottom() -> None:
     leds = build_ledset([LedSource("lamp", 20)])  # a vertical strip, first LED at the bottom
     flame = LifxFlame()
-    frames = [flame.emulate(_ctx(t / 7), leds) for t in range(30)]
+    frames = [flame.emulate(render_ctx(t / 7), leds) for t in range(30)]
     heat = np.mean([frame.sum(axis=1) for frame in frames], axis=0)
     assert heat[:5].mean() > heat[-5:].mean()

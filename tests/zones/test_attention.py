@@ -5,8 +5,8 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, timedelta
 
 import pytest
-from conftest import FakeLight
-from zone_home import START, Home, HomeFactory
+from conftest import FakeLight, device_stats
+from zone_home import START, Home, HomeFactory, zone_record
 
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext
@@ -16,7 +16,7 @@ from dj_ledfx.looks.model import Layer, Look
 from dj_ledfx.types import DeviceStats, FloatRGB
 from dj_ledfx.zones.attention import AttentionFeed, AttentionItem
 from dj_ledfx.zones.lights import LightMonitor
-from dj_ledfx.zones.model import AttentionChanged, ZoneRecord
+from dj_ledfx.zones.model import AttentionChanged
 
 
 class Exploding(FieldEffect, register=False):
@@ -37,21 +37,6 @@ SPARKS = Look(
     category="ambient",
     layers=(Layer(id="f", name="Spark field", type="field", kind="exploding"),),
 )
-
-
-def _zone(zone_id: str, name: str, *lights: str) -> ZoneRecord:
-    return ZoneRecord(id=zone_id, name=name, lights=lights)
-
-
-def _stats(device_id: str, dropped_pct: float) -> DeviceStats:
-    return DeviceStats(
-        device_name=device_id,
-        effective_latency_ms=20.0,
-        send_fps=55.0,
-        frames_dropped=0,
-        device_id=device_id,
-        dropped_pct=dropped_pct,
-    )
 
 
 def _feed(
@@ -77,7 +62,7 @@ async def test_an_offline_zone_light_needs_attention_after_two_minutes(
     make_home: HomeFactory,
 ) -> None:
     rope, spare = FakeLight("rope", name="Rope"), FakeLight("spare", name="Spare")
-    home = await make_home([rope, spare], [_zone("z", "Living room", "rope")])
+    home = await make_home([rope, spare], [zone_record("z", "rope", name="Living room")])
     await home.manager.start("z", home.look("classic-breathe"))
     monitor, feed = _feed(home)
     home.devices.demote_device("rope")
@@ -109,9 +94,9 @@ async def test_crashed_zones_come_first_and_slow_zones_after(make_home: HomeFact
     home = await make_home(
         [FakeLight("a"), FakeLight("b"), FakeLight("c")],
         [
-            _zone("desk", "Desk", "a"),
-            _zone("porch", "Porch lights", "b"),
-            _zone("kitchen", "Kitchen", "c"),
+            zone_record("desk", "a", name="Desk"),
+            zone_record("porch", "b", name="Porch lights"),
+            zone_record("kitchen", "c", name="Kitchen"),
         ],
     )
     _, feed = _feed(home)
@@ -153,7 +138,7 @@ async def test_crashed_zones_come_first_and_slow_zones_after(make_home: HomeFact
 async def test_a_crash_reaches_the_running_channel_without_an_attention_tick(
     make_home: HomeFactory,
 ) -> None:
-    home = await make_home([FakeLight("a")], [_zone("desk", "Desk", "a")])
+    home = await make_home([FakeLight("a")], [zone_record("desk", "a", name="Desk")])
     await home.manager.start("desk", SPARKS)
     before = len(home.changes)
 
@@ -170,7 +155,7 @@ async def test_a_light_dropping_frames_for_a_minute_needs_attention(
     make_home: HomeFactory,
 ) -> None:
     home = await make_home([FakeLight("lamp", name="Lamp")], [])
-    stats = [_stats("lamp", 8.0)]
+    stats = [device_stats("lamp", dropped_pct=8.0)]
     _, feed = _feed(home, stats=lambda: stats)
 
     feed.update()
@@ -187,7 +172,7 @@ async def test_a_light_dropping_frames_for_a_minute_needs_attention(
         START,
     )
 
-    stats[0] = _stats("lamp", 2.0)
+    stats[0] = device_stats("lamp", dropped_pct=2.0)
     feed.update()
     assert feed.items() == []
 
@@ -202,7 +187,7 @@ async def test_attention_changed_is_emitted_only_when_the_list_changes(
     home.bus.subscribe(AttentionChanged, events.append)
 
     feed.update()
-    stats.append(_stats("lamp", 9.0))
+    stats.append(device_stats("lamp", dropped_pct=9.0))
     feed.update()  # dropping, but not for a minute yet
     assert events == []
 
@@ -214,7 +199,7 @@ async def test_attention_changed_is_emitted_only_when_the_list_changes(
 
 async def test_run_updates_until_stopped(make_home: HomeFactory) -> None:
     home = await make_home([FakeLight("lamp")], [])
-    stats = [_stats("lamp", 9.0)]
+    stats = [device_stats("lamp", dropped_pct=9.0)]
     _, feed = _feed(home, stats=lambda: stats, interval_s=0.01)
     task = asyncio.create_task(feed.run())
     await asyncio.sleep(0.03)

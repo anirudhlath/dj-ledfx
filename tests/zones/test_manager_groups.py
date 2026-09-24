@@ -4,19 +4,14 @@ import json
 
 import pytest
 from conftest import FakeLight
-from zone_home import GLOW, HomeFactory
+from zone_home import GLOW, HomeFactory, zone_record
 
 from dj_ledfx.looks.model import LookError, LookNotFoundError
 from dj_ledfx.zones.model import (
     ZoneError,
     ZoneNotFoundError,
     ZoneNotRunningError,
-    ZoneRecord,
 )
-
-
-def _zone(zone_id: str, *lights: str) -> ZoneRecord:
-    return ZoneRecord(id=zone_id, name=zone_id.capitalize(), lights=lights)
 
 
 async def test_groups_are_created_renamed_and_deleted(make_home: HomeFactory) -> None:
@@ -57,7 +52,7 @@ async def test_changing_a_running_group_takes_over_and_releases_lights(
 ) -> None:
     a, b = FakeLight("a", captured=b"a0"), FakeLight("b")
     c = FakeLight("c", power=False)
-    home = await make_home([a, b, c], [_zone("other", "c")])
+    home = await make_home([a, b, c], [zone_record("other", "c")])
     group = await home.manager.create_group("Desk", ["a", "b"])
     await home.manager.start("other", home.look("classic-strobe"))
     await home.manager.start(group.id, home.look("classic-breathe"))
@@ -93,7 +88,7 @@ async def test_deleting_a_running_group_turns_it_off_first(make_home: HomeFactor
 async def test_the_effect_deck_starts_and_tunes_a_zones_classic_effect(
     make_home: HomeFactory,
 ) -> None:
-    home = await make_home([FakeLight("a")], [_zone("z", "a")])
+    home = await make_home([FakeLight("a")], [zone_record("z", "a")])
     assert home.manager.classic_layer("z") is None
 
     kind, params = await home.manager.set_classic_effect("z", "breathe", {"min_brightness": 0.1})
@@ -121,7 +116,7 @@ async def test_the_effect_deck_starts_and_tunes_a_zones_classic_effect(
 
 
 async def test_the_effect_deck_refuses_what_it_cannot_play(make_home: HomeFactory) -> None:
-    home = await make_home([FakeLight("a")], [_zone("z", "a")])
+    home = await make_home([FakeLight("a")], [zone_record("z", "a")])
     with pytest.raises(ZoneNotRunningError):
         await home.manager.set_classic_effect("z", None, {"min_brightness": 0.2})
     with pytest.raises(LookNotFoundError):

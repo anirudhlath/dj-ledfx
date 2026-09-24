@@ -17,12 +17,12 @@ from dj_ledfx.devices.capabilities import (
     NoAnswer,
 )
 from dj_ledfx.effects.base import Effect
-from dj_ledfx.effects.context import RenderContext
+from dj_ledfx.effects.context import NO_SIGNALS, RenderContext
 from dj_ledfx.effects.firmware import FirmwareEffect, Params
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.spatial.geometry import DeviceGeometry
-from dj_ledfx.types import DeviceInfo, FloatRGB
+from dj_ledfx.types import DeviceInfo, DeviceStats, FloatRGB
 
 
 class MockDeviceAdapter(DeviceAdapter):
@@ -268,6 +268,36 @@ class GlowFirmware(FirmwareEffect):
 
     def emulate(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         return np.full((leds.count, 3), self.level, dtype=np.float32)
+
+
+def device_stats(
+    device_id: str, *, send_fps: float = 55.0, dropped_pct: float = 0.0
+) -> DeviceStats:
+    """A light's send numbers as the scheduler reports them."""
+    return DeviceStats(
+        device_name=device_id,
+        effective_latency_ms=20.0,
+        send_fps=send_fps,
+        frames_dropped=0,
+        device_id=device_id,
+        dropped_pct=dropped_pct,
+    )
+
+
+def render_ctx(
+    t: float = 1.0, *, beat_phase: float = 0.25, bar_phase: float = 0.5, bpm: float = 128.0
+) -> RenderContext:
+    """A moment to render, with no signals."""
+    return RenderContext(
+        t=t,
+        dt=1 / 60,
+        beat_phase=beat_phase,
+        bar_phase=bar_phase,
+        bpm=bpm,
+        beat_index=0,
+        bar_index=0,
+        signals=NO_SIGNALS,
+    )
 
 
 # The app's effects and GlowFirmware. Every test starts from these, and an effect a test

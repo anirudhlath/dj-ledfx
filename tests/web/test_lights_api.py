@@ -4,26 +4,14 @@ from datetime import timedelta
 from pathlib import Path
 
 from api_home import api_home
-from conftest import FakeLight
+from conftest import FakeLight, device_stats
 from zone_home import GLOW
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
-from dj_ledfx.types import DeviceStats
 from dj_ledfx.zones.model import ZoneRecord
 
 TILE = DeviceCapabilities(protocol="LIFX", model="LIFX Tile", matrix=True, firmware_version="3.70")
 LAMP = DeviceCapabilities(protocol="Govee", model="H6076")
-
-
-def _stats(device_id: str, send_fps: float, dropped_pct: float) -> DeviceStats:
-    return DeviceStats(
-        device_name=device_id,
-        effective_latency_ms=20.0,
-        send_fps=send_fps,
-        frames_dropped=0,
-        device_id=device_id,
-        dropped_pct=dropped_pct,
-    )
 
 
 async def test_lights_come_with_their_status_and_numbers(tmp_path: Path) -> None:
@@ -33,7 +21,12 @@ async def test_lights_come_with_their_status_and_numbers(tmp_path: Path) -> None
     async with api_home(tmp_path, [tile, lamp], zones) as api:
         await api.home.manager.start("desk", GLOW)
         await api.monitor.poll_idle_lights()
-        api.stats.extend([_stats("tile", 0.0, 0.0), _stats("lamp", 39.46, 1.25)])
+        api.stats.extend(
+            [
+                device_stats("tile", send_fps=0.0),
+                device_stats("lamp", send_fps=39.46, dropped_pct=1.25),
+            ]
+        )
 
         resp = await api.client.get("/api/lights")
 

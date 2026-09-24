@@ -4,12 +4,13 @@ from typing import Any
 
 import numpy as np
 import pytest
+from conftest import render_ctx
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.base import Effect, StripEffect
-from dj_ledfx.effects.context import NO_SIGNALS, RenderContext
+from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.fire_storm import FireStorm
 from dj_ledfx.effects.firmware import FirmwareEffect, Params
@@ -24,19 +25,6 @@ from dj_ledfx.effects.strip_adapter import StripAdapter
 from dj_ledfx.types import BeatContext, FloatRGB
 
 CLASSIC = {"beat_pulse", "breathe", "color_chase", "fire_storm", "rainbow_wave", "strobe"}
-
-
-def _ctx(t: float = 1.0) -> RenderContext:
-    return RenderContext(
-        t=t,
-        dt=1 / 60,
-        beat_phase=0.25,
-        bar_phase=0.5,
-        bpm=128.0,
-        beat_index=0,
-        bar_index=0,
-        signals=NO_SIGNALS,
-    )
 
 
 class _Ramp(StripEffect, register=False):
@@ -119,7 +107,7 @@ def test_unknown_kinds_raise_key_error() -> None:
 
 def test_strip_adapter_plays_the_strip_along_the_leds_in_order() -> None:
     leds = build_ledset([LedSource("a", 3), LedSource("b", 2)])
-    colors = StripAdapter(_Ramp()).render(_ctx(), leds)
+    colors = StripAdapter(_Ramp()).render(render_ctx(), leds)
     assert colors.shape == (5, 3)
     assert colors.dtype == np.float32
     assert np.allclose(colors[:, 0], np.linspace(0, 255, 5).astype(np.uint8) / 255.0)

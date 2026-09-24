@@ -39,6 +39,11 @@ BREATHE_AND_GLOW = Look(
 START = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
 
 
+def zone_record(zone_id: str, *lights: str, name: str | None = None) -> ZoneRecord:
+    """A zone of these lights, named after its id unless a name is given."""
+    return ZoneRecord(id=zone_id, name=name or zone_id.capitalize(), lights=lights)
+
+
 class FakeHost:
     """Stands in for the engine: it only keeps the runtimes it is given."""
 

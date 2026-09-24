@@ -4,18 +4,14 @@ import asyncio
 from datetime import timedelta
 
 from conftest import FakeLight
-from zone_home import BREATHE_AND_GLOW, GLOW, TILE, Home, HomeFactory
+from zone_home import BREATHE_AND_GLOW, GLOW, TILE, Home, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.events import DeviceOfflineEvent
 from dj_ledfx.zones.lights import LightMonitor
-from dj_ledfx.zones.model import LightsChanged, ZoneRecord
+from dj_ledfx.zones.model import LightsChanged
 
 LAMP = DeviceCapabilities(protocol="Govee")
-
-
-def _zone(zone_id: str, *lights: str) -> ZoneRecord:
-    return ZoneRecord(id=zone_id, name=zone_id.capitalize(), lights=lights)
 
 
 def _monitor(home: Home, **kwargs: float) -> LightMonitor:
@@ -40,7 +36,7 @@ async def test_statuses_follow_zones_power_and_connection(make_home: HomeFactory
     gone = FakeLight("gone", connected=False)
     wobbly = FakeLight("wobbly")
     home = await make_home(
-        [tile, lamp, bulb, spare, gone, wobbly], [_zone("z", "tile", "lamp", "bulb")]
+        [tile, lamp, bulb, spare, gone, wobbly], [zone_record("z", "tile", "lamp", "bulb")]
     )
     monitor = _monitor(home)
     await home.manager.start("z", BREATHE_AND_GLOW)
@@ -68,7 +64,7 @@ async def test_statuses_follow_zones_power_and_connection(make_home: HomeFactory
 async def test_a_light_that_cannot_run_the_firmware_look_shows_its_copy(
     make_home: HomeFactory,
 ) -> None:
-    home = await make_home([FakeLight("lamp", caps=LAMP)], [_zone("z", "lamp")])
+    home = await make_home([FakeLight("lamp", caps=LAMP)], [zone_record("z", "lamp")])
     monitor = _monitor(home)
 
     await home.manager.start("z", GLOW)  # ZonesChanged makes the monitor refresh
@@ -80,7 +76,7 @@ async def test_zone_polls_drop_switched_off_lights_and_resend_stopped_effects(
     make_home: HomeFactory,
 ) -> None:
     tile = FakeLight("tile", caps=TILE)
-    home = await make_home([tile], [_zone("z", "tile")])
+    home = await make_home([tile], [zone_record("z", "tile")])
     monitor = _monitor(home)
     await home.manager.start("z", GLOW)
 
@@ -104,7 +100,7 @@ async def test_a_reading_taken_before_a_start_switched_the_light_on_is_ignored(
     make_home: HomeFactory,
 ) -> None:
     lamp = FakeLight("lamp")
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     monitor = _monitor(home)
     await home.manager.start("z", home.look("classic-breathe"))
     lamp.power = False  # switched off elsewhere
@@ -125,7 +121,7 @@ async def test_a_light_that_did_not_answer_the_poll_is_not_asked_about_its_effec
     make_home: HomeFactory,
 ) -> None:
     tile = FakeLight("tile", caps=TILE)
-    home = await make_home([tile], [_zone("z", "tile")])
+    home = await make_home([tile], [zone_record("z", "tile")])
     monitor = _monitor(home)
     await home.manager.start("z", GLOW)
     tile.silent = True
@@ -140,7 +136,7 @@ async def test_the_lights_of_a_zone_whose_look_cannot_be_read_show_idle(
     make_home: HomeFactory,
 ) -> None:
     lamp = FakeLight("lamp")
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     await home.manager.start("z", home.look("classic-breathe"))
     await home.db.write("UPDATE zone_assignments SET look='{not json' WHERE zone_id='z'")
     home = await home.restart()
@@ -155,7 +151,7 @@ async def test_the_lights_of_a_zone_whose_look_cannot_be_read_show_idle(
 
 async def test_status_since_moves_only_when_the_status_changes(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp")
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     monitor = _monitor(home)
     monitor.refresh()
     first = monitor.state("lamp")
@@ -173,7 +169,7 @@ async def test_status_since_moves_only_when_the_status_changes(make_home: HomeFa
 
 
 async def test_lights_changed_is_emitted_only_on_change(make_home: HomeFactory) -> None:
-    home = await make_home([FakeLight("lamp")], [_zone("z", "lamp")])
+    home = await make_home([FakeLight("lamp")], [zone_record("z", "lamp")])
     monitor = _monitor(home)
     events: list[LightsChanged] = []
     home.bus.subscribe(LightsChanged, events.append)
@@ -214,7 +210,7 @@ async def test_run_polls_zone_lights_often_and_idle_lights_rarely(
 ) -> None:
     a = FakeLight("a")
     spare = FakeLight("spare", colour=(1, 1, 1))
-    home = await make_home([a, spare], [_zone("z", "a")])
+    home = await make_home([a, spare], [zone_record("z", "a")])
     await home.manager.start("z", home.look("classic-breathe"))
     monitor = _monitor(home, zone_poll_s=0.01, idle_poll_s=60.0)
     task = asyncio.create_task(monitor.run())

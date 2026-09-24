@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from conftest import FakeLight
-from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory
+from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.latency.strategies import StaticLatency
@@ -26,14 +26,10 @@ from dj_ledfx.zones.model import (
 LAMP = DeviceCapabilities(protocol="Govee")
 
 
-def _zone(zone_id: str, *lights: str) -> ZoneRecord:
-    return ZoneRecord(id=zone_id, name=zone_id.capitalize(), lights=lights)
-
-
 async def test_start_captures_switches_on_and_streams(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp", power=False)
     bulb = FakeLight("bulb")
-    home = await make_home([lamp, bulb], [_zone("desk", "lamp", "bulb")])
+    home = await make_home([lamp, bulb], [zone_record("desk", "lamp", "bulb")])
 
     result = await home.manager.start("desk", home.look("classic-breathe"))
 
@@ -58,7 +54,7 @@ async def test_start_captures_switches_on_and_streams(make_home: HomeFactory) ->
 
 async def test_a_light_that_cannot_report_its_power_is_switched_on(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp", caps=LAMP, power=None)
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
 
     await home.manager.start("z", home.look("classic-breathe"))
 
@@ -70,7 +66,9 @@ async def test_takeover_keeps_first_capture_and_off_restores_it(make_home: HomeF
     a = FakeLight("a", captured=b"a-before")
     b = FakeLight("b", captured=b"b-before")
     c = FakeLight("c", captured=b"c-before")
-    home = await make_home([a, b, c], [_zone("left", "a", "b"), _zone("right", "b", "c")])
+    home = await make_home(
+        [a, b, c], [zone_record("left", "a", "b"), zone_record("right", "b", "c")]
+    )
     await home.manager.start("left", home.look("classic-breathe"))
     b.captured = b"b-showing-breathe"  # what capturing b again would get now
 
@@ -102,7 +100,7 @@ async def test_takeover_keeps_first_capture_and_off_restores_it(make_home: HomeF
 async def test_a_zone_left_with_no_lights_stops(make_home: HomeFactory) -> None:
     a, b = FakeLight("a"), FakeLight("b")
     everything = ZoneRecord(id="all", name="Everything", all_lights=True)
-    home = await make_home([a, b], [_zone("desk", "a"), everything])
+    home = await make_home([a, b], [zone_record("desk", "a"), everything])
     await home.manager.start("desk", home.look("classic-breathe"))
 
     result = await home.manager.start("all", home.look("classic-strobe"))
@@ -118,7 +116,7 @@ async def test_a_zone_left_with_no_lights_stops(make_home: HomeFactory) -> None:
 async def test_firmware_runs_on_the_lights_that_support_it(make_home: HomeFactory) -> None:
     tile = FakeLight("tile", caps=TILE)
     lamp = FakeLight("lamp", caps=LAMP)
-    home = await make_home([tile, lamp], [_zone("z", "tile", "lamp")])
+    home = await make_home([tile, lamp], [zone_record("z", "tile", "lamp")])
 
     await home.manager.start("z", GLOW)
 
@@ -135,7 +133,7 @@ async def test_firmware_runs_on_the_lights_that_support_it(make_home: HomeFactor
 async def test_a_rejected_firmware_effect_streams_its_copy(make_home: HomeFactory) -> None:
     tile = FakeLight("tile", caps=TILE)
     tile.reject_firmware = True
-    home = await make_home([tile], [_zone("z", "tile")])
+    home = await make_home([tile], [zone_record("z", "tile")])
 
     await home.manager.start("z", GLOW)
 
@@ -150,7 +148,7 @@ async def test_a_firmware_effect_that_got_no_answer_is_tried_again_at_the_next_p
 ) -> None:
     tile = FakeLight("tile", caps=TILE)
     tile.silent_firmware = True
-    home = await make_home([tile], [_zone("z", "tile")])
+    home = await make_home([tile], [zone_record("z", "tile")])
 
     await home.manager.start("z", GLOW)
 
@@ -184,7 +182,7 @@ async def test_the_horizon_follows_connected_streaming_lights_without_a_search(
     make_home: HomeFactory,
 ) -> None:
     tile, lamp, far = _Counted("tile", caps=TILE), _Counted("lamp"), _Counted("far")
-    home = await make_home([tile, lamp, far], [_zone("z", "tile", "lamp", "far")])
+    home = await make_home([tile, lamp, far], [zone_record("z", "tile", "lamp", "far")])
     for device_id, ms in (("tile", 500.0), ("far", 300.0)):
         managed = home.devices.get_by_stable_id(device_id)
         assert managed is not None
@@ -205,7 +203,7 @@ async def test_the_horizon_follows_connected_streaming_lights_without_a_search(
 
 async def test_off_leaves_an_uncapturable_light_alone(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp", captured=None)
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     await home.manager.start("z", home.look("classic-breathe"))
     assert await home.db.load_device_state("lamp") == b""  # control taken, nothing captured
 
@@ -219,7 +217,7 @@ async def test_a_look_switches_on_a_light_switched_off_while_it_was_idle(
     make_home: HomeFactory,
 ) -> None:
     lamp = FakeLight("lamp", captured=None)  # can't be captured, so Off leaves it as it is
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     await home.manager.start("z", home.look("classic-breathe"))
     await home.manager.off("z")
     lamp.power = False  # switched off elsewhere while it was idle
@@ -236,7 +234,7 @@ async def test_off_restores_a_light_switched_off_during_the_look_and_leaves_it_o
     make_home: HomeFactory,
 ) -> None:
     lamp = FakeLight("lamp", captured=b"l0")
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     await home.manager.start("z", home.look("classic-breathe"))
     lamp.power = False
     await home.manager.on_power_reading("lamp", False)  # the light monitor saw it
@@ -252,7 +250,7 @@ async def test_a_light_switched_off_just_before_off_is_never_switched_on(
     make_home: HomeFactory,
 ) -> None:
     lamp = FakeLight("lamp", captured=b"l0")
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     await home.manager.start("z", home.look("classic-breathe"))
     lamp.power = False  # switched off at the wall a moment ago: no poll since
 
@@ -264,7 +262,7 @@ async def test_a_light_switched_off_just_before_off_is_never_switched_on(
 # B20: a light no zone owns forgets its last power reading.
 async def test_a_released_light_forgets_its_power(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp", captured=None)  # Off leaves it as it is
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     await home.manager.start("z", home.look("classic-breathe"))
     assert home.manager.power_of("lamp") is True
 
@@ -294,7 +292,7 @@ async def test_captures_are_saved_together_before_any_light_changes(
 ) -> None:
     seen: list[set[str]] = []
     lights = [_Watched(x, tmp_path / "state.db", seen) for x in ("a", "b", "c")]
-    home = await make_home(lights, [_zone("z", "a", "b", "c")])
+    home = await make_home(lights, [zone_record("z", "a", "b", "c")])
 
     await home.manager.start("z", home.look("classic-breathe"))
 
@@ -303,7 +301,7 @@ async def test_captures_are_saved_together_before_any_light_changes(
 
 async def test_off_is_idempotent_and_unknown_zones_raise(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp")
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     await home.manager.off("z")
     assert lamp.calls == []
 
@@ -320,7 +318,7 @@ async def test_off_is_idempotent_and_unknown_zones_raise(make_home: HomeFactory)
 
 async def test_brightness_is_saved_and_resends_firmware(make_home: HomeFactory) -> None:
     tile = FakeLight("tile", caps=TILE)
-    home = await make_home([tile], [_zone("z", "tile")])
+    home = await make_home([tile], [zone_record("z", "tile")])
     await home.manager.start("z", GLOW)
 
     info = await home.manager.set_brightness("z", 0.4)
@@ -339,7 +337,7 @@ async def test_brightness_is_saved_and_resends_firmware(make_home: HomeFactory) 
 
 async def test_stop_all_restores_every_light(make_home: HomeFactory) -> None:
     a, b = FakeLight("a", captured=b"a0"), FakeLight("b", captured=b"b0")
-    home = await make_home([a, b], [_zone("one", "a"), _zone("two", "b")])
+    home = await make_home([a, b], [zone_record("one", "a"), zone_record("two", "b")])
     await home.manager.start("one", home.look("classic-breathe"))
     await home.manager.start("two", home.look("classic-strobe"))
 
@@ -356,7 +354,7 @@ async def test_restart_gives_a_rejected_firmware_effect_another_try(
 ) -> None:
     tile = FakeLight("tile", caps=TILE)
     tile.reject_firmware = True
-    home = await make_home([tile], [_zone("z", "tile")])
+    home = await make_home([tile], [zone_record("z", "tile")])
     await home.manager.start("z", GLOW)
     tile.reject_firmware = False
 
@@ -370,7 +368,7 @@ async def test_restart_gives_a_rejected_firmware_effect_another_try(
 
 async def test_starting_a_running_zone_again_replaces_its_look(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp", captured=b"l0")
-    home = await make_home([lamp], [_zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("z", "lamp")])
     await home.manager.start("z", home.look("classic-breathe"))
     await home.manager.set_brightness("z", 0.3)
 
@@ -386,7 +384,7 @@ async def test_a_look_starts_its_firmware_even_when_layer_ids_repeat(
     make_home: HomeFactory,
 ) -> None:
     tile = FakeLight("tile", caps=TILE)
-    home = await make_home([tile], [_zone("z", "tile")])
+    home = await make_home([tile], [zone_record("z", "tile")])
     await home.manager.start("z", GLOW)
     brighter = Look(
         id="glow-2",
@@ -405,7 +403,7 @@ async def test_a_zone_with_no_lights_or_a_look_m1_cannot_run_is_refused(
     make_home: HomeFactory,
 ) -> None:
     lamp = FakeLight("lamp")
-    home = await make_home([lamp], [_zone("empty"), _zone("z", "lamp")])
+    home = await make_home([lamp], [zone_record("empty"), zone_record("z", "lamp")])
     with pytest.raises(ZoneError, match="no lights"):
         await home.manager.start("empty", home.look("classic-breathe"))
     home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)

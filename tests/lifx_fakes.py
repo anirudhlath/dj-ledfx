@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Collection, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING
 
+from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.packet import (
     GET_COLOR,
     GET_DEVICE_CHAIN,
@@ -31,7 +34,14 @@ from dj_ledfx.devices.lifx.packet import (
     STATE_VERSION,
     LifxPacket,
 )
+from dj_ledfx.devices.lifx.strip import LifxStripAdapter
+from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
 from dj_ledfx.devices.lifx.transport import LifxTransport
+from dj_ledfx.devices.lifx.types import TileInfo
+from dj_ledfx.types import DeviceInfo
+
+if TYPE_CHECKING:
+    from dj_ledfx.devices.capabilities import DeviceCapabilities
 
 
 class FakeLifxTransport(LifxTransport):
@@ -205,3 +215,40 @@ class FakeLifxTransport(LifxTransport):
             msg_type=msg_type,
             payload=payload,
         )
+
+
+MAC = b"\xd0\x73\xd5\x00\x00\x01"
+
+
+def lifx_info(kind: str, leds: int) -> DeviceInfo:
+    return DeviceInfo(
+        f"LIFX {kind}",
+        f"lifx_{kind}",
+        leds,
+        "10.0.0.5:56700",
+        mac=MAC.hex(),
+        stable_id=f"lifx:{MAC.hex()}",
+        backend="lifx",
+    )
+
+
+def lifx_bulb(transport: FakeLifxTransport) -> LifxBulbAdapter:
+    return LifxBulbAdapter(transport, lifx_info("bulb", 1), MAC)
+
+
+def lifx_strip(transport: FakeLifxTransport, zones: int = 8) -> LifxStripAdapter:
+    return LifxStripAdapter(transport, lifx_info("strip", zones), MAC, zone_count=zones)
+
+
+def lifx_candle(
+    transport: FakeLifxTransport, caps: DeviceCapabilities | None = None
+) -> LifxTileChainAdapter:
+    """A Candle C: one 5x6 matrix."""
+    tile = TileInfo(user_x=0.0, user_y=0.0, width=5, height=6, accel_x=0, accel_y=0, accel_z=0)
+    return LifxTileChainAdapter(transport, lifx_info("tile", 30), MAC, tiles=[tile], caps=caps)
+
+
+def read_hex(path: Path) -> bytes:
+    """A hex fixture: hex digits over any number of lines, "#" lines are comments."""
+    lines = path.read_text().splitlines()
+    return bytes.fromhex("".join(line for line in lines if not line.startswith("#")))
