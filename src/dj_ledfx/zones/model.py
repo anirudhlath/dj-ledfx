@@ -99,3 +99,8 @@ class ZonesChanged:
 @dataclass(frozen=True, slots=True)
 class PreviewOnlyChanged:
     on: bool
+
+
+@dataclass(frozen=True, slots=True)
+class LightsChanged:
+    """A light's status, power or colour changed."""
