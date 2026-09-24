@@ -219,6 +219,39 @@ async def test_a_stopped_firmware_effect_is_sent_again(make_home: HomeFactory) -
     assert tile.firmware_running
 
 
+# B5: asking a light about its effect happens outside the manager's lock.
+async def test_checking_a_firmware_effect_holds_up_no_command(make_home: HomeFactory) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    home = await make_home([tile], [_zone("z", "tile")])
+    await home.manager.start("z", GLOW)
+    tile.firmware_running = False  # it looks stopped when the check asks
+    hold = tile.hold("is_running")
+    check = asyncio.create_task(home.manager.verify_firmware("tile"))
+    await hold.entered.wait()
+
+    await asyncio.wait_for(home.manager.set_brightness("z", 0.5), timeout=1.0)
+    assert tile.names().count("firmware") == 2  # the new brightness went out
+    hold.release.set()
+    await check
+
+    assert tile.names().count("firmware") == 2  # the stale answer sent nothing more
+
+
+# E6: a reading that changes nothing doesn't wait for the lock.
+async def test_an_unchanged_power_reading_waits_for_nothing(make_home: HomeFactory) -> None:
+    lamp, other = FakeLight("lamp"), FakeLight("other")
+    home = await make_home([lamp, other], [_zone("z", "lamp"), _zone("y", "other")])
+    await home.manager.start("z", home.look("classic-breathe"))
+    hold = other.hold("read_light")
+    starting = asyncio.create_task(home.manager.start("y", home.look("classic-breathe")))
+    await hold.entered.wait()  # the start holds the lock while it reads the light
+
+    await asyncio.wait_for(home.manager.on_power_reading("lamp", True), timeout=1.0)
+
+    hold.release.set()
+    await starting
+
+
 async def test_a_light_that_drops_out_rejoins_with_its_effect(make_home: HomeFactory) -> None:
     tile = FakeLight("tile", caps=TILE)
     home = await make_home([tile], [_zone("z", "tile")])

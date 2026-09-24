@@ -99,6 +99,42 @@ async def test_zone_polls_drop_switched_off_lights_and_resend_stopped_effects(
     assert "power" not in tile.names()
 
 
+# B8: a reading older than the last power change is ignored.
+async def test_a_reading_taken_before_a_start_switched_the_light_on_is_ignored(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp")
+    home = await make_home([lamp], [_zone("z", "lamp")])
+    monitor = _monitor(home)
+    await home.manager.start("z", home.look("classic-breathe"))
+    lamp.power = False  # switched off elsewhere
+    hold = lamp.hold("read_light")
+    poll = asyncio.create_task(monitor.poll_zone_lights())
+    await hold.entered.wait()  # the poll has read "off"
+
+    await home.manager.start("z", home.look("classic-strobe"))  # this switches it on
+    hold.release.set()
+    await poll
+
+    assert home.manager.power_of("lamp") is True
+    assert home.routes.routes["lamp"].streaming
+
+
+# B5: no answer, no question about the effect.
+async def test_a_light_that_did_not_answer_the_poll_is_not_asked_about_its_effect(
+    make_home: HomeFactory,
+) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    home = await make_home([tile], [_zone("z", "tile")])
+    monitor = _monitor(home)
+    await home.manager.start("z", GLOW)
+    tile.silent = True
+
+    await monitor.poll_zone_lights()
+
+    assert tile.firmware_checks == 0
+
+
 async def test_status_since_moves_only_when_the_status_changes(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp")
     home = await make_home([lamp], [_zone("z", "lamp")])

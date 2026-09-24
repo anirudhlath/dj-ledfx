@@ -166,8 +166,11 @@ class LightMonitor:
         return found
 
     async def _poll_zone_light(self, device_id: str, managed: ManagedDevice) -> None:
+        version = self._zones.power_version(device_id)
         reading = await self._read(device_id, managed)
-        await self._zones.on_power_reading(device_id, reading.power if reading else None)
+        if reading is None:  # no answer: nothing learned, and no effect worth asking about
+            return
+        await self._zones.on_power_reading(device_id, reading.power, read_after=version)
         await self._zones.verify_firmware(device_id)
 
     async def _read(self, device_id: str, managed: ManagedDevice) -> LightReading | None:

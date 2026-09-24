@@ -11,6 +11,7 @@ is saved as an empty capture: Off leaves it alone rather than guessing (spec §8
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -147,7 +148,9 @@ class ZoneManager:
         self._running: dict[str, _Running] = {}
         self._captured: dict[str, bytes] = {}  # b"": control taken, nothing captured
         self._applied: dict[str, AppliedKey] = {}
-        self._power: dict[str, bool | None] = {}
+        self._power: dict[str, bool | None] = {}  # absent: not read since it was taken
+        self._power_versions: dict[str, int] = {}  # moves on with every change to _power
+        self._versions = itertools.count(1)
         self._deferred_power_on: set[str] = set()
         self._seen_states: dict[str, ZoneState] = {}
         self._lock = asyncio.Lock()
@@ -199,6 +202,11 @@ class ZoneManager:
 
     def power_of(self, device_id: str) -> bool | None:
         return self._power.get(device_id)
+
+    def power_version(self, device_id: str) -> int:
+        """Moves on whenever the manager learns or forgets a light's power. The light
+        monitor notes it before a read, so a reading older than a Start is ignored."""
+        return self._power_versions.get(device_id, 0)
 
     # --- commands ---------------------------------------------------------------------
 
@@ -320,23 +328,36 @@ class ZoneManager:
             await self._sync(self._known_lights(), power_on=deferred)
         self._event_bus.emit(PreviewOnlyChanged(on))
 
-    async def on_power_reading(self, device_id: str, power: bool | None) -> None:
-        """The light monitor read a light's power (every 5 s for zone lights).
+    async def on_power_reading(
+        self, device_id: str, power: bool | None, *, read_after: int | None = None
+    ) -> None:
+        """The light monitor read a light's power (every 5 s for zone lights). read_after is
+        power_version() from before the read: a reading older than a change is ignored.
 
         A light switched off elsewhere drops out of its zone's stream and rejoins when it's
         switched back on (spec §6.4). This never switches a light on.
         """
-        if power is None:
+        if power is None or self._nothing_new(device_id, power, read_after):
             return
         async with self._lock:
-            before = self._power.get(device_id)
-            self._power[device_id] = power
-            if power != before and self.owner_of(device_id) is not None:
+            if self._nothing_new(device_id, power, read_after):
+                return
+            self._set_power(device_id, power)
+            if self.owner_of(device_id) is not None:
                 await self._sync([device_id])
+
+    def _nothing_new(self, device_id: str, power: bool, read_after: int | None) -> bool:
+        if read_after is not None and read_after != self.power_version(device_id):
+            return True  # read before the manager last learned or changed its power
+        return device_id in self._power and self._power[device_id] == power
 
     async def verify_firmware(self, device_id: str) -> None:
         """At each poll of a zone light that's on: apply its look again if the light didn't
-        answer last time, or send its firmware effect again if something stopped it."""
+        answer last time, or send its firmware effect again if something stopped it.
+
+        The light is asked outside the lock, so a slow light holds up no command; its
+        answer counts only if the light still has what it had when it was asked.
+        """
         async with self._lock:
             runtime = self._runtime_of(device_id)
             adapter = self._adapter(device_id)
@@ -347,33 +368,36 @@ class ZoneManager:
                 or self._power.get(device_id) is False
             ):
                 return
-            if self._applied.get(device_id) != _applied_key(runtime, device_id):
+            key = _applied_key(runtime, device_id)
+            if self._applied.get(device_id) != key:
                 await self._sync([device_id])
                 return
             claim = runtime.claim_for(device_id)
             if claim is None:
                 return
             effect = claim[1]
-            try:
-                running = await effect.is_running(adapter)
-            except Exception as exc:
-                logger.debug("Couldn't ask {} about {}: {}", device_id, effect.display_name, exc)
-                return
-            if running is False:  # None: the light can't say, so trust it
-                logger.info(
-                    "{} stopped {}; sending it again",
-                    adapter.device_info.name,
-                    effect.display_name,
-                )
-                del self._applied[device_id]
-                await self._sync([device_id])
+        try:
+            running = await effect.is_running(adapter)
+        except Exception as exc:
+            logger.debug("Couldn't ask {} about {}: {}", device_id, effect.display_name, exc)
+            return
+        if running is not False:  # None: the light can't say, so trust it
+            return
+        async with self._lock:
+            if self._applied.get(device_id) != key:
+                return  # it was applied again meanwhile, or left its zone
+            logger.info(
+                "{} stopped {}; sending it again", adapter.device_info.name, effect.display_name
+            )
+            del self._applied[device_id]
+            await self._sync([device_id])
 
     async def on_device_offline(self, device_id: str) -> None:
         """A light dropped out. It keeps its place in its zone until it's back, but gets
         no frames until it's ready for them again."""
         async with self._lock:
             self._applied.pop(device_id, None)
-            self._power.pop(device_id, None)
+            self._forget_power(device_id)
             await self._sync([device_id])
 
     async def on_device_online(self, device_id: str) -> None:
@@ -385,7 +409,7 @@ class ZoneManager:
         """
         async with self._lock:
             self._applied.pop(device_id, None)
-            self._power.pop(device_id, None)
+            self._forget_power(device_id)
             zone_id = self.owner_of(device_id)
             runtime = self._runtime_of(device_id)
             if zone_id is not None and runtime is not None:
@@ -793,7 +817,7 @@ class ZoneManager:
         if runtime is None or adapter is None or self._held(runtime, adapter):
             return None
         if power_on or device_id not in self._power:  # a look being applied reads it afresh
-            self._power[device_id] = (await self._read(adapter)).power
+            self._set_power(device_id, (await self._read(adapter)).power)
         if device_id in self._captured:
             return None
         state = await self._capture(adapter)
@@ -807,7 +831,7 @@ class ZoneManager:
         if zone_id is None:
             self._routes.set_route(device_id, None)
             self._applied.pop(device_id, None)
-            self._power.pop(device_id, None)  # read afresh when a zone takes it again
+            self._forget_power(device_id)  # read afresh when a zone takes it again
             if adapter is None or self._preview_only:
                 return False
             return await self._release(device_id, adapter)
@@ -903,7 +927,16 @@ class ZoneManager:
         except Exception as exc:
             logger.warning("Couldn't switch on {}: {}", adapter.device_info.name, exc)
             return
-        self._power[device_id] = True
+        self._set_power(device_id, True)
+
+    def _set_power(self, device_id: str, power: bool | None) -> None:
+        self._power[device_id] = power
+        self._power_versions[device_id] = next(self._versions)
+
+    def _forget_power(self, device_id: str) -> None:
+        if device_id in self._power:
+            del self._power[device_id]
+            self._power_versions[device_id] = next(self._versions)
 
     async def _release(self, device_id: str, adapter: DeviceAdapter) -> bool:
         """Put a light back how it was before dj-ledfx took control, once (spec §4.3).

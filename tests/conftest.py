@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 import numpy as np
@@ -78,6 +80,14 @@ class MockDeviceAdapter(DeviceAdapter):
         self.send_frame_calls.append(colors.copy())
 
 
+@dataclass
+class Hold:
+    """A call held part-way: entered is set when it starts, and it ends on release."""
+
+    entered: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+
 class FakeLight(DeviceAdapter):
     """A light that records what the app asks of it. Power and colour are readable."""
 
@@ -109,6 +119,8 @@ class FakeLight(DeviceAdapter):
         self.reject_firmware = False
         self.silent_firmware = False  # firmware commands get no answer
         self.silent = False  # reads get no answer (it's unplugged, or cut at the wall)
+        self.firmware_checks = 0  # how often the app asked whether its effect still runs
+        self._holds: dict[str, Hold] = {}
         self.calls: list[tuple[str, object]] = []
         self.frames: list[NDArray[np.uint8]] = []
         self.record_frames = False  # log frames in calls too, to check what came first
@@ -162,6 +174,17 @@ class FakeLight(DeviceAdapter):
         if self.on_io is not None:
             self.on_io()
 
+    def hold(self, call: str) -> Hold:
+        """Hold the next read_light or is_running part-way, with what it saw already."""
+        self._holds[call] = Hold()
+        return self._holds[call]
+
+    async def wait_if_held(self, call: str) -> None:
+        hold = self._holds.pop(call, None)
+        if hold is not None:
+            hold.entered.set()
+            await hold.release.wait()
+
     async def capture_state(self) -> bytes | None:
         self.io()
         self.calls.append(("capture", None))
@@ -175,7 +198,9 @@ class FakeLight(DeviceAdapter):
         self.io()
         if self.silent:
             raise NoAnswer(f"{self.name} didn't answer")
-        return LightReading(power=self.power, colour=self.colour)
+        reading = LightReading(power=self.power, colour=self.colour)
+        await self.wait_if_held("read_light")
+        return reading
 
     async def set_power(self, on: bool) -> None:
         self.io()
@@ -229,7 +254,11 @@ class GlowFirmware(FirmwareEffect):
         light.firmware_running = False
 
     async def is_running(self, adapter: DeviceAdapter) -> bool | None:
-        return cast(FakeLight, adapter).firmware_running
+        light = cast(FakeLight, adapter)
+        light.firmware_checks += 1
+        running = light.firmware_running
+        await light.wait_if_held("is_running")
+        return running
 
     def emulate(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         return np.full((leds.count, 3), self.level, dtype=np.float32)
