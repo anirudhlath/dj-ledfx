@@ -90,15 +90,30 @@ describe('ConnectionIndicator', () => {
 
   it('shows Reconnecting with the attempt, in signal', () => {
     render(<ConnectionIndicator variant="bar" connection={reconnecting} />)
-    const status = screen.getByRole('status')
-    expect(status).toHaveTextContent('Reconnecting· try 3')
-    expect(status).toHaveClass('text-signal')
+    const face = screen.getByText('· try 3').parentElement
+    expect(face).toHaveTextContent('Reconnecting· try 3')
+    expect(face).toHaveClass('text-signal')
   })
 
   it('shows nothing on phone while live, and a reconnect pill otherwise', () => {
     const { container, rerender } = render(<ConnectionIndicator variant="header" connection={live} />)
-    expect(container).toBeEmptyDOMElement()
+    expect(container).toHaveTextContent(/^$/)
     rerender(<ConnectionIndicator variant="header" connection={reconnecting} />)
-    expect(screen.getByRole('status')).toHaveTextContent('Reconnecting · try 3')
+    expect(screen.getByText('Reconnecting · try 3')).toHaveClass('sr-only')
+  })
+
+  // A screen reader reads changes inside a live region, but often not a region that arrives with
+  // its text. So one status region is always there, and it carries the news, not every retry.
+  it.each(['bar', 'header'] as const)('announces a drop and a recovery through one lasting status region (%s)', (variant) => {
+    const { rerender } = render(<ConnectionIndicator variant={variant} connection={live} />)
+    const status = screen.getByRole('status')
+    expect(status).toBeEmptyDOMElement()
+    rerender(<ConnectionIndicator variant={variant} connection={{ status: 'reconnecting', attempt: 1 }} />)
+    expect(status).toHaveTextContent(/^Reconnecting$/)
+    rerender(<ConnectionIndicator variant={variant} connection={{ status: 'reconnecting', attempt: 2 }} />)
+    expect(status).toHaveTextContent(/^Reconnecting$/)
+    rerender(<ConnectionIndicator variant={variant} connection={live} />)
+    expect(status).toHaveTextContent(/^Live again$/)
+    expect(screen.getAllByRole('status')).toEqual([status])
   })
 })

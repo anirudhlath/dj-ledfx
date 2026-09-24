@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Icon } from '@/design/icon'
 import type { Connection } from './state'
 
@@ -11,6 +12,29 @@ const SPIN = 'animate-[reconnect-spin_1.4s_linear_infinite]'
 
 /** §6.2 ConnectionIndicator: "● Live 60 fps" or "⟳ Reconnecting · try 3". */
 export function ConnectionIndicator({ connection, variant }: ConnectionIndicatorProps) {
+  return (
+    <>
+      <span role="status" className="sr-only">
+        {useNews(connection.status)}
+      </span>
+      <Face connection={connection} variant={variant} />
+    </>
+  )
+}
+
+/**
+ * What the status region says. Screen readers read changes inside a live region, but often not a
+ * region that arrives with its text, so the region is always there: empty at first, "Reconnecting"
+ * when the link drops, "Live again" when it's back. The attempt count is noise; it stays out.
+ */
+function useNews(status: Connection['status']): string {
+  const [dropped, setDropped] = useState(status === 'reconnecting')
+  if (status === 'reconnecting' && !dropped) setDropped(true)
+  if (status === 'reconnecting') return 'Reconnecting'
+  return dropped ? 'Live again' : ''
+}
+
+function Face({ connection, variant }: ConnectionIndicatorProps) {
   if (connection.status === 'live') {
     if (variant === 'header') return null
     return (
@@ -24,10 +48,7 @@ export function ConnectionIndicator({ connection, variant }: ConnectionIndicator
 
   if (variant === 'header') {
     return (
-      <span
-        role="status"
-        className="inline-flex h-(--touch-min) items-center rounded-pill border border-signal-line bg-signal-bg px-3 text-signal"
-      >
+      <span className="inline-flex h-(--touch-min) items-center rounded-pill border border-signal-line bg-signal-bg px-3 text-signal">
         <Icon name="refresh" size={15} className={SPIN} />
         <span className="sr-only">Reconnecting · try {connection.attempt}</span>
       </span>
@@ -35,7 +56,7 @@ export function ConnectionIndicator({ connection, variant }: ConnectionIndicator
   }
 
   return (
-    <span role="status" className="inline-flex items-center gap-1.75 text-meta font-semibold whitespace-nowrap text-signal">
+    <span className="inline-flex items-center gap-1.75 text-meta font-semibold whitespace-nowrap text-signal">
       <Icon name="refresh" size={14} className={SPIN} />
       Reconnecting
       <span className="num font-normal">· try {connection.attempt}</span>

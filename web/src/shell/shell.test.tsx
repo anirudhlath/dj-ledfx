@@ -85,14 +85,15 @@ describe('PhoneHeader', () => {
     expect(header).toHaveTextContent('Wed 19:14 · sun sets 19:26')
     expect(within(header).getByRole('switch', { name: 'Preview only' })).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: '1 needs attention' })).toBeInTheDocument()
-    expect(within(header).queryByRole('status')).toBeNull()
+    expect(within(header).queryByText(/Reconnecting/)).toBeNull()
+    expect(within(header).getByRole('status')).toBeEmptyDOMElement()
   })
 
   it('puts the reconnect pill first while reconnecting', () => {
     const chrome = { ...HERO_CHROME, connection: { status: 'reconnecting', attempt: 3 } as const }
     at('/live', <PhoneHeader title="Home" chrome={chrome} />)
-    const pill = screen.getByRole('status')
-    expect(pill).toHaveTextContent('Reconnecting · try 3')
+    const pill = screen.getByText('Reconnecting · try 3').parentElement!
+    expect(pill).toHaveClass('text-signal')
     expect(pill.compareDocumentPosition(screen.getByRole('switch'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
   })
 

@@ -20,9 +20,9 @@ describe('Chip, Tag and Label', () => {
 })
 
 describe('Toast', () => {
-  it('is a polite status tinted by the light it is about', () => {
+  it('is tinted by the light it is about', () => {
     render(<Toast icon="bell" title="Doorbell" detail="Front door · 19:16" readout="1.8 s" tint="rgb(255, 207, 92)" />)
-    const toast = screen.getByRole('status')
+    const toast = screen.getByText('Doorbell').parentElement!
     expect(toast).toHaveTextContent('DoorbellFront door · 19:161.8 s')
     expect(toast.style.borderColor).toContain('rgb(255, 207, 92)')
     expect(screen.getByText('1.8 s')).toHaveStyle({ color: 'rgb(255, 207, 92)' })
@@ -30,7 +30,14 @@ describe('Toast', () => {
 
   it('keeps the neutral border and readout without a tint', () => {
     render(<Toast title="Saved" readout="2 s" />)
-    expect(screen.getByRole('status').getAttribute('style')).toBeNull()
+    expect(screen.getByText('Saved').parentElement!.getAttribute('style')).toBeNull()
     expect(screen.getByText('2 s').getAttribute('style')).toBeNull()
+  })
+
+  // A live region that arrives with its text often goes unannounced. Whatever shows toasts keeps
+  // one lasting status region for their words instead.
+  it('is not a live region of its own', () => {
+    render(<Toast title="Doorbell" />)
+    expect(screen.queryByRole('status')).toBeNull()
   })
 })
