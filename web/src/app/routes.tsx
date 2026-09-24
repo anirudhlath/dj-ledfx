@@ -48,6 +48,12 @@ export const routes: RouteObject[] = [
       { path: 'devices/:deviceId', handle: DEVICES, element: <Placeholder name="Devices" milestone="F6" /> },
       { path: 'inputs', handle: INPUTS, element: <Placeholder name="Inputs" milestone="F6" /> },
       { path: 'settings', handle: SETTINGS, element: <Placeholder name="Settings" milestone="F6" /> },
+      // The primitives specimen loads on demand, keeping Base UI out of the first load.
+      {
+        path: 'system',
+        handle: { title: 'System' } satisfies PageMeta,
+        lazy: async () => ({ Component: (await import('@/pages/system')).SystemPage }),
+      },
       { path: '*', handle: { title: 'Not found' } satisfies PageMeta, element: <NotFound /> },
     ],
   },
