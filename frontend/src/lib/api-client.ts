@@ -4,14 +4,17 @@ import type {
   Device,
   DeviceGroup,
   EffectParamSchema,
+  LookSummary,
   Preset,
+  Running,
+  RunningZone,
   SceneData,
-  TransportState,
+  Zone,
 } from "./types"
 
 const BASE = "/api"
 
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function request(path: string, init?: RequestInit): Promise<Response> {
   const resp = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
@@ -20,7 +23,16 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await resp.json().catch(() => ({}))
     throw new Error((body as { detail?: string }).detail || `HTTP ${resp.status}`)
   }
-  return resp.json() as Promise<T>
+  return resp
+}
+
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await request(path, init)).json() as Promise<T>
+}
+
+// The effect deck works on one zone's classic effect
+function zone(zoneId: string): string {
+  return `zone=${encodeURIComponent(zoneId)}`
 }
 
 // Effects
@@ -30,15 +42,18 @@ export async function getEffects(): Promise<
   return fetchJson("/effects")
 }
 
-export async function getActiveEffect(): Promise<ActiveEffect> {
-  return fetchJson("/effects/active")
+export async function getActiveEffect(zoneId: string): Promise<ActiveEffect | null> {
+  const resp = await fetch(`${BASE}/effects/active?${zone(zoneId)}`)
+  if (resp.status === 404) return null // the zone isn't playing a classic effect
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json() as Promise<ActiveEffect>
 }
 
-export async function setActiveEffect(req: {
-  effect?: string
-  params?: Record<string, unknown>
-}): Promise<ActiveEffect> {
-  return fetchJson("/effects/active", {
+export async function setActiveEffect(
+  zoneId: string,
+  req: { effect?: string; params?: Record<string, unknown> }
+): Promise<ActiveEffect> {
+  return fetchJson(`/effects/active?${zone(zoneId)}`, {
     method: "PUT",
     body: JSON.stringify(req),
   })
@@ -49,15 +64,15 @@ export async function getPresets(): Promise<Preset[]> {
   return fetchJson("/presets")
 }
 
-export async function savePreset(name: string): Promise<Preset> {
-  return fetchJson("/presets", {
+export async function savePreset(zoneId: string, name: string): Promise<Preset> {
+  return fetchJson(`/presets?${zone(zoneId)}`, {
     method: "POST",
     body: JSON.stringify({ name }),
   })
 }
 
-export async function loadPreset(name: string): Promise<ActiveEffect> {
-  return fetchJson(`/presets/${encodeURIComponent(name)}/load`, {
+export async function loadPreset(zoneId: string, name: string): Promise<ActiveEffect> {
+  return fetchJson(`/presets/${encodeURIComponent(name)}/load?${zone(zoneId)}`, {
     method: "POST",
   })
 }
@@ -214,17 +229,33 @@ export async function updateSceneMapping(
   })
 }
 
-// Transport
-export async function getTransport(): Promise<{ state: TransportState }> {
-  return fetchJson<{ state: TransportState }>("/transport")
+// Zones and looks (web spec §12.3)
+export async function getZones(): Promise<Zone[]> {
+  return fetchJson("/zones")
 }
 
-export async function setTransport(
-  state: TransportState,
-): Promise<{ state: TransportState }> {
-  return fetchJson<{ state: TransportState }>("/transport", {
-    method: "PUT",
-    body: JSON.stringify({ state }),
+export async function getLooks(): Promise<LookSummary[]> {
+  return fetchJson("/looks")
+}
+
+export async function getRunning(): Promise<Running> {
+  return fetchJson("/running")
+}
+
+export async function startLook(zoneId: string, lookId: string): Promise<RunningZone> {
+  return fetchJson(`/zones/${encodeURIComponent(zoneId)}/start`, {
+    method: "POST",
+    body: JSON.stringify({ lookId }),
   })
 }
 
+export async function turnOff(zoneId: string): Promise<void> {
+  await request(`/zones/${encodeURIComponent(zoneId)}/off`, { method: "POST" })
+}
+
+export async function setPreviewOnly(on: boolean): Promise<AppConfig> {
+  return fetchJson("/config", {
+    method: "PUT",
+    body: JSON.stringify({ engine: { preview_only: on } }),
+  })
+}

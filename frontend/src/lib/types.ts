@@ -55,7 +55,7 @@ export interface SystemStatus {
 }
 
 export interface AppConfig {
-  engine: { fps: number; max_lookahead_ms: number }
+  engine: { fps: number; max_lookahead_ms: number; preview_only?: boolean }
   effect: { active_effect: string; beat_pulse_palette: string[]; beat_pulse_gamma: number }
   network: { interface: string; passive_mode: boolean }
   web: { enabled: boolean; host: string; port: number; static_dir: string | null; cors_origins: string[] }
@@ -102,4 +102,34 @@ export interface SceneData {
   bounds: [[number, number, number], [number, number, number]] | null
 }
 
-export type TransportState = "stopped" | "playing" | "simulating"
+// Zones, looks and what runs: web spec §12.2 names, only the fields the look picker reads
+
+export interface Zone {
+  id: string
+  name: string
+  kind: "home" | "room" | "sub-zone" | "group"
+  lights: string[]
+}
+
+export interface LookSummary {
+  id: string
+  name: string
+  category: string
+  builtIn: boolean
+}
+
+export interface RunningZone {
+  zoneId: string
+  lookId: string
+  lookName: string
+  since: string
+  brightness: number
+  lights: string[]
+  state: "running" | "transition" | "slow" | "crashed" | "waiting"
+  error: { layer: string; message: string; at: string } | null
+  waitingFor: string[] | null
+}
+
+export interface Running {
+  zones: RunningZone[]
+}
