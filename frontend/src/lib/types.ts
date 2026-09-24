@@ -32,6 +32,7 @@ export interface Preset {
 }
 
 export interface Device {
+  id: string // the stable id: frames and stats are keyed by it
   name: string
   device_type: string
   led_count: number

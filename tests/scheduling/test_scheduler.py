@@ -4,8 +4,9 @@ from typing import Any
 
 import numpy as np
 import pytest
-from conftest import MockDeviceAdapter
+from conftest import FakeLight, MockDeviceAdapter
 
+from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.engine import RingBuffer
 from dj_ledfx.latency.strategies import StaticLatency, WindowedMeanLatency
@@ -639,6 +640,38 @@ async def test_a_route_that_does_not_stream_sends_nothing_but_keeps_the_preview(
     assert device.adapter.send_frame_calls == []
     assert "TestDevice" in scheduler.frame_snapshots  # the preview shows its slice
     assert scheduler.get_device_stats()[0].dropped_pct == 0.0
+
+
+class _Labels(metrics._NoOpMetric):
+    """Notes the device label of every observation."""
+
+    def __init__(self) -> None:
+        self.devices: set[str] = set()
+
+    def labels(self, **kw: str) -> metrics._NoOpMetric:
+        self.devices.add(kw["device"])
+        return self
+
+
+# B11: the four RAM sticks share a name; each keeps its own frames, sequence and metrics.
+async def test_lights_that_share_a_name_keep_their_own_frames_and_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    latency = _Labels()
+    monkeypatch.setattr(metrics, "DEVICE_LATENCY", latency)
+    sticks = [FakeLight(f"openrgb:ram:{i}", name="RAM", led_count=10) for i in range(2)]
+    devices = [
+        ManagedDevice(adapter=s, tracker=LatencyTracker(StaticLatency(10.0))) for s in sticks
+    ]
+    buf = RingBuffer(capacity=60, led_count=10)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = _scheduler(buf, devices, fps=60)
+
+    await _run_for(scheduler, 0.15)
+
+    assert set(scheduler.frame_snapshots) == {"openrgb:ram:0", "openrgb:ram:1"}
+    assert latency.devices == {"openrgb:ram:0", "openrgb:ram:1"}
+    assert all(len(stick.frames) > 0 for stick in sticks)
 
 
 class _HeldAdapter(MockDeviceAdapter):

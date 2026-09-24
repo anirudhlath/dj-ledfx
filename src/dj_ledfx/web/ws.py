@@ -253,36 +253,40 @@ async def _stats_poll(ws: WebSocket, app: Any) -> None:
     """Poll device stats at ~1fps."""
     while True:
         await asyncio.sleep(1.0)
-        scheduler = app.state.scheduler
+        await _send_json(ws, stats_message(app))
+
+
+def stats_message(app: Any) -> dict[str, Any]:
+    """The stats channel's message: each device's send statistics."""
+    scheduler = app.state.scheduler
+    try:
+        stats = scheduler.get_device_stats()
+        # Each device's status by stable id: lights may share a name (the RAM sticks)
+        manager = app.state.device_manager
+        status_by_id: dict[str, str] = {}
         try:
-            stats = scheduler.get_device_stats()
-            # Build name -> status map from device manager for status field
-            manager = app.state.device_manager
-            status_by_name: dict[str, str] = {}
-            try:
-                for d in manager.devices:
-                    status_by_name[d.adapter.device_info.name] = d.status
-            except Exception:
-                pass
-            stats_data = {
-                "channel": "stats",
-                "devices": [
-                    {
-                        "name": s.device_name,
-                        "id": s.device_id,
-                        "fps": s.send_fps,
-                        "latency_ms": s.effective_latency_ms,
-                        "frames_dropped": s.frames_dropped,
-                        "dropped_pct": s.dropped_pct,
-                        "connected": s.connected,
-                        "status": status_by_name.get(s.device_name, "online"),
-                    }
-                    for s in stats
-                ],
-            }
+            for d in manager.devices:
+                status_by_id[d.adapter.device_info.effective_id] = d.status
         except Exception:
-            stats_data = {"channel": "stats", "devices": []}
-        await _send_json(ws, stats_data)
+            pass
+        return {
+            "channel": "stats",
+            "devices": [
+                {
+                    "id": s.device_id,
+                    "name": s.device_name,
+                    "send_fps": s.send_fps,
+                    "latency_ms": s.effective_latency_ms,
+                    "frames_dropped": s.frames_dropped,
+                    "dropped_pct": s.dropped_pct,
+                    "connected": s.connected,
+                    "status": status_by_id.get(s.device_id, "online"),
+                }
+                for s in stats
+            ],
+        }
+    except Exception:
+        return {"channel": "stats", "devices": []}
 
 
 async def _status_poll(ws: WebSocket, app: Any) -> None:

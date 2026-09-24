@@ -31,6 +31,7 @@ class CreatePresetRequest(BaseModel):
 
 
 class DeviceResponse(BaseModel):
+    id: str  # the stable id: frames and stats are keyed by it
     name: str
     device_type: str
     led_count: int

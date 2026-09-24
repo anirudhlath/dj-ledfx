@@ -25,8 +25,8 @@ export function useDevices() {
   useEffect(() => {
     const unsub = wsClient.on("stats", (msg) => {
       const stats = msg.devices as Array<{
-        name: string
-        fps: number
+        id: string
+        send_fps: number
         latency_ms: number
         frames_dropped: number
         connected: boolean
@@ -35,11 +35,11 @@ export function useDevices() {
 
       setDevices((prev) =>
         prev.map((d) => {
-          const s = stats.find((x) => x.name === d.name)
+          const s = stats.find((x) => x.id === d.id)
           return s
             ? {
                 ...d,
-                send_fps: s.fps,
+                send_fps: s.send_fps,
                 effective_latency_ms: s.latency_ms,
                 frames_dropped: s.frames_dropped,
                 connected: s.connected,

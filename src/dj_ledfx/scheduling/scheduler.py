@@ -178,10 +178,9 @@ class LookaheadScheduler:
         for key, state in self._device_state.items():
             if key not in self._routes:
                 continue
-            name = state.managed.adapter.device_info.name
             if state.slot.has_pending:
-                logger.trace("Frame overwritten for '{}': it drains slower than the engine", name)
-                metrics.FRAMES_DROPPED.labels(device=name).inc()
+                logger.trace("Frame overwritten for '{}': it drains slower than the engine", key)
+                metrics.FRAMES_DROPPED.labels(device=key).inc()
             state.slot.put(now + state.managed.tracker.effective_latency_s)
 
     async def _send_loop(self, state: DeviceSendState, key: str) -> None:
@@ -236,21 +235,20 @@ class LookaheadScheduler:
                         logger.warning("Send failed for '{}'", device_name)
                         continue
                 sent = time.monotonic()
-                metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(sent - send_start)
+                metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
                 if device.adapter.supports_latency_probing:
                     device.tracker.update((sent - send_start) * 1000.0)
                 state.send_count += 1
                 state.sent_at.append(sent)
                 _trim(state.sent_at, sent)
-                metrics.DEVICE_LATENCY.labels(device=device_name).set(
-                    device.tracker.effective_latency_s
-                )
-                metrics.DEVICE_FPS.labels(device=device_name).set(device.max_fps)
+                metrics.DEVICE_LATENCY.labels(device=key).set(device.tracker.effective_latency_s)
+                metrics.DEVICE_FPS.labels(device=key).set(device.max_fps)
 
-            # The web preview shows every routed device's slice, sent or not.
-            seq = self._frame_seq.get(device_name, 0) + 1
-            self._frame_seq[device_name] = seq
-            self._frame_snapshots[device_name] = (colors, seq)
+            # The web preview shows every routed device's slice, sent or not, by stable id:
+            # lights may share a name (the four RAM sticks).
+            seq = self._frame_seq.get(key, 0) + 1
+            self._frame_seq[key] = seq
+            self._frame_snapshots[key] = (colors, seq)
 
             last_send_time += 1.0 / device.max_fps
             remaining = last_send_time - time.monotonic()

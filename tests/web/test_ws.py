@@ -5,9 +5,9 @@ import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from dj_ledfx.types import BeatState
+from dj_ledfx.types import BeatState, DeviceStats
 from dj_ledfx.web.app import create_app
-from dj_ledfx.web.ws import close_all
+from dj_ledfx.web.ws import close_all, stats_message
 
 
 @pytest.fixture
@@ -101,3 +101,35 @@ def test_ws_refuses_a_connection_once_the_server_is_stopping(ws_app) -> None:
         with pytest.raises(WebSocketDisconnect) as refused, client.websocket_connect("/ws"):
             pass
     assert refused.value.code == 1001
+
+
+# B10 and B11: the stats channel carries send_fps (web spec §12.4), and status by stable id.
+def test_stats_carry_send_fps_and_each_devices_status_by_stable_id() -> None:
+    stick = MagicMock(status="offline")
+    stick.adapter.device_info.name = "RAM"
+    stick.adapter.device_info.effective_id = "openrgb:ram:1"
+    twin = MagicMock(status="online")
+    twin.adapter.device_info.name = "RAM"
+    twin.adapter.device_info.effective_id = "openrgb:ram:0"
+    stats = [
+        DeviceStats(
+            device_name="RAM",
+            effective_latency_ms=5.0,
+            send_fps=58.0,
+            frames_dropped=0,
+            connected=True,
+            device_id=device_id,
+            dropped_pct=0.0,
+        )
+        for device_id in ("openrgb:ram:0", "openrgb:ram:1")
+    ]
+    app = MagicMock()
+    app.state.scheduler.get_device_stats.return_value = stats
+    app.state.device_manager.devices = [stick, twin]
+
+    message = stats_message(app)
+
+    [first, second] = message["devices"]
+    assert (first["id"], first["send_fps"], first["status"]) == ("openrgb:ram:0", 58.0, "online")
+    assert (second["id"], second["status"]) == ("openrgb:ram:1", "offline")
+    assert "fps" not in first

@@ -260,9 +260,9 @@ export function DeviceMonitor({ devices, frameData }: DeviceMonitorProps) {
           <div className="flex gap-2 p-2">
             {devices.map((device) => (
               <DeviceCard
-                key={device.name}
+                key={device.id}
                 device={device}
-                frame={frameData.get(device.name)}
+                frame={frameData.get(device.id)}
               />
             ))}
           </div>

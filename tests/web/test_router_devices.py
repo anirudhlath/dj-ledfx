@@ -83,6 +83,7 @@ def test_list_devices_includes_status(client_with_device):
     assert len(devices) == 1
     assert "status" in devices[0]
     assert devices[0]["status"] == "online"
+    assert devices[0]["id"] == "lifx:strip1"  # frames and stats are keyed by it
 
 
 def test_groups_crud(client):
