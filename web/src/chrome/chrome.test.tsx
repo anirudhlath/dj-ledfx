@@ -1,6 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { Popover } from '@/design/overlays'
 import { AttentionButton } from './attention-button'
 import { ConnectionIndicator } from './connection-indicator'
 import { HERO_CHROME, type Connection, type TempoState } from './state'
@@ -27,6 +28,25 @@ describe('TempoModule', () => {
     expect(tempo).toHaveTextContent('Music')
     expect(tempo).not.toHaveTextContent('bar 42')
     expect(within(tempo).getByRole('button', { name: 'Tap' })).toHaveClass('h-10')
+  })
+
+  // Decision 7: F3 attaches the tempo source popover without touching the component.
+  it('lets a popover wrap the source button (desktop)', async () => {
+    render(
+      <TempoModule
+        variant="bar"
+        {...HERO_CHROME.tempo}
+        renderSource={(source) => (
+          <Popover trigger={source} title="Tempo source">
+            <p>Music, from Home Assistant</p>
+          </Popover>
+        )}
+      />,
+    )
+    const source = screen.getByRole('button', { name: 'Music' })
+    await userEvent.click(source)
+    expect(await screen.findByRole('dialog', { name: 'Tempo source' })).toBeInTheDocument()
+    expect(source).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('stale: the source turns signal, is named stale, and the pips stop', () => {
@@ -75,6 +95,19 @@ describe('AttentionButton', () => {
   it('agrees in number', () => {
     render(<AttentionButton variant="header" count={3} />)
     expect(screen.getByRole('button', { name: '3 need attention' })).toHaveTextContent('3')
+  })
+
+  // Decision 7: F3 opens the attention popover (desktop) and sheet (phone) from this button as is.
+  it.each(['bar', 'header'] as const)('works as a Popover trigger (%s)', async (variant) => {
+    render(
+      <Popover trigger={<AttentionButton variant={variant} count={1} />} title="Needs attention">
+        <p>Rope is offline</p>
+      </Popover>,
+    )
+    const button = screen.getByRole('button', { name: '1 needs attention' })
+    await userEvent.click(button)
+    expect(await screen.findByRole('dialog', { name: 'Needs attention' })).toBeInTheDocument()
+    expect(button).toHaveAttribute('aria-expanded', 'true')
   })
 })
 

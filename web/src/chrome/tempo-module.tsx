@@ -1,3 +1,4 @@
+import type { ReactElement, ReactNode } from 'react'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import type { IconName } from '@/design/icons'
@@ -8,6 +9,8 @@ export interface TempoModuleProps extends TempoState {
   /** "bar": the desktop top bar. "strip": the phone strip under the header on Live. */
   variant: 'bar' | 'strip'
   onSourceClick?: () => void
+  /** Desktop: wraps the source button, e.g. in F3's tempo source popover as its trigger. */
+  renderSource?: (source: ReactElement) => ReactNode
   onTap?: () => void
 }
 
@@ -18,7 +21,7 @@ const SOURCE: Record<TempoSource, { label: string; icon: IconName }> = {
 }
 
 /** §6.2 TempoModule. F0 draws a still beat; F3 drives the pips from the beat clock (§5.4). */
-export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceClick, onTap }: TempoModuleProps) {
+export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceClick, renderSource, onTap }: TempoModuleProps) {
   const { label, icon } = SOURCE[source]
   const staleNote = stale && <span className="sr-only">, stale</span>
   const pips = <Pips beat={stale ? null : beat} variant={variant} />
@@ -55,6 +58,20 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
     )
   }
 
+  const sourceButton = (
+    <button
+      type="button"
+      aria-haspopup="dialog"
+      onClick={onSourceClick}
+      className={cx('inline-flex h-7 items-center gap-1.5 rounded-chip bg-control px-2 text-meta font-semibold', stale ? 'text-signal' : 'text-text-2')}
+    >
+      <Icon name={icon} size={14} />
+      <span className="tablet:sr-only">{label}</span>
+      {staleNote}
+      <Icon name="down" size={12} className="text-text-3" />
+    </button>
+  )
+
   return (
     <div
       role="group"
@@ -63,17 +80,7 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
       // top bar's title truncates before TAP leaves it.
       className="flex h-10 min-w-95 items-center justify-between gap-3 rounded-tile border border-line bg-raised px-1.5 tablet:min-w-0"
     >
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        onClick={onSourceClick}
-        className={cx('inline-flex h-7 items-center gap-1.5 rounded-chip bg-control px-2 text-meta font-semibold', stale ? 'text-signal' : 'text-text-2')}
-      >
-        <Icon name={icon} size={14} />
-        <span className="tablet:sr-only">{label}</span>
-        {staleNote}
-        <Icon name="down" size={12} className="text-text-3" />
-      </button>
+      {renderSource ? renderSource(sourceButton) : sourceButton}
       <span className="flex items-baseline gap-1.25">
         <span className="num text-bpm font-semibold tracking-[-0.02em] text-text">{formatBpm(bpm)}</span>
         <span className="text-[10px] font-semibold tracking-[0.08em] text-text-3">BPM</span>
