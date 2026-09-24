@@ -4,12 +4,12 @@ import { Icon } from '@/design/icon'
 import { TAB_ITEMS } from './nav'
 import { NavDot } from './nav-dot'
 
-/** §4.2 tab bar (Phone-Live.png). The OS home indicator gets env(safe-area-inset-bottom). */
+/** §4.2 tab bar (Phone-Live.png). AppShell keeps it above the OS home indicator. */
 export function TabBar({ attention }: { attention: AttentionCounts }) {
   return (
     <nav
       aria-label="Main"
-      className="flex h-[calc(var(--tabbar-h)+env(safe-area-inset-bottom))] shrink-0 border-t border-line-soft bg-bg px-2 pt-1 pb-[env(safe-area-inset-bottom)]"
+      className="flex h-(--tabbar-h) shrink-0 border-t border-line-soft bg-bg px-2 pt-1"
     >
       {TAB_ITEMS.map((item) => (
         <NavLink

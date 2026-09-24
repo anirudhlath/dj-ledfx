@@ -35,6 +35,30 @@ async function axeViolations(page: Page): Promise<string[]> {
   return violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)
 }
 
+type Insets = { top: number; right: number; bottom: number; left: number }
+
+/** A notched screen: Chromium's safe-area override stands in for the phone's (viewport-fit=cover). */
+async function notch(page: Page, insets: Insets) {
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets })
+}
+
+/** Each landmark edge that crosses into a safe-area inset, as "<landmark> <edge>". */
+function outsideSafeArea(page: Page, insets: Insets): Promise<string[]> {
+  return page.evaluate((insets) => {
+    const crossed: string[] = []
+    for (const landmark of document.querySelectorAll('nav, header, main')) {
+      const box = landmark.getBoundingClientRect()
+      const name = landmark.tagName.toLowerCase()
+      if (box.left < insets.left) crossed.push(`${name} left`)
+      if (box.top < insets.top) crossed.push(`${name} top`)
+      if (box.right > innerWidth - insets.right) crossed.push(`${name} right`)
+      if (box.bottom > innerHeight - insets.bottom) crossed.push(`${name} bottom`)
+    }
+    return crossed
+  }, insets)
+}
+
 /** How far a Tempo group's children reach past its right edge; 0 or less means TAP stays inside. */
 function spill(group: Locator): Promise<number> {
   return group.evaluate((element) => {
@@ -226,14 +250,23 @@ test.describe('phone', () => {
     expect(hits).toEqual(['Tap', 'Tap'])
   })
 
-  // A phone turned sideways (844 × 390) is wider than 768 px, so it gets the rail and the top bar,
-  // with the notch on one side (viewport-fit=cover). Chromium's safe-area override stands in for it.
-  test('a landscape phone keeps the rail reachable and clear of the notch', async ({ page }) => {
-    const [width, height, notch] = [844, 390, 47]
-    await page.setViewportSize({ width, height })
-    const cdp = await page.context().newCDPSession(page)
-    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: notch, right: notch, bottom: 21 } })
+  // Upright, the header clears the notch and the tab bar the home indicator.
+  test('a notched phone keeps its chrome inside the safe area', async ({ page }) => {
+    const insets = { top: 47, right: 0, bottom: 34, left: 0 }
+    await notch(page, insets)
     await open(page, '/next/live')
+    expect(await outsideSafeArea(page, insets)).toEqual([])
+  })
+
+  // A phone turned sideways (844 × 390) is wider than 768 px, so it gets the rail and the top bar,
+  // with the notch on one side and the home indicator below.
+  test('a landscape phone keeps the rail reachable and clear of the notch', async ({ page }) => {
+    const [width, height] = [844, 390]
+    const insets = { top: 0, right: 47, bottom: 21, left: 47 }
+    await page.setViewportSize({ width, height })
+    await notch(page, insets)
+    await open(page, '/next/live')
+    expect(await outsideSafeArea(page, insets)).toEqual([])
 
     // The page itself never scrolls; the rail and <main> scroll by themselves.
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(height)
@@ -242,20 +275,15 @@ test.describe('phone', () => {
     await settings.scrollIntoViewIfNeeded()
     await expect(settings).toBeInViewport({ ratio: 1 })
     for (const link of await rail.getByRole('link').all()) {
-      const box = (await link.boundingBox())!
-      expect(box.x, 'clear of the left inset').toBeGreaterThanOrEqual(notch)
-      expect(box.height, 'still a whole target').toBeGreaterThanOrEqual(44)
+      expect((await link.boundingBox())!.height, 'still a whole target').toBeGreaterThanOrEqual(44)
     }
 
-    // The rail's column grows with it, so the top bar starts where the rail ends.
+    // The top bar starts where the rail ends, and its cluster stays inside it.
     const railBox = (await rail.boundingBox())!
     expect((await page.getByRole('banner').boundingBox())!.x).toBe(railBox.x + railBox.width)
-
-    // The top bar's cluster and the page stop short of the right inset.
     const reach = await page
       .getByRole('banner')
       .evaluate((bar) => Math.max(...[...bar.querySelectorAll('*')].map((el) => el.getBoundingClientRect().right)))
-    expect(reach, 'the top bar clears the right inset').toBeLessThanOrEqual(width - notch)
-    expect(await page.locator('main').evaluate((main) => getComputedStyle(main).paddingRight)).toBe(`${notch}px`)
+    expect(reach, 'the top bar clears the right inset').toBeLessThanOrEqual(width - insets.right)
   })
 })
