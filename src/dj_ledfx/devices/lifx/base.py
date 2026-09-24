@@ -3,6 +3,7 @@ capture and restore (spec §6.3, §7.1, §8)."""
 
 from __future__ import annotations
 
+import itertools
 import json
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -69,6 +70,9 @@ class LifxAdapterBase(DeviceAdapter):
         self._kelvin = kelvin
         self._caps = caps
         self._is_connected = False
+        # Frames count their own sequence: on the transport's shared 8-bit counter they
+        # would wrap it every few seconds, and a late reply could match a newer request.
+        self._frame_sequence = itertools.count(1)
         host, port = device_info.address.rsplit(":", 1)
         self._addr = (host, int(port))
 
@@ -100,7 +104,7 @@ class LifxAdapterBase(DeviceAdapter):
             target=self._target_mac + b"\x00\x00",
             ack_required=False,
             res_required=False,
-            sequence=self._transport.next_sequence() % 256,
+            sequence=next(self._frame_sequence) % 256,
             msg_type=msg_type,
             payload=payload,
         )

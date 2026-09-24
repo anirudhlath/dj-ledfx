@@ -176,6 +176,20 @@ async def test_candle_size_geometry_and_frames_follow_its_device_chain() -> None
     assert (tile_index, length, x, y, width) == (0, 1, 0, 0, 5)
 
 
+# B16: frames count their own sequence, so the 8-bit request counter wraps only after 256
+# requests, and a late reply can't be taken for the answer to a newer request.
+async def test_streamed_frames_leave_the_request_sequence_alone() -> None:
+    transport = FakeLifxTransport()
+    candle = _candle(transport)
+    before = transport.next_sequence()
+
+    for _ in range(300):
+        await candle.send_frame(np.zeros((30, 3), dtype=np.uint8))
+
+    assert transport.next_sequence() == before + 1
+    assert [packet.sequence for packet in transport.sent[254:258]] == [255, 0, 1, 2]
+
+
 async def test_tiles_wider_than_64_pixels_are_sent_in_row_bands() -> None:
     transport = FakeLifxTransport()
     wide = TileInfo(user_x=0.0, user_y=0.0, width=16, height=8, accel_x=0, accel_y=0, accel_z=0)
