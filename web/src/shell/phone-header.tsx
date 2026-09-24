@@ -6,7 +6,7 @@ import { PreviewOnlySwitch } from '@/chrome/preview-only-switch'
 
 export interface PhoneHeaderProps {
   title: string
-  context?: string
+  context?: ReactNode
   chrome: ChromeState
   /** Drawn under the title row, inside the banner: the tempo strip on Live. */
   children?: ReactNode

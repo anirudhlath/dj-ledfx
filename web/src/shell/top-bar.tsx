@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { AttentionButton } from '@/chrome/attention-button'
 import { ConnectionIndicator } from '@/chrome/connection-indicator'
 import type { ChromeState } from '@/chrome/state'
@@ -6,7 +7,7 @@ import { TempoModule } from '@/chrome/tempo-module'
 
 export interface TopBarProps {
   title: string
-  context?: string
+  context?: ReactNode
   chrome: ChromeState
 }
 

@@ -1,7 +1,7 @@
 import { Outlet } from 'react-router'
-import { documentTitle, usePageMeta } from '@/app/page-meta'
+import { documentTitle, usePageMeta, type MetaContext } from '@/app/page-meta'
 import { useConnectionNews } from '@/chrome/connection-news'
-import { useChrome } from '@/chrome/state'
+import { useChrome, type ChromeState } from '@/chrome/state'
 import { TempoModule } from '@/chrome/tempo-module'
 import { Announcer } from '@/design/announcer'
 import { cx } from '@/design/cx'
@@ -24,8 +24,6 @@ export function AppShell() {
   const meta = usePageMeta()
   const chrome = useChrome()
   const news = useConnectionNews(chrome.connection.status)
-  const now = useNow()
-  const at = { now, chrome }
 
   return (
     <Announcer news={news}>
@@ -37,7 +35,11 @@ export function AppShell() {
       >
         <title>{documentTitle(meta.title)}</title>
         {isPhone ? (
-          <PhoneHeader title={meta.phoneTitle ?? meta.title} context={meta.phoneContext?.(at)} chrome={chrome}>
+          <PhoneHeader
+            title={meta.phoneTitle ?? meta.title}
+            context={meta.phoneContext && <PageContext get={meta.phoneContext} chrome={chrome} />}
+            chrome={chrome}
+          >
             {meta.tempoStrip && (
               <div className="mx-4 mt-1.5">
                 <TempoModule variant="strip" {...chrome.tempo} />
@@ -45,11 +47,17 @@ export function AppShell() {
             )}
           </PhoneHeader>
         ) : (
-          <div className="row-span-2">
-            <Rail attention={chrome.attention} server={chrome.server} />
-          </div>
+          <>
+            <div className="row-span-2">
+              <Rail attention={chrome.attention} server={chrome.server} />
+            </div>
+            <TopBar
+              title={meta.title}
+              context={meta.context && <PageContext get={meta.context} chrome={chrome} />}
+              chrome={chrome}
+            />
+          </>
         )}
-        {!isPhone && <TopBar title={meta.title} context={meta.context?.(at)} chrome={chrome} />}
         <main className="min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </main>
@@ -57,4 +65,9 @@ export function AppShell() {
       </div>
     </Announcer>
   )
+}
+
+/** A page's context line. It alone reads the clock, so the minute ticking over redraws just the line. */
+function PageContext({ get, chrome }: { get: (at: MetaContext) => string; chrome: ChromeState }) {
+  return get({ now: useNow(), chrome })
 }

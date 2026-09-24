@@ -101,6 +101,16 @@ describe('desktop chrome (Main.png)', () => {
     expect(within(header).getByRole('group', { name: 'Tempo' })).toHaveTextContent('121.8')
   })
 
+  it('ticks the context line over with the minute', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 8, 23, 19, 14, 30))
+    renderApp('/next/live')
+    const header = screen.getByRole('banner')
+    expect(header).toHaveTextContent('Wed 23 Sep · 19:14')
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(header).toHaveTextContent('Wed 23 Sep · 19:15')
+  })
+
   it('moves the current page with navigation', async () => {
     renderApp('/next/live')
     const rail = await screen.findByRole('navigation', { name: 'Main' })
