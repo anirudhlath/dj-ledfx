@@ -26,7 +26,7 @@ from dj_ledfx.config import (
     save_config,
     strip_none,
 )
-from dj_ledfx.web.state import get_db
+from dj_ledfx.web.state import get_db, get_looks, get_zones
 
 router = APIRouter()
 
@@ -190,9 +190,21 @@ async def export_state(request: Request) -> Response:
 
 @router.post("/state/import")
 async def import_state(request: Request) -> dict[str, str]:
+    """Restore a backup: running looks stop first, then come back from the file."""
     from dj_ledfx.persistence.toml_io import import_toml
 
     db = get_db(request)
-    body = await request.body()
-    await import_toml(db, body.decode())
+    try:
+        text = (await request.body()).decode()
+        tomllib.loads(text)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid TOML: {exc}") from exc
+    zones, looks = get_zones(request), get_looks(request)
+    await zones.stop_all()
+    try:
+        await import_toml(db, text)
+    finally:
+        await looks.load()
+        await zones.load()
+        await zones.resume()
     return {"status": "ok"}
