@@ -49,6 +49,13 @@ uv run mypy src/                 # Type check
 cd frontend && npm run build     # Build frontend static assets
 cd frontend && npx tsc --noEmit  # TypeScript type check
 cd frontend && npm run dev       # Frontend dev server (proxies to :8080)
+cd web && npm install            # New web app (F0–F11): install dependencies
+cd web && npm run dev            # Dev server at http://localhost:5174/next/ (proxies /api and /ws to :8080)
+cd web && npm run build          # Type-check and build web/dist; FastAPI serves it at /next
+cd web && npm test               # Vitest: unit and component tests
+cd web && npm run lint           # ESLint (npx tsc -b type-checks)
+cd web && npx playwright install chromium  # Once per machine
+cd web && npm run e2e            # Playwright: screenshots, axe on every route, keyboard, reflow
 ```
 
 ## Architecture
@@ -101,6 +108,17 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - `src/components/` — transport-section, effect-deck, device-monitor (Live page); scene/ (3D editor)
 - `src/components/scene/` — R3F scene editor: viewport, device meshes, mapping helpers, bounds box, panels
 
+web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 + Base UI; served at /next until F11):
+- `src/styles/tokens.css`, `src/design/icons.ts` — byte copies of `docs/design/web-app/`, changed only by `cp` (keep search-and-replace away from them); `src/design/payload.node.test.ts` fails if either drifts
+- `src/design/` — the spec's §6.1 primitives and `Icon`, and the page's one status region (`Announcer`, `useAnnounce()`)
+- `src/chrome/` — the §6.2 always-within-reach cluster; `state.ts` holds its data types (`ChromeState`, `TempoState`, `Connection`) and `useChrome()` (a hero fixture until F1/F3)
+- `src/shell/` — rail, top bar, tab bar, phone header; `AppShell` swaps desktop and phone chrome at the phone breakpoint without remounting the page
+- `src/app/` — routes (§4.3), each with a `PageMeta` handle for its titles and context lines; pages sit in a pathless route whose `errorElement` keeps the chrome, and the root route's catches `AppShell` itself
+- `src/pages/` — placeholders, not-found and error pages (all drawn by `EmptyState`), and the unlinked `/system` specimen
+- `src/lib/` — formatters and the viewport and clock hooks (`useIsPhone`, `useNow`)
+- `e2e/` — Playwright specs and the committed screenshot baselines
+- `src/dj_ledfx/web/app.py` serves `web/dist` at `/next` (SPA fallback), registered before the old UI's catch-all
+
 ## Code Style
 
 - Use `uv` for everything (never pip, never poetry)
@@ -118,8 +136,8 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - All components run on a single asyncio event loop — no cross-thread state access
 - AppConfig uses nested dataclasses: `config.engine.fps`, `config.devices.openrgb.host` (not flat)
 - EffectEngine accepts `deck: EffectDeck` (not raw `effect: Effect`)
-- Frontend uses shadcn/ui components (based on @base-ui/react, NOT Radix — different APIs)
-- Frontend hooks in `src/hooks/`, one per domain (use-beat, use-devices, use-effects, use-scene, use-transport)
+- `frontend/` uses shadcn/ui components (based on @base-ui/react, NOT Radix — different APIs); `web/` uses @base-ui/react directly behind its own primitives in `src/design/`
+- `frontend/` hooks in `src/hooks/`, one per domain (use-beat, use-devices, use-effects, use-scene, use-transport)
 - WebSocket binary frame protocol: 2-byte name length, UTF-8 name, 4-byte sequence, then RGB bytes
 
 ## Key Design Decisions
@@ -196,3 +214,19 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - Web tests: `uv sync --extra web` required in worktrees — web tests skip silently without it
 - PipelineManager: `activate_scene` must guard against double-activation (check `scene_id in _pipelines` first)
 - PipelineManager uses `scheduler.has_device()` for upsert logic — never access `scheduler._device_state` directly
+- `Path.resolve()` raises `ValueError` on a NUL byte (a request for `/%00`); path guards must catch it, as `_file_within` in `web/app.py` does
+- Web app: tokens.css names both a colour and a font size `control`; `text-control` is the colour, `text-size-control` the size
+- Web app: where tokens.css has a token, use its utility (`text-data`, `h-(--touch-min)`), never an arbitrary value equal to it
+- Web app: `@import "./tokens.css" theme(static)` keeps every token as a CSS variable, even ones no class uses
+- Web app: Vite's dev and preview servers only answer below `/next/` — a bare `/next` is a 404 there and a missing asset gets index.html; FastAPI handles both (tests/web/test_next_static.py)
+- Web app: React Router won't match a bare `/next` against a `/next/` basename, so `main.tsx` passes `routerBasename(import.meta.env.BASE_URL)`; Vitest reports `BASE_URL` as `/` whatever `base` says, so tests pass `routerBasename('/next/')`
+- Web app: Base UI tooltips are visual only (their popups are `aria-hidden`); icon-only triggers still need `aria-label`
+- Web app: Base UI clones a `trigger` element and adds props and a ref, so a component used as one spreads the rest of `ComponentProps<'button'>` onto its button (React 19 passes `ref` as a prop; see `AttentionButton`)
+- Web app: axe's region rule flags a popup portaled loose into `<body>` unless it's a dialog; the Select list portals into the dialog or `<main>` around its trigger, and a new overlay joins `OVERLAYS` in `e2e/shell.spec.ts`
+- Web app: Base UI's `Portal` renders nothing for `container={null}`; `undefined`, or a ref still holding null, means `<body>`
+- Web app: a live region must exist before its text changes, so the page keeps one: `Announcer` wraps `AppShell`, outside the chrome that swaps at the phone breakpoint, and says the connection's news; anything else speaks through `useAnnounce()`, as `Toast` does. Don't add another `role="status"`
+- Web app: where a render draws a control smaller than `--touch-min`, keep the drawn face and add the `touch-target` utility from app.css (`max-md:touch-target` on a phone-only control, like TempoModule's TAP); it grows the hit area and never shrinks one
+- Web app: `AppShell`'s root alone pads by all four `env(safe-area-inset-*)` (index.html sets `viewport-fit=cover`), in both layouts; a phone turned sideways is wider than the phone breakpoint and gets the desktop chrome. Keep insets off the rail, the bars and `<main>`. e2e fakes a notch with CDP `Emulation.setSafeAreaInsetsOverride` and checks landmark edges
+- Web app: jsdom has no `matchMedia`; component tests resize with `setViewportWidth()` from `src/test/viewport.ts`
+- Web app: `npm run e2e` builds and serves the bundle on :4174 with `strictPort` and no server reuse, so only one worktree can run it at a time
+- Web app: Playwright baselines are per OS (`*-linux.png`); re-record with `npm run e2e -- --update-snapshots` only after comparing with the reference renders by eye
