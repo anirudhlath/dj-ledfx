@@ -148,15 +148,7 @@ class DiscoveryOrchestrator:
             if existing is None:
                 # Check by name as fallback (device may have had no stable_id before)
                 existing_by_name = self._manager.get_device(name)
-                if existing_by_name is None:
-                    self._manager.add_device(device.adapter, device.tracker, device.max_fps)
-                    self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
-                    new_count += 1
-                    if self._state_db:
-                        persist_tasks.append(
-                            asyncio.create_task(self._persist_device(device.adapter))
-                        )
-                elif existing_by_name.status == "offline":
+                if existing_by_name is not None and existing_by_name.status == "offline":
                     # Promote the offline device using the freshly discovered adapter
                     self._manager.promote_device(
                         existing_by_name.adapter.device_info.effective_id,
@@ -165,16 +157,14 @@ class DiscoveryOrchestrator:
                         max_fps=device.max_fps,
                     )
                     self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
-                    new_count += 1
-                    if self._state_db:
-                        persist_tasks.append(
-                            asyncio.create_task(self._persist_device(device.adapter))
-                        )
                 else:
-                    logger.debug(
-                        "Device '{}' already managed online under different stable_id, skipping",
-                        name,
-                    )
+                    # A new stable_id is a new light, even beside an online one of the same
+                    # name: the PC's four RAM sticks share one (spec §6.3, §6.6).
+                    self._manager.add_device(device.adapter, device.tracker, device.max_fps)
+                    self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
+                new_count += 1
+                if self._state_db:
+                    persist_tasks.append(asyncio.create_task(self._persist_device(device.adapter)))
             elif existing.status == "offline":
                 self._manager.promote_device(
                     stable_id,

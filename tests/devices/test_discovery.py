@@ -336,3 +336,44 @@ async def test_offline_device_repromotion_via_discovery(config, device_manager, 
     assert managed.adapter is real_adapter
     assert len(online_events) == 1
     assert online_events[0].stable_id == "lifx:bulba"
+
+
+@pytest.mark.asyncio
+async def test_devices_that_share_a_name_are_each_managed(config, device_manager, event_bus):
+    """The PC's four RAM sticks share one OpenRGB name; each is its own light (spec §6.3, §6.6)."""
+    from dj_ledfx.devices.backend import DiscoveredDevice
+    from dj_ledfx.events import DeviceDiscoveredEvent
+    from dj_ledfx.types import DeviceInfo
+
+    discovered: list[DeviceDiscoveredEvent] = []
+    event_bus.subscribe(DeviceDiscoveredEvent, discovered.append)
+    ids = [f"openrgb:127.0.0.1:6742:{index}" for index in range(4)]
+    sticks = []
+    for stable_id in ids:
+        adapter = MagicMock()
+        adapter.device_info = DeviceInfo(
+            name="Corsair Vengeance RGB Pro DDR4",
+            device_type="openrgb",
+            led_count=10,
+            address="127.0.0.1:6742",
+            backend="openrgb",
+            stable_id=stable_id,
+        )
+        adapter.led_count = 10
+        adapter.is_connected = True
+        sticks.append(DiscoveredDevice(adapter=adapter, tracker=_make_tracker(), max_fps=60))
+
+    async def _mock_discover(config, on_found=None, skip_ids=None):
+        for stick in sticks:
+            on_found(stick)
+        return sticks
+
+    mock_backend = MagicMock()
+    mock_backend.discover = _mock_discover
+    orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus)
+    orchestrator._backends = [mock_backend]
+    await orchestrator.run_scan()
+
+    assert [d.adapter.device_info.stable_id for d in device_manager.devices] == ids
+    assert all(d.status == "online" for d in device_manager.devices)
+    assert [event.stable_id for event in discovered] == ids
