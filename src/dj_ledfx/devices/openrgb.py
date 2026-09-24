@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import json
 from typing import Any
 
 import numpy as np
@@ -8,6 +10,7 @@ from loguru import logger
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
+from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected, LightReading
 from dj_ledfx.types import DeviceInfo
 
 try:
@@ -16,6 +19,9 @@ try:
 except ImportError:
     OpenRGBClient = None
     RGBColor = None
+
+HAS_BRIGHTNESS = 1 << 4  # openrgb.utils.ModeFlags.HAS_BRIGHTNESS
+HAS_PER_LED_COLOR = 1 << 5  # openrgb.utils.ModeFlags.HAS_PER_LED_COLOR
 
 
 class OpenRGBAdapter(DeviceAdapter):
@@ -35,6 +41,8 @@ class OpenRGBAdapter(DeviceAdapter):
         self._is_connected = False
         self._led_count = 0
         self._device_name = ""
+        self._modes: tuple[str, ...] = ()
+        self._streaming = False  # True once the device is in Direct mode for streamed frames
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -66,14 +74,10 @@ class OpenRGBAdapter(DeviceAdapter):
                     f"(server has {len(client.devices)} devices)"
                 )
             device = client.devices[self._device_index]
-            # Switch to "Direct" mode for per-LED control
-            for i, mode in enumerate(device.modes):
-                if mode.name.lower() == "direct":
-                    device.set_mode(i)
-                    logger.debug("Set device '{}' to Direct mode", device.name)
-                    break
             self._client = client
             self._device = device
+            self._modes = tuple(str(mode.name) for mode in device.modes)
+            self._streaming = False
             self._led_count = len(device.colors)
             self._device_name = getattr(device, "name", f"Device {self._device_index}")
 
@@ -118,6 +122,8 @@ class OpenRGBAdapter(DeviceAdapter):
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         if not self._is_connected or self._device is None:
             return
+        if not self._streaming:
+            await self.prepare_stream()
 
         device = self._device
         led_count = self._led_count
@@ -138,6 +144,97 @@ class OpenRGBAdapter(DeviceAdapter):
             self._is_connected = False
             raise
         logger.trace("Sent {} colors to '{}'", len(rgb_colors), self._device_name)
+
+    @property
+    def capabilities(self) -> DeviceCapabilities:
+        return DeviceCapabilities(
+            protocol="OpenRGB", model=self._device_name, openrgb_modes=self._modes
+        )
+
+    def _find_mode(self, name: str) -> Any:
+        device = self._device
+        if device is None:
+            return None
+        return next((m for m in device.modes if str(m.name).lower() == name.lower()), None)
+
+    async def prepare_stream(self) -> None:
+        device = self._device
+        direct = self._find_mode("direct")
+        if device is not None and direct is not None:
+            await asyncio.to_thread(device.set_mode, str(direct.name))
+        self._streaming = True
+
+    async def set_mode(self, name: str, brightness: float) -> None:
+        """Start one of the device's own modes, scaled to the zone's brightness."""
+        device = self._device
+        mode = self._find_mode(name)
+        if device is None or mode is None:
+            raise FirmwareRejected(f"{self._device_name} has no mode '{name}'")
+        chosen = copy.copy(mode)
+        if int(chosen.flags) & HAS_BRIGHTNESS and chosen.brightness_max is not None:
+            low = int(chosen.brightness_min or 0)
+            high = int(chosen.brightness_max)
+            chosen.brightness = round(low + (high - low) * max(0.0, min(1.0, brightness)))
+        try:
+            await asyncio.to_thread(device.set_mode, chosen)
+        except (ValueError, ConnectionError, OSError) as exc:
+            raise FirmwareRejected(f"{self._device_name} refused mode '{name}': {exc}") from exc
+        self._streaming = False
+
+    async def _read(self) -> tuple[str, list[tuple[int, int, int]]] | None:
+        """The active mode's name and the LED colours, fresh from the server."""
+        device = self._device
+        if device is None:
+            return None
+
+        def _update() -> tuple[str, list[tuple[int, int, int]]]:
+            device.update()
+            colours = [(int(c.red), int(c.green), int(c.blue)) for c in device.colors]
+            return str(device.modes[device.active_mode].name), colours
+
+        try:
+            return await asyncio.to_thread(_update)
+        except (IndexError, ConnectionError, OSError):
+            return None
+
+    async def active_mode_name(self) -> str | None:
+        read = await self._read()
+        return read[0] if read is not None else None
+
+    async def read_light(self) -> LightReading:
+        read = await self._read()
+        colour = read[1][0] if read is not None and read[1] else None
+        return LightReading(power=None, colour=colour)
+
+    async def capture_state(self) -> bytes | None:
+        read = await self._read()
+        if read is None:
+            return None
+        mode, colours = read
+        return json.dumps({"mode": mode, "colors": [list(c) for c in colours]}).encode()
+
+    async def restore_state(self, state: bytes) -> None:
+        device = self._device
+        try:
+            snapshot = json.loads(state)
+            mode = self._find_mode(str(snapshot["mode"]))
+            colours = [RGBColor(int(r), int(g), int(b)) for r, g, b in snapshot["colors"]]
+        except (ValueError, KeyError, TypeError):
+            logger.warning("OpenRGB '{}': captured state is unreadable", self._device_name)
+            return
+        if device is None or mode is None:
+            return
+
+        def _restore() -> None:
+            device.set_mode(str(mode.name))
+            if colours and int(mode.flags) & HAS_PER_LED_COLOR:
+                device.set_colors(colours)
+
+        try:
+            await asyncio.to_thread(_restore)
+        except (ValueError, ConnectionError, OSError):
+            logger.warning("OpenRGB '{}': couldn't restore its mode", self._device_name)
+        self._streaming = False
 
     @staticmethod
     async def discover(host: str = "127.0.0.1", port: int = 6742) -> list[DeviceInfo]:

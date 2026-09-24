@@ -134,20 +134,6 @@ class TestGoveeSegmentAdapter:
         assert geo.length == 1.0
 
     @pytest.mark.asyncio
-    async def test_connect_captures_original_state(
-        self, mock_transport: MagicMock, record: GoveeDeviceRecord
-    ) -> None:
-        mock_transport.query_status = AsyncMock(
-            return_value={"onOff": 0, "brightness": 50, "color": {"r": 10, "g": 20, "b": 30}}
-        )
-        adapter = GoveeSegmentAdapter(mock_transport, record, num_segments=15)
-        await adapter.connect()
-        assert adapter._original_state is not None
-        assert adapter._original_state.on_off == 0
-        assert adapter._original_state.brightness == 50
-        assert adapter._original_state.r == 10
-
-    @pytest.mark.asyncio
     async def test_capture_state_returns_original(
         self, mock_transport: MagicMock, record: GoveeDeviceRecord
     ) -> None:

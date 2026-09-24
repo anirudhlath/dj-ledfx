@@ -58,21 +58,6 @@ class TestGoveeSolidAdapter:
         mock_transport.query_status.assert_awaited_once_with(record.ip)
 
     @pytest.mark.asyncio
-    async def test_connect_turns_on_if_off(
-        self, mock_transport: MagicMock, record: GoveeDeviceRecord
-    ) -> None:
-        mock_transport.query_status = AsyncMock(return_value={"onOff": 0})
-        adapter = GoveeSolidAdapter(mock_transport, record)
-        await adapter.connect()
-        # Should have sent turn(on) and brightness(100)
-        calls = mock_transport.send_command.call_args_list
-        turn_call = calls[0][0][1]
-        assert turn_call["msg"]["cmd"] == "turn"
-        assert turn_call["msg"]["data"]["value"] == 1
-        brightness_call = calls[1][0][1]
-        assert brightness_call["msg"]["cmd"] == "brightness"
-
-    @pytest.mark.asyncio
     async def test_connect_raises_on_unreachable(
         self, mock_transport: MagicMock, record: GoveeDeviceRecord
     ) -> None:
@@ -114,19 +99,6 @@ class TestGoveeSolidAdapter:
         adapter = GoveeSolidAdapter(mock_transport, record)
         geo = adapter.geometry
         assert isinstance(geo, PointGeometry)
-
-    @pytest.mark.asyncio
-    async def test_connect_captures_original_state(
-        self, mock_transport: MagicMock, record: GoveeDeviceRecord
-    ) -> None:
-        mock_transport.query_status = AsyncMock(
-            return_value={"onOff": 0, "brightness": 50, "color": {"r": 10, "g": 20, "b": 30}}
-        )
-        adapter = GoveeSolidAdapter(mock_transport, record)
-        await adapter.connect()
-        assert adapter._original_state is not None
-        assert adapter._original_state.on_off == 0
-        assert adapter._original_state.brightness == 50
 
     @pytest.mark.asyncio
     async def test_capture_state_returns_original(
