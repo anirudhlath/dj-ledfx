@@ -607,7 +607,7 @@ Implements engine spec §10 ("served at `/next` until it reaches parity") and sp
 - Test: `tests/web/test_next_static.py`
 
 **Interfaces:**
-- Consumes: `_file_within(root: Path, relative: str) -> Path | None` from PR #10, already in `web/app.py`. The tests build a fake `dist`.
+- Consumes: `_file_within(root: Path, relative: str) -> Path | None` from PR #10, already in `web/app.py`. The tests build a fake `dist`. If M1 has merged first, `create_app` no longer takes `effect_deck`: leave that argument out of `_client` below.
 - Produces:
   - `create_app(..., next_static_dir: Path | None = None)`, which defaults to `<repo>/web/dist`.
   - `GET /next` and `GET /next/{path}`, which serve `web/dist` with an SPA fallback.
@@ -4283,7 +4283,15 @@ git commit -m "docs: add the new web app to CLAUDE.md"
 
 ### Task 17: Final gate and pull request
 
-- [ ] **Step 1: The whole web gate, from a clean install**
+- [ ] **Step 1: Rebase onto master**
+
+```bash
+git fetch origin master && git rebase origin/master
+```
+
+The branch hasn't been pushed, so rebasing is safe. If M1 merged meanwhile, `create_app` no longer takes `effect_deck`: delete that argument from `tests/web/test_next_static.py`. When a conflict touches `src/dj_ledfx/web/app.py` or `CLAUDE.md`, keep both sides. The steps below gate the rebased branch.
+
+- [ ] **Step 2: The whole web gate, from a clean install**
 
 ```bash
 (cd web && npm ci && npm test && npx tsc -b && npm run lint && npm run build && npm run e2e)
@@ -4291,7 +4299,7 @@ git commit -m "docs: add the new web app to CLAUDE.md"
 
 Expected: every step passes, and e2e prints `40 passed` and `10 skipped`.
 
-- [ ] **Step 2: The whole Python gate**
+- [ ] **Step 3: The whole Python gate**
 
 ```bash
 uv run pytest -q -p no:randomly 2>&1 | tail -1
@@ -4301,12 +4309,12 @@ uv run mypy src/ 2>&1 | tail -1
 ```
 
 Expected:
-- All tests pass: the baseline count plus Task 2's 15.
+- All tests pass: the baseline count plus Task 2's 13.
 - `ruff check` is clean.
 - `format --check` flags only the file it flagged at baseline.
 - mypy prints the baseline count.
 
-- [ ] **Step 3: Scope checks**
+- [ ] **Step 4: Scope checks**
 
 ```bash
 git diff --stat origin/master...HEAD -- frontend/ docs/design/
@@ -4316,7 +4324,7 @@ git status --short
 
 Expected: no diff under `frontend/` or `docs/design/`; `copies identical`; a clean tree.
 
-- [ ] **Step 4: Push and open the PR**
+- [ ] **Step 5: Push and open the PR**
 
 ```bash
 git push -u origin feature/web-f0-scaffold
@@ -4329,7 +4337,7 @@ Milestone F0 (the handoff's M0) of the web app rebuild, per docs/superpowers/pla
 - The handoff's `tokens.css` and `icons.ts` are used as delivered, through byte copies with a drift test. The fonts are self-hosted.
 - `Icon`, the §6.1 primitives, the §6.2 always-within-reach cluster, and the app shell (rail, top bar, phone header, tab bar).
 - Every §4.3 route has a placeholder. There's a not-found page, an error page, and an unlinked `/system` specimen.
-- FastAPI serves `web/dist` at `/next` with an SPA fallback. The old UI's fallback no longer follows `..` out of `frontend/dist`.
+- FastAPI serves `web/dist` at `/next` with an SPA fallback, guarded by PR #10's `_file_within`.
 - CLAUDE.md gains `web/` in Commands, Architecture and Gotchas.
 
 ## Test plan

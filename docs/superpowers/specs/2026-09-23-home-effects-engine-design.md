@@ -26,7 +26,7 @@ Easy to hard. M2 is the foundation for everything after it. Each milestone also 
 | # | Milestone | Delivers | Looks |
 |---|---|---|---|
 | M1 | Set-and-forget | Firmware effects; looks as data (built-in and saved); zones with take-over, brightness, Off, Restart and Stop all, persisting and resuming; sharing policy; light status and the attention feed; LIFX capabilities from `products.json`; host-network deploy; minimal look picker | Firmware showcase |
-| M2 | 3D fields | Home map (rooms, walls, windows, furniture, anchors, sub-zones, placements) seeded from this home, with placement guessing and confirmation; field-effect API; layer stack; zones as rooms, sub-zones, home and groups; zone frames with per-device slices; per-zone render horizon; preview runtimes and frame protocol v2; today's effects through a strip adapter | Sunset, Aurora, Lava, Color carousel, Ripples, Focus |
+| M2 | 3D fields | Home map (rooms, walls, windows, furniture, anchors, sub-zones, placements) seeded from this home, with placement guessing and confirmation; field-effect API; layer stack; zones as rooms, sub-zones, home and groups; zone frames with per-device slices; per-zone render horizon; preview runtimes and frame protocol v2; today's effects through a strip adapter; the PC as one light with parts | Sunset, Aurora, Lava, Color carousel, Ripples, Focus |
 | M3 | Tempo | Always-running tempo clock (internal with tap and nudge, Pro DJ Link takeover, source lock); beat and bar index in the render context; deck info | Shockwave + beam, Scanner, 3D checker, Speaker waves (beat-driven) |
 | M4 | Modifiers and transitions | Layer and look modifiers; cut, fade, wipe, spread, dissolve | — |
 | M5 | Particles | Particle API; emitters, paths and targets that know where the lamps are | Fireflies, Embers, Rain storm, Snow, Spotlights, Beat bursts, Fountain, Vortex, Twin comets, Bouncing ball, Flock |
@@ -222,7 +222,7 @@ The method was prototyped during brainstorming; the prototype lives in `.superpo
 ### 6.3 Devices and Capabilities
 
 - **LIFX:** capabilities come from a vendored copy of LIFX's `products.json` (colour, temperature range, multizone, extended multizone, matrix, chain) instead of hard-coded product sets. Matrix size comes from `StateDeviceChain` instead of 64 LEDs per tile.
-- **OpenRGB:** Direct mode for streamed looks; the device's own modes for firmware looks. The PC's OpenRGB devices (keyboard, RAM, GPU, motherboard, mouse) appear in the web app as one light with parts. Each part keeps its own adapter, latency and LED order, and can be placed on its own; by default the parts share the PC's placement.
+- **OpenRGB:** Direct mode for streamed looks; the device's own modes for firmware looks. The PC's OpenRGB devices (keyboard, RAM, GPU, motherboard, mouse) appear in the web app as one light with parts, from M2 (in M1 each is its own light). Each part keeps its own adapter, latency and LED order, and can be placed on its own; by default the parts share the PC's placement.
 - **Govee:** streamed only.
 - **Status**, for the web app: streaming, running its own effect, streamed copy, offline, switched off elsewhere, or idle (not in a running zone, with its current power and colour). Switched off elsewhere means reachable but powered off. A light cut at the wall switch is unreachable, so it shows as offline.
 - **Detail**, for the Devices page: model, address, MAC, firmware version, LED count and parts; measured, estimated and overridden latency with a 60 s history; send rate; dropped frames; the last scan time.
@@ -323,7 +323,7 @@ Any bindable look parameter can follow a signal: `{signal, in: [lo, hi], out: [l
 
 | Web app | Needs from the engine |
 |---|---|
-| F3 Live; F6 Devices | M1: zones, take-over, brightness, Off, Stop all, light status, attention |
+| F3 Live; F6 Devices | M1: zones, take-over, brightness, Off, Stop all, light status, attention; M2: the PC as one light with parts (F6) |
 | F4 Put a look on | M1 zones; M2 preview runtimes and frame protocol v2 |
 | F7 Home map | M2 home map |
 | F8 Look editor | M2 layers; M4 modifiers and transitions; M7 bindings |
