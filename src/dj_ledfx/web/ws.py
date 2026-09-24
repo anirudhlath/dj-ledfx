@@ -21,12 +21,67 @@ def _get_connected(app: Any) -> set[WebSocket]:
     return app.state.connected_websockets
 
 
+_GOING_AWAY = 1001  # RFC 6455 close code: the server is going down
+
+
+class _Session:
+    """An open /ws connection that close_all can end, and that says when it has ended."""
+
+    def __init__(self) -> None:
+        loop = asyncio.get_running_loop()
+        self.stop: asyncio.Future[None] = loop.create_future()
+        self.ended: asyncio.Future[None] = loop.create_future()
+
+
+async def close_all(app: Any, *, timeout: float = 1.0) -> None:
+    """Close every open /ws session (going away) and refuse new ones, before the web server stops.
+
+    granian's Server.stop() leaves an open websocket waiting on its receive, and the loop's
+    final cancel then logs a traceback, so each session ends itself here first.
+    """
+    app.state.ws_closing = True
+    sessions: set[_Session] = app.state.ws_sessions
+    for session in sessions:
+        if not session.stop.done():
+            session.stop.set_result(None)
+    if not sessions:
+        return
+    _, still_open = await asyncio.wait([s.ended for s in sessions], timeout=timeout)
+    if still_open:
+        logger.warning("{} websocket(s) still open {} s after closing", len(still_open), timeout)
+
+
+async def _receive_unless_stopped(websocket: WebSocket, stop: asyncio.Future[None]) -> str | None:
+    """The client's next message, or None once close_all has stopped the session."""
+    receive = asyncio.ensure_future(websocket.receive_text())
+    either: list[asyncio.Future[Any]] = [receive, stop]
+    try:
+        await asyncio.wait(either, return_when=asyncio.FIRST_COMPLETED)
+    except BaseException:
+        # Cancelled: pass the cancellation on as it came. Awaiting the receive here could
+        # replace it with the receive's own, which anyio's cancel scopes don't recognise.
+        receive.cancel()
+        raise
+    if receive.done():
+        return receive.result()
+    # granian holds back a close while a receive is pending, so end the receive first.
+    receive.cancel()
+    await asyncio.wait([receive])
+    return None
+
+
 async def ws_endpoint(websocket: WebSocket) -> None:
     """Main WebSocket endpoint handler."""
-    await websocket.accept()
     app = websocket.app
+    if app.state.ws_closing:
+        await websocket.close(code=_GOING_AWAY)  # refused: the server is stopping
+        return
+    await websocket.accept()
     sub = ClientSubscription()
     tasks: list[asyncio.Task[None]] = []
+    session = _Session()
+    sessions: set[_Session] = app.state.ws_sessions
+    sessions.add(session)
     _get_connected(app).add(websocket)
 
     try:
@@ -38,23 +93,28 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         tasks.append(asyncio.create_task(_stats_poll(websocket, app)))
         tasks.append(asyncio.create_task(_status_poll(websocket, app)))
 
-        # Handle incoming commands
-        while True:
-            data = await websocket.receive_text()
+        # Handle incoming commands until the client leaves or the server stops
+        while (data := await _receive_unless_stopped(websocket, session.stop)) is not None:
             try:
                 msg = json.loads(data)
                 await _handle_command(websocket, app, sub, tasks, msg)
             except json.JSONDecodeError:
                 await _send_json(websocket, {"channel": "error", "detail": "Invalid JSON"})
+        await websocket.close(code=_GOING_AWAY)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.debug("WebSocket error: {}", e)
     finally:
+        sessions.discard(session)
+        session.ended.set_result(None)
         _get_connected(app).discard(websocket)
         for t in tasks:
             t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        if tasks:
+            # wait, not gather: a gather cancelled with the session would raise the poll
+            # tasks' CancelledError instead of the session's own
+            await asyncio.wait(tasks)
 
 
 async def _send_json(ws: WebSocket, data: dict[str, Any]) -> None:

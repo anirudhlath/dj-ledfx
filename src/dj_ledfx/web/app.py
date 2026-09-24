@@ -100,6 +100,8 @@ def create_app(
     app.state.light_monitor = light_monitor
     app.state.attention_feed = attention_feed
     app.state.connected_websockets: set = set()
+    app.state.ws_sessions = set()  # open /ws sessions, which ws.close_all ends
+    app.state.ws_closing = False
 
     @app.on_event("startup")
     async def _start_broadcasts() -> None:

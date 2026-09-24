@@ -2,10 +2,12 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from dj_ledfx.types import BeatState
 from dj_ledfx.web.app import create_app
+from dj_ledfx.web.ws import close_all
 
 
 @pytest.fixture
@@ -78,3 +80,24 @@ def test_ws_the_old_deck_and_transport_commands_are_gone(client):
                 break
         else:
             pytest.fail("no error for set_transport")
+
+
+def test_ws_sessions_close_going_away_when_the_server_stops(ws_app) -> None:
+    """granian abandons an open websocket when it stops, so each session closes itself first."""
+    with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
+        ws.receive_text()  # connected
+        assert client.portal is not None
+        client.portal.call(close_all, ws_app)
+        with pytest.raises(WebSocketDisconnect) as closed:
+            while True:
+                ws.receive_text()
+    assert closed.value.code == 1001  # going away
+
+
+def test_ws_refuses_a_connection_once_the_server_is_stopping(ws_app) -> None:
+    with TestClient(ws_app) as client:
+        assert client.portal is not None
+        client.portal.call(close_all, ws_app)
+        with pytest.raises(WebSocketDisconnect) as refused, client.websocket_connect("/ws"):
+            pass
+    assert refused.value.code == 1001

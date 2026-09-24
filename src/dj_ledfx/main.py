@@ -5,7 +5,8 @@ import asyncio
 import signal
 import sys
 import time
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +126,26 @@ async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
         web=web,
         discovery=discovery,
     )
+
+
+@dataclass
+class _WebServer:
+    """The embedded web server, stopped rather than cancelled so its lifespan shutdown runs."""
+
+    app: Any
+    task: asyncio.Task[None]
+    stop_serving: Callable[[], None]
+
+    async def stop(self) -> None:
+        from dj_ledfx.web.ws import close_all
+
+        await close_all(self.app)  # Server.stop() would leave open websockets hanging
+        self.stop_serving()
+        _, running = await asyncio.wait([self.task], timeout=5.0)
+        if running:
+            logger.warning("Web server still running 5 s after stop; cancelling it")
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
 
 
 async def _run(args: argparse.Namespace) -> None:
@@ -284,7 +305,7 @@ async def _run(args: argparse.Namespace) -> None:
             logger.info("[vite] {}", line.decode().rstrip())
 
     stop_event = asyncio.Event()
-    web_server_task: asyncio.Task[None] | None = None
+    web_server: _WebServer | None = None
     vite_process: asyncio.subprocess.Process | None = None
     web_mode = args.web or ("prod" if config.web.enabled else None)
 
@@ -329,14 +350,22 @@ async def _run(args: argparse.Namespace) -> None:
                 interface=Interfaces.ASGI,
                 websockets=True,
             )
-            web_server_task = asyncio.create_task(granian_server.serve())
+            web_server = _WebServer(
+                web_app, asyncio.create_task(granian_server.serve()), granian_server.stop
+            )
         except (ImportError, Exception) as e:
             logger.warning("Granian unavailable ({}), falling back to uvicorn", e)
             import uvicorn  # type: ignore[import-not-found]
 
             uvi_config = uvicorn.Config(web_app, host=host, port=port, loop="none")
             uvi_server = uvicorn.Server(uvi_config)
-            web_server_task = asyncio.create_task(uvi_server.serve())
+
+            def _stop_uvicorn() -> None:
+                uvi_server.should_exit = True
+
+            web_server = _WebServer(
+                web_app, asyncio.create_task(uvi_server.serve()), _stop_uvicorn
+            )
 
         logger.info("API server on http://{}:{}", host, port)
 
@@ -416,9 +445,8 @@ async def _run(args: argparse.Namespace) -> None:
         vite_process.terminate()
         await vite_process.wait()
 
-    if web_server_task is not None:
-        web_server_task.cancel()
-        await asyncio.gather(web_server_task, return_exceptions=True)
+    if web_server is not None:
+        await web_server.stop()
 
     scheduler.stop()
     engine.stop()
