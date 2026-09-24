@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -19,6 +20,15 @@ class DeviceAdapter(ABC):
     """
 
     supports_latency_probing: bool = True
+    _send_lock: asyncio.Lock | None = None
+
+    @property
+    def send_lock(self) -> asyncio.Lock:
+        """Held while a frame is sent and while the light is changed back: the scheduler
+        checks the route again once it holds it, so no frame lands after a restore."""
+        if self._send_lock is None:
+            self._send_lock = asyncio.Lock()
+        return self._send_lock
 
     @property
     @abstractmethod

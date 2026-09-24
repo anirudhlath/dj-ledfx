@@ -627,23 +627,8 @@ async def test_each_device_gets_its_slice_of_the_frame_for_its_own_latency() -> 
     assert far_sent == {bytes([255] * 15)}
 
 
-async def test_preview_only_sends_nothing_but_keeps_the_preview() -> None:
-    device = _make_device()
-    buf = RingBuffer(capacity=60, led_count=10)
-    _fill_buffer(buf, time.monotonic(), 60)
-    scheduler = _scheduler(buf, [device], fps=60)
-    scheduler.set_preview_only(True)
-
-    await _run_for(scheduler, 0.15)
-
-    assert scheduler.preview_only
-    assert device.adapter.send_frame_calls == []
-    assert "TestDevice" in scheduler.frame_snapshots
-    assert scheduler.get_device_stats()[0].dropped_pct == 0.0
-
-
-async def test_a_light_running_its_own_effect_gets_no_frames() -> None:
-    device = _make_device()
+async def test_a_route_that_does_not_stream_sends_nothing_but_keeps_the_preview() -> None:
+    device = _make_device()  # it runs its own effect, or preview-only is on
     buf = RingBuffer(capacity=60, led_count=10)
     _fill_buffer(buf, time.monotonic(), 60)
     scheduler = LookaheadScheduler(devices=[device], fps=60)
@@ -652,7 +637,65 @@ async def test_a_light_running_its_own_effect_gets_no_frames() -> None:
     await _run_for(scheduler, 0.15)
 
     assert device.adapter.send_frame_calls == []
-    assert "TestDevice" in scheduler.frame_snapshots  # the preview shows its streamed copy
+    assert "TestDevice" in scheduler.frame_snapshots  # the preview shows its slice
+    assert scheduler.get_device_stats()[0].dropped_pct == 0.0
+
+
+class _HeldAdapter(MockDeviceAdapter):
+    """Holds each frame until released, and logs frames and restores in order."""
+
+    def __init__(self) -> None:
+        super().__init__(name="held")
+        self.log: list[str] = []
+        self.sending = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def send_frame(self, colors: Any) -> None:
+        self.sending.set()
+        await self.release.wait()
+        self.log.append("frame")
+
+
+async def test_a_restore_waits_for_the_frame_on_its_way() -> None:
+    adapter = _HeldAdapter()
+    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=StaticLatency(10.0)))
+    buf = RingBuffer(capacity=60, led_count=10)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = _scheduler(buf, [device], fps=60)
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.wait_for(adapter.sending.wait(), timeout=1.0)
+
+    scheduler.set_route("held", None)  # as the zone manager does before it restores
+
+    async def restore() -> None:
+        async with adapter.send_lock:
+            adapter.log.append("restore")
+
+    restoring = asyncio.create_task(restore())
+    await asyncio.sleep(0.02)
+    adapter.release.set()
+    await restoring
+    await asyncio.sleep(0.05)
+    scheduler.stop()
+    await task
+
+    assert adapter.log == ["frame", "restore"]
+
+
+async def test_a_frame_that_waited_for_a_restore_is_dropped() -> None:
+    device = _make_device()
+    buf = RingBuffer(capacity=60, led_count=10)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = _scheduler(buf, [device], fps=60)
+    async with device.adapter.send_lock:  # a restore is under way
+        task = asyncio.create_task(scheduler.run())
+        await asyncio.sleep(0.05)  # the send loop waits with a frame
+        scheduler.set_route("TestDevice", None)
+    await asyncio.sleep(0.05)
+    scheduler.stop()
+    await task
+
+    assert device.adapter.send_frame_calls == []
 
 
 async def test_a_device_without_a_route_gets_nothing() -> None:

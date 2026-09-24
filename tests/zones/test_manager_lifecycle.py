@@ -14,6 +14,7 @@ from dj_ledfx.zones.model import PreviewOnlyChanged, ZoneRecord
 
 LAMP = DeviceCapabilities(protocol="Govee")
 CANDLE = DeviceCapabilities(protocol="LIFX", matrix=True, chain=True)
+STRIP = DeviceCapabilities(protocol="LIFX", multizone=True, extended_multizone=True)
 
 
 def _zone(zone_id: str, *lights: str) -> ZoneRecord:
@@ -68,22 +69,25 @@ async def test_preview_only_defers_power_on_and_restore_until_turned_off(
     make_home: HomeFactory,
 ) -> None:
     lamp = FakeLight("lamp", power=False, captured=b"l0")
+    lamp.record_frames = True
     home = await make_home([lamp], [_zone("z", "lamp")], preview_only=True)
     seen: list[bool] = []
     home.bus.subscribe(PreviewOnlyChanged, lambda event: seen.append(event.on))
-    assert home.routes.preview_only
 
     await home.manager.start("z", home.look("classic-breathe"))
 
     assert lamp.calls == []
-    assert home.routes.routes["lamp"].zone_id == "z"  # the preview still gets frames
+    route = home.routes.routes["lamp"]
+    assert route.ring is home.host.runtimes["z"].ring  # the preview still gets frames
+    assert not route.streaming
 
     await home.manager.set_preview_only(False)
 
-    assert lamp.names() == ["capture", "power", "prepare_stream"]
-    assert not home.routes.preview_only
+    assert lamp.names() == ["capture", "power", "prepare_stream"]  # no frame came first
+    assert home.routes.routes["lamp"].streaming
 
     await home.manager.set_preview_only(True)
+    assert not home.routes.routes["lamp"].streaming
     await home.manager.off("z")
     assert "restore" not in lamp.names()
 
@@ -230,6 +234,27 @@ async def test_a_light_that_drops_out_rejoins_with_its_effect(make_home: HomeFac
 
     assert tile.names() == ["capture", "firmware", "firmware"]
     assert home.host.runtimes["z"].ring is ring  # same LEDs: no rebuild
+
+
+async def test_a_strip_back_online_gets_no_frames_before_it_is_ready(
+    make_home: HomeFactory,
+) -> None:
+    strip = FakeLight("strip", caps=STRIP)
+    home = await make_home([strip], [_zone("z", "strip")])
+    await home.manager.start("z", home.look("classic-breathe"))
+    home.devices.demote_device("strip")
+    await asyncio.sleep(0)
+    await home.manager.on_device_offline("strip")
+    assert not home.routes.routes["strip"].streaming
+    await strip.connect()
+    home.devices.promote_device("strip", strip)
+    strip.calls.clear()
+    strip.record_frames = True
+
+    await home.manager.on_device_online("strip")
+
+    assert strip.names() == ["prepare_stream"]  # its own effect stops before any frame
+    assert home.routes.routes["strip"].streaming
 
 
 async def test_off_while_a_light_is_offline_restores_it_when_it_is_back(

@@ -75,8 +75,6 @@ class RouteTable(Protocol):
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None: ...
 
-    def set_preview_only(self, on: bool) -> None: ...
-
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -146,7 +144,6 @@ class ZoneManager:
         self._deferred_power_on: set[str] = set()
         self._seen_states: dict[str, ZoneState] = {}
         self._lock = asyncio.Lock()
-        routes.set_preview_only(preview_only)
 
     async def load(self) -> None:
         self._zones = {zone.id: zone for zone in await self._store.load_zones()}
@@ -304,18 +301,18 @@ class ZoneManager:
     async def set_preview_only(self, on: bool) -> None:
         """Preview-only: looks run and stream to the web preview; the lights are left alone.
 
-        Turning it off sends the current state to the lights (spec §6.4): lights of zones
-        started meanwhile are captured and switched on, lights of zones turned off are
-        restored, once.
+        Turning it on stops the frames at once. Turning it off sends the current state to
+        the lights (spec §6.4): lights of zones started meanwhile are captured and switched
+        on, lights of zones turned off are restored, once.
         """
         async with self._lock:
             if on == self._preview_only:
                 return
             self._preview_only = on
-            self._routes.set_preview_only(on)
+            deferred: set[str] = set()
             if not on:
                 deferred, self._deferred_power_on = self._deferred_power_on, set()
-                await self._sync(self._known_lights(), power_on=deferred)
+            await self._sync(self._known_lights(), power_on=deferred)
         self._event_bus.emit(PreviewOnlyChanged(on))
 
     async def on_power_reading(self, device_id: str, power: bool | None) -> None:
@@ -366,10 +363,12 @@ class ZoneManager:
                 await self._sync([device_id])
 
     async def on_device_offline(self, device_id: str) -> None:
-        """A light dropped out. It keeps its place in its zone until it's back."""
+        """A light dropped out. It keeps its place in its zone until it's back, but gets
+        no frames until it's ready for them again."""
         async with self._lock:
             self._applied.pop(device_id, None)
             self._power.pop(device_id, None)
+            await self._sync([device_id])
 
     async def on_device_online(self, device_id: str) -> None:
         """A known light came back, or was found at start-up. It isn't switched on.
@@ -766,7 +765,7 @@ class ZoneManager:
             or adapter is None
             or not adapter.is_connected  # offline: it rejoins when it's back
         ):
-            self._routes.set_route(device_id, runtime.route_for(device_id))
+            self._publish(device_id, runtime)
             return
         if power_on or device_id not in self._power:  # a look being applied reads it afresh
             self._power[device_id] = (await self._read(adapter)).power
@@ -779,7 +778,18 @@ class ZoneManager:
             self._applied.pop(device_id, None)
             return
         await self._apply(device_id, adapter, runtime)
-        self._routes.set_route(device_id, runtime.route_for(device_id))
+        self._publish(device_id, runtime)
+
+    def _publish(self, device_id: str, runtime: ZoneRuntime) -> None:
+        """Route a light to its zone's frames. They're sent only once _apply has readied the
+        light for this runtime, and never while preview-only is on; the web preview gets
+        every routed slice either way."""
+        route = runtime.route_for(device_id)
+        applied = self._applied.get(device_id)
+        ready = applied is not None and applied[0] == runtime.generation
+        if route is not None and route.streaming and (self._preview_only or not ready):
+            route = replace(route, streaming=False)
+        self._routes.set_route(device_id, route)
 
     async def _apply(self, device_id: str, adapter: DeviceAdapter, runtime: ZoneRuntime) -> None:
         """Start the light's firmware layer, or get it ready to stream, once per change."""
@@ -791,7 +801,8 @@ class ZoneManager:
             layer, effect = claim
             self._routes.set_route(device_id, runtime.route_for(device_id))  # stop frames first
             try:
-                await effect.start(adapter, effect.start_params(runtime.brightness))
+                async with adapter.send_lock:
+                    await effect.start(adapter, effect.start_params(runtime.brightness))
             except Exception as exc:  # rejected or no answer: stream a copy (spec §8)
                 logger.warning(
                     "{} didn't start {} ({}); streaming a copy instead",
@@ -844,7 +855,8 @@ class ZoneManager:
             return  # nothing to release, or offline: released when it's back
         if state and self._power.get(device_id) is not False:  # never switch a light on
             try:
-                await adapter.restore_state(state)
+                async with adapter.send_lock:  # the route is gone; no frame lands after this
+                    await adapter.restore_state(state)
             except Exception as exc:
                 logger.warning("Couldn't restore {}: {}", adapter.device_info.name, exc)
                 return

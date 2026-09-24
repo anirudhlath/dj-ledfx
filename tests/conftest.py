@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, cast
 
 import numpy as np
@@ -103,6 +104,10 @@ class FakeLight(DeviceAdapter):
         self.reject_firmware = False
         self.calls: list[tuple[str, object]] = []
         self.frames: list[NDArray[np.uint8]] = []
+        self.record_frames = False  # log frames in calls too, to check what came first
+        # Called whenever the app asks the light something: the fake scheduler sends
+        # frames down the streaming routes then, as the real one does meanwhile.
+        self.on_io: Callable[[], None] | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -139,23 +144,37 @@ class FakeLight(DeviceAdapter):
         self.connected = False
 
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
+        self.receive_frame(colors)
+
+    def receive_frame(self, colors: NDArray[np.uint8]) -> None:
         self.frames.append(colors.copy())
+        if self.record_frames:
+            self.calls.append(("frame", None))
+
+    def io(self) -> None:
+        if self.on_io is not None:
+            self.on_io()
 
     async def capture_state(self) -> bytes | None:
+        self.io()
         self.calls.append(("capture", None))
         return self.captured
 
     async def restore_state(self, state: bytes) -> None:
+        self.io()
         self.calls.append(("restore", state))
 
     async def read_light(self) -> LightReading:
+        self.io()
         return LightReading(power=self.power, colour=self.colour)
 
     async def set_power(self, on: bool) -> None:
+        self.io()
         self.calls.append(("power", on))
         self.power = on
 
     async def prepare_stream(self) -> None:
+        self.io()
         self.calls.append(("prepare_stream", None))
 
     def names(self) -> list[str]:
@@ -187,6 +206,7 @@ class GlowFirmware(FirmwareEffect):
     # conftest), so a FakeLight may come from either copy.
     async def start(self, adapter: DeviceAdapter, params: Params) -> None:
         light = cast(FakeLight, adapter)
+        light.io()
         if light.reject_firmware:
             raise FirmwareRejected(f"{light.name} refused Glow")
         light.calls.append(("firmware", dict(params)))

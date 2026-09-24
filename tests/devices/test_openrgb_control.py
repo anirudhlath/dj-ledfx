@@ -51,10 +51,12 @@ async def test_connect_leaves_the_mode_alone() -> None:
     device.set_mode.assert_not_called()
 
 
-async def test_prepare_stream_picks_direct_and_frames_do_it_once() -> None:
+async def test_prepare_stream_picks_direct_and_frames_leave_the_mode_alone() -> None:
     device = _device()
     adapter = await _connected(device)
     await adapter.send_frame(np.zeros((2, 3), dtype=np.uint8))
+    device.set_mode.assert_not_called()  # the zone manager prepares it before any frame
+    await adapter.prepare_stream()
     await adapter.send_frame(np.zeros((2, 3), dtype=np.uint8))
     device.set_mode.assert_called_once_with("Direct")
     assert device.set_colors.call_count == 2
@@ -75,16 +77,6 @@ async def test_set_mode_scales_brightness_on_a_copy() -> None:
     assert sent.name == "Rainbow Wave"
     assert sent.brightness == 50
     assert device.modes[2].brightness == 100
-
-
-async def test_a_hardware_mode_makes_the_next_frame_switch_back_to_direct() -> None:
-    device = _device()
-    adapter = await _connected(device)
-    await adapter.prepare_stream()
-    await adapter.set_mode("Rainbow Wave", brightness=1.0)
-    device.set_mode.reset_mock()
-    await adapter.send_frame(np.zeros((2, 3), dtype=np.uint8))
-    device.set_mode.assert_called_once_with("Direct")
 
 
 async def test_unknown_mode_is_rejected() -> None:

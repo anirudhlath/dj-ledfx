@@ -3,11 +3,12 @@ fakes for the engine (it hosts runtimes) and the scheduler (it holds routes)."""
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 from conftest import FakeLight
 
 from dj_ledfx.beat.clock import BeatClock
@@ -51,20 +52,26 @@ class FakeHost:
 
 
 class FakeRoutes:
-    """Stands in for the scheduler: it only keeps each light's route."""
+    """Stands in for the scheduler: it keeps each light's route, and sends a frame down
+    every streaming route whenever the app asks a light something (send_frames), as the
+    real scheduler does while the zone manager awaits."""
 
-    def __init__(self) -> None:
+    def __init__(self, lights: Mapping[str, FakeLight]) -> None:
         self.routes: dict[str, DeviceRoute] = {}
-        self.preview_only = False
+        self._lights = lights
+
+    def send_frames(self) -> None:
+        for device_id, route in self.routes.items():
+            light = self._lights.get(device_id)
+            if light is None or not light.connected or not route.streaming:
+                continue
+            light.receive_frame(np.zeros((light.led_count, 3), dtype=np.uint8))
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None:
         if route is None:
             self.routes.pop(device_id, None)
         else:
             self.routes[device_id] = route
-
-    def set_preview_only(self, on: bool) -> None:
-        self.preview_only = on
 
 
 @dataclass
@@ -122,7 +129,10 @@ async def assemble(
     looks = LookStore(db)
     await looks.load()
     store = ZoneStore(db)
-    host, routes = FakeHost(), FakeRoutes()
+    by_id = {light.stable_id: light for light in lights}
+    host, routes = FakeHost(), FakeRoutes(by_id)
+    for light in lights:
+        light.on_io = routes.send_frames
     manager = ZoneManager(
         store=store,
         looks=looks,
@@ -137,7 +147,7 @@ async def assemble(
     )
     home = Home(
         db=db,
-        lights={light.stable_id: light for light in lights},
+        lights=by_id,
         devices=devices,
         store=store,
         looks=looks,

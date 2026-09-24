@@ -23,7 +23,7 @@ async def test_preview_only_applies_without_a_restart(api: Api) -> None:
 
     assert resp.status_code == 200
     assert resp.headers["X-Requires-Restart"] == "false"
-    assert api.home.manager.preview_only and api.home.routes.preview_only
+    assert api.home.manager.preview_only
     assert (await api.client.get("/api/config")).json()["engine"]["preview_only"] is True
     assert (await api.home.db.load_config("engine"))["preview_only"] == "true"
 

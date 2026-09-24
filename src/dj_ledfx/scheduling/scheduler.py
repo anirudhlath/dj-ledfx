@@ -78,8 +78,9 @@ class LookaheadScheduler:
     """Sends each device the slice its route points at, for now plus the device's latency.
 
     The zone manager sets the routes: this is its RouteTable. A device with no route gets
-    nothing. A light running its own effect, and every light while preview-only is on,
-    gets no frames either, but its slice still reaches the web preview.
+    nothing. A route that doesn't stream (the light runs its own effect, isn't ready yet,
+    or preview-only is on) sends nothing either, but its slice still reaches the web
+    preview.
     """
 
     def __init__(
@@ -95,7 +96,6 @@ class LookaheadScheduler:
         self._running = False
         self._event_bus = event_bus
         self._routes: dict[str, DeviceRoute] = {}
-        self._preview_only = False
         self._frame_snapshots: dict[str, tuple[NDArray[np.uint8], int]] = {}
         self._frame_seq: dict[str, int] = {}
         self._device_state: dict[str, DeviceSendState] = {}
@@ -111,20 +111,12 @@ class LookaheadScheduler:
     def frame_snapshots(self) -> dict[str, tuple[NDArray[np.uint8], int]]:
         return self._frame_snapshots
 
-    @property
-    def preview_only(self) -> bool:
-        return self._preview_only
-
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None:
         """Where a device's frames come from; None stops them."""
         if route is None:
             self._routes.pop(device_id, None)
         else:
             self._routes[device_id] = route
-
-    def set_preview_only(self, on: bool) -> None:
-        """Frames reach the web preview only and nothing is sent (spec §6.4)."""
-        self._preview_only = on
 
     def add_device(self, managed: ManagedDevice) -> None:
         """Add a device dynamically. Spawns a send task if the scheduler is running."""
@@ -232,13 +224,17 @@ class LookaheadScheduler:
                 logger.trace("No frame yet for '{}' (target {:.3f})", device_name, target_time)
                 continue
 
-            if route.streaming and not self._preview_only:
-                send_start = time.monotonic()
-                try:
-                    await device.adapter.send_frame(colors)
-                except Exception:
-                    logger.warning("Send failed for '{}'", device_name)
-                    continue
+            if route.streaming:
+                async with device.adapter.send_lock:
+                    current = self._routes.get(key)  # a restore may have run meanwhile
+                    if current is None or not current.streaming:
+                        continue
+                    send_start = time.monotonic()
+                    try:
+                        await device.adapter.send_frame(colors)
+                    except Exception:
+                        logger.warning("Send failed for '{}'", device_name)
+                        continue
                 sent = time.monotonic()
                 metrics.DEVICE_SEND_DURATION.labels(device=device_name).observe(sent - send_start)
                 if device.adapter.supports_latency_probing:
@@ -287,12 +283,7 @@ class LookaheadScheduler:
     def _dropped_pct(self, key: str, state: DeviceSendState, send_fps: float) -> float:
         """How far a streaming light falls short of the frames it should get, in percent."""
         route = self._routes.get(key)
-        if (
-            route is None
-            or not route.streaming
-            or self._preview_only
-            or not state.managed.adapter.is_connected
-        ):
+        if route is None or not route.streaming or not state.managed.adapter.is_connected:
             return 0.0
         expected = min(self._fps, state.managed.max_fps)
         return max(0.0, 1.0 - send_fps / expected) * 100.0
