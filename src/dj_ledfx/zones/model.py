@@ -94,3 +94,8 @@ class ZoneNotRunningError(ZoneError):
 @dataclass(frozen=True, slots=True)
 class ZonesChanged:
     """Running zones changed: started, stopped, taken over, brightness or state."""
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewOnlyChanged:
+    on: bool

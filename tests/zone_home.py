@@ -84,6 +84,14 @@ class Home:
     def look(self, look_id: str) -> Look:
         return self.looks.get(look_id)
 
+    async def restart(self, *, preview_only: bool = False) -> Home:
+        """The app starting again on the same state.db and lights, then resuming."""
+        for light in self.lights.values():
+            light.calls.clear()
+        home = await assemble(self.db, list(self.lights.values()), self.clock, preview_only)
+        await home.manager.resume()
+        return home
+
 
 HomeFactory = Callable[..., Awaitable[Home]]
 

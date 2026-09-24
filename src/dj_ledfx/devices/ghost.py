@@ -6,6 +6,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
+from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.spatial.geometry import DeviceGeometry
 from dj_ledfx.types import DeviceInfo
 
 
@@ -19,9 +21,27 @@ class GhostAdapter(DeviceAdapter):
 
     supports_latency_probing = False
 
-    def __init__(self, device_info: DeviceInfo, led_count: int) -> None:
+    def __init__(
+        self,
+        device_info: DeviceInfo,
+        led_count: int,
+        *,
+        caps: DeviceCapabilities | None = None,
+        geometry: DeviceGeometry | None = None,
+    ) -> None:
         self._device_info = device_info
         self._led_count = led_count
+        self._caps = caps
+        self._geometry = geometry
+
+    @property
+    def capabilities(self) -> DeviceCapabilities:
+        """What the light could do when it was last seen, else a guess from its type."""
+        return self._caps if self._caps is not None else super().capabilities
+
+    @property
+    def geometry(self) -> DeviceGeometry | None:
+        return self._geometry
 
     @property
     def device_info(self) -> DeviceInfo:

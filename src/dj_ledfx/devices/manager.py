@@ -253,7 +253,12 @@ class DeviceManager:
         except RuntimeError:
             logger.debug("demote_device: no running event loop, skipping async disconnect")
 
-        managed.adapter = GhostAdapter(info, led_count=led_count)
+        managed.adapter = GhostAdapter(
+            info,
+            led_count=led_count,
+            caps=old_adapter.capabilities,
+            geometry=old_adapter.geometry,
+        )
         managed.status = "offline"
         logger.info(
             "Demoted device '{}' to offline (stable_id={})",

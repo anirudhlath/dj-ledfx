@@ -1,11 +1,14 @@
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
+from conftest import FakeLight
 
+from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
 from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.spatial.geometry import StripGeometry
 from dj_ledfx.types import DeviceInfo
 
 
@@ -242,3 +245,27 @@ async def test_demote_device_disconnects_old_adapter() -> None:
     await asyncio.sleep(0)
 
     real_adapter.disconnect.assert_awaited_once()
+
+
+def test_a_demoted_light_keeps_its_capabilities_and_geometry() -> None:
+    mgr = DeviceManager(event_bus=EventBus())
+    caps = DeviceCapabilities(protocol="LIFX", multizone=True, extended_multizone=True)
+    geometry = StripGeometry(direction=(1.0, 0.0, 0.0), length=2.0)
+    mgr.add_device(
+        FakeLight("lifx:n1", led_count=40, caps=caps, geometry=geometry), _make_tracker()
+    )
+
+    mgr.demote_device("lifx:n1")
+
+    device = mgr.get_by_stable_id("lifx:n1")
+    assert device is not None and isinstance(device.adapter, GhostAdapter)
+    assert device.adapter.capabilities == caps
+    assert device.adapter.geometry == geometry
+    assert device.adapter.led_count == 40
+
+
+def test_a_ghost_without_capabilities_guesses_from_its_type() -> None:
+    info = _make_info()
+    ghost = GhostAdapter(info, led_count=60)
+    assert ghost.capabilities == DeviceCapabilities(protocol="LIFX")
+    assert ghost.geometry is None

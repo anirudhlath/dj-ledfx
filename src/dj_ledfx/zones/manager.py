@@ -11,6 +11,7 @@ is saved as an empty capture: Off leaves it alone rather than guessing (spec §8
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -19,11 +20,12 @@ from typing import TYPE_CHECKING, Protocol
 from loguru import logger
 
 from dj_ledfx.devices.capabilities import LightReading
-from dj_ledfx.looks.model import LookNotFoundError, validate_look
+from dj_ledfx.looks.model import LookNotFoundError, look_from_dict, validate_look
 from dj_ledfx.looks.store import look_body
 from dj_ledfx.zones.model import (
     Assignment,
     CrashInfo,
+    PreviewOnlyChanged,
     RunningZoneInfo,
     StartResult,
     TakeOver,
@@ -256,6 +258,141 @@ class ZoneManager:
         self._event_bus.emit(ZonesChanged())
         return info
 
+    async def resume(self) -> None:
+        """Bring back the zones that were running when the app stopped (spec §4.3, §6.4).
+
+        Assignments replay oldest first, so take-overs come out as they were. Lights are
+        captured when first reached and never switched on. A captured light that no zone
+        owns any more is restored when it's reachable.
+        """
+        async with self._lock:
+            for saved in await self._store.load_assignments():
+                zone = self._zones.get(saved.zone_id)
+                members = self._lights_of(zone) if zone is not None else ()
+                lights = [
+                    light
+                    for light in saved.lights or members
+                    if light in members and self._adapter(light) is not None
+                ]
+                if not lights:
+                    logger.info(
+                        "Zone {} has none of its lights left; not resuming it", saved.zone_id
+                    )
+                    await self._store.delete_assignment(saved.zone_id)
+                    continue
+                await self._take_over(saved.zone_id, lights)
+                running = self._resumed(saved, lights)
+                self._running[saved.zone_id] = running
+                if running.runtime is not None:
+                    self._host.add_runtime(running.runtime)
+                await self._persist(saved.zone_id)
+            await self._sync(self._known_lights())
+        self._event_bus.emit(ZonesChanged())
+
+    async def set_preview_only(self, on: bool) -> None:
+        """Preview-only: looks run and stream to the web preview; the lights are left alone.
+
+        Turning it off sends the current state to the lights (spec §6.4): lights of zones
+        started meanwhile are captured and switched on, lights of zones turned off are
+        restored, once.
+        """
+        async with self._lock:
+            if on == self._preview_only:
+                return
+            self._preview_only = on
+            self._routes.set_preview_only(on)
+            if not on:
+                deferred, self._deferred_power_on = self._deferred_power_on, set()
+                await self._sync(self._known_lights(), power_on=deferred)
+        self._event_bus.emit(PreviewOnlyChanged(on))
+
+    async def on_power_reading(self, device_id: str, power: bool | None) -> None:
+        """The light monitor read a light's power (every 5 s for zone lights).
+
+        A light switched off elsewhere drops out of its zone's stream and rejoins when it's
+        switched back on (spec §6.4). This never switches a light on.
+        """
+        if power is None:
+            return
+        async with self._lock:
+            before = self._power.get(device_id)
+            self._power[device_id] = power
+            if power != before and self.owner_of(device_id) is not None:
+                await self._sync([device_id])
+
+    async def verify_firmware(self, device_id: str) -> None:
+        """Send a light's firmware effect again if something stopped it, while it's on."""
+        async with self._lock:
+            zone_id = self.owner_of(device_id)
+            runtime = self._running[zone_id].runtime if zone_id is not None else None
+            claim = runtime.claim_for(device_id) if runtime is not None else None
+            adapter = self._adapter(device_id)
+            if (
+                runtime is None
+                or claim is None
+                or runtime.crash is not None
+                or device_id not in self._applied
+                or adapter is None
+                or not adapter.is_connected
+                or self._preview_only
+                or self._power.get(device_id) is False
+            ):
+                return
+            effect = claim[1]
+            try:
+                running = await effect.is_running(adapter)
+            except Exception as exc:
+                logger.debug("Couldn't ask {} about {}: {}", device_id, effect.display_name, exc)
+                return
+            if running is False:  # None: the light can't say, so trust it
+                logger.info(
+                    "{} stopped {}; sending it again",
+                    adapter.device_info.name,
+                    effect.display_name,
+                )
+                del self._applied[device_id]
+                await self._sync([device_id])
+
+    async def on_device_offline(self, device_id: str) -> None:
+        """A light dropped out. It keeps its place in its zone until it's back."""
+        async with self._lock:
+            self._applied.pop(device_id, None)
+            self._power.pop(device_id, None)
+
+    async def on_device_online(self, device_id: str) -> None:
+        """A known light came back, or was found at start-up. It isn't switched on.
+
+        If it came back with another LED count or other capabilities, its zone rebuilds
+        its LED set and every light in the zone gets its slice of the new ring. A captured
+        light that no zone owns any more is restored now.
+        """
+        async with self._lock:
+            self._applied.pop(device_id, None)
+            self._power.pop(device_id, None)
+            zone_id = self.owner_of(device_id)
+            running = self._running[zone_id] if zone_id is not None else None
+            if running is not None and running.runtime is not None:
+                lights = self._zone_lights(running.lights)
+                if list(running.runtime.lights) != lights:
+                    running.runtime.set_lights(lights)
+                    await self._sync(running.lights)
+                    return
+            await self._sync([device_id])
+
+    async def on_device_discovered(self, device_id: str) -> None:
+        """A light seen for the first time joins the newest running all-lights zone."""
+        async with self._lock:
+            zone_id = self._newest_all_lights_zone()
+            if zone_id is None or self.owner_of(device_id) is not None:
+                return
+            running = self._running[zone_id]
+            running.lights.append(device_id)
+            if running.runtime is not None:
+                running.runtime.set_lights(self._zone_lights(running.lights))
+            await self._persist(zone_id)
+            await self._sync(running.lights)
+        self._event_bus.emit(ZonesChanged())
+
     # --- running zones ----------------------------------------------------------------
 
     def _require_running(self, zone_id: str) -> _Running:
@@ -297,6 +434,44 @@ class ZoneManager:
         running.look_json = look_body(look)
         self._host.add_runtime(running.runtime)
         return True
+
+    def _resumed(self, saved: Assignment, lights: list[str]) -> _Running:
+        """A running zone rebuilt from its saved assignment (spec §8 for bad looks)."""
+        running = _Running(
+            look_id=saved.look_id,
+            look_name=self._look_name(saved.look_id),
+            look_json=saved.look_json,
+            brightness=saved.brightness,
+            since=saved.started_at,
+            lights=lights,
+            runtime=None,
+            epoch=self._next_epoch(),
+        )
+        try:
+            look = replace(look_from_dict(json.loads(saved.look_json)), id=saved.look_id)
+        except Exception as exc:  # a bad saved look never stops the app
+            logger.error("Zone {}: the saved look can't be read: {}", saved.zone_id, exc)
+            running.broken = CrashInfo(
+                layer="", message=f"The saved look can't be read: {exc}", at=self._now()
+            )
+            return running
+        running.look_name = look.name
+        running.runtime = self._new_runtime(saved.zone_id, look, lights, saved.brightness)
+        return running
+
+    def _look_name(self, look_id: str) -> str:
+        try:
+            return self._looks.get(look_id).name
+        except LookNotFoundError:
+            return look_id
+
+    def _newest_all_lights_zone(self) -> str | None:
+        running = [
+            (state.since, zone_id)
+            for zone_id, state in self._running.items()
+            if self._zones[zone_id].all_lights
+        ]
+        return max(running)[1] if running else None
 
     async def _take_over(
         self, zone_id: str, wanted: Iterable[str]
@@ -400,6 +575,11 @@ class ZoneManager:
             return zone.lights
         infos = (managed.adapter.device_info for managed in self._devices.devices)
         return tuple(info.stable_id for info in infos if info.stable_id)
+
+    def _known_lights(self) -> list[str]:
+        """Every light the app knows, then captured lights no device stands for yet."""
+        ids = (managed.adapter.device_info.stable_id for managed in self._devices.devices)
+        return list(dict.fromkeys([*(x for x in ids if x), *self._captured]))
 
     async def _sync(self, device_ids: Iterable[str], power_on: Iterable[str] = ()) -> None:
         """Bring each light in line with the zone that owns it, or release it."""
