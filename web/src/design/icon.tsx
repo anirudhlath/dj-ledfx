@@ -1,3 +1,4 @@
+import { cx } from './cx'
 import { ICONS, type IconName } from './icons'
 
 export interface IconProps {
@@ -22,7 +23,7 @@ export function Icon({ name, size = 16, strokeWidth = 1.6, className }: IconProp
       strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
-      className={className ? `block shrink-0 ${className}` : 'block shrink-0'}
+      className={cx('block shrink-0', className)}
       dangerouslySetInnerHTML={{ __html: ICONS[name] }}
     />
   )

@@ -26,36 +26,24 @@ interface BadgeProps {
   className?: string
 }
 
-/** §6.1 Chip: inputs a look uses, modifiers, states. */
-export function Chip({ variant = 'input', icon, children, className }: BadgeProps & { variant?: ChipVariant }) {
+/** Chip and Tag: a pill with an optional icon; `look` is its size and colours. */
+function Pill({ look, icon, children, className }: BadgeProps & { look: string }) {
   return (
-    <span
-      className={cx(
-        'inline-flex h-5.5 items-center gap-1.25 rounded-pill border px-2 text-[11.5px] font-semibold whitespace-nowrap',
-        CHIP[variant],
-        className,
-      )}
-    >
+    <span className={cx('inline-flex items-center rounded-pill border text-[11.5px] whitespace-nowrap', look, className)}>
       {icon && <Icon name={icon} size={13} strokeWidth={1.8} />}
       {children}
     </span>
   )
 }
 
+/** §6.1 Chip: inputs a look uses, modifiers, states. */
+export function Chip({ variant = 'input', ...pill }: BadgeProps & { variant?: ChipVariant }) {
+  return <Pill look={cx('h-5.5 gap-1.25 px-2 font-semibold', CHIP[variant])} {...pill} />
+}
+
 /** §6.1 Tag: a pill drawn on the stage. */
-export function Tag({ variant = 'plain', icon, children, className }: BadgeProps & { variant?: TagVariant }) {
-  return (
-    <span
-      className={cx(
-        'inline-flex h-6.5 items-center gap-1.5 rounded-pill border px-2.25 text-[11.5px] font-bold tracking-[0.03em] whitespace-nowrap',
-        TAG[variant],
-        className,
-      )}
-    >
-      {icon && <Icon name={icon} size={13} strokeWidth={1.8} />}
-      {children}
-    </span>
-  )
+export function Tag({ variant = 'plain', ...pill }: BadgeProps & { variant?: TagVariant }) {
+  return <Pill look={cx('h-6.5 gap-1.5 px-2.25 font-bold tracking-[0.03em]', TAG[variant])} {...pill} />
 }
 
 /** §6.1 Label: 11/600 caps (the label-caps utility from tokens.css). */

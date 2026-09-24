@@ -37,14 +37,12 @@ const SIZE: Record<ButtonSize, string> = {
 
 const ICON_SIZE: Record<ButtonSize, number> = { sm: 16, md: 16, lg: 18, cta: 18 }
 
+/** What Button and IconButton share: a bordered, centred control that fades while disabled. */
+const BASE =
+  'inline-flex shrink-0 items-center justify-center rounded-control border transition-colors duration-(--duration-fast) ease-out disabled:pointer-events-none disabled:opacity-45'
+
 function buttonClass(variant: ButtonVariant, size: ButtonSize, className?: string) {
-  return cx(
-    'inline-flex shrink-0 items-center justify-center gap-2 rounded-control border font-semibold tracking-[0.005em] whitespace-nowrap',
-    'transition-colors duration-(--duration-fast) ease-out disabled:pointer-events-none disabled:opacity-45',
-    VARIANT[variant],
-    SIZE[size],
-    className,
-  )
+  return cx(BASE, 'gap-2 font-semibold tracking-[0.005em] whitespace-nowrap', VARIANT[variant], SIZE[size], className)
 }
 
 function Content({ size, icon, trailingIcon, children }: Pick<ButtonLook, 'icon' | 'trailingIcon' | 'children'> & { size: ButtonSize }) {
@@ -89,9 +87,9 @@ export function IconButton({ icon, label, active, className, type = 'button', ..
       aria-label={label}
       aria-pressed={active}
       className={cx(
-        'inline-flex size-8 shrink-0 items-center justify-center rounded-control border transition-colors duration-(--duration-fast) ease-out',
-        'disabled:pointer-events-none disabled:opacity-45 max-md:size-(--touch-min) max-md:rounded-tile',
-        active ? 'border-text bg-text text-on-text' : 'border-line bg-control text-text-2 hover:bg-control-hover hover:text-text max-md:text-text',
+        BASE,
+        'size-8 max-md:size-(--touch-min) max-md:rounded-tile',
+        active ? VARIANT.primary : 'border-line bg-control text-text-2 hover:bg-control-hover hover:text-text max-md:text-text',
         className,
       )}
       {...rest}

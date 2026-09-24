@@ -8,7 +8,7 @@ export interface ConnectionIndicatorProps {
   variant: 'bar' | 'header'
 }
 
-const SPIN = 'animate-[reconnect-spin_1.4s_linear_infinite]'
+const SPIN = 'animate-[spin_1.4s_linear_infinite]'
 
 /** §6.2 ConnectionIndicator: "● Live 60 fps" or "⟳ Reconnecting · try 3". */
 export function ConnectionIndicator({ connection, variant }: ConnectionIndicatorProps) {

@@ -1,5 +1,5 @@
 import { Select as BaseSelect } from '@base-ui/react/select'
-import { useCallback, useState } from 'react'
+import { useCallback, useRef } from 'react'
 import { cx } from './cx'
 import { Icon } from './icon'
 
@@ -22,8 +22,11 @@ const HOSTS = '[role="dialog"], [role="alertdialog"], main'
  * rule). Inside a dialog that scrolls, Base UI's collision handling keeps the list in view.
  */
 export function Select<T extends string>({ label, value, items, onValueChange, className }: SelectProps<T>) {
-  const [host, setHost] = useState<HTMLElement | null>(null)
-  const findHost = useCallback((trigger: HTMLElement | null) => setHost(trigger?.closest<HTMLElement>(HOSTS) ?? null), [])
+  // Base UI reads the ref when the list opens; while it's empty (no host found) the list goes to <body>.
+  const host = useRef<HTMLElement | null>(null)
+  const findHost = useCallback((trigger: HTMLElement | null) => {
+    host.current = trigger?.closest<HTMLElement>(HOSTS) ?? null
+  }, [])
   return (
     <BaseSelect.Root
       items={items}
@@ -43,7 +46,7 @@ export function Select<T extends string>({ label, value, items, onValueChange, c
         <BaseSelect.Value className="truncate" />
         <Icon name="down" size={14} className="text-text-3" />
       </BaseSelect.Trigger>
-      <BaseSelect.Portal container={host ?? undefined}>
+      <BaseSelect.Portal container={host}>
         <BaseSelect.Positioner sideOffset={4} alignItemWithTrigger={false} className="z-50">
           <BaseSelect.Popup className="min-w-(--anchor-width) rounded-card border border-line-strong bg-raised py-1 shadow-pop outline-none">
             <BaseSelect.List>

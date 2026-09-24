@@ -76,7 +76,7 @@
 /* Spec §4.4's middle band keeps the desktop structure, so the top bar drops its optional text. */
 @custom-variant tablet (@media (width >= 48rem) and (width < 75rem));
 
-/* §6.2 ConnectionIndicator: the live dot's pulse and the reconnect spinner, as in the reference pages. */
+/* §6.2 ConnectionIndicator: the live dot's pulse, as in the reference pages. The spinner is Tailwind's spin. */
 @keyframes livedot {
   0%,
   100% {
@@ -84,11 +84,5 @@
   }
   50% {
     opacity: 0.35;
-  }
-}
-
-@keyframes reconnect-spin {
-  to {
-    transform: rotate(360deg);
   }
 }
