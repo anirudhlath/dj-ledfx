@@ -27,7 +27,3 @@ export const TAB_ITEMS: readonly NavItem[] = [
   { to: '/inputs', label: 'Tempo', icon: 'tempo', dot: 'inputs' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
-
-export function hasDot(item: NavItem, attention: AttentionCounts): boolean {
-  return item.dot !== undefined && attention[item.dot] > 0
-}

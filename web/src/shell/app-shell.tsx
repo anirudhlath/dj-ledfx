@@ -1,5 +1,5 @@
 import { Outlet } from 'react-router'
-import { usePageMeta } from '@/app/page-meta'
+import { documentTitle, usePageMeta } from '@/app/page-meta'
 import { useChrome } from '@/chrome/state'
 import { TempoModule } from '@/chrome/tempo-module'
 import { useIsPhone } from '@/lib/use-media-query'
@@ -31,7 +31,7 @@ export function AppShell() {
           : 'grid h-dvh grid-cols-[auto_minmax(0,1fr)] grid-rows-[var(--topbar-h)_minmax(0,1fr)]'
       }
     >
-      <title>{`${meta.title} · dj-ledfx`}</title>
+      <title>{documentTitle(meta.title)}</title>
       {isPhone ? (
         <PhoneHeader title={meta.phoneTitle ?? meta.title} context={meta.phoneContext?.(at)} chrome={chrome}>
           {meta.tempoStrip && (

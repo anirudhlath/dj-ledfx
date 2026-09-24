@@ -2,7 +2,8 @@ import { Link, NavLink } from 'react-router'
 import type { AttentionCounts } from '@/chrome/state'
 import { Icon } from '@/design/icon'
 import { Logo } from './logo'
-import { RAIL_ITEMS, hasDot } from './nav'
+import { RAIL_ITEMS } from './nav'
+import { NavDot } from './nav-dot'
 
 export interface RailProps {
   attention: AttentionCounts
@@ -27,12 +28,7 @@ export function Rail({ attention, server }: RailProps) {
         >
           <Icon name={item.icon} size={20} />
           <span>{item.label}</span>
-          {hasDot(item, attention) && (
-            <>
-              <span aria-hidden="true" className="absolute top-1.5 right-3 size-1.75 rounded-full bg-signal shadow-[0_0_0_2px_var(--color-bg)]" />
-              <span className="sr-only">, needs attention</span>
-            </>
-          )}
+          <NavDot item={item} attention={attention} className="top-1.5 right-3 shadow-[0_0_0_2px_var(--color-bg)]" />
         </NavLink>
       ))}
       <div className="flex-1" />

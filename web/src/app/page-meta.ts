@@ -22,6 +22,11 @@ export interface PageMeta {
 
 const FALLBACK: PageMeta = { title: 'dj-ledfx' }
 
+/** The browser tab's title for a page. */
+export function documentTitle(title: string): string {
+  return `${title} · dj-ledfx`
+}
+
 /** The meta of the deepest matched route that has one. */
 export function usePageMeta(): PageMeta {
   const matches = useMatches()

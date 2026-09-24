@@ -1,7 +1,8 @@
 import { NavLink } from 'react-router'
 import type { AttentionCounts } from '@/chrome/state'
 import { Icon } from '@/design/icon'
-import { TAB_ITEMS, hasDot } from './nav'
+import { TAB_ITEMS } from './nav'
+import { NavDot } from './nav-dot'
 
 /** §4.2 tab bar (Phone-Live.png). The OS home indicator gets env(safe-area-inset-bottom). */
 export function TabBar({ attention }: { attention: AttentionCounts }) {
@@ -18,12 +19,7 @@ export function TabBar({ attention }: { attention: AttentionCounts }) {
         >
           <Icon name={item.icon} size={22} />
           <span>{item.label}</span>
-          {hasDot(item, attention) && (
-            <>
-              <span aria-hidden="true" className="absolute top-1.5 left-1/2 ml-2 size-1.75 rounded-full bg-signal" />
-              <span className="sr-only">, needs attention</span>
-            </>
-          )}
+          <NavDot item={item} attention={attention} className="top-1.5 left-1/2 ml-2" />
         </NavLink>
       ))}
     </nav>

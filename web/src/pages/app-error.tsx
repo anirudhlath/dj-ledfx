@@ -1,16 +1,20 @@
+import { documentTitle } from '@/app/page-meta'
 import { Button } from '@/design/button'
+import { EmptyState } from './empty-state'
 
-function Message({ heading: Heading }: { heading: 'h1' | 'h2' }) {
+function Message({ heading }: { heading: 'h1' | 'h2' }) {
   return (
-    <div className="grid h-full place-items-center p-6">
-      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-        <Heading className="font-serif text-display-lg">Something broke</Heading>
-        <p className="text-body text-text-2">This screen hit an error. Your looks keep running on the server.</p>
+    <EmptyState
+      as={heading}
+      title="Something broke"
+      action={
         <Button variant="outline" icon="refresh" onClick={() => window.location.reload()}>
           Reload
         </Button>
-      </div>
-    </div>
+      }
+    >
+      This screen hit an error. Your looks keep running on the server.
+    </EmptyState>
   )
 }
 
@@ -27,7 +31,7 @@ export function AppError() {
 export function RootError() {
   return (
     <main className="h-dvh">
-      <title>Something broke · dj-ledfx</title>
+      <title>{documentTitle('Something broke')}</title>
       <Message heading="h1" />
     </main>
   )
