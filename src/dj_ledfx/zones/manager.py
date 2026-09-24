@@ -753,7 +753,7 @@ class ZoneManager:
         ):
             self._routes.set_route(device_id, runtime.route_for(device_id))
             return
-        if device_id not in self._power:
+        if power_on or device_id not in self._power:  # a look being applied reads it afresh
             self._power[device_id] = (await self._read(adapter)).power
         if device_id not in self._captured:
             await self._capture(device_id, adapter)

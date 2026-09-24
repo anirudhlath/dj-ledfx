@@ -149,6 +149,22 @@ async def test_off_leaves_an_uncapturable_light_alone(make_home: HomeFactory) ->
     assert await home.db.load_device_state("lamp") is None
 
 
+async def test_a_look_switches_on_a_light_switched_off_while_it_was_idle(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp", captured=None)  # can't be captured, so Off leaves it as it is
+    home = await make_home([lamp], [_zone("z", "lamp")])
+    await home.manager.start("z", home.look("classic-breathe"))
+    await home.manager.off("z")
+    lamp.power = False  # switched off elsewhere while it was idle
+
+    await home.manager.start("z", home.look("classic-breathe"))
+
+    assert lamp.names()[-2:] == ["power", "prepare_stream"]
+    assert lamp.power is True
+    assert home.routes.routes["lamp"].zone_id == "z"
+
+
 async def test_off_is_idempotent_and_unknown_zones_raise(make_home: HomeFactory) -> None:
     lamp = FakeLight("lamp")
     home = await make_home([lamp], [_zone("z", "lamp")])
