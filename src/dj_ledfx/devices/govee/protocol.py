@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from dj_ledfx.types import RGB
+
 
 def build_scan_message() -> dict[str, Any]:
     return {"msg": {"cmd": "scan", "data": {"account_topic": "reserve"}}}
@@ -73,11 +75,9 @@ def build_pt_real_message(ble_packets: Sequence[bytes]) -> dict[str, Any]:
     return {"msg": {"cmd": "ptReal", "data": {"command": encoded}}}
 
 
-def map_colors_to_segments(
-    colors: NDArray[np.uint8], num_segments: int
-) -> list[tuple[int, int, int]]:
+def map_colors_to_segments(colors: NDArray[np.uint8], num_segments: int) -> list[RGB]:
     n_leds = len(colors)
-    result: list[tuple[int, int, int]] = []
+    result: list[RGB] = []
     for seg in range(num_segments):
         start = seg * n_leds / num_segments
         end = (seg + 1) * n_leds / num_segments

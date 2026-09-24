@@ -4,8 +4,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from dj_ledfx.transport import TransportState
-
 
 class EffectSchema(BaseModel):
     name: str
@@ -33,6 +31,7 @@ class CreatePresetRequest(BaseModel):
 
 
 class DeviceResponse(BaseModel):
+    id: str  # the stable id: frames and stats are keyed by it
     name: str
     device_type: str
     led_count: int
@@ -99,37 +98,3 @@ class UpdatePlacementRequest(BaseModel):
 class UpdateMappingRequest(BaseModel):
     type: Literal["linear", "radial"]
     params: dict[str, Any] = {}
-
-
-# Multi-scene schemas
-
-
-class SceneListItem(BaseModel):
-    id: str
-    name: str
-    is_active: bool = False
-    mapping_type: Literal["linear", "radial"] | None = None
-    effect_mode: Literal["independent", "shared"] | None = None
-
-
-class CreateSceneRequest(BaseModel):
-    name: str
-    mapping_type: Literal["linear", "radial"] = "linear"
-    effect_mode: Literal["independent", "shared"] = "independent"
-
-
-class UpdateSceneRequest(BaseModel):
-    name: str | None = None
-    mapping_type: Literal["linear", "radial"] | None = None
-    effect_mode: Literal["independent", "shared"] | None = None
-
-
-# Transport schemas
-
-
-class TransportBody(BaseModel):
-    state: TransportState
-
-
-class TransportResponse(BaseModel):
-    state: TransportState

@@ -30,9 +30,9 @@ async def test_creates_db_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_schema_version_is_3(db):
+async def test_schema_version_is_4(db):
     version = await db.get_schema_version()
-    assert version == 3
+    assert version == 4
 
 
 @pytest.mark.asyncio
@@ -59,10 +59,15 @@ async def test_tables_created(db):
         "device_saved_state",
         "devices",
         "groups",
+        "look_stars",
+        "looks",
         "presets",
         "scene_effect_state",
         "scene_placements",
         "scenes",
+        "zone_assignments",
+        "zone_members",
+        "zones",
     ]
     assert table_names == expected
 
@@ -76,7 +81,7 @@ async def test_idempotent_open(tmp_path):
     db2 = StateDB(db_path)
     await db2.open()
     version = await db2.get_schema_version()
-    assert version == 3
+    assert version == 4
     await db2.close()
 
 
@@ -344,67 +349,6 @@ async def test_save_scene_upsert(db):
 
 
 @pytest.mark.asyncio
-async def test_delete_scene(db):
-    await db.save_scene(
-        {"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.delete_scene("s1")
-    scenes = await db.load_scenes()
-    assert scenes == []
-
-
-@pytest.mark.asyncio
-async def test_set_scene_active(db):
-    await db.save_scene(
-        {"id": "s1", "name": "Scene 1", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.save_scene(
-        {"id": "s2", "name": "Scene 2", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.set_scene_active("s1")
-    scenes = await db.load_scenes()
-    by_id = {s["id"]: s for s in scenes}
-    assert by_id["s1"]["is_active"] == 1
-    assert by_id["s2"]["is_active"] == 0
-
-
-@pytest.mark.asyncio
-async def test_set_scene_active_does_not_deactivate_others(db):
-    """Multiple scenes can be active concurrently; set_scene_active only sets one."""
-    await db.save_scene(
-        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.save_scene(
-        {"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.set_scene_active("s1")
-    await db.set_scene_active("s2")
-    scenes = await db.load_scenes()
-    by_id = {s["id"]: s for s in scenes}
-    # Both scenes should now be active (concurrent multi-scene support)
-    assert by_id["s1"]["is_active"] == 1
-    assert by_id["s2"]["is_active"] == 1
-
-
-@pytest.mark.asyncio
-async def test_set_scene_inactive(db):
-    """set_scene_inactive only deactivates the specified scene."""
-    await db.save_scene(
-        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.save_scene(
-        {"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.set_scene_active("s1")
-    await db.set_scene_active("s2")
-    await db.set_scene_inactive("s1")
-    scenes = await db.load_scenes()
-    by_id = {s["id"]: s for s in scenes}
-    assert by_id["s1"]["is_active"] == 0
-    assert by_id["s2"]["is_active"] == 1
-
-
-@pytest.mark.asyncio
 async def test_save_and_load_scene_effect_state(db):
     await db.save_scene(
         {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
@@ -446,49 +390,6 @@ async def test_save_and_load_placement(db):
     assert placements[0]["device_id"] == "lifx:aa"
     assert placements[0]["position_x"] == 1.0
     assert placements[0]["geometry_type"] == "strip"
-
-
-@pytest.mark.asyncio
-async def test_delete_placement(db):
-    await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
-    await db.save_scene(
-        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.save_placement(
-        {
-            "scene_id": "s1",
-            "device_id": "lifx:aa",
-            "position_x": 0.0,
-            "position_y": 0.0,
-            "position_z": 0.0,
-            "geometry_type": "point",
-        }
-    )
-    await db.delete_placement("s1", "lifx:aa")
-    placements = await db.load_scene_placements("s1")
-    assert placements == []
-
-
-@pytest.mark.asyncio
-async def test_delete_scene_cascades_placements(db):
-    await db.upsert_device({"id": "lifx:aa", "name": "Test", "backend": "lifx", "led_count": 30})
-    await db.save_scene(
-        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.save_placement(
-        {
-            "scene_id": "s1",
-            "device_id": "lifx:aa",
-            "position_x": 0.0,
-            "position_y": 0.0,
-            "position_z": 0.0,
-            "geometry_type": "point",
-        }
-    )
-    await db.delete_scene("s1")
-    # placements table should be empty due to CASCADE
-    rows = await db._execute_read("SELECT COUNT(*) FROM scene_placements")
-    assert rows[0][0] == 0
 
 
 # --- Task 10: Presets CRUD ---
@@ -645,7 +546,7 @@ async def test_migrate_from_config_toml(tmp_path):
     assert engine_cfg.get("fps") == "90"
 
     network_cfg = await db.load_config("network")
-    assert network_cfg.get("interface") == "192.168.1.100"
+    assert json.loads(network_cfg["interface"]) == "192.168.1.100"
 
     scenes = await db.load_scenes()
     assert len(scenes) == 1
@@ -790,104 +691,6 @@ async def test_save_scene_preserves_placements(db):
     placements = await db.load_scene_placements("s1")
     assert len(placements) == 1
     assert placements[0]["device_id"] == "d1"
-
-
-# --- Multi-scene concurrent activation ---
-
-
-@pytest.mark.asyncio
-async def test_set_scene_active_concurrent_does_not_deactivate_other(db):
-    """set_scene_active on one scene must not touch another already-active scene."""
-    await db.save_scene(
-        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.save_scene(
-        {"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    # Activate s1 first, then s2; both must remain active
-    await db.set_scene_active("s1")
-    await db.set_scene_active("s2")
-    scenes = await db.load_scenes()
-    by_id = {s["id"]: s for s in scenes}
-    assert by_id["s1"]["is_active"] == 1, "s1 should still be active after s2 was activated"
-    assert by_id["s2"]["is_active"] == 1
-
-
-# --- set_scene_inactive only deactivates one scene ---
-
-
-@pytest.mark.asyncio
-async def test_set_scene_inactive_leaves_other_scenes_active(db):
-    """set_scene_inactive on one scene must not deactivate other active scenes."""
-    await db.save_scene(
-        {"id": "s1", "name": "S1", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.save_scene(
-        {"id": "s2", "name": "S2", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.save_scene(
-        {"id": "s3", "name": "S3", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    await db.set_scene_active("s1")
-    await db.set_scene_active("s2")
-    await db.set_scene_active("s3")
-    # Deactivate only s2
-    await db.set_scene_inactive("s2")
-    scenes = await db.load_scenes()
-    by_id = {s["id"]: s for s in scenes}
-    assert by_id["s1"]["is_active"] == 1, "s1 must remain active"
-    assert by_id["s2"]["is_active"] == 0, "s2 must be inactive"
-    assert by_id["s3"]["is_active"] == 1, "s3 must remain active"
-
-
-# --- load_scene_by_id ---
-
-
-@pytest.mark.asyncio
-async def test_load_scene_by_id_returns_correct_scene(db):
-    """load_scene_by_id returns the exact scene dict for a known ID."""
-    await db.save_scene(
-        {"id": "main", "name": "Main Stage", "mapping_type": "radial", "effect_mode": "spatial"}
-    )
-    await db.save_scene(
-        {"id": "booth", "name": "DJ Booth", "mapping_type": "linear", "effect_mode": "independent"}
-    )
-    scene = await db.load_scene_by_id("main")
-    assert scene is not None
-    assert scene["id"] == "main"
-    assert scene["name"] == "Main Stage"
-    assert scene["mapping_type"] == "radial"
-
-
-@pytest.mark.asyncio
-async def test_load_scene_by_id_returns_none_for_missing(db):
-    """load_scene_by_id returns None when the scene ID does not exist."""
-    result = await db.load_scene_by_id("nonexistent-scene")
-    assert result is None
-
-
-# --- device_exists ---
-
-
-@pytest.mark.asyncio
-async def test_device_exists_returns_true_for_known_device(db):
-    """device_exists returns True when the device has been upserted."""
-    await db.upsert_device({"id": "lifx:aa", "name": "Strip", "backend": "lifx", "led_count": 30})
-    assert await db.device_exists("lifx:aa") is True
-
-
-@pytest.mark.asyncio
-async def test_device_exists_returns_false_for_unknown_device(db):
-    """device_exists returns False when no matching device exists."""
-    assert await db.device_exists("govee:not-here") is False
-
-
-@pytest.mark.asyncio
-async def test_device_exists_false_after_delete(db):
-    """device_exists returns False once a device has been deleted."""
-    await db.upsert_device({"id": "lifx:aa", "name": "Strip", "backend": "lifx", "led_count": 30})
-    await db.delete_device("lifx:aa")
-    assert await db.device_exists("lifx:aa") is False
 
 
 # --- Migration rollback on failure ---

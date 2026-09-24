@@ -1,0 +1,123 @@
+"""Pushed WebSocket channels (web spec §12.4): the current state on connect, then changes."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections.abc import AsyncIterator, Callable
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
+
+import pytest_asyncio
+from api_home import Api, api_home
+from conftest import FakeLight
+
+from dj_ledfx.web.ws import Session, event_broadcast, initial_messages
+from dj_ledfx.zones.model import ZoneRecord, ZonesChanged
+
+
+class FakeSocket:
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    async def send_text(self, text: str) -> None:
+        self.messages.append(json.loads(text))
+
+    def on(self, channel: str) -> list[dict[str, Any]]:
+        return [message for message in self.messages if message["channel"] == channel]
+
+
+async def until(condition: Callable[[], bool]) -> None:
+    async with asyncio.timeout(1.0):
+        while not condition():
+            await asyncio.sleep(0.01)
+
+
+@pytest_asyncio.fixture
+async def api(tmp_path: Path) -> AsyncIterator[Api]:
+    zones = [ZoneRecord(id="desk", name="Desk", lights=("a",))]
+    async with api_home(tmp_path, [FakeLight("a")], zones) as api:
+        yield api
+
+
+@pytest_asyncio.fixture
+async def socket(api: Api) -> AsyncIterator[FakeSocket]:
+    """A connected client, with the app's event broadcaster running."""
+    fake = FakeSocket()
+    api.app.state.ws_sessions.add(Session(fake))  # type: ignore[arg-type]
+    task = asyncio.create_task(event_broadcast(api.app))
+    await asyncio.sleep(0)  # let it subscribe
+    yield fake
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_running_zones_are_pushed_when_they_change(api: Api, socket: FakeSocket) -> None:
+    await api.client.post("/api/zones/desk/start", json={"lookId": "classic-breathe"})
+    await until(lambda: bool(socket.on("running")))
+
+    [message] = socket.on("running")
+    assert [zone["zoneId"] for zone in message["zones"]] == ["desk"]
+    assert message["zones"][0]["lookName"] == "Breathe"
+    assert message["overlays"] == []
+
+
+async def test_changes_that_arrive_together_are_pushed_once(api: Api, socket: FakeSocket) -> None:
+    api.home.bus.emit(ZonesChanged())
+    api.home.bus.emit(ZonesChanged())
+    await until(lambda: bool(socket.on("running")))
+    await asyncio.sleep(0.05)
+
+    assert len(socket.on("running")) == 1
+
+
+async def test_a_client_that_connects_gets_the_current_state(api: Api) -> None:
+    await api.client.post("/api/zones/desk/start", json={"lookId": "classic-breathe"})
+
+    messages = {message["channel"]: message for message in initial_messages(api.app)}
+
+    assert [zone["zoneId"] for zone in messages["running"]["zones"]] == ["desk"]
+
+
+async def test_light_statuses_are_pushed_when_they_change(api: Api, socket: FakeSocket) -> None:
+    await api.client.post("/api/zones/desk/start", json={"lookId": "classic-breathe"})
+    await until(lambda: bool(socket.on("lights")))
+
+    assert socket.on("lights")[-1]["lights"] == [
+        {
+            "id": "a",
+            "status": "streaming",
+            "statusSince": "2026-09-24T19:00:00Z",
+            "ownEffect": None,
+            "power": None,
+            "colour": None,
+        }
+    ]
+
+
+async def test_attention_is_pushed_when_the_list_changes(api: Api, socket: FakeSocket) -> None:
+    await api.client.post("/api/zones/desk/start", json={"lookId": "classic-breathe"})
+    api.home.devices.demote_device("a")
+    api.monitor.refresh()
+    api.home.clock[0] += timedelta(minutes=2)
+    api.feed.update()
+    await until(lambda: bool(socket.on("attention")))
+
+    [message] = socket.on("attention")
+    assert [item["kind"] for item in message["items"]] == ["light-offline"]
+
+
+async def test_a_client_that_connects_gets_every_pushed_channel(api: Api) -> None:
+    api.monitor.refresh()
+
+    channels = [message["channel"] for message in initial_messages(api.app)]
+
+    assert channels == ["running", "lights", "attention", "transport"]
+
+
+async def test_preview_only_is_pushed_as_the_transport_state(api: Api, socket: FakeSocket) -> None:
+    await api.home.manager.set_preview_only(True)
+    await until(lambda: bool(socket.on("transport")))
+
+    assert socket.on("transport") == [{"channel": "transport", "state": "simulating"}]

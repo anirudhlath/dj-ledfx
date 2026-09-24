@@ -1,3 +1,4 @@
+import errno
 import textwrap
 from pathlib import Path
 
@@ -381,11 +382,19 @@ def test_app_config_has_discovery():
     assert config.discovery.broadcast_interval_s == 30.0
 
 
-def test_engine_config_unassigned_device_mode_default():
-    cfg = EngineConfig()
-    assert cfg.unassigned_device_mode == "default_effect"
+def test_save_config_leaves_a_file_it_cannot_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The container mounts config.toml read-only; state.db is the source of truth."""
+    path = tmp_path / "config.toml"
+    path.write_text("[engine]\nfps = 30\n")
 
+    def busy(src: object, dst: object) -> None:
+        raise OSError(errno.EBUSY, "Device or resource busy")
 
-def test_engine_config_unassigned_device_mode_idle():
-    cfg = EngineConfig(unassigned_device_mode="idle")
-    assert cfg.unassigned_device_mode == "idle"
+    monkeypatch.setattr("dj_ledfx.config.os.replace", busy)
+
+    save_config(AppConfig(), path)
+
+    assert path.read_text() == "[engine]\nfps = 30\n"
+    assert not (tmp_path / "config.tmp").exists()

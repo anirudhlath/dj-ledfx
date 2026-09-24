@@ -2,12 +2,12 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from dj_ledfx.effects.beat_pulse import BeatPulse
-from dj_ledfx.effects.deck import EffectDeck
-from dj_ledfx.types import BeatState
+from dj_ledfx.types import BeatState, DeviceStats
 from dj_ledfx.web.app import create_app
+from dj_ledfx.web.ws import close_all, stats_message
 
 
 @pytest.fixture
@@ -24,14 +24,12 @@ def ws_app():
     clock.last_deck_number = 1
     clock.last_deck_name = "CDJ-3000"
 
-    deck = EffectDeck(BeatPulse())
     scheduler = MagicMock()
     scheduler.frame_snapshots = {}
     scheduler.get_device_stats.return_value = []
 
     app = create_app(
         beat_clock=clock,
-        effect_deck=deck,
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=scheduler,
@@ -71,46 +69,67 @@ def test_ws_subscribe_beat_command(client):
                 break
 
 
-def test_ws_set_effect_with_scene_id(client):
-    """set_effect with scene_id targets that scene's pipeline."""
-    mock_pm = MagicMock()
-    client.app.state.pipeline_manager = mock_pm
-
+def test_ws_the_old_deck_and_transport_commands_are_gone(client):
+    """set_effect and set_transport went with the global deck and transport (M1)."""
     with client.websocket_connect("/ws") as ws:
-        ws.receive_text()  # drain beat
-
-        ws.send_json(
-            {
-                "action": "set_effect",
-                "id": "test1",
-                "scene_id": "scene1",
-                "effect": "rainbow_wave",
-                "params": {},
-            }
-        )
+        ws.send_json({"action": "set_transport", "id": "t1", "state": "playing"})
         for _ in range(10):
-            data = ws.receive_text()
-            msg = json.loads(data)
-            if msg.get("channel") == "ack" and msg.get("id") == "test1":
+            msg = json.loads(ws.receive_text())
+            if msg.get("channel") == "error" and msg.get("id") == "t1":
+                assert msg["detail"] == "Unknown action: set_transport"
                 break
-        mock_pm.set_scene_effect.assert_called_once_with("scene1", "rainbow_wave", {})
+        else:
+            pytest.fail("no error for set_transport")
 
 
-def test_ws_set_effect_without_scene_id(client):
-    """set_effect without scene_id targets the global deck (backward compat)."""
-    with client.websocket_connect("/ws") as ws:
-        ws.receive_text()  # drain beat
-        ws.send_json(
-            {
-                "action": "set_effect",
-                "id": "test2",
-                "effect": "beat_pulse",
-                "params": {},
-            }
+def test_ws_sessions_close_going_away_when_the_server_stops(ws_app) -> None:
+    """granian abandons an open websocket when it stops, so each session closes itself first."""
+    with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
+        ws.receive_text()  # connected
+        assert client.portal is not None
+        client.portal.call(close_all, ws_app)
+        with pytest.raises(WebSocketDisconnect) as closed:
+            while True:
+                ws.receive_text()
+    assert closed.value.code == 1001  # going away
+
+
+def test_ws_refuses_a_connection_once_the_server_is_stopping(ws_app) -> None:
+    with TestClient(ws_app) as client:
+        assert client.portal is not None
+        client.portal.call(close_all, ws_app)
+        with pytest.raises(WebSocketDisconnect) as refused, client.websocket_connect("/ws"):
+            pass
+    assert refused.value.code == 1001
+
+
+# B10 and B11: the stats channel carries send_fps (web spec §12.4), and status by stable id.
+def test_stats_carry_send_fps_and_each_devices_status_by_stable_id() -> None:
+    stick = MagicMock(status="offline")
+    stick.adapter.device_info.name = "RAM"
+    stick.adapter.device_info.effective_id = "openrgb:ram:1"
+    twin = MagicMock(status="online")
+    twin.adapter.device_info.name = "RAM"
+    twin.adapter.device_info.effective_id = "openrgb:ram:0"
+    stats = [
+        DeviceStats(
+            device_name="RAM",
+            effective_latency_ms=5.0,
+            send_fps=58.0,
+            frames_dropped=0,
+            connected=True,
+            device_id=device_id,
+            dropped_pct=0.0,
         )
-        for _ in range(10):
-            data = ws.receive_text()
-            msg = json.loads(data)
-            if msg.get("channel") == "ack" and msg.get("id") == "test2":
-                break
-        assert client.app.state.effect_deck.effect_name == "beat_pulse"
+        for device_id in ("openrgb:ram:0", "openrgb:ram:1")
+    ]
+    app = MagicMock()
+    app.state.scheduler.get_device_stats.return_value = stats
+    app.state.device_manager.devices = [stick, twin]
+
+    message = stats_message(app)
+
+    [first, second] = message["devices"]
+    assert (first["id"], first["send_fps"], first["status"]) == ("openrgb:ram:0", 58.0, "online")
+    assert (second["id"], second["status"]) == ("openrgb:ram:1", "offline")
+    assert "fps" not in first

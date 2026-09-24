@@ -14,7 +14,6 @@ def client(tmp_path):
     config = AppConfig()
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=MagicMock(),
@@ -34,7 +33,6 @@ def client_with_db(tmp_path):
     asyncio.run(db.open())
     app = create_app(
         beat_clock=MagicMock(),
-        effect_deck=MagicMock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=MagicMock(),
@@ -88,12 +86,3 @@ def test_state_import_no_db(client):
 def test_state_export_with_db(client_with_db):
     resp = client_with_db.get("/api/state/export")
     assert resp.status_code == 200
-
-
-def test_state_import_with_db(client_with_db):
-    toml_str = (
-        '[presets."My Preset"]\neffect_class = "beat_pulse"\n\n[presets."My Preset".params]\n'
-    )
-    resp = client_with_db.post("/api/state/import", content=toml_str)
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"

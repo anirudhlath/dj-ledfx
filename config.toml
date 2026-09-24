@@ -14,13 +14,13 @@ beat_pulse_gamma = 2.0
 
 [network]
 interface = "auto"
-passive_mode = "True"
+passive_mode = true
 
 [web]
-enabled = "False"
+enabled = false
 host = "127.0.0.1"
 port = 8080
-cors_origins = "['http://localhost:5173', 'http://localhost:4173', 'http://localhost:8080']"
+cors_origins = ["http://localhost:5173", "http://localhost:4173", "http://localhost:8080"]
 
 [devices.openrgb]
 enabled = true

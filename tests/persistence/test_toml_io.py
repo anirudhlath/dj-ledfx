@@ -1,13 +1,17 @@
 """Tests for TOML import/export marshaling."""
 
+import errno
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 
 from dj_ledfx.persistence.state_db import StateDB
-from dj_ledfx.persistence.toml_io import export_toml, import_toml
+from dj_ledfx.persistence.toml_io import export_toml, import_toml, migrate_from_toml
+from dj_ledfx.zones.model import Assignment, ZoneRecord
+from dj_ledfx.zones.store import ZoneStore
 
 
 @pytest_asyncio.fixture
@@ -311,3 +315,119 @@ segment_count = 15
     assert (tmp_path / "config.toml.bak").exists()
 
     await state_db.close()
+
+
+STARTED = datetime(2026, 9, 24, 19, 30, 15, 250000, tzinfo=UTC)
+INSERT_LOOK = "INSERT INTO looks (id, body, created_at, updated_at) VALUES (?, ?, ?, ?)"
+LOOK_ROW = ("mine-0badc0de", '{"name": "Mine", "derivedFrom": null}', "2026-09-24T18:00", "t2")
+
+
+async def _zones_looks_and_running(db: StateDB) -> None:
+    store = ZoneStore(db)
+    await store.save_zone(ZoneRecord(id="desk", name="Office desk", lights=("lifx:b", "lifx:a")))
+    await store.save_zone(ZoneRecord(id="all-lights", name="All lights", all_lights=True))
+    await db.write(INSERT_LOOK, LOOK_ROW)
+    await db.write("INSERT INTO look_stars (look_id) VALUES (?)", ("classic-breathe",))
+    await store.save_assignment(
+        Assignment("desk", "mine-0badc0de", LOOK_ROW[1], 0.5, ("lifx:b",), STARTED)
+    )
+
+
+@pytest.mark.asyncio
+async def test_zones_looks_stars_and_running_round_trip(db, tmp_path: Path) -> None:
+    await _zones_looks_and_running(db)
+    text = await export_toml(db)
+
+    fresh = StateDB(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        await import_toml(fresh, text)
+
+        assert await ZoneStore(fresh).load_zones() == await ZoneStore(db).load_zones()
+        assert await ZoneStore(fresh).load_assignments() == await ZoneStore(db).load_assignments()
+        looks = await fresh.fetch_all("SELECT id, body, created_at, updated_at FROM looks")
+        assert looks == [LOOK_ROW]
+        assert await fresh.fetch_all("SELECT look_id FROM look_stars") == [("classic-breathe",)]
+    finally:
+        await fresh.close()
+
+
+@pytest.mark.asyncio
+async def test_import_skips_what_it_cannot_use(db) -> None:
+    text = """
+[zones.desk]
+name = "Desk"
+kind = "castle"
+lights = ["lifx:a"]
+
+[looks.firmware]
+body = "{}"
+
+[looks.mine-nobody]
+created_at = "2026-09-24T18:00"
+
+[running.desk]
+look_id = "classic-breathe"
+look = "{}"
+brightness = 0.5
+lights = ["lifx:a"]
+started_at = "not a time"
+
+[running.nowhere]
+look_id = "classic-breathe"
+look = "{}"
+brightness = 1.0
+lights = []
+started_at = 2026-09-24T19:00:00Z
+"""
+    await import_toml(db, text)
+
+    assert await ZoneStore(db).load_zones() == [
+        ZoneRecord(id="desk", name="Desk", kind="group", lights=("lifx:a",))
+    ]
+    assert await db.fetch_all("SELECT id FROM looks") == []
+    assert await ZoneStore(db).load_assignments() == []
+
+
+@pytest.mark.asyncio
+async def test_migration_keeps_value_types(tmp_path: Path) -> None:
+    config_toml = tmp_path / "config.toml"
+    config_toml.write_text(
+        '[network]\ninterface = "auto"\npassive_mode = false\n\n'
+        '[web]\ncors_origins = ["http://localhost:5173"]\n'
+    )
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    try:
+        await migrate_from_toml(db, config_path=config_toml)
+        config = await db.load_all_config()
+    finally:
+        await db.close()
+
+    assert config[("network", "interface")] == "auto"
+    assert config[("network", "passive_mode")] is False
+    assert config[("web", "cors_origins")] == ["http://localhost:5173"]
+
+
+@pytest.mark.asyncio
+async def test_migration_leaves_a_file_it_cannot_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bind-mounted config.toml can't be renamed; the migration still counts."""
+    config_toml = tmp_path / "config.toml"
+    config_toml.write_text("[engine]\nfps = 90\n")
+
+    def busy(self: Path, target: object) -> Path:
+        raise OSError(errno.EBUSY, "Device or resource busy")
+
+    monkeypatch.setattr(Path, "rename", busy)
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    try:
+        await migrate_from_toml(db, config_path=config_toml)
+        config = await db.load_all_config()
+    finally:
+        await db.close()
+
+    assert config[("engine", "fps")] == 90
+    assert config_toml.exists()

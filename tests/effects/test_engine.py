@@ -1,4 +1,4 @@
-import importlib
+import asyncio
 import time
 from unittest.mock import MagicMock
 
@@ -7,11 +7,13 @@ import pytest
 
 import dj_ledfx.metrics as metrics_mod
 from dj_ledfx.beat.clock import BeatClock
-from dj_ledfx.effects.beat_pulse import BeatPulse
-from dj_ledfx.effects.deck import EffectDeck
-from dj_ledfx.effects.engine import EffectEngine, RingBuffer
-from dj_ledfx.spatial.pipeline import ScenePipeline
+from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.effects.engine import EffectEngine
+from dj_ledfx.effects.ring_buffer import RingBuffer
+from dj_ledfx.looks.builtin import builtin_looks
+from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.types import RenderedFrame
+from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
 
 @pytest.fixture
@@ -23,7 +25,7 @@ def clock() -> BeatClock:
 
 
 def test_ring_buffer_write_and_read() -> None:
-    buf = RingBuffer(capacity=10, led_count=5)
+    buf = RingBuffer(capacity=10)
     frame = RenderedFrame(
         colors=np.zeros((5, 3), dtype=np.uint8),
         target_time=100.0,
@@ -37,7 +39,7 @@ def test_ring_buffer_write_and_read() -> None:
 
 
 def test_ring_buffer_find_nearest() -> None:
-    buf = RingBuffer(capacity=60, led_count=5)
+    buf = RingBuffer(capacity=60)
     for i in range(10):
         frame = RenderedFrame(
             colors=np.zeros((5, 3), dtype=np.uint8),
@@ -52,218 +54,76 @@ def test_ring_buffer_find_nearest() -> None:
     assert abs(result.target_time - 100.05) < 0.02
 
 
-def test_ring_buffer_returns_copy() -> None:
-    buf = RingBuffer(capacity=10, led_count=5)
-    colors = np.full((5, 3), 42, dtype=np.uint8)
+# E5: the ring hands out the frame it holds, and a route's colours are a new 8-bit
+# array, so a send never shares the ring's memory.
+def test_ring_buffer_hands_out_its_frame_and_routes_copy_their_slice() -> None:
+    buf = RingBuffer(capacity=10)
+    colors = np.full((5, 3), 0.5, dtype=np.float32)
     frame = RenderedFrame(colors=colors, target_time=100.0, beat_phase=0.0, bar_phase=0.0)
     buf.write(frame)
+    assert buf.find_nearest(100.0) is frame
 
-    result = buf.find_nearest(100.0)
-    assert result is not None
-    result.colors[0, 0] = 0
-    original = buf.find_nearest(100.0)
-    assert original is not None
-    assert original.colors[0, 0] == 42
+    for led_count in (3, 4):  # the slice's size, and a device with more LEDs
+        sent = DeviceRoute(ring=buf, start=1, stop=4, streaming=True).colors_at(100.0, led_count)
+        assert sent is not None and not np.shares_memory(sent, colors)
+        sent[:] = 0
+    assert np.all(colors == 0.5)
 
 
 def test_ring_buffer_empty_returns_none() -> None:
-    buf = RingBuffer(capacity=10, led_count=5)
+    buf = RingBuffer(capacity=10)
     assert buf.find_nearest(100.0) is None
 
 
-@pytest.mark.asyncio
-async def test_engine_tick_observes_render_duration() -> None:
-    """Verify that EffectEngine.tick() calls metrics.RENDER_DURATION.observe()."""
-    importlib.reload(metrics_mod)
-    mock_duration = MagicMock()
-    mock_rendered = MagicMock()
-    original_duration = metrics_mod.RENDER_DURATION
-    original_rendered = metrics_mod.FRAMES_RENDERED
-    metrics_mod.RENDER_DURATION = mock_duration
-    metrics_mod.FRAMES_RENDERED = mock_rendered
-    try:
-        import time as time_mod
-
-        from dj_ledfx.beat.clock import BeatClock
-        from dj_ledfx.effects.beat_pulse import BeatPulse
-        from dj_ledfx.effects.engine import EffectEngine
-
-        clock = BeatClock()
-        now = time_mod.monotonic()
-        clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=now)
-        effect = BeatPulse()
-        deck = EffectDeck(effect)
-        engine = EffectEngine(clock=clock, deck=deck, led_count=10, fps=60)
-        engine.tick(now)
-        mock_duration.observe.assert_called_once()
-        mock_rendered.inc.assert_called_once()
-    finally:
-        metrics_mod.RENDER_DURATION = original_duration
-        metrics_mod.FRAMES_RENDERED = original_rendered
+def _runtime(zone_id: str, clock: BeatClock) -> ZoneRuntime:
+    look = next(look for look in builtin_looks() if look.id == "classic-breathe")
+    light = ZoneLight(f"{zone_id}-light", 4, DeviceCapabilities(protocol="LIFX"))
+    return ZoneRuntime(zone_id, look, [light], clock=clock, latency_s=lambda _: 0.05)
 
 
-def test_engine_render_tick_populates_buffer() -> None:
-    clock = BeatClock()
+def test_the_engine_renders_each_zone_it_hosts(clock: BeatClock) -> None:
+    engine = EffectEngine(fps=60)
+    desk, shelf = _runtime("desk", clock), _runtime("shelf", clock)
+    engine.add_runtime(desk)
+    engine.add_runtime(shelf)
     now = time.monotonic()
-    clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=now)
-
-    effect = BeatPulse()
-    deck = EffectDeck(effect)
-    engine = EffectEngine(
-        clock=clock,
-        deck=deck,
-        led_count=10,
-        fps=60,
-        max_lookahead_s=1.0,
-    )
 
     engine.tick(now)
+    engine.remove_runtime("shelf")
+    engine.tick(now + 1 / 60)
 
-    frame = engine.ring_buffer.find_nearest(now + 1.0)
+    assert (desk.ring.count, shelf.ring.count) == (2, 1)
+    frame = desk.ring.find_nearest(now + 0.05 + 1 / 60)
     assert frame is not None
-    assert frame.colors.shape == (10, 3)
+    assert (frame.colors.shape, frame.colors.dtype) == ((4, 3), np.float32)
+    assert engine.fill_level == desk.ring.fill_level
+    assert EffectEngine().fill_level == 1.0
 
 
-def test_engine_tick_renders_to_pipelines(clock: BeatClock) -> None:
-    """Engine tick renders each pipeline into its own ring buffer."""
-    deck1 = EffectDeck(BeatPulse())
-    buf1 = RingBuffer(60, 30)
-    p1 = ScenePipeline(
-        scene_id="s1",
-        deck=deck1,
-        ring_buffer=buf1,
-        compositor=None,
-        mapping=None,
-        devices=[],
-        led_count=30,
-    )
+def test_a_tick_observes_the_render_duration(
+    clock: BeatClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    duration, rendered = MagicMock(), MagicMock()
+    monkeypatch.setattr(metrics_mod, "RENDER_DURATION", duration)
+    monkeypatch.setattr(metrics_mod, "FRAMES_RENDERED", rendered)
+    engine = EffectEngine(fps=60)
+    engine.add_runtime(_runtime("desk", clock))
 
-    deck2 = EffectDeck(BeatPulse())
-    buf2 = RingBuffer(60, 50)
-    p2 = ScenePipeline(
-        scene_id="s2",
-        deck=deck2,
-        ring_buffer=buf2,
-        compositor=None,
-        mapping=None,
-        devices=[],
-        led_count=50,
-    )
+    engine.tick(time.monotonic())
 
-    engine = EffectEngine(
-        clock=clock,
-        deck=deck1,
-        led_count=30,
-        fps=60,
-        max_lookahead_s=1.0,
-        pipelines=[p1, p2],
-    )
-    engine.tick(0.0)
-    assert buf1.count == 1
-    assert buf2.count == 1
+    duration.observe.assert_called_once()
+    rendered.inc.assert_called_once()
+    assert engine.avg_render_time_ms > 0.0
 
 
-def test_engine_empty_pipelines_uses_legacy_buffer(clock: BeatClock) -> None:
-    """When no pipelines, engine uses legacy single-buffer mode."""
-    deck = EffectDeck(BeatPulse())
-    engine = EffectEngine(clock=clock, deck=deck, led_count=60, fps=60)
-    engine.tick(0.0)
-    assert engine.ring_buffer.count == 1
+async def test_the_engine_renders_until_stopped(clock: BeatClock) -> None:
+    engine = EffectEngine(fps=60)
+    desk = _runtime("desk", clock)
+    engine.add_runtime(desk)
 
+    task = asyncio.create_task(engine.run())
+    await asyncio.sleep(0.1)
+    engine.stop()
+    await asyncio.wait_for(task, timeout=1.0)
 
-def test_engine_add_pipeline(clock: BeatClock) -> None:
-    deck = EffectDeck(BeatPulse())
-    engine = EffectEngine(clock=clock, deck=deck, led_count=10, fps=60, max_lookahead_s=1.0)
-    assert len(engine.pipelines) == 1  # default pipeline
-
-    new_buf = RingBuffer(60, 20)
-    new_deck = EffectDeck(BeatPulse())
-    pipeline = ScenePipeline(
-        scene_id="test",
-        deck=new_deck,
-        ring_buffer=new_buf,
-        compositor=None,
-        mapping=None,
-        devices=[],
-        led_count=20,
-    )
-    engine.add_pipeline(pipeline)
-    assert len(engine.pipelines) == 2
-    assert engine.pipelines[1].scene_id == "test"
-
-
-def test_engine_remove_pipeline(clock: BeatClock) -> None:
-    deck = EffectDeck(BeatPulse())
-    buf1 = RingBuffer(60, 10)
-    buf2 = RingBuffer(60, 10)
-    p1 = ScenePipeline(
-        scene_id="s1",
-        deck=deck,
-        ring_buffer=buf1,
-        compositor=None,
-        mapping=None,
-        devices=[],
-        led_count=10,
-    )
-    p2 = ScenePipeline(
-        scene_id="s2",
-        deck=EffectDeck(BeatPulse()),
-        ring_buffer=buf2,
-        compositor=None,
-        mapping=None,
-        devices=[],
-        led_count=10,
-    )
-    engine = EffectEngine(
-        clock=clock,
-        deck=deck,
-        led_count=10,
-        fps=60,
-        max_lookahead_s=1.0,
-        pipelines=[p1, p2],
-    )
-
-    # Write some frames
-    engine.tick(0.0)
-    assert buf2.count == 1
-
-    engine.remove_pipeline("s2")
-    assert len(engine.pipelines) == 1
-    assert engine.pipelines[0].scene_id == "s1"
-    assert buf2.count == 0  # cleared on removal
-
-
-def test_engine_tick_shared_buffer_dedup(clock: BeatClock) -> None:
-    """Shared-mode pipelines with same buffer only render once per tick."""
-    shared_deck = EffectDeck(BeatPulse())
-    shared_buf = RingBuffer(60, 10)
-    p1 = ScenePipeline(
-        scene_id="s1",
-        deck=shared_deck,
-        ring_buffer=shared_buf,
-        compositor=None,
-        mapping=None,
-        devices=[],
-        led_count=10,
-    )
-    p2 = ScenePipeline(
-        scene_id="s2",
-        deck=shared_deck,
-        ring_buffer=shared_buf,
-        compositor=None,
-        mapping=None,
-        devices=[],
-        led_count=10,
-    )
-    engine = EffectEngine(
-        clock=clock,
-        deck=shared_deck,
-        led_count=10,
-        fps=60,
-        max_lookahead_s=1.0,
-        pipelines=[p1, p2],
-    )
-
-    engine.tick(0.0)
-    # Only 1 frame written, not 2 (dedup by buffer identity)
-    assert shared_buf.count == 1
+    assert desk.ring.count >= 3

@@ -175,7 +175,9 @@ export default function ConfigPage() {
     if (!draft) return
     setSaving(true)
     try {
-      const updated = await updateConfig(draft)
+      // Preview only is switched on the Live page: don't send back the value loaded here
+      const engine = { fps: draft.engine.fps, max_lookahead_ms: draft.engine.max_lookahead_ms }
+      const updated = await updateConfig({ ...draft, engine })
       setConfig(updated)
       setDraft(updated)
       toast.success("Configuration saved")

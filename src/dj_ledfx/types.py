@@ -6,6 +6,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 RGB = tuple[int, int, int]
+FloatRGB = NDArray[np.float32]  # shape (n_leds, 3), linear 0..1 per channel
+
+
+def clamp01(value: float) -> float:
+    """A brightness or fraction held within 0..1."""
+    return max(0.0, min(1.0, value))
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +32,7 @@ class DeviceInfo:
 
 @dataclass(slots=True)
 class RenderedFrame:
-    colors: NDArray[np.uint8]  # shape (n_leds, 3)
+    colors: FloatRGB  # shape (n_leds, 3), linear 0..1
     target_time: float  # monotonic time when this should be displayed
     beat_phase: float
     bar_phase: float
@@ -65,6 +71,8 @@ class DeviceStats:
     send_fps: float
     frames_dropped: int
     connected: bool = True
+    device_id: str = ""  # the light's stable id
+    dropped_pct: float = 0.0  # share of frames dropped over the last second, while streaming
 
 
 @dataclass(frozen=True, slots=True)

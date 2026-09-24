@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.color import hsv_to_rgb_array
 from dj_ledfx.effects.easing import ease_in
 from dj_ledfx.effects.energy import bpm_energy
@@ -13,7 +13,7 @@ from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import BeatContext
 
 
-class RainbowWave(Effect):
+class RainbowWave(StripEffect):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {

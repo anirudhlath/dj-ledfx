@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import numpy as np
 from loguru import logger
@@ -12,13 +12,8 @@ from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.backend import DeviceBackend
 from dj_ledfx.devices.ghost import GhostAdapter
-from dj_ledfx.events import EventBus, TransportStateChangedEvent
 from dj_ledfx.latency.tracker import LatencyTracker
-from dj_ledfx.transport import TransportState
 from dj_ledfx.types import DeviceGroup, DeviceInfo
-
-if TYPE_CHECKING:
-    from dj_ledfx.persistence.state_db import StateDB
 
 
 @dataclass
@@ -30,31 +25,15 @@ class ManagedDevice:
 
 
 class DeviceManager:
-    def __init__(self, event_bus: EventBus) -> None:
-        self._event_bus = event_bus
+    def __init__(self) -> None:
         self._devices: list[ManagedDevice] = []
+        self._by_id: dict[str | None, ManagedDevice] = {}  # by stable id; see _index
         self._groups: dict[str, DeviceGroup] = {}
         self._device_groups: dict[str, str] = {}  # device_name -> group_name
-        self._transport_state: TransportState = TransportState.STOPPED
-        self._state_db: StateDB | None = None
-        event_bus.subscribe(TransportStateChangedEvent, self._on_transport_changed)
-
-    def set_state_db(self, db: StateDB) -> None:
-        """Attach a StateDB for device state persistence."""
-        self._state_db = db
-
-    def _on_transport_changed(self, event: TransportStateChangedEvent) -> None:
-        self._transport_state = event.new_state
 
     @property
     def devices(self) -> list[ManagedDevice]:
         return list(self._devices)
-
-    @property
-    def max_led_count(self) -> int:
-        if not self._devices:
-            return 0
-        return max(d.adapter.led_count for d in self._devices)
 
     def add_device(
         self,
@@ -63,6 +42,7 @@ class DeviceManager:
         max_fps: int = 60,
     ) -> None:
         self._devices.append(ManagedDevice(adapter=adapter, tracker=tracker, max_fps=max_fps))
+        self._index()
         logger.info(
             "Added device '{}' ({} LEDs, latency={:.0f}ms)",
             adapter.device_info.name,
@@ -80,26 +60,6 @@ class DeviceManager:
                 logger.opt(exception=result).error(
                     "Failed to connect to '{}'", device.adapter.device_info.name
                 )
-            elif self._transport_state == TransportState.STOPPED and self._state_db is not None:
-                asyncio.create_task(self._capture_device_state(device.adapter))
-
-    async def _capture_device_state(self, adapter: DeviceAdapter) -> None:
-        """Capture and persist the current state of a device."""
-        assert self._state_db is not None
-        stable_id = adapter.device_info.effective_id
-        try:
-            state_bytes = await adapter.capture_state()
-            await self._state_db.save_device_state(stable_id, state_bytes)
-            logger.debug(
-                "Captured state for device '{}' (stable_id={})",
-                adapter.device_info.name,
-                stable_id,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to capture state for device '{}'",
-                adapter.device_info.name,
-            )
 
     async def disconnect_all(self) -> None:
         results = await asyncio.gather(
@@ -172,11 +132,18 @@ class DeviceManager:
                 break
 
     def get_by_stable_id(self, stable_id: str) -> ManagedDevice | None:
-        """Return the ManagedDevice whose adapter has the given stable_id, or None."""
+        """Return the ManagedDevice whose adapter has the given stable_id, or None.
+
+        A dict lookup: the render loop asks for each light's latency on every tick, and
+        some adapters build a fresh DeviceInfo on every read.
+        """
+        return self._by_id.get(stable_id)
+
+    def _index(self) -> None:
+        """Re-key the devices by stable id after the list or an adapter changed."""
+        self._by_id = {}
         for d in self._devices:
-            if d.adapter.device_info.stable_id == stable_id:
-                return d
-        return None
+            self._by_id.setdefault(d.adapter.device_info.stable_id, d)  # the first one wins
 
     def add_device_from_info(
         self,
@@ -190,6 +157,7 @@ class DeviceManager:
         self._devices.append(
             ManagedDevice(adapter=ghost, tracker=tracker, max_fps=max_fps, status=status)
         )
+        self._index()
         logger.info(
             "Registered device '{}' as {} (stable_id={})",
             device_info.name,
@@ -214,6 +182,7 @@ class DeviceManager:
         if managed is None:
             raise KeyError(f"Device not found: {stable_id}")
         managed.adapter = adapter
+        self._index()
         if tracker is not None:
             managed.tracker = tracker
         if max_fps is not None:
@@ -224,9 +193,6 @@ class DeviceManager:
             adapter.device_info.name,
             stable_id,
         )
-        # Capture device state on promote when transport is stopped
-        if self._transport_state == TransportState.STOPPED and self._state_db is not None:
-            asyncio.create_task(self._capture_device_state(adapter))
 
     def demote_device(self, stable_id: str) -> None:
         """Swap a real adapter for a GhostAdapter and set status to offline."""
@@ -251,7 +217,12 @@ class DeviceManager:
         except RuntimeError:
             logger.debug("demote_device: no running event loop, skipping async disconnect")
 
-        managed.adapter = GhostAdapter(info, led_count=led_count)
+        managed.adapter = GhostAdapter(
+            info,
+            led_count=led_count,
+            caps=old_adapter.capabilities,
+            geometry=old_adapter.geometry,
+        )
         managed.status = "offline"
         logger.info(
             "Demoted device '{}' to offline (stable_id={})",
@@ -262,7 +233,9 @@ class DeviceManager:
     def remove_device(self, stable_id: str) -> None:
         """Remove a device by stable_id."""
         self._devices = [d for d in self._devices if d.adapter.device_info.stable_id != stable_id]
+        self._index()
 
     def remove_by_name(self, name: str) -> None:
         """Remove a device by name."""
         self._devices = [d for d in self._devices if d.adapter.device_info.name != name]
+        self._index()

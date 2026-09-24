@@ -13,7 +13,8 @@ from loguru import logger
 class EngineConfig:
     fps: int = 60
     max_lookahead_ms: int = 1000
-    unassigned_device_mode: str = "default_effect"  # "default_effect" | "idle"
+    # Looks run and show in the web app; the lights are left alone (spec §6.4).
+    preview_only: bool = False
 
 
 @dataclass
@@ -227,12 +228,21 @@ def atomic_toml_write(data: dict[str, Any], path: Path) -> None:
 
     tmp = path.with_suffix(".tmp")
     tmp.write_bytes(tomli_w.dumps(data).encode())
-    os.replace(tmp, path)
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def save_config(config: AppConfig, path: Path) -> None:
+    """Mirror the config to TOML. state.db is the source of truth, so a file that can't be
+    written (the container mounts config.toml read-only) only logs a warning."""
     import dataclasses
 
     data = dataclasses.asdict(config)
     strip_none(data)
-    atomic_toml_write(data, path)
+    try:
+        atomic_toml_write(data, path)
+    except OSError as exc:
+        logger.warning("Config not written to {}: {}", path, exc)

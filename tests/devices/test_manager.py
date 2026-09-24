@@ -1,11 +1,13 @@
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
+from conftest import FakeLight
 
+from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
-from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.spatial.geometry import StripGeometry
 from dj_ledfx.types import DeviceInfo
 
 
@@ -20,27 +22,11 @@ def _make_mock_adapter(name: str = "TestDevice", led_count: int = 10) -> AsyncMo
 
 
 def test_device_manager_add_device() -> None:
-    bus = EventBus()
-    manager = DeviceManager(event_bus=bus)
+    manager = DeviceManager()
     adapter = _make_mock_adapter()
     tracker = LatencyTracker(strategy=StaticLatency(10.0))
     manager.add_device(adapter, tracker, max_fps=60)  # type: ignore[arg-type]
     assert len(manager.devices) == 1
-
-
-def test_device_manager_max_led_count() -> None:
-    bus = EventBus()
-    manager = DeviceManager(event_bus=bus)
-
-    a1 = _make_mock_adapter("Dev1", led_count=10)
-    a2 = _make_mock_adapter("Dev2", led_count=30)
-    t1 = LatencyTracker(strategy=StaticLatency(10.0))
-    t2 = LatencyTracker(strategy=StaticLatency(10.0))
-
-    manager.add_device(a1, t1, max_fps=60)  # type: ignore[arg-type]
-    manager.add_device(a2, t2, max_fps=60)  # type: ignore[arg-type]
-
-    assert manager.max_led_count == 30
 
 
 def test_managed_device_max_fps() -> None:
@@ -50,8 +36,7 @@ def test_managed_device_max_fps() -> None:
 
 
 def test_device_manager_get_device_by_name() -> None:
-    bus = EventBus()
-    manager = DeviceManager(event_bus=bus)
+    manager = DeviceManager()
     adapter = _make_mock_adapter("MyDevice")
     tracker = LatencyTracker(strategy=StaticLatency(10.0))
     manager.add_device(adapter, tracker, max_fps=60)  # type: ignore[arg-type]
@@ -65,8 +50,7 @@ def test_device_manager_get_device_by_name() -> None:
 
 
 def test_device_manager_groups() -> None:
-    bus = EventBus()
-    manager = DeviceManager(event_bus=bus)
+    manager = DeviceManager()
 
     group = manager.create_group("DJ Booth", "#00e5ff")
     assert group.name == "DJ Booth"
@@ -80,8 +64,7 @@ def test_device_manager_groups() -> None:
 
 
 def test_device_manager_assign_group() -> None:
-    bus = EventBus()
-    manager = DeviceManager(event_bus=bus)
+    manager = DeviceManager()
 
     adapter = _make_mock_adapter("Dev1")
     tracker = LatencyTracker(strategy=StaticLatency(10.0))
@@ -95,8 +78,7 @@ def test_device_manager_assign_group() -> None:
 
 
 def test_device_manager_assign_group_missing_device() -> None:
-    bus = EventBus()
-    manager = DeviceManager(event_bus=bus)
+    manager = DeviceManager()
 
     manager.create_group("Stage", "#ff0000")
     with pytest.raises(KeyError, match="Device not found"):
@@ -104,8 +86,7 @@ def test_device_manager_assign_group_missing_device() -> None:
 
 
 def test_device_manager_assign_group_missing_group() -> None:
-    bus = EventBus()
-    manager = DeviceManager(event_bus=bus)
+    manager = DeviceManager()
 
     adapter = _make_mock_adapter("Dev1")
     tracker = LatencyTracker(strategy=StaticLatency(10.0))
@@ -116,8 +97,7 @@ def test_device_manager_assign_group_missing_group() -> None:
 
 
 def test_device_manager_delete_group_clears_assignments() -> None:
-    bus = EventBus()
-    manager = DeviceManager(event_bus=bus)
+    manager = DeviceManager()
 
     adapter = _make_mock_adapter("Dev1")
     tracker = LatencyTracker(strategy=StaticLatency(10.0))
@@ -163,7 +143,7 @@ def test_managed_device_status_default() -> None:
 
 
 def test_add_device_with_info_creates_ghost() -> None:
-    mgr = DeviceManager(event_bus=EventBus())
+    mgr = DeviceManager()
     info = _make_info()
     mgr.add_device_from_info(info, tracker=_make_tracker(), status="offline")
     device = mgr.get_by_stable_id("lifx:aabb")
@@ -174,7 +154,7 @@ def test_add_device_with_info_creates_ghost() -> None:
 
 
 def test_promote_device() -> None:
-    mgr = DeviceManager(event_bus=EventBus())
+    mgr = DeviceManager()
     info = _make_info()
     mgr.add_device_from_info(info, tracker=_make_tracker(), status="offline")
     real_adapter = MagicMock()
@@ -189,7 +169,7 @@ def test_promote_device() -> None:
 
 
 def test_demote_device() -> None:
-    mgr = DeviceManager(event_bus=EventBus())
+    mgr = DeviceManager()
     real_adapter = MagicMock()
     info = _make_info()
     real_adapter.device_info = info
@@ -204,7 +184,7 @@ def test_demote_device() -> None:
 
 
 def test_remove_device() -> None:
-    mgr = DeviceManager(event_bus=EventBus())
+    mgr = DeviceManager()
     info = _make_info()
     mgr.add_device_from_info(info, tracker=_make_tracker())
     mgr.remove_device("lifx:aabb")
@@ -212,7 +192,7 @@ def test_remove_device() -> None:
 
 
 def test_get_by_stable_id_returns_none() -> None:
-    mgr = DeviceManager(event_bus=EventBus())
+    mgr = DeviceManager()
     assert mgr.get_by_stable_id("nonexistent") is None
 
 
@@ -226,7 +206,7 @@ async def test_demote_device_disconnects_old_adapter() -> None:
     """demote_device schedules a disconnect() call on the old real adapter."""
     import asyncio
 
-    mgr = DeviceManager(event_bus=EventBus())
+    mgr = DeviceManager()
     info = _make_info()
 
     real_adapter = AsyncMock()
@@ -242,3 +222,27 @@ async def test_demote_device_disconnects_old_adapter() -> None:
     await asyncio.sleep(0)
 
     real_adapter.disconnect.assert_awaited_once()
+
+
+def test_a_demoted_light_keeps_its_capabilities_and_geometry() -> None:
+    mgr = DeviceManager()
+    caps = DeviceCapabilities(protocol="LIFX", multizone=True, extended_multizone=True)
+    geometry = StripGeometry(direction=(1.0, 0.0, 0.0), length=2.0)
+    mgr.add_device(
+        FakeLight("lifx:n1", led_count=40, caps=caps, geometry=geometry), _make_tracker()
+    )
+
+    mgr.demote_device("lifx:n1")
+
+    device = mgr.get_by_stable_id("lifx:n1")
+    assert device is not None and isinstance(device.adapter, GhostAdapter)
+    assert device.adapter.capabilities == caps
+    assert device.adapter.geometry == geometry
+    assert device.adapter.led_count == 40
+
+
+def test_a_ghost_without_capabilities_guesses_from_its_type() -> None:
+    info = _make_info()
+    ghost = GhostAdapter(info, led_count=60)
+    assert ghost.capabilities == DeviceCapabilities(protocol="LIFX")
+    assert ghost.geometry is None

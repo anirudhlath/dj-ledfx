@@ -7,121 +7,81 @@ import pytest
 from conftest import MockDeviceAdapter
 
 from dj_ledfx.beat.clock import BeatClock
-from dj_ledfx.beat.simulator import BeatSimulator
+from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import ManagedDevice
-from dj_ledfx.effects.beat_pulse import BeatPulse
-from dj_ledfx.effects.deck import EffectDeck
-from dj_ledfx.effects.engine import EffectEngine, RingBuffer
-from dj_ledfx.effects.rainbow_wave import RainbowWave
-from dj_ledfx.events import EventBus
-from dj_ledfx.latency.strategies import StaticLatency, WindowedMeanLatency
+from dj_ledfx.effects.engine import EffectEngine
+from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
-from dj_ledfx.prodjlink.listener import BeatEvent
+from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
-from dj_ledfx.spatial.pipeline import ScenePipeline
-from dj_ledfx.transport import TransportState
+from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
 
-def _setup_pipeline(
-    devices: list[ManagedDevice],
-    bpm: float = 300.0,
-) -> tuple[BeatSimulator, EffectEngine, LookaheadScheduler, EventBus]:
-    """Create a full pipeline: BeatSimulator -> Clock -> Engine -> Scheduler."""
-    event_bus = EventBus()
+def _device(name: str, latency_ms: float, led_count: int) -> ManagedDevice:
+    adapter = MockDeviceAdapter(name=name, led_count=led_count)
+    tracker = LatencyTracker(strategy=StaticLatency(latency_ms))
+    return ManagedDevice(adapter=adapter, tracker=tracker, max_fps=60)
+
+
+def _clock() -> BeatClock:
     clock = BeatClock()
-
-    def on_beat(event: BeatEvent) -> None:
-        clock.on_beat(
-            bpm=event.bpm,
-            beat_number=event.beat_position,
-            next_beat_ms=event.next_beat_ms,
-            timestamp=event.timestamp,
-        )
-
-    event_bus.subscribe(BeatEvent, on_beat)
-
-    effect = BeatPulse()
-    deck = EffectDeck(effect)
-    engine = EffectEngine(
-        clock=clock,
-        deck=deck,
-        led_count=10,
-        fps=60,
-        max_lookahead_s=1.0,
-    )
-
-    scheduler = LookaheadScheduler(
-        ring_buffer=engine.ring_buffer,
-        devices=devices,
-        fps=60,
-    )
-
-    simulator = BeatSimulator(event_bus=event_bus, bpm=bpm)
-    return simulator, engine, scheduler, event_bus
+    clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=time.monotonic())
+    return clock
 
 
-async def test_full_pipeline_simulator_to_mock_device() -> None:
-    """Integration: BeatSimulator -> BeatClock -> EffectEngine -> Scheduler -> MockDevice."""
-    adapter = MockDeviceAdapter(name="MockLED", led_count=10)
-    tracker = LatencyTracker(strategy=StaticLatency(10.0))
-    managed = ManagedDevice(adapter=adapter, tracker=tracker, max_fps=60)
+def _zone(
+    zone_id: str, look_id: str, devices: list[ManagedDevice], clock: BeatClock
+) -> ZoneRuntime:
+    """A running zone as the zone manager builds one (lights are keyed by name here)."""
+    look = next(look for look in builtin_looks() if look.id == look_id)
+    caps = DeviceCapabilities(protocol="LIFX")
+    lights = [ZoneLight(d.adapter.device_info.name, d.adapter.led_count, caps) for d in devices]
+    latency = {d.adapter.device_info.name: d.tracker.effective_latency_s for d in devices}
+    return ZoneRuntime(zone_id, look, lights, clock=clock, latency_s=latency.__getitem__)
 
-    simulator, engine, scheduler, _ = _setup_pipeline([managed])
 
-    engine._resume_event.set()
-    scheduler._resume_event.set()
-    scheduler._transport_state = TransportState.PLAYING
-    sim_task = asyncio.create_task(simulator.run())
-    engine_task = asyncio.create_task(engine.run())
-    sched_task = asyncio.create_task(scheduler.run())
-
-    await asyncio.sleep(1.0)
-
-    simulator.stop()
+async def _play(zones: list[ZoneRuntime], devices: list[ManagedDevice], seconds: float) -> None:
+    """The engine and the scheduler, wired the way main wires them, for a while."""
+    engine = EffectEngine(fps=60)
+    scheduler = LookaheadScheduler(devices=devices, fps=60)
+    for zone in zones:
+        engine.add_runtime(zone)
+        for light in zone.lights:
+            scheduler.set_route(light.device_id, zone.route_for(light.device_id))
+    tasks = [asyncio.create_task(engine.run()), asyncio.create_task(scheduler.run())]
+    await asyncio.sleep(seconds)
     engine.stop()
     scheduler.stop()
-    await asyncio.gather(sim_task, engine_task, sched_task, return_exceptions=True)
-
-    assert len(adapter.send_frame_calls) > 0
-    sent_colors = adapter.send_frame_calls[0]
-    assert isinstance(sent_colors, np.ndarray)
-    assert sent_colors.shape == (10, 3)
+    await asyncio.gather(*tasks)
 
 
-async def test_mixed_latency_devices() -> None:
-    """Two devices with different latencies both receive frames."""
-    fast_adapter = MockDeviceAdapter(name="USB Device", led_count=10)
-    fast_tracker = LatencyTracker(strategy=StaticLatency(5.0))
-    fast_device = ManagedDevice(adapter=fast_adapter, tracker=fast_tracker, max_fps=60)
+async def test_one_zone_streams_each_light_its_own_slice() -> None:
+    near, far = _device("near", 10.0, 10), _device("far", 100.0, 5)
+    zone = _zone("desk", "classic-rainbow-wave", [near, far], _clock())
 
-    slow_adapter = MockDeviceAdapter(name="Govee WiFi", led_count=10)
-    slow_tracker = LatencyTracker(
-        strategy=WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
-    )
-    slow_device = ManagedDevice(adapter=slow_adapter, tracker=slow_tracker, max_fps=60)
+    await _play([zone], [near, far], 0.5)
 
-    simulator, engine, scheduler, _ = _setup_pipeline([fast_device, slow_device])
+    assert zone.horizon_s == pytest.approx(0.1 + 1 / 60)
+    assert zone.leds.count == 15
+    assert near.adapter.send_frame_calls and far.adapter.send_frame_calls
+    near_frame, far_frame = near.adapter.send_frame_calls[-1], far.adapter.send_frame_calls[-1]
+    assert (near_frame.shape, far_frame.shape) == ((10, 3), (5, 3))
+    assert near_frame.dtype == far_frame.dtype == np.uint8
 
-    engine._resume_event.set()
-    scheduler._resume_event.set()
-    scheduler._transport_state = TransportState.PLAYING
-    sim_task = asyncio.create_task(simulator.run())
-    engine_task = asyncio.create_task(engine.run())
-    sched_task = asyncio.create_task(scheduler.run())
 
-    await asyncio.sleep(1.0)
+async def test_two_zones_play_their_own_looks() -> None:
+    left, right = _device("left", 10.0, 10), _device("right", 10.0, 10)
+    clock = _clock()
+    zones = [
+        _zone("a", "classic-beat-pulse", [left], clock),
+        _zone("b", "classic-rainbow-wave", [right], clock),
+    ]
 
-    simulator.stop()
-    engine.stop()
-    scheduler.stop()
-    await asyncio.gather(sim_task, engine_task, sched_task, return_exceptions=True)
+    await _play(zones, [left, right], 0.5)
 
-    # Both devices received frames
-    assert len(fast_adapter.send_frame_calls) > 0
-    assert len(slow_adapter.send_frame_calls) > 0
-
-    # Fast device should have more frames (higher effective FPS)
-    assert len(fast_adapter.send_frame_calls) >= len(slow_adapter.send_frame_calls)
+    assert left.adapter.send_frame_calls and right.adapter.send_frame_calls
+    left_frame, right_frame = left.adapter.send_frame_calls[-1], right.adapter.send_frame_calls[-1]
+    assert not np.array_equal(left_frame, right_frame), "each zone plays its own look"
 
 
 async def test_rtt_callback_updates_tracker() -> None:
@@ -164,7 +124,7 @@ async def test_startup_with_fresh_db(tmp_path: Path) -> None:
     db = StateDB(tmp_path / "state.db")
     await db.open()
     version = await db.get_schema_version()
-    assert version == 3
+    assert version == 4
     devices = await db.load_devices()
     assert devices == []
     scenes = await db.load_scenes()
@@ -210,89 +170,3 @@ async def test_startup_with_migrated_toml(tmp_path: Path) -> None:
     assert not config_toml.exists()
     assert (tmp_path / "config.toml.bak").exists()
     await db.close()
-
-
-async def test_multi_pipeline_renders_to_separate_devices() -> None:
-    """Two pipelines with different effects render to different devices."""
-    adapter1 = MockDeviceAdapter(name="LED1", led_count=10)
-    tracker1 = LatencyTracker(strategy=StaticLatency(10.0))
-    managed1 = ManagedDevice(adapter=adapter1, tracker=tracker1, max_fps=60)
-
-    adapter2 = MockDeviceAdapter(name="LED2", led_count=10)
-    tracker2 = LatencyTracker(strategy=StaticLatency(10.0))
-    managed2 = ManagedDevice(adapter=adapter2, tracker=tracker2, max_fps=60)
-
-    # Pipeline A: BeatPulse
-    deck_a = EffectDeck(BeatPulse())
-    buf_a = RingBuffer(60, 10)
-    pipeline_a = ScenePipeline(
-        scene_id="scene_a",
-        deck=deck_a,
-        ring_buffer=buf_a,
-        compositor=None,
-        mapping=None,
-        devices=[managed1],
-        led_count=10,
-    )
-
-    # Pipeline B: RainbowWave
-    deck_b = EffectDeck(RainbowWave())
-    buf_b = RingBuffer(60, 10)
-    pipeline_b = ScenePipeline(
-        scene_id="scene_b",
-        deck=deck_b,
-        ring_buffer=buf_b,
-        compositor=None,
-        mapping=None,
-        devices=[managed2],
-        led_count=10,
-    )
-
-    event_bus = EventBus()
-    clock = BeatClock()
-    simulator = BeatSimulator(event_bus=event_bus, bpm=120.0)
-    simulator._clock = clock
-    clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=time.monotonic())
-
-    engine = EffectEngine(
-        clock=clock,
-        deck=deck_a,
-        led_count=10,
-        fps=60,
-        max_lookahead_s=1.0,
-        pipelines=[pipeline_a, pipeline_b],
-        event_bus=event_bus,
-    )
-
-    scheduler = LookaheadScheduler(
-        ring_buffer=buf_a,
-        devices=[],
-        fps=60,
-        event_bus=event_bus,
-    )
-    scheduler.add_device(managed1, pipeline=pipeline_a)
-    scheduler.add_device(managed2, pipeline=pipeline_b)
-
-    engine._resume_event.set()
-    scheduler._resume_event.set()
-    scheduler._transport_state = TransportState.PLAYING
-
-    sim_task = asyncio.create_task(simulator.run())
-    engine_task = asyncio.create_task(engine.run())
-    sched_task = asyncio.create_task(scheduler.run())
-
-    await asyncio.sleep(0.5)
-
-    simulator.stop()
-    engine.stop()
-    scheduler.stop()
-    await asyncio.gather(sim_task, engine_task, sched_task, return_exceptions=True)
-
-    # Both devices should have received frames
-    assert len(adapter1.send_frame_calls) > 0
-    assert len(adapter2.send_frame_calls) > 0
-
-    # Frames should differ (different effects)
-    frame1 = adapter1.send_frame_calls[-1]
-    frame2 = adapter2.send_frame_calls[-1]
-    assert not (frame1 == frame2).all(), "Different effects should produce different frames"

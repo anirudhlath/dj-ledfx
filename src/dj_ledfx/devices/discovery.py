@@ -64,29 +64,9 @@ class DiscoveryOrchestrator:
                 continue
 
             for device in discovered:
-                info = device.adapter.device_info
-                stable_id = info.effective_id
-                name = info.name
-
-                existing = self._manager.get_by_stable_id(stable_id)
-                if existing is not None and existing.status == "offline":
-                    self._manager.promote_device(
-                        stable_id,
-                        device.adapter,
-                        tracker=device.tracker,
-                        max_fps=device.max_fps,
-                    )
-                    self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
+                if self._merge(device):
                     promoted += 1
-                    if self._state_db:
-                        await self._persist_device(device.adapter)
-                elif existing is None:
-                    # Device not in manager yet — add it directly
-                    self._manager.add_device(device.adapter, device.tracker, device.max_fps)
-                    self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
-                    promoted += 1
-                    if self._state_db:
-                        await self._persist_device(device.adapter)
+                    await self._persist_device(device.adapter)
 
         if promoted:
             logger.info("Fast reconnect: {} device(s) online immediately", promoted)
@@ -140,49 +120,8 @@ class DiscoveryOrchestrator:
 
         def _on_found(device: DiscoveredDevice) -> None:
             nonlocal new_count
-            info = device.adapter.device_info
-            stable_id = info.effective_id
-            name = info.name
-
-            existing = self._manager.get_by_stable_id(stable_id)
-            if existing is None:
-                # Check by name as fallback (device may have had no stable_id before)
-                existing_by_name = self._manager.get_device(name)
-                if existing_by_name is None:
-                    self._manager.add_device(device.adapter, device.tracker, device.max_fps)
-                    self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
-                    new_count += 1
-                    if self._state_db:
-                        persist_tasks.append(
-                            asyncio.create_task(self._persist_device(device.adapter))
-                        )
-                elif existing_by_name.status == "offline":
-                    # Promote the offline device using the freshly discovered adapter
-                    self._manager.promote_device(
-                        existing_by_name.adapter.device_info.effective_id,
-                        device.adapter,
-                        tracker=device.tracker,
-                        max_fps=device.max_fps,
-                    )
-                    self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
-                    new_count += 1
-                    if self._state_db:
-                        persist_tasks.append(
-                            asyncio.create_task(self._persist_device(device.adapter))
-                        )
-                else:
-                    logger.debug(
-                        "Device '{}' already managed online under different stable_id, skipping",
-                        name,
-                    )
-            elif existing.status == "offline":
-                self._manager.promote_device(
-                    stable_id,
-                    device.adapter,
-                    tracker=device.tracker,
-                    max_fps=device.max_fps,
-                )
-                self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
+            if self._merge(device):
+                new_count += 1
                 if self._state_db:
                     persist_tasks.append(asyncio.create_task(self._persist_device(device.adapter)))
 
@@ -206,6 +145,36 @@ class DiscoveryOrchestrator:
             await asyncio.gather(*persist_tasks, return_exceptions=True)
 
         return new_count
+
+    def _merge(self, device: DiscoveredDevice) -> bool:
+        """Take a found device in. True when it's new here or came back online.
+
+        It's matched by stable id. Its name is a fallback only for a light whose id
+        changed: exactly one managed device has that name, and it's offline. Otherwise a
+        new id is a new light, even beside lights of the same name: the PC's four RAM
+        sticks share one (spec §6.3, §6.6).
+        """
+        info = device.adapter.device_info
+        stable_id, name = info.effective_id, info.name
+        existing = self._manager.get_by_stable_id(stable_id)
+        if existing is None:
+            named = [d for d in self._manager.devices if d.adapter.device_info.name == name]
+            if len(named) == 1 and named[0].status == "offline":
+                existing = named[0]
+        if existing is None:
+            self._manager.add_device(device.adapter, device.tracker, device.max_fps)
+            self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
+            return True
+        if existing.status != "offline":
+            return False
+        self._manager.promote_device(
+            existing.adapter.device_info.effective_id,
+            device.adapter,
+            tracker=device.tracker,
+            max_fps=device.max_fps,
+        )
+        self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
+        return True
 
     async def _persist_device(self, adapter: DeviceAdapter) -> None:
         if not self._state_db:

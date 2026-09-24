@@ -40,6 +40,11 @@ class GoveeTransport:
     def is_open(self) -> bool:
         return self._is_open
 
+    @property
+    def can_receive(self) -> bool:
+        """False when another program holds UDP 4002, so the lamps' replies never reach us."""
+        return self._recv_transport is not None
+
     async def open(self) -> None:
         loop = asyncio.get_running_loop()
 

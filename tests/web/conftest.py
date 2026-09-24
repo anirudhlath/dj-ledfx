@@ -19,7 +19,6 @@ def mock_deps() -> dict[str, Any]:
     """create_app's required arguments, mocked, with no static directory configured."""
     return {
         "beat_clock": MagicMock(),
-        "effect_deck": MagicMock(),
         "effect_engine": MagicMock(),
         "device_manager": MagicMock(),
         "scheduler": MagicMock(),

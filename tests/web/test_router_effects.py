@@ -1,102 +1,89 @@
-import asyncio
-from unittest.mock import MagicMock
+"""The old UI's effect controls, aimed at a zone's classic effect (spec §6.5)."""
 
-import pytest
-from fastapi.testclient import TestClient
+from __future__ import annotations
 
-from dj_ledfx.effects.beat_pulse import BeatPulse
-from dj_ledfx.effects.deck import EffectDeck
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+import pytest_asyncio
+from api_home import Api, api_home
+from conftest import FakeLight
+
 from dj_ledfx.effects.presets import PresetStore
-from dj_ledfx.persistence.state_db import StateDB
-from dj_ledfx.web.app import create_app
+from dj_ledfx.zones.model import ZoneRecord
+
+DESK = {"zone": "desk"}
 
 
-@pytest.fixture
-def client(tmp_path):
-    deck = EffectDeck(BeatPulse())
-    store = PresetStore(tmp_path / "presets.toml")
-    app = create_app(
-        beat_clock=MagicMock(),
-        effect_deck=deck,
-        effect_engine=MagicMock(),
-        device_manager=MagicMock(),
-        scheduler=MagicMock(),
-        preset_store=store,
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"])),
-        config_path=None,
-    )
-    return TestClient(app)
+@pytest_asyncio.fixture
+async def api(tmp_path: Path) -> AsyncIterator[Api]:
+    zones = [ZoneRecord(id="desk", name="Desk", lights=("a",))]
+    async with api_home(tmp_path, [FakeLight("a")], zones) as api:
+        api.app.state.preset_store = PresetStore(state_db=api.home.db)
+        yield api
 
 
-def test_list_effects(client):
-    resp = client.get("/api/effects")
+async def test_list_effects(api: Api) -> None:
+    resp = await api.client.get("/api/effects")
+
     assert resp.status_code == 200
-    data = resp.json()
-    assert "beat_pulse" in data
+    assert "beat_pulse" in resp.json()
 
 
-def test_get_active_effect(client):
-    resp = client.get("/api/effects/active")
+async def test_choosing_an_effect_starts_its_classic_look_on_the_zone(api: Api) -> None:
+    resp = await api.client.get("/api/effects/active", params=DESK)
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Desk isn't playing a classic effect"
+
+    resp = await api.client.put("/api/effects/active", params=DESK, json={"effect": "beat_pulse"})
+
     assert resp.status_code == 200
     assert resp.json()["effect"] == "beat_pulse"
+    running = (await api.client.get("/api/running")).json()["zones"]
+    assert [(zone["zoneId"], zone["lookId"]) for zone in running] == [
+        ("desk", "classic-beat-pulse")
+    ]
 
 
-def test_update_params(client):
-    resp = client.put("/api/effects/active", json={"params": {"gamma": 3.0}})
+async def test_settings_change_in_place(api: Api) -> None:
+    await api.client.put("/api/effects/active", params=DESK, json={"effect": "beat_pulse"})
+
+    resp = await api.client.put(
+        "/api/effects/active", params=DESK, json={"params": {"gamma": 3.0}}
+    )
+
     assert resp.status_code == 200
-    resp2 = client.get("/api/effects/active")
-    assert resp2.json()["params"]["gamma"] == 3.0
+    active = (await api.client.get("/api/effects/active", params=DESK)).json()
+    assert (active["effect"], active["params"]["gamma"]) == ("beat_pulse", 3.0)
 
 
-def test_presets_crud(client):
-    resp = client.post("/api/presets", json={"name": "Test"})
+async def test_unknown_effects_unknown_zones_and_no_zone(api: Api) -> None:
+    resp = await api.client.put("/api/effects/active", params=DESK, json={"effect": "nope"})
+    assert (resp.status_code, resp.json()["detail"]) == (404, "Unknown effect: nope")
+
+    resp = await api.client.get("/api/effects/active", params={"zone": "zzz"})
+    assert (resp.status_code, resp.json()["detail"]) == (404, "No zone 'zzz'")
+
+    resp = await api.client.get("/api/effects/active")
+    assert resp.status_code == 422
+
+
+async def test_presets_save_and_load_on_a_zone(api: Api) -> None:
+    body = {"effect": "beat_pulse", "params": {"gamma": 3.0}}
+    await api.client.put("/api/effects/active", params=DESK, json=body)
+
+    resp = await api.client.post("/api/presets", params=DESK, json={"name": "Test"})
     assert resp.status_code == 200
-    resp = client.get("/api/presets")
-    assert len(resp.json()) == 1
-    resp = client.post("/api/presets/Test/load")
+    assert (resp.json()["effect_class"], resp.json()["params"]["gamma"]) == ("beat_pulse", 3.0)
+
+    await api.client.put("/api/effects/active", params=DESK, json={"effect": "rainbow_wave"})
+    resp = await api.client.post("/api/presets/Test/load", params=DESK)
     assert resp.status_code == 200
-    resp = client.delete("/api/presets/Test")
-    assert resp.status_code == 200
-    assert len(client.get("/api/presets").json()) == 0
+    assert (resp.json()["effect"], resp.json()["params"]["gamma"]) == ("beat_pulse", 3.0)
 
-
-def test_preset_update(client):
-    client.post("/api/presets", json={"name": "Test"})
-    resp = client.put("/api/presets/Test", json={"params": {"gamma": 4.0}})
-    assert resp.status_code == 200
-
-
-def test_presets_crud_with_db(tmp_path):
-    """Presets use save_async/delete_async when PresetStore has a StateDB."""
-    db = StateDB(tmp_path / "state.db")
-    asyncio.run(db.open())
-    try:
-        deck = EffectDeck(BeatPulse())
-        store = PresetStore(state_db=db)
-        app = create_app(
-            beat_clock=MagicMock(),
-            effect_deck=deck,
-            effect_engine=MagicMock(),
-            device_manager=MagicMock(),
-            scheduler=MagicMock(),
-            preset_store=store,
-            scene_model=None,
-            compositor=None,
-            config=MagicMock(web=MagicMock(cors_origins=["*"])),
-            config_path=None,
-            state_db=db,
-        )
-        tc = TestClient(app)
-        # Save preset
-        resp = tc.post("/api/presets", json={"name": "DBPreset"})
-        assert resp.status_code == 200
-        # List
-        assert len(tc.get("/api/presets").json()) == 1
-        # Delete
-        resp = tc.delete("/api/presets/DBPreset")
-        assert resp.status_code == 200
-        assert len(tc.get("/api/presets").json()) == 0
-    finally:
-        asyncio.run(db.close())
+    resp = await api.client.put("/api/presets/Test", json={"params": {"gamma": 4.0}})
+    assert (resp.status_code, resp.json()["params"]["gamma"]) == (200, 4.0)
+    assert [p["name"] for p in (await api.client.get("/api/presets")).json()] == ["Test"]
+    assert (await api.client.delete("/api/presets/Test")).status_code == 200
+    assert (await api.client.get("/api/presets")).json() == []
+    assert (await api.client.post("/api/presets/Test/load", params=DESK)).status_code == 404

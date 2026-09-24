@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 from numpy.typing import NDArray
 
+if TYPE_CHECKING:
+    from dj_ledfx.types import RGB, FloatRGB
 
-def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+
+def hex_to_rgb(hex_color: str) -> RGB:
     h = hex_color.lstrip("#")
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
 def rgb_to_hex(r: int, g: int, b: int) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def to_float_rgb(colours: NDArray[np.uint8]) -> FloatRGB:
+    """8-bit colours as the 0..1 floats that field effects render."""
+    out = colours.astype(np.float32)
+    out *= np.float32(1.0 / 255.0)
+    return out
 
 
 def hsv_to_rgb_array(
@@ -76,7 +88,7 @@ def hsv_to_rgb_array(
 
 
 def palette_lerp(
-    palette: list[tuple[int, int, int]],
+    palette: list[RGB],
     positions: NDArray[np.float64],
 ) -> NDArray[np.uint8]:
     """Interpolate between palette colors at 0-1 positions."""

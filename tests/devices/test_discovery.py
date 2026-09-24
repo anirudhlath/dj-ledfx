@@ -19,7 +19,7 @@ def event_bus():
 
 @pytest.fixture
 def device_manager(event_bus):
-    return DeviceManager(event_bus=event_bus)
+    return DeviceManager()
 
 
 @pytest.fixture
@@ -336,3 +336,151 @@ async def test_offline_device_repromotion_via_discovery(config, device_manager, 
     assert managed.adapter is real_adapter
     assert len(online_events) == 1
     assert online_events[0].stable_id == "lifx:bulba"
+
+
+@pytest.mark.asyncio
+async def test_devices_that_share_a_name_are_each_managed(config, device_manager, event_bus):
+    """The PC's four RAM sticks share one OpenRGB name; each is its own light (spec §6.3, §6.6)."""
+    from dj_ledfx.devices.backend import DiscoveredDevice
+    from dj_ledfx.events import DeviceDiscoveredEvent
+    from dj_ledfx.types import DeviceInfo
+
+    discovered: list[DeviceDiscoveredEvent] = []
+    event_bus.subscribe(DeviceDiscoveredEvent, discovered.append)
+    ids = [f"openrgb:127.0.0.1:6742:{index}" for index in range(4)]
+    sticks = []
+    for stable_id in ids:
+        adapter = MagicMock()
+        adapter.device_info = DeviceInfo(
+            name="Corsair Vengeance RGB Pro DDR4",
+            device_type="openrgb",
+            led_count=10,
+            address="127.0.0.1:6742",
+            backend="openrgb",
+            stable_id=stable_id,
+        )
+        adapter.led_count = 10
+        adapter.is_connected = True
+        sticks.append(DiscoveredDevice(adapter=adapter, tracker=_make_tracker(), max_fps=60))
+
+    async def _mock_discover(config, on_found=None, skip_ids=None):
+        for stick in sticks:
+            on_found(stick)
+        return sticks
+
+    mock_backend = MagicMock()
+    mock_backend.discover = _mock_discover
+    orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus)
+    orchestrator._backends = [mock_backend]
+    await orchestrator.run_scan()
+
+    assert [d.adapter.device_info.stable_id for d in device_manager.devices] == ids
+    assert all(d.status == "online" for d in device_manager.devices)
+    assert [event.stable_id for event in discovered] == ids
+
+
+RAM = "Corsair Vengeance RGB Pro DDR4"
+
+
+def _found(name: str, stable_id: str):  # type: ignore[no-untyped-def]
+    from dj_ledfx.devices.backend import DiscoveredDevice
+    from dj_ledfx.types import DeviceInfo
+
+    adapter = MagicMock()
+    adapter.device_info = DeviceInfo(
+        name=name,
+        device_type="openrgb",
+        led_count=10,
+        address="127.0.0.1:6742",
+        backend="openrgb",
+        stable_id=stable_id,
+    )
+    adapter.led_count = 10
+    adapter.is_connected = True
+    return DiscoveredDevice(adapter=adapter, tracker=_make_tracker(), max_fps=60)
+
+
+def _ghost(device_manager, name: str, stable_id: str) -> None:  # type: ignore[no-untyped-def]
+    from dj_ledfx.types import DeviceInfo
+
+    info = DeviceInfo(
+        name=name,
+        device_type="openrgb",
+        led_count=10,
+        address="127.0.0.1:6742",
+        backend="openrgb",
+        stable_id=stable_id,
+    )
+    device_manager.add_device_from_info(info, tracker=_make_tracker(), status="offline")
+
+
+def _backend(found):  # type: ignore[no-untyped-def]
+    async def _discover(config, on_found=None, skip_ids=None):  # type: ignore[no-untyped-def]
+        for device in found:
+            on_found(device)
+        return found
+
+    backend = MagicMock()
+    backend.discover = _discover
+    backend.connect_known = AsyncMock(return_value=found)
+    return backend
+
+
+# B19: a stick whose id changed isn't promoted over a sibling's ghost when two managed
+# devices share its name; both siblings keep their ids.
+@pytest.mark.parametrize("path", ["scan", "connect_known"])
+async def test_a_changed_id_beside_same_named_ghosts_is_a_new_light(
+    config, device_manager, event_bus, path
+):
+    _ghost(device_manager, RAM, "openrgb:ram:0")
+    _ghost(device_manager, RAM, "openrgb:ram:1")
+    orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus)
+    orchestrator._backends = [_backend([_found(RAM, "openrgb:ram:9")])]
+
+    if path == "scan":
+        await orchestrator.run_scan()
+    else:
+        await orchestrator.connect_known_devices([])
+
+    ids = [d.adapter.device_info.stable_id for d in device_manager.devices]
+    assert ids == ["openrgb:ram:0", "openrgb:ram:1", "openrgb:ram:9"]
+    assert [d.status for d in device_manager.devices] == ["offline", "offline", "online"]
+
+
+# B19: a light whose id changed takes over the offline ghost of its name when that ghost
+# is the only device with the name.
+@pytest.mark.parametrize("path", ["scan", "connect_known"])
+async def test_a_changed_id_takes_over_the_only_ghost_of_its_name(
+    config, device_manager, event_bus, path
+):
+    from dj_ledfx.events import DeviceOnlineEvent
+
+    online: list[DeviceOnlineEvent] = []
+    event_bus.subscribe(DeviceOnlineEvent, online.append)
+    _ghost(device_manager, RAM, "openrgb:ram:0")
+    orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus)
+    found = _found(RAM, "openrgb:ram:9")
+    orchestrator._backends = [_backend([found])]
+
+    if path == "scan":
+        await orchestrator.run_scan()
+    else:
+        await orchestrator.connect_known_devices([])
+
+    [managed] = device_manager.devices
+    assert managed.adapter is found.adapter and managed.status == "online"
+    assert device_manager.get_by_stable_id("openrgb:ram:9") is managed
+    assert [event.stable_id for event in online] == ["openrgb:ram:9"]
+
+
+# B19: an online light of the same name leaves the name fallback alone.
+async def test_an_online_namesake_is_not_a_reason_to_promote(config, device_manager, event_bus):
+    _ghost(device_manager, RAM, "openrgb:ram:0")
+    device_manager.add_device(_found(RAM, "openrgb:ram:1").adapter, _make_tracker())
+    orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus)
+    orchestrator._backends = [_backend([_found(RAM, "openrgb:ram:9")])]
+
+    await orchestrator.connect_known_devices([])
+
+    ids = [d.adapter.device_info.stable_id for d in device_manager.devices]
+    assert ids == ["openrgb:ram:0", "openrgb:ram:1", "openrgb:ram:9"]

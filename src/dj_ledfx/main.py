@@ -5,7 +5,10 @@ import asyncio
 import signal
 import sys
 import time
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -25,19 +28,21 @@ from dj_ledfx.config import (
 )
 from dj_ledfx.devices.discovery import DiscoveryOrchestrator
 from dj_ledfx.devices.manager import DeviceManager
-from dj_ledfx.effects.beat_pulse import BeatPulse
-from dj_ledfx.effects.deck import EffectDeck
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent, EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.looks.store import LookStore
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.persistence.toml_io import migrate_from_toml
 from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
-from dj_ledfx.spatial.pipeline_manager import PipelineManager
 from dj_ledfx.status import SystemStatus
 from dj_ledfx.types import DeviceInfo
+from dj_ledfx.zones.attention import AttentionFeed
+from dj_ledfx.zones.lights import LightMonitor
+from dj_ledfx.zones.manager import ZoneManager
+from dj_ledfx.zones.store import ZoneStore
 
 
 def _parse_args() -> argparse.Namespace:
@@ -123,6 +128,26 @@ async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
     )
 
 
+@dataclass
+class _WebServer:
+    """The embedded web server, stopped rather than cancelled so its lifespan shutdown runs."""
+
+    app: Any
+    task: asyncio.Task[None]
+    stop_serving: Callable[[], None]
+
+    async def stop(self) -> None:
+        from dj_ledfx.web.ws import close_all
+
+        await close_all(self.app)  # Server.stop() would leave open websockets hanging
+        self.stop_serving()
+        _, running = await asyncio.wait([self.task], timeout=5.0)
+        if running:
+            logger.warning("Web server still running 5 s after stop; cancelling it")
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+
+
 async def _run(args: argparse.Namespace) -> None:
     metrics.init(enabled=args.metrics, port=args.metrics_port)
 
@@ -170,8 +195,7 @@ async def _run(args: argparse.Namespace) -> None:
         logger.info("Starting Pro DJ Link listener")
         await start_listener(event_bus=event_bus)
 
-    device_manager = DeviceManager(event_bus=event_bus)
-    device_manager.set_state_db(state_db)
+    device_manager = DeviceManager()
     registered_devices = await state_db.load_devices()
     for dev_row in registered_devices:
         led_count = dev_row.get("led_count") or 60
@@ -200,76 +224,76 @@ async def _run(args: argparse.Namespace) -> None:
         state_db=state_db,
     )
 
-    if registered_devices:
-        await discovery_orchestrator.connect_known_devices(registered_devices)
+    # Scenes become groups once; zones that were running come back (spec §4.3, §6.5).
+    zone_store = ZoneStore(state_db)
+    await zone_store.migrate_scenes_once()
+    look_store = LookStore(state_db)
+    await look_store.load()
 
-    pipeline_manager = PipelineManager(
-        device_manager=device_manager,
-        state_db=state_db,
-        event_bus=event_bus,
-        config=config,
+    engine = EffectEngine(fps=config.engine.fps)
+    scheduler = LookaheadScheduler(
+        devices=device_manager.devices, fps=config.engine.fps, event_bus=event_bus
     )
-    await pipeline_manager.load_active_scenes()
-
-    default_deck = pipeline_manager.default_deck or EffectDeck(BeatPulse())
-    default_pipeline = pipeline_manager.default_pipeline
-    led_count = device_manager.max_led_count or 60
-    logger.info("Using {} LEDs", led_count)
-
-    engine = EffectEngine(
+    zone_manager = ZoneManager(
+        store=zone_store,
+        looks=look_store,
+        devices=device_manager,
+        db=state_db,
+        host=engine,
+        routes=scheduler,
+        event_bus=event_bus,
         clock=clock,
-        deck=default_deck,
-        led_count=led_count,
         fps=config.engine.fps,
         max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
-        pipelines=pipeline_manager.all_pipelines if pipeline_manager.all_pipelines else None,
+        preview_only=config.engine.preview_only is True,
+    )
+    await zone_manager.load()
+    # Before any light connects, so no light is restored and then taken over again.
+    await zone_manager.resume()
+
+    light_monitor = LightMonitor(devices=device_manager, zones=zone_manager, event_bus=event_bus)
+    attention_feed = AttentionFeed(
+        zones=zone_manager,
+        lights=light_monitor,
+        devices=device_manager,
+        stats=scheduler.get_device_stats,
         event_bus=event_bus,
     )
 
-    default_ring_buffer = default_pipeline.ring_buffer if default_pipeline else engine.ring_buffer
-    default_compositor = default_pipeline.compositor if default_pipeline else None
+    background: set[asyncio.Task[None]] = set()
 
-    scheduler = LookaheadScheduler(
-        ring_buffer=default_ring_buffer,
-        devices=[],
-        fps=config.engine.fps,
-        compositor=default_compositor,
-        event_bus=event_bus,
-        state_db=state_db,
-    )
-
-    pipeline_manager.bind(engine, scheduler)
-
-    for pipeline in pipeline_manager.all_pipelines:
-        for managed in pipeline.devices:
-            scheduler.add_device(managed, pipeline=pipeline)
+    def _spawn(work: Coroutine[Any, Any, None]) -> None:
+        """Run a zone manager handler off the event bus, keeping a reference to it."""
+        task = asyncio.create_task(work)
+        background.add(task)
+        task.add_done_callback(background.discard)
 
     def _on_device_offline(event: DeviceOfflineEvent) -> None:
-        if event.stable_id:
-            try:
-                device_manager.demote_device(event.stable_id)
-            except KeyError:
-                logger.debug(
-                    "demote_device: stable_id '{}' not found (already removed?)",
-                    event.stable_id,
-                )
-        scheduler.remove_device(event.stable_id)
+        managed = device_manager.get_by_stable_id(event.stable_id)
+        if managed is None or managed.status == "offline":
+            return  # the scheduler and the light monitor can both report the same light
+        device_manager.demote_device(event.stable_id)
+        _spawn(zone_manager.on_device_offline(event.stable_id))
+        light_monitor.refresh()
+
+    def _on_device_back(event: DeviceOnlineEvent | DeviceDiscoveredEvent) -> None:
+        managed = device_manager.get_by_stable_id(event.stable_id)
+        if managed is None:
+            return
+        if not scheduler.has_device(event.stable_id):
+            scheduler.add_device(managed)
+        if isinstance(event, DeviceDiscoveredEvent):
+            _spawn(zone_manager.on_device_discovered(event.stable_id))
+        else:
+            _spawn(zone_manager.on_device_online(event.stable_id))
+        light_monitor.refresh()
 
     event_bus.subscribe(DeviceOfflineEvent, _on_device_offline)
+    event_bus.subscribe(DeviceOnlineEvent, _on_device_back)
+    event_bus.subscribe(DeviceDiscoveredEvent, _on_device_back)
 
-    def _on_device_discovered(event: DeviceDiscoveredEvent) -> None:
-        managed = device_manager.get_by_stable_id(event.stable_id)
-        if managed is not None:
-            pipeline_manager.reassign_devices()
-
-    event_bus.subscribe(DeviceDiscoveredEvent, _on_device_discovered)
-
-    def _on_device_online(event: DeviceOnlineEvent) -> None:
-        managed = device_manager.get_by_stable_id(event.stable_id)
-        if managed is not None:
-            pipeline_manager.reassign_devices()
-
-    event_bus.subscribe(DeviceOnlineEvent, _on_device_online)
+    if registered_devices:
+        await discovery_orchestrator.connect_known_devices(registered_devices)
 
     # Web setup
     async def _forward_vite_output(proc: asyncio.subprocess.Process) -> None:
@@ -281,7 +305,7 @@ async def _run(args: argparse.Namespace) -> None:
             logger.info("[vite] {}", line.decode().rstrip())
 
     stop_event = asyncio.Event()
-    web_server_task: asyncio.Task[None] | None = None
+    web_server: _WebServer | None = None
     vite_process: asyncio.subprocess.Process | None = None
     web_mode = args.web or ("prod" if config.web.enabled else None)
 
@@ -298,19 +322,21 @@ async def _run(args: argparse.Namespace) -> None:
 
         web_app = create_app(
             beat_clock=clock,
-            effect_deck=default_deck,
             effect_engine=engine,
             device_manager=device_manager,
             scheduler=scheduler,
             preset_store=preset_store,
             scene_model=None,
-            compositor=default_compositor,
+            compositor=None,
             config=config,
             config_path=args.config,
             web_static_dir=None if web_mode == "dev" else args.web_static_dir,
             state_db=state_db,
             event_bus=event_bus,
-            pipeline_manager=pipeline_manager,
+            look_store=look_store,
+            zone_manager=zone_manager,
+            light_monitor=light_monitor,
+            attention_feed=attention_feed,
         )
 
         try:
@@ -324,14 +350,22 @@ async def _run(args: argparse.Namespace) -> None:
                 interface=Interfaces.ASGI,
                 websockets=True,
             )
-            web_server_task = asyncio.create_task(granian_server.serve())
+            web_server = _WebServer(
+                web_app, asyncio.create_task(granian_server.serve()), granian_server.stop
+            )
         except (ImportError, Exception) as e:
             logger.warning("Granian unavailable ({}), falling back to uvicorn", e)
             import uvicorn  # type: ignore[import-not-found]
 
             uvi_config = uvicorn.Config(web_app, host=host, port=port, loop="none")
             uvi_server = uvicorn.Server(uvi_config)
-            web_server_task = asyncio.create_task(uvi_server.serve())
+
+            def _stop_uvicorn() -> None:
+                uvi_server.should_exit = True
+
+            web_server = _WebServer(
+                web_app, asyncio.create_task(uvi_server.serve()), _stop_uvicorn
+            )
 
         logger.info("API server on http://{}:{}", host, port)
 
@@ -374,6 +408,8 @@ async def _run(args: argparse.Namespace) -> None:
         tasks.append(asyncio.create_task(simulator.run()))
     tasks.append(asyncio.create_task(engine.run()))
     tasks.append(asyncio.create_task(scheduler.run()))
+    tasks.append(asyncio.create_task(light_monitor.run()))
+    tasks.append(asyncio.create_task(attention_feed.run()))
 
     discovery_orchestrator.start()
 
@@ -384,11 +420,11 @@ async def _run(args: argparse.Namespace) -> None:
                 prodjlink_connected=beat_state.is_playing,
                 current_bpm=beat_state.bpm or None,
                 connected_devices=[d.adapter.device_info.name for d in device_manager.devices],
-                buffer_fill_level=default_ring_buffer.fill_level,
+                buffer_fill_level=engine.fill_level,
                 avg_frame_render_time_ms=engine.avg_render_time_ms,
                 device_stats=scheduler.get_device_stats(),
             )
-            metrics.RING_BUFFER_DEPTH.set(default_ring_buffer.fill_level)
+            metrics.RING_BUFFER_DEPTH.set(engine.fill_level)
             summary = status.summary()
             await asyncio.to_thread(logger.info, "Status: {}", summary)
             try:
@@ -409,18 +445,19 @@ async def _run(args: argparse.Namespace) -> None:
         vite_process.terminate()
         await vite_process.wait()
 
-    if web_server_task is not None:
-        web_server_task.cancel()
-        await asyncio.gather(web_server_task, return_exceptions=True)
+    if web_server is not None:
+        await web_server.stop()
 
     scheduler.stop()
     engine.stop()
+    light_monitor.stop()
+    attention_feed.stop()
     if simulator is not None:
         simulator.stop()
 
-    for task in tasks:
+    for task in [*tasks, *background]:
         task.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.gather(*tasks, *background, return_exceptions=True)
 
     await discovery_orchestrator.shutdown()
     await device_manager.disconnect_all()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -160,6 +161,31 @@ class StateDB:
             assert self._conn is not None
             self._conn.executemany(sql, params_seq)
             self._conn.commit()
+
+        async with self._lock:
+            await asyncio.to_thread(_run)
+
+    async def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+        """Run a read query and return every row."""
+        return await self._execute_read(sql, params)
+
+    async def write(self, sql: str, params: tuple[Any, ...] = ()) -> None:
+        """Run one write statement and commit it."""
+        await self._execute_write(sql, params)
+
+    async def write_many(self, statements: Sequence[tuple[str, tuple[Any, ...]]]) -> None:
+        """Run several write statements as one transaction: all of them or none."""
+
+        def _run() -> None:
+            assert self._conn is not None
+            self._conn.execute("BEGIN")
+            try:
+                for sql, params in statements:
+                    self._conn.execute(sql, params)
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
 
         async with self._lock:
             await asyncio.to_thread(_run)
@@ -360,40 +386,9 @@ class StateDB:
         rows = await self._execute_read(f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes")
         return [dict(zip(self._SCENE_COLUMNS, row, strict=True)) for row in rows]
 
-    async def load_scene_by_id(self, scene_id: str) -> dict[str, Any] | None:
-        """Return a single scene row by ID, or None if not found."""
-        rows = await self._execute_read(
-            f"SELECT {', '.join(self._SCENE_COLUMNS)} FROM scenes WHERE id=?",
-            (scene_id,),
-        )
-        if not rows:
-            return None
-        return dict(zip(self._SCENE_COLUMNS, rows[0], strict=True))
-
-    async def device_exists(self, device_id: str) -> bool:
-        """Return True if a device with the given ID exists."""
-        rows = await self._execute_read("SELECT 1 FROM devices WHERE id=? LIMIT 1", (device_id,))
-        return bool(rows)
-
     async def save_scene(self, data: dict[str, Any]) -> None:
         """Insert or replace a scene record. Must include 'id', 'name'."""
         await self._upsert("scenes", self._SCENE_COLUMNS, data, pk_columns=("id",))
-
-    async def delete_scene(self, scene_id: str) -> None:
-        """Delete a scene and cascade to placements and effect state."""
-        await self._execute_write("DELETE FROM scenes WHERE id=?", (scene_id,))
-
-    async def set_scene_active(self, scene_id: str) -> None:
-        """Set a single scene as active without touching other scenes.
-
-        Multiple scenes may run concurrently; this method only flips the given
-        scene to is_active=1.  Use set_scene_inactive() to deactivate a scene.
-        """
-        await self._execute_write("UPDATE scenes SET is_active=1 WHERE id=?", (scene_id,))
-
-    async def set_scene_inactive(self, scene_id: str) -> None:
-        """Deactivate a single scene without affecting other scenes."""
-        await self._execute_write("UPDATE scenes SET is_active=0 WHERE id=?", (scene_id,))
 
     async def load_scene_effect_state(self, scene_id: str) -> dict[str, str] | None:
         """Return effect class + params for a scene, or None if unset."""
@@ -430,13 +425,6 @@ class StateDB:
             pk_columns=("scene_id", "device_id"),
         )
 
-    async def delete_placement(self, scene_id: str, device_id: str) -> None:
-        """Remove a device from a scene's placement list."""
-        await self._execute_write(
-            "DELETE FROM scene_placements WHERE scene_id=? AND device_id=?",
-            (scene_id, device_id),
-        )
-
     async def load_presets(self) -> list[dict[str, str]]:
         """Return all presets as dicts."""
         rows = await self._execute_read("SELECT name, effect_class, params FROM presets")
@@ -453,14 +441,14 @@ class StateDB:
         """Delete a preset by name."""
         await self._execute_write("DELETE FROM presets WHERE name=?", (name,))
 
-    async def save_device_state(self, stable_id: str, state_bytes: bytes) -> None:
-        """Upsert the saved LED state for a device."""
-        await self._execute_write(
+    async def save_device_states(self, states: Mapping[str, bytes]) -> None:
+        """Upsert the captured states of several lights in one transaction."""
+        await self._executemany_write(
             "INSERT INTO device_saved_state (stable_id, state_bytes, captured_at) "
             "VALUES (?, ?, datetime('now')) "
             "ON CONFLICT(stable_id) DO UPDATE SET state_bytes=excluded.state_bytes, "
             "captured_at=datetime('now')",
-            (stable_id, state_bytes),
+            list(states.items()),
         )
 
     async def load_device_state(self, stable_id: str) -> bytes | None:
@@ -477,3 +465,9 @@ class StateDB:
         """Return all saved device states as a mapping of stable_id -> state_bytes."""
         rows = await self._execute_read("SELECT stable_id, state_bytes FROM device_saved_state")
         return {row[0]: bytes(row[1]) for row in rows}
+
+    async def delete_device_states(self, stable_ids: Iterable[str]) -> None:
+        """Forget several lights' captured states (restored or released) in one transaction."""
+        await self._executemany_write(
+            "DELETE FROM device_saved_state WHERE stable_id=?", [(x,) for x in stable_ids]
+        )

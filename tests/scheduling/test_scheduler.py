@@ -1,23 +1,19 @@
 import asyncio
 import time
+from typing import Any
 
 import numpy as np
 import pytest
-from conftest import MockDeviceAdapter
+from conftest import FakeLight, MockDeviceAdapter
 
+from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
-from dj_ledfx.effects.engine import RingBuffer
+from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.latency.strategies import StaticLatency, WindowedMeanLatency
 from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.scheduling.scheduler import FrameSlot, LookaheadScheduler
-from dj_ledfx.transport import TransportState
 from dj_ledfx.types import RenderedFrame
-
-
-def _set_playing(scheduler: LookaheadScheduler) -> None:
-    """Put the scheduler in PLAYING state so run() is not blocked."""
-    scheduler._transport_state = TransportState.PLAYING
-    scheduler._resume_event.set()
 
 
 def _make_device(
@@ -25,8 +21,9 @@ def _make_device(
     latency_ms: float = 10.0,
     connected: bool = True,
     max_fps: int = 60,
+    led_count: int = 10,
 ) -> ManagedDevice:
-    adapter = MockDeviceAdapter(name=name, connected=connected)
+    adapter = MockDeviceAdapter(name=name, led_count=led_count, connected=connected)
     tracker = LatencyTracker(strategy=StaticLatency(latency_ms))
     return ManagedDevice(adapter=adapter, tracker=tracker, max_fps=max_fps)
 
@@ -34,12 +31,35 @@ def _make_device(
 def _fill_buffer(buf: RingBuffer, base_time: float, count: int = 60) -> None:
     for i in range(count):
         frame = RenderedFrame(
-            colors=np.full((10, 3), i % 256, dtype=np.uint8),
+            colors=np.full((10, 3), (i % 256) / 255.0, dtype=np.float32),
             target_time=base_time + i * (1.0 / 60.0),
             beat_phase=0.0,
             bar_phase=0.0,
         )
         buf.write(frame)
+
+
+def _route(
+    ring: RingBuffer, *, start: int = 0, stop: int = 10, streaming: bool = True
+) -> DeviceRoute:
+    return DeviceRoute(ring=ring, start=start, stop=stop, streaming=streaming)
+
+
+def _scheduler(
+    ring_buffer: RingBuffer, devices: list[ManagedDevice], **kwargs: Any
+) -> LookaheadScheduler:
+    """A scheduler that sends every device the first ten LEDs of ring_buffer's frames."""
+    made = LookaheadScheduler(devices=devices, **kwargs)
+    for device in devices:
+        made.set_route(device.adapter.device_info.effective_id, _route(ring_buffer))
+    return made
+
+
+async def _run_for(scheduler: LookaheadScheduler, seconds: float) -> None:
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.sleep(seconds)
+    scheduler.stop()
+    await task
 
 
 # --- FrameSlot tests ---
@@ -127,11 +147,10 @@ async def test_distributor_writes_to_all_devices() -> None:
     """Distributor tick should result in frames sent to every connected device."""
     dev1 = _make_device("Dev1", latency_ms=10.0)
     dev2 = _make_device("Dev2", latency_ms=100.0)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[dev1, dev2], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[dev1, dev2], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -145,11 +164,10 @@ async def test_distributor_computes_correct_target_time() -> None:
     """target_time should be now + effective_latency_s for each device."""
     dev_fast = _make_device("Fast", latency_ms=5.0)
     dev_slow = _make_device("Slow", latency_ms=100.0)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[dev_fast, dev_slow], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[dev_fast, dev_slow], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -166,11 +184,10 @@ async def test_distributor_computes_correct_target_time() -> None:
 async def test_send_loop_disconnected_backoff() -> None:
     """Disconnected device should not receive any frames."""
     device = _make_device(connected=False)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -182,16 +199,15 @@ async def test_send_loop_disconnected_backoff() -> None:
 async def test_send_loop_reconnection_sends_frames() -> None:
     """Device that reconnects should start receiving frames."""
     device = _make_device(connected=False)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(
+    scheduler = _scheduler(
         ring_buffer=buf,
         devices=[device],
         fps=60,
         disconnect_backoff_s=0.01,
     )
-    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.05)
 
@@ -214,16 +230,15 @@ async def test_send_loop_reconnection_resets_tracker() -> None:
     strategy.update(300.0)
     assert abs(strategy.get_latency() - 250.0) < 0.1
 
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(
+    scheduler = _scheduler(
         ring_buffer=buf,
         devices=[device],
         fps=60,
         disconnect_backoff_s=0.01,
     )
-    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.05)
 
@@ -242,11 +257,10 @@ async def test_send_loop_rtt_not_updated_when_probing_disabled() -> None:
     adapter = MockDeviceAdapter(name="NoProbe", supports_probing=False)
     strategy = WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
     device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy), max_fps=60)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -262,11 +276,10 @@ async def test_send_loop_rtt_updated_when_probing_enabled() -> None:
     strategy = WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
     device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy), max_fps=60)
 
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.15)
     scheduler.stop()
@@ -279,11 +292,10 @@ async def test_send_loop_rtt_updated_when_probing_enabled() -> None:
 async def test_send_loop_buffer_not_ready() -> None:
     """Empty ring buffer should result in no frames sent."""
     device = _make_device()
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     # Don't fill buffer
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.1)
     scheduler.stop()
@@ -295,7 +307,7 @@ async def test_send_loop_buffer_not_ready() -> None:
 async def test_send_loop_continues_after_send_exception() -> None:
     """Send loop should log warning and continue on send_frame exception."""
     device = _make_device()
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
     call_count = 0
@@ -310,8 +322,7 @@ async def test_send_loop_continues_after_send_exception() -> None:
 
     device.adapter.send_frame = flaky_send  # type: ignore[assignment]
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.2)
     scheduler.stop()
@@ -324,11 +335,10 @@ async def test_send_loop_continues_after_send_exception() -> None:
 async def test_fps_cap_limits_send_rate() -> None:
     """max_fps should throttle the device send rate."""
     device = _make_device(max_fps=10)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(1.0)
     scheduler.stop()
@@ -341,12 +351,11 @@ async def test_fps_cap_limits_send_rate() -> None:
 async def test_fps_cap_no_accumulated_drift() -> None:
     """Over many iterations, total elapsed should match expected (no drift)."""
     device = _make_device(max_fps=20)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     start = time.monotonic()
-    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(2.0)
     scheduler.stop()
@@ -368,11 +377,10 @@ async def test_fps_cap_no_accumulated_drift() -> None:
 async def test_graceful_stop() -> None:
     """stop() should cause run() to return cleanly."""
     device = _make_device()
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.1)
     scheduler.stop()
@@ -382,11 +390,10 @@ async def test_graceful_stop() -> None:
 async def test_external_cancellation() -> None:
     """Cancelling the scheduler task should clean up child tasks."""
     device = _make_device()
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.1)
     task.cancel()
@@ -397,7 +404,7 @@ async def test_external_cancellation() -> None:
 async def test_shutdown_during_active_send() -> None:
     """Cancel while send_frame is blocked should not crash or leave inconsistent state."""
     device = _make_device()
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
     send_started = asyncio.Event()
@@ -408,8 +415,7 @@ async def test_shutdown_during_active_send() -> None:
 
     device.adapter.send_frame = slow_send  # type: ignore[assignment]
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
 
     # Wait until send_frame is actually in progress
@@ -429,17 +435,17 @@ async def test_shutdown_during_active_send() -> None:
 async def test_get_device_stats() -> None:
     """get_device_stats should report per-device metrics."""
     device = _make_device("StatsDevice", latency_ms=50.0)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.2)
 
     stats = scheduler.get_device_stats()
     assert len(stats) == 1
     assert stats[0].device_name == "StatsDevice"
+    assert stats[0].device_id == "StatsDevice"
     assert stats[0].effective_latency_ms == 50.0
     assert stats[0].send_fps > 0
     assert stats[0].frames_dropped >= 0
@@ -451,11 +457,10 @@ async def test_get_device_stats() -> None:
 async def test_get_device_stats_fps_accuracy() -> None:
     """send_fps should approximate the actual send rate."""
     device = _make_device("FpsDevice", max_fps=20)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(1.0)
 
@@ -473,15 +478,14 @@ async def test_mixed_fps_per_device() -> None:
 
     fast_device = _make_device("fast", max_fps=60)
     slow_device = _make_device("slow", max_fps=30)
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
-    scheduler = LookaheadScheduler(
+    scheduler = _scheduler(
         ring_buffer=buf,
         devices=[fast_device, slow_device],
         fps=60,
     )
 
-    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.5)
     scheduler.stop()
@@ -496,27 +500,6 @@ async def test_mixed_fps_per_device() -> None:
     assert slow_count > 0
     ratio = fast_count / slow_count
     assert 1.5 < ratio < 3.0, f"Expected ~2:1 ratio, got {ratio:.1f}:1"
-
-
-def test_compositor_property_setter():
-    """Compositor can be swapped at runtime via property setter."""
-    from dj_ledfx.spatial.compositor import SpatialCompositor
-    from dj_ledfx.spatial.geometry import PointGeometry
-    from dj_ledfx.spatial.mapping import LinearMapping
-    from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
-
-    buf = RingBuffer(capacity=60, led_count=10)
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[])
-    assert scheduler.compositor is None
-
-    scene = SceneModel(
-        placements={
-            "a": DevicePlacement("a", (0.0, 0.0, 0.0), PointGeometry(), 1),
-        }
-    )
-    new_comp = SpatialCompositor(scene, LinearMapping())
-    scheduler.compositor = new_comp
-    assert scheduler.compositor is new_comp
 
 
 # --- DeviceSendState tests ---
@@ -536,7 +519,6 @@ def test_device_send_state_creation() -> None:
         slot=slot,
         send_count=0,
         send_task=None,
-        pipeline=None,
     )
     assert state.managed is managed
     assert state.slot is slot
@@ -552,10 +534,9 @@ async def test_scheduler_add_device_during_run() -> None:
     from dj_ledfx.latency.tracker import LatencyTracker
     from dj_ledfx.types import DeviceInfo
 
-    buf = RingBuffer(60, 60)
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[], fps=60)
+    buf = RingBuffer(60)
+    scheduler = _scheduler(ring_buffer=buf, devices=[], fps=60)
 
-    _set_playing(scheduler)
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.05)
 
@@ -581,80 +562,6 @@ async def test_scheduler_add_device_during_run() -> None:
         pass
 
 
-async def test_remove_pipeline_refs():
-    """remove_pipeline_refs nulls out pipeline for devices referencing that scene."""
-    from dj_ledfx.effects.beat_pulse import BeatPulse
-    from dj_ledfx.effects.deck import EffectDeck
-    from dj_ledfx.effects.engine import RingBuffer
-    from dj_ledfx.spatial.pipeline import ScenePipeline
-
-    d1 = _make_device("Dev1", latency_ms=10.0)
-    d2 = _make_device("Dev2", latency_ms=10.0)
-    buf = RingBuffer(60, 10)
-    deck = EffectDeck(BeatPulse())
-    pipeline = ScenePipeline(
-        scene_id="scene1",
-        deck=deck,
-        ring_buffer=buf,
-        compositor=None,
-        mapping=None,
-        devices=[d1, d2],
-        led_count=10,
-    )
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[], fps=60)
-    scheduler.add_device(d1, pipeline=pipeline)
-    scheduler.add_device(d2, pipeline=pipeline)
-
-    for state in scheduler._device_state.values():
-        assert state.pipeline is pipeline
-
-    scheduler.remove_pipeline_refs("scene1")
-
-    for state in scheduler._device_state.values():
-        assert state.pipeline is None
-
-
-async def test_remove_pipeline_refs_only_affects_target_scene():
-    """remove_pipeline_refs only nulls devices in the target scene, not others."""
-    from dj_ledfx.effects.beat_pulse import BeatPulse
-    from dj_ledfx.effects.deck import EffectDeck
-    from dj_ledfx.effects.engine import RingBuffer
-    from dj_ledfx.spatial.pipeline import ScenePipeline
-
-    d1 = _make_device("Dev1", latency_ms=10.0)
-    d2 = _make_device("Dev2", latency_ms=10.0)
-    buf = RingBuffer(60, 10)
-    deck = EffectDeck(BeatPulse())
-    pipeline_a = ScenePipeline(
-        scene_id="sceneA",
-        deck=deck,
-        ring_buffer=buf,
-        compositor=None,
-        mapping=None,
-        devices=[d1],
-        led_count=10,
-    )
-    pipeline_b = ScenePipeline(
-        scene_id="sceneB",
-        deck=deck,
-        ring_buffer=buf,
-        compositor=None,
-        mapping=None,
-        devices=[d2],
-        led_count=10,
-    )
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[], fps=60)
-    scheduler.add_device(d1, pipeline=pipeline_a)
-    scheduler.add_device(d2, pipeline=pipeline_b)
-
-    scheduler.remove_pipeline_refs("sceneA")
-
-    d1_key = d1.adapter.device_info.effective_id
-    d2_key = d2.adapter.device_info.effective_id
-    assert scheduler._device_state[d1_key].pipeline is None
-    assert scheduler._device_state[d2_key].pipeline is pipeline_b
-
-
 @pytest.mark.asyncio
 async def test_distributor_handles_concurrent_add_device() -> None:
     """Device added while distributor is running receives frames without errors.
@@ -663,19 +570,19 @@ async def test_distributor_handles_concurrent_add_device() -> None:
     crash when _device_state is mutated concurrently (e.g. via add_device).
     We verify the late-joining device still gets frames after it is added.
     """
-    buf = RingBuffer(capacity=60, led_count=10)
+    buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
     # Start with one device so the distributor loop is active immediately
     initial_device = _make_device("Initial", latency_ms=10.0)
-    scheduler = LookaheadScheduler(ring_buffer=buf, devices=[initial_device], fps=60)
-    _set_playing(scheduler)
+    scheduler = _scheduler(ring_buffer=buf, devices=[initial_device], fps=60)
     run_task = asyncio.create_task(scheduler.run())
 
     # Let the distributor run for a few ticks before adding the second device
     await asyncio.sleep(0.05)
 
     late_device = _make_device("LateJoiner", latency_ms=10.0)
+    scheduler.set_route("LateJoiner", _route(buf))
     scheduler.add_device(late_device)
 
     # Give the scheduler time to pick up the new device and send frames to it
@@ -686,3 +593,165 @@ async def test_distributor_handles_concurrent_add_device() -> None:
     # Both the initial device and the late joiner must have received frames
     assert len(initial_device.adapter.send_frame_calls) > 0, "Initial device received no frames"
     assert len(late_device.adapter.send_frame_calls) > 0, "Late-joining device received no frames"
+
+
+# --- Routes ---
+
+
+def _two_frame_ring() -> RingBuffer:
+    """Frame 0 for now and frame 1 for a second later; LEDs 0-4 and 5-9 differ in each."""
+    buf = RingBuffer(capacity=10)
+    now = time.monotonic()
+    for index, (first, second) in enumerate([(0.25, 0.5), (0.75, 1.0)]):
+        colors = np.empty((10, 3), dtype=np.float32)
+        colors[:5], colors[5:] = first, second
+        buf.write(
+            RenderedFrame(colors=colors, target_time=now + index, beat_phase=0.0, bar_phase=0.0)
+        )
+    return buf
+
+
+async def test_each_device_gets_its_slice_of_the_frame_for_its_own_latency() -> None:
+    near = _make_device("near", latency_ms=10.0, led_count=5)
+    far = _make_device("far", latency_ms=600.0, led_count=5)
+    buf = _two_frame_ring()
+    scheduler = LookaheadScheduler(devices=[near, far], fps=60)
+    scheduler.set_route("near", _route(buf, start=0, stop=5))
+    scheduler.set_route("far", _route(buf, start=5, stop=10))
+
+    await _run_for(scheduler, 0.2)
+
+    # near reads frame 0 (now + 10 ms), far reads frame 1 (now + 600 ms)
+    near_sent = {frame.tobytes() for frame in near.adapter.send_frame_calls}
+    far_sent = {frame.tobytes() for frame in far.adapter.send_frame_calls}
+    assert near_sent == {bytes([64] * 15)}  # 0.25 in 8 bits
+    assert far_sent == {bytes([255] * 15)}
+
+
+async def test_a_route_that_does_not_stream_sends_nothing_but_keeps_the_preview() -> None:
+    device = _make_device()  # it runs its own effect, or preview-only is on
+    buf = RingBuffer(capacity=60)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = LookaheadScheduler(devices=[device], fps=60)
+    scheduler.set_route("TestDevice", _route(buf, streaming=False))
+
+    await _run_for(scheduler, 0.15)
+
+    assert device.adapter.send_frame_calls == []
+    assert "TestDevice" in scheduler.frame_snapshots  # the preview shows its slice
+    assert scheduler.get_device_stats()[0].dropped_pct == 0.0
+
+
+class _Labels(metrics._NoOpMetric):
+    """Notes the device label of every observation."""
+
+    def __init__(self) -> None:
+        self.devices: set[str] = set()
+
+    def labels(self, **kw: str) -> metrics._NoOpMetric:
+        self.devices.add(kw["device"])
+        return self
+
+
+# B11: the four RAM sticks share a name; each keeps its own frames, sequence and metrics.
+async def test_lights_that_share_a_name_keep_their_own_frames_and_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    latency = _Labels()
+    monkeypatch.setattr(metrics, "DEVICE_LATENCY", latency)
+    sticks = [FakeLight(f"openrgb:ram:{i}", name="RAM", led_count=10) for i in range(2)]
+    devices = [
+        ManagedDevice(adapter=s, tracker=LatencyTracker(StaticLatency(10.0))) for s in sticks
+    ]
+    buf = RingBuffer(capacity=60)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = _scheduler(buf, devices, fps=60)
+
+    await _run_for(scheduler, 0.15)
+
+    assert set(scheduler.frame_snapshots) == {"openrgb:ram:0", "openrgb:ram:1"}
+    assert latency.devices == {"openrgb:ram:0", "openrgb:ram:1"}
+    assert all(len(stick.frames) > 0 for stick in sticks)
+
+
+class _HeldAdapter(MockDeviceAdapter):
+    """Holds each frame until released, and logs frames and restores in order."""
+
+    def __init__(self) -> None:
+        super().__init__(name="held")
+        self.log: list[str] = []
+        self.sending = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def send_frame(self, colors: Any) -> None:
+        self.sending.set()
+        await self.release.wait()
+        self.log.append("frame")
+
+
+async def test_a_restore_waits_for_the_frame_on_its_way() -> None:
+    adapter = _HeldAdapter()
+    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=StaticLatency(10.0)))
+    buf = RingBuffer(capacity=60)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = _scheduler(buf, [device], fps=60)
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.wait_for(adapter.sending.wait(), timeout=1.0)
+
+    scheduler.set_route("held", None)  # as the zone manager does before it restores
+
+    async def restore() -> None:
+        async with adapter.send_lock:
+            adapter.log.append("restore")
+
+    restoring = asyncio.create_task(restore())
+    await asyncio.sleep(0.02)
+    adapter.release.set()
+    await restoring
+    await asyncio.sleep(0.05)
+    scheduler.stop()
+    await task
+
+    assert adapter.log == ["frame", "restore"]
+
+
+async def test_a_frame_that_waited_for_a_restore_is_dropped() -> None:
+    device = _make_device()
+    buf = RingBuffer(capacity=60)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = _scheduler(buf, [device], fps=60)
+    async with device.adapter.send_lock:  # a restore is under way
+        task = asyncio.create_task(scheduler.run())
+        await asyncio.sleep(0.05)  # the send loop waits with a frame
+        scheduler.set_route("TestDevice", None)
+    await asyncio.sleep(0.05)
+    scheduler.stop()
+    await task
+
+    assert device.adapter.send_frame_calls == []
+
+
+async def test_a_device_without_a_route_gets_nothing() -> None:
+    routed, idle = _make_device("routed"), _make_device("idle")
+    buf = RingBuffer(capacity=60)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = LookaheadScheduler(devices=[routed, idle], fps=60)
+    scheduler.set_route("routed", _route(buf))
+
+    await _run_for(scheduler, 0.15)
+
+    assert routed.adapter.send_frame_calls
+    assert idle.adapter.send_frame_calls == []
+    assert "idle" not in scheduler.frame_snapshots
+
+
+async def test_stats_report_the_share_of_frames_a_streaming_light_misses() -> None:
+    starved, idle = _make_device("starved"), _make_device("idle")
+    scheduler = LookaheadScheduler(devices=[starved, idle], fps=60)
+    scheduler.set_route("starved", _route(RingBuffer(capacity=60)))  # no frames
+
+    await _run_for(scheduler, 0.15)
+
+    stats = {entry.device_id: entry for entry in scheduler.get_device_stats()}
+    assert (stats["starved"].send_fps, stats["starved"].dropped_pct) == (0.0, 100.0)
+    assert stats["idle"].dropped_pct == 0.0  # not streaming, so nothing is missed

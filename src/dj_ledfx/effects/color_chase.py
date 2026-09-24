@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.color import hex_to_rgb, palette_lerp, rgb_to_hex
 from dj_ledfx.effects.energy import bpm_energy
 from dj_ledfx.effects.params import EffectParam
@@ -14,7 +14,7 @@ from dj_ledfx.types import BeatContext
 _DEFAULT_PALETTE = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"]
 
 
-class ColorChase(Effect):
+class ColorChase(StripEffect):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {

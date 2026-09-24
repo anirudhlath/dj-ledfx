@@ -8,6 +8,14 @@ Export format:
   [scenes."<id>".placements."<device_name>"]  — device placements
   [groups."<name>"]           — group metadata + members
   [presets."<name>"]          — preset records
+  [zones."<id>"]              — zones: name, kind, all_lights, lights (stable ids, LED order)
+  [looks."<id>"]              — saved looks: body (contract JSON), created_at, updated_at
+  [stars]                     — looks = ids of starred looks, built in or saved
+  [running."<zone id>"]       — what a zone runs: look_id, look (JSON), brightness,
+                                lights, started_at
+
+Import merges into what is there. Zones and looks in the file replace those with the
+same id, and each running entry becomes that zone's assignment.
 """
 
 from __future__ import annotations
@@ -15,13 +23,20 @@ from __future__ import annotations
 import dataclasses
 import json
 import tomllib
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast, get_args
 
 import tomli_w
 from loguru import logger
 
+from dj_ledfx.looks.builtin import builtin_looks
+from dj_ledfx.looks.store import STAR_LOOK, UPSERT_LOOK
 from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.timing import as_utc, utcnow
+from dj_ledfx.types import clamp01
+from dj_ledfx.zones.model import Assignment, ZoneKind, ZoneRecord
+from dj_ledfx.zones.store import ZoneStore
 
 if TYPE_CHECKING:
     from dj_ledfx.config import AppConfig
@@ -162,6 +177,7 @@ async def export_toml(db: StateDB) -> str:
             }
         doc["presets"] = presets_doc
 
+    doc.update(await _export_zones_and_looks(db))
     return tomli_w.dumps(doc)
 
 
@@ -310,6 +326,126 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
         await db.save_preset(preset_name, effect_class, params_str)
         logger.debug("import_toml: saved preset '{}'", preset_name)
 
+    await _import_zones_and_looks(db, data)
+
+
+async def _export_zones_and_looks(db: StateDB) -> dict[str, Any]:
+    """Zones, saved looks, stars and what each zone runs (M1)."""
+    store = ZoneStore(db)
+    doc: dict[str, Any] = {}
+    zones = await store.load_zones()
+    if zones:
+        doc["zones"] = {
+            zone.id: {
+                "name": zone.name,
+                "kind": zone.kind,
+                "all_lights": zone.all_lights,
+                "lights": list(zone.lights),
+            }
+            for zone in zones
+        }
+    looks = await db.fetch_all(
+        "SELECT id, body, created_at, updated_at FROM looks ORDER BY created_at, id"
+    )
+    if looks:
+        doc["looks"] = {
+            look_id: {"body": body, "created_at": created_at, "updated_at": updated_at}
+            for look_id, body, created_at, updated_at in looks
+        }
+    stars = await db.fetch_all("SELECT look_id FROM look_stars ORDER BY look_id")
+    if stars:
+        doc["stars"] = {"looks": [look_id for (look_id,) in stars]}
+    assignments = await store.load_assignments()
+    if assignments:
+        doc["running"] = {
+            a.zone_id: {
+                "look_id": a.look_id,
+                "look": a.look_json,
+                "brightness": a.brightness,
+                "lights": list(a.lights),
+                "started_at": a.started_at,
+            }
+            for a in assignments
+        }
+    return doc
+
+
+def _tables(data: dict[str, Any], key: str) -> dict[str, dict[str, Any]]:
+    """The sub-tables of a top-level table; anything else there is ignored."""
+    table = data.get(key, {})
+    if not isinstance(table, dict):
+        return {}
+    return {name: value for name, value in table.items() if isinstance(value, dict)}
+
+
+def _strings(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str))
+
+
+def _zone(zone_id: str, info: dict[str, Any]) -> ZoneRecord:
+    kind = info.get("kind", "group")
+    if kind not in get_args(ZoneKind):
+        logger.warning("import_toml: zone '{}' has unknown kind {!r}; using group", zone_id, kind)
+        kind = "group"
+    return ZoneRecord(
+        id=zone_id,
+        name=str(info.get("name", zone_id)),
+        kind=cast(ZoneKind, kind),
+        lights=_strings(info.get("lights")),
+        all_lights=bool(info.get("all_lights", False)),
+    )
+
+
+def _assignment(zone_id: str, info: dict[str, Any]) -> Assignment | None:
+    look_id, look = info.get("look_id"), info.get("look")
+    brightness, started_at = info.get("brightness", 1.0), info.get("started_at")
+    if (
+        not isinstance(look_id, str)
+        or not isinstance(look, str)
+        or not isinstance(brightness, int | float)
+        or isinstance(brightness, bool)
+        or not isinstance(started_at, datetime)
+    ):
+        return None
+    return Assignment(
+        zone_id=zone_id,
+        look_id=look_id,
+        look_json=look,
+        brightness=clamp01(float(brightness)),
+        lights=_strings(info.get("lights")),
+        started_at=as_utc(started_at),
+    )
+
+
+async def _import_zones_and_looks(db: StateDB, data: dict[str, Any]) -> None:
+    store = ZoneStore(db)
+    for zone_id, info in _tables(data, "zones").items():
+        await store.save_zone(_zone(zone_id, info))
+
+    built_in = {look.id for look in builtin_looks()}
+    now = utcnow().isoformat()
+    for look_id, info in _tables(data, "looks").items():
+        body = info.get("body")
+        if look_id in built_in or not isinstance(body, str):
+            logger.warning("import_toml: skipped look '{}' (built in, or no body)", look_id)
+            continue
+        created_at = str(info.get("created_at", now))
+        await db.write(UPSERT_LOOK, (look_id, body, created_at, str(info.get("updated_at", now))))
+
+    stars = data.get("stars", {})
+    starred = _strings(stars.get("looks") if isinstance(stars, dict) else None)
+    await db.write_many([(STAR_LOOK, (look_id,)) for look_id in starred])
+
+    known = {zone.id for zone in await store.load_zones()}
+    for zone_id, info in _tables(data, "running").items():
+        assignment = _assignment(zone_id, info) if zone_id in known else None
+        if assignment is None:
+            logger.warning("import_toml: skipped what zone '{}' was running", zone_id)
+            continue
+        await store.save_assignment(assignment)
+
 
 # --- First-Launch Migration ---
 
@@ -322,7 +458,8 @@ async def migrate_from_toml(
     """Migrate legacy TOML files into the DB on first launch.
 
     For each provided path:
-    - If the file exists, parse it, import data into DB, rename to .bak.
+    - If the file exists, parse it, import data into DB, rename to .bak (or leave it,
+      with a warning, when it can't be renamed).
     - If the file does not exist, silently skip.
 
     config_path format (old config.toml):
@@ -340,15 +477,23 @@ async def migrate_from_toml(
     """
     if config_path is not None and config_path.exists():
         await _migrate_config_toml(db, config_path)
-        bak = config_path.with_suffix(".toml.bak")
-        config_path.rename(bak)
-        logger.info("migrate_from_toml: migrated config, backed up to {}", bak)
+        _set_aside(config_path)
 
     if presets_path is not None and presets_path.exists():
         await _migrate_presets_toml(db, presets_path)
-        bak = presets_path.with_suffix(".toml.bak")
-        presets_path.rename(bak)
-        logger.info("migrate_from_toml: migrated presets, backed up to {}", bak)
+        _set_aside(presets_path)
+
+
+def _set_aside(path: Path) -> None:
+    """Rename a migrated file to .bak. A file that can't be renamed (config.toml is mounted
+    read-only in the container) stays where it is: the database is the source of truth."""
+    bak = path.with_suffix(".toml.bak")
+    try:
+        path.rename(bak)
+    except OSError as exc:
+        logger.warning("migrate_from_toml: left {} in place ({})", path, exc)
+        return
+    logger.info("migrate_from_toml: migrated {}, backed up to {}", path, bak)
 
 
 async def _migrate_config_toml(db: StateDB, path: Path) -> None:
@@ -360,15 +505,17 @@ async def _migrate_config_toml(db: StateDB, path: Path) -> None:
     for section in _PLAIN_SECTIONS:
         if section not in raw or not isinstance(raw[section], dict):
             continue
-        # Top-level keys (non-dict values)
-        str_kv = {k: str(v) for k, v in raw[section].items() if not isinstance(v, dict)}
+        # Top-level keys (non-dict values), as JSON like every other config write
+        str_kv = {k: json.dumps(v) for k, v in raw[section].items() if not isinstance(v, dict)}
         if str_kv:
             await db.save_config_bulk(section, str_kv)
         # Nested sub-tables: flatten as dotted section keys, e.g. "devices.lifx"
         for sub_key, sub_val in raw[section].items():
             if isinstance(sub_val, dict):
                 nested_section = f"{section}.{sub_key}"
-                nested_kv = {k: str(v) for k, v in sub_val.items() if not isinstance(v, dict)}
+                nested_kv = {
+                    k: json.dumps(v) for k, v in sub_val.items() if not isinstance(v, dict)
+                }
                 if nested_kv:
                     await db.save_config_bulk(nested_section, nested_kv)
 

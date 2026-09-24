@@ -23,14 +23,15 @@ async def list_devices(request: Request) -> list[DeviceResponse]:
     manager = request.app.state.device_manager
     scheduler = request.app.state.scheduler
     stats_list = scheduler.get_device_stats() if hasattr(scheduler, "get_device_stats") else []
-    stats_by_name = {s.device_name: s for s in stats_list}
+    stats_by_id = {s.device_id: s for s in stats_list}
 
     devices = []
     for d in manager.devices:
         info = d.adapter.device_info
-        stats = stats_by_name.get(info.name)
+        stats = stats_by_id.get(info.effective_id)
         devices.append(
             DeviceResponse(
+                id=info.effective_id,
                 name=info.name,
                 device_type=info.device_type,
                 led_count=d.adapter.led_count,

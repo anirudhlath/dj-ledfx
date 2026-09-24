@@ -67,6 +67,8 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["tests"]
+markers = ["perf: frame-budget benchmarks, run locally with `uv run pytest -m perf`"]
+addopts = "-m 'not perf'"
 
 [dependency-groups]
 dev = [
