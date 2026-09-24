@@ -76,9 +76,10 @@ src/dj_ledfx/ layout:
 - `beat/` — BeatClock phase interpolation + BeatSimulator for demo mode
 - `effects/` — Effect ABC (`base.py`, with today's 1D `StripEffect`) + the 60fps engine, which hosts each running zone's runtime and renders it ahead into that zone's ring buffer
 - `effects/context.py` — `RenderContext` (beat, time, signals) that field effects render from
-- `effects/ledset.py` — `LedSet`: a zone's LEDs from each device's own geometry, in order
+- `effects/ledset.py` — `LedSet`: a zone's LEDs from each device's own geometry, in order; `subset()` gives some devices' LEDs with the zone's positions and device indices (a firmware layer's copy is drawn on its own lights)
+- `effects/ring_buffer.py` — `RingBuffer`: a running zone's frames, rendered ahead; `find_nearest` hands out the frame itself
 - `effects/field.py`, `effects/strip_adapter.py` — `FieldEffect`; `StripAdapter` runs a 1D `StripEffect` in LED order along a zone's lights
-- `effects/firmware.py`, `firmware_lifx.py`, `firmware_openrgb.py` — effects the light runs itself: LIFX Flame and Morph (matrix), Move (multizone), waveforms (bulbs), OpenRGB hardware modes; lights that can't run one get its streamed `emulate()`
+- `effects/firmware.py`, `firmware_lifx.py`, `firmware_openrgb.py` — effects the light runs itself: LIFX Flame and Morph (matrix), Move (multizone), waveforms (bulbs), OpenRGB hardware modes; lights that can't run one get its streamed `emulate()`; `require_adapter()` turns the wrong kind of light into `FirmwareRejected`
 - `effects/color.py` — Color math: hex/RGB conversion, HSV→RGB vectorized, palette interpolation
 - `effects/easing.py` — Easing functions: lerp, ease_in/out, sine_ease
 - `effects/energy.py` — BPM→energy mapping (0-1 linear between 100-150 BPM)
@@ -86,18 +87,18 @@ src/dj_ledfx/ layout:
 - `scheduling/route.py` — `DeviceRoute`: a light's slice of its zone's frames, converted to 8 bits once, at send
 - `metrics.py` — Contextmanager-based timing metrics for performance measurement
 - `devices/` — DeviceAdapter ABC (read/set power and colour, capture/restore) + OpenRGB adapter (asyncio.to_thread wrapped) + device-type heuristics
-- `devices/capabilities.py` — `DeviceCapabilities`: what a light can do (colour, matrix, multizone, effects)
+- `devices/capabilities.py` — `DeviceCapabilities`: what a light can do (colour, matrix, multizone, effects); `LightReading` (`UNKNOWN`: it answered but can't say) and `try_read()` (None: no answer)
 - `devices/backend.py` — DeviceBackend ABC for protocol-level adapters
 - `devices/govee/` — Govee WiFi LED protocol (UDP segment control, SKU registry, transport)
-- `devices/lifx/` — LIFX LAN protocol (bulb/strip/tile discovery, packet encoding, transport); `base.py` shared adapter, `products.py` capabilities from the vendored `data/products.json`
+- `devices/lifx/` — LIFX LAN protocol (bulb/strip/tile discovery, packet encoding, transport); `base.py` shared adapter, `transport.py` `ask`/`query` (retries, the reply type checked and parsed, None on silence), `products.py` `lifx_capabilities()` from the vendored `data/products.json`
 - `looks/` — the look model, the built-ins (the handoff's Firmware showcase and six classic looks, from the vendored `data/looks.json`), and the store (saved looks, stars)
 - `zones/` — `model` (every light, rooms, groups), `store`, `runtime` (a running look's layers and ring buffer), `manager` (take-over, capture/restore, brightness, Stop all, resume, preview-only, the sharing policy), `lights` (LightMonitor: status and the 5 s/30 s polls), `attention` (the feed)
 - `latency/` — ProbeStrategy protocol + StaticLatency/EMA/WindowedMean strategies
 - `config.py` — Nested dataclass config (EngineConfig, EffectConfig, NetworkConfig, WebConfig, DevicesConfig) with load/save via tomllib/tomli_w
 - `effects/params.py` — EffectParam descriptor for runtime introspection
-- `effects/registry.py` — Effect auto-registry via __init_subclass__, get_effect_classes/schemas/create
+- `effects/registry.py` — Effect auto-registry via __init_subclass__, get_effect_classes/schemas
 - `effects/presets.py` — PresetStore with TOML persistence
-- `devices/manager.py` — DeviceManager: discovery, lifecycle, group management
+- `devices/manager.py` — DeviceManager: the managed devices (online and ghosts), indexed by stable id (`get_by_stable_id` is a dict lookup, rebuilt on every change), promote/demote, groups
 - `web/` — FastAPI app factory, REST routers (effects, devices, config, scene, looks, zones, lights, attention), WebSocket hub, Pydantic schemas
 - `web/contract.py` — the web spec's API models (camelCase) and the converters from engine types; `web/errors.py` — `answers()` maps engine errors to HTTP
 - `web/ws.py` — WebSocket hub: binary LED frame broadcast (2-byte name + 4-byte seq + RGB); beat, stats and status channels; pushed `running`, `lights` and `attention` snapshots; `transport` carries preview-only (`simulating` while on, `playing` otherwise); `close_all()` ends sessions with 1001 at shutdown
@@ -107,7 +108,8 @@ src/dj_ledfx/ layout:
 - `spatial/compositor.py` — Spatial compositor for multi-device LED frame distribution
 - `spatial/geometry.py` — 3D geometry utilities for spatial calculations
 - `spatial/scene.py` — SceneModel: device placements, spatial configuration
-- `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats)
+- `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats), and `clamp01`
+- `timing.py` — `utcnow()`, `as_utc()`, the one-second rate window (`RATE_WINDOW_S`, `trim_window`) and `paced()`, the fixed-period loop the engine and the scheduler run
 - `events.py` — Typed callback event bus (sync, non-blocking callbacks only) + device events; the zones' events (`ZonesChanged`, `PreviewOnlyChanged`, `LightsChanged`, `AttentionChanged`) live in `zones/model.py`
 - `persistence/` — SQLite-backed state persistence (state_db.py, toml_io.py, debounced_writer.py, migrations/)
 - `devices/discovery.py` — DiscoveryOrchestrator: multi-wave scanning, fast reconnect, ghost promote/demote
@@ -144,7 +146,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Field effects render `render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB`; today's six 1D effects keep `StripEffect.render(self, ctx: BeatContext, led_count: int)` and run through `StripAdapter`
 - Firmware effects implement `supports(caps)`, `start(adapter, params)`, `stop(adapter)`, `is_running(adapter)` (None: the light can't say) and `emulate(ctx, leds)` for lights that can't run them
 - New effects must: import in `effects/__init__.py` to trigger auto-registry via `__init_subclass__`
-- Use shared utilities from `effects/color.py` (hex_to_rgb, rgb_to_hex, hsv_to_rgb_array, palette_lerp) and `effects/easing.py`
+- Use shared utilities from `effects/color.py` (hex_to_rgb, rgb_to_hex, hsv_to_rgb_array, palette_lerp, to_float_rgb) and `effects/easing.py`
 - Effect render methods are synchronous (pure numpy math, no I/O)
 - BeatClock read methods are synchronous and lock-free (called from render loop)
 - BeatClock write method is `on_beat(bpm, beat_number, next_beat_ms, timestamp, ...)` (not `update()`)
@@ -160,7 +162,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 
 - Ring buffer stores FUTURE frames. High-latency devices read newer (further-future) frames.
 - Each zone runtime renders at `now + horizon` (its lights' largest latency plus a frame, within the lookahead) into its own ring buffer. Scheduler picks frame at `now + device_latency`.
-- Frame data must be copied before passing to device threads (race condition prevention).
+- A frame in a ring buffer is never changed after it's written: the runtime renders a new array every tick, `find_nearest` hands out the frame itself, and a route's `to_device_colors` makes the new 8-bit array each send uses.
 - Passive Pro DJ Link mode for MVP (no virtual CDJ handshake needed for beat packets).
 - BeatClock drift correction: soft correct if <5ms, hard snap if >=5ms.
 - BPM must always be pitch-adjusted: `track_bpm * (1 + pitch/100)`.
@@ -172,13 +174,13 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - SQLite `state.db` is single source of truth at runtime; TOML is import/export format only
 - Device identity: MAC-based `stable_id` for cross-session matching via `DeviceInfo.effective_id` (falls back to name)
 - Web layer resolves display names → stable_ids before any DB write (placements, deletions)
-- A new stable_id is a new light even beside an online light of the same name (the PC's four RAM sticks share one); only an offline ghost is promoted by name
+- A new stable_id is a new light even beside an online light of the same name (the PC's four RAM sticks share one); a device is matched by name only when exactly one managed device has that name and it's offline (`DiscoveryOrchestrator._merge`)
 - Ghost/promote/demote lifecycle: offline devices stay registered as GhostAdapters, get promoted when rediscovered
 - Discovery `skip_ids` must exclude offline devices — otherwise ghosts can never be re-promoted
 - Zones replace the transport, scenes and pipelines (spec §4.3): starting a look on a zone takes its lights from other zones (newest wins); what's running persists and resumes on start; there is nothing to press play on
 - Capture/restore: a light is captured before dj-ledfx first changes it; the capture survives hand-overs between zones and restarts (in state.db) and is released on Off or Stop all. `capture_state()` returns None by default (can't capture: Off leaves it alone)
 - Sharing policy (spec §6.4): dj-ledfx switches a light on only when a look is applied. A zone light switched off elsewhere drops out and rejoins when it's back on; a stopped firmware effect is re-sent at the next 5 s poll while the light is on; idle lights are read every 30 s and never changed
-- Light status: a LIFX light that misses three 5 s polls is `offline` (a wall switch); `switched-off` is a power reading, not an attention item
+- Light status: a light whose read fails three 5 s polls in a row (no answer, or any error) is `offline` (a wall switch), whatever its protocol; `switched-off` is a power reading, not an attention item
 - Preview-only (`engine.preview_only`, `PUT /api/config`) applies at once: looks run and stream to the web preview, the lights are left alone. It's kept across restarts in state.db's config table
 - Scenes became device-group zones once (migration 004), not running; the old UI's effect endpoints take `?zone=`
 
@@ -199,7 +201,8 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Packet parsing tests use hex dump fixtures from `tests/fixtures/`; `tests/fixtures/lifx/recorded/` holds replies recorded from this home's lights (a product with no recording skips)
 - Mock `openrgb-python` for device tests
 - Integration tests run BeatSimulator → full pipeline → mock DeviceAdapter
-- Shared fakes: `tests/conftest.py` (`FakeLight`, a controllable light; `GlowFirmware`, a firmware effect), `tests/zone_home.py` (a zone manager over fake lights), `tests/api_home.py` (the same behind the web app); `pythonpath = ["tests"]` makes them importable
+- Shared fakes: `tests/conftest.py` (`FakeLight`, a controllable light; `GlowFirmware`, a firmware effect; `device_stats()`, `render_ctx()`), `tests/zone_home.py` (a zone manager over fake lights; `zone_record()`), `tests/api_home.py` (the same behind the web app), `tests/lifx_fakes.py` (`FakeLifxTransport`, a LifxTransport with a faked socket; `lifx_bulb/strip/candle()`; `read_hex()` for hex fixtures); `pythonpath = ["tests"]` makes them importable
+- Every test starts from the app's effect registry (an autouse fixture in conftest); a test effect defined with `register=False` never leaks
 - Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern; `tests/web/conftest.py` shares `mock_deps()`, `write_dist()` and `static_client()` for `create_app`
 - `tests/web/` covers all REST routers and WebSocket hub; `tests/test_main.py` runs the app in a subprocess and checks a SIGTERM shutdown logs no traceback
 - Gates compare with a baseline: no new mypy errors (compare `uv run mypy src/` output with the branch's starting point) and no format findings; perf benchmarks are deselected (`-m perf` runs them)
