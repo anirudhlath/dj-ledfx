@@ -121,6 +121,7 @@ class FakeLight(DeviceAdapter):
         self.silent = False  # reads get no answer (it's unplugged, or cut at the wall)
         self.firmware_checks = 0  # how often the app asked whether its effect still runs
         self._holds: dict[str, Hold] = {}
+        self._power_at_capture: bool | None = None
         self.calls: list[tuple[str, object]] = []
         self.frames: list[NDArray[np.uint8]] = []
         self.record_frames = False  # log frames in calls too, to check what came first
@@ -188,11 +189,14 @@ class FakeLight(DeviceAdapter):
     async def capture_state(self) -> bytes | None:
         self.io()
         self.calls.append(("capture", None))
+        self._power_at_capture = self.power
         return self.captured
 
     async def restore_state(self, state: bytes, *, power: bool = True) -> None:
         self.io()
         self.calls.append(("restore" if power else "restore_off", state))
+        if power and self._power_at_capture is not None:
+            self.power = self._power_at_capture  # a restore puts power back too
 
     async def read_light(self) -> LightReading:
         self.io()

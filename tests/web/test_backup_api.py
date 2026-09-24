@@ -42,6 +42,21 @@ async def test_restore_brings_back_zones_looks_stars_and_what_ran(tmp_path: Path
         assert [p["name"] for p in await new.home.db.load_presets()] == ["Slow"]
 
 
+# B6: a restored look is applied as a start is: its lights end up on and running.
+async def test_restored_looks_switch_their_lights_on_and_run(tmp_path: Path) -> None:
+    lamp = FakeLight("a", power=False)
+    async with api_home(tmp_path, [lamp], [DESK]) as api:
+        await api.home.manager.start("desk", api.home.look("classic-breathe"))
+        backup = (await api.client.get("/api/state/export")).text
+
+        resp = await api.client.post("/api/state/import", content=backup)
+
+        assert resp.status_code == 200
+        assert [r.zone_id for r in api.home.manager.running()] == ["desk"]
+        assert lamp.power is True
+        assert api.home.routes.routes["a"].streaming
+
+
 async def test_restoring_stops_what_runs_here_first(tmp_path: Path) -> None:
     kitchen = ZoneRecord(id="kitchen", name="Kitchen", lights=("b",))
     lights = [FakeLight("a"), FakeLight("b")]

@@ -190,7 +190,8 @@ async def export_state(request: Request) -> Response:
 
 @router.post("/state/import")
 async def import_state(request: Request) -> dict[str, str]:
-    """Restore a backup: running looks stop first, then come back from the file."""
+    """Restore a backup: the running looks give way to the file's, which start as a Start
+    would (ZoneManager.replace_state)."""
     from dj_ledfx.persistence.toml_io import import_toml
 
     db = get_db(request)
@@ -199,12 +200,13 @@ async def import_state(request: Request) -> dict[str, str]:
         tomllib.loads(text)
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {exc}") from exc
-    zones, looks = get_zones(request), get_looks(request)
-    await zones.stop_all()
-    try:
-        await import_toml(db, text)
-    finally:
-        await looks.load()
-        await zones.load()
-        await zones.resume()
+    looks = get_looks(request)
+
+    async def restore() -> None:
+        try:
+            await import_toml(db, text)
+        finally:
+            await looks.load()
+
+    await get_zones(request).replace_state(restore)
     return {"status": "ok"}

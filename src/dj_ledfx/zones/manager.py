@@ -288,28 +288,50 @@ class ZoneManager:
         owns any more is restored when it's reachable.
         """
         async with self._lock:
-            for saved in await self._store.load_assignments():
-                zone = self._zones.get(saved.zone_id)
-                members = self._lights_of(zone) if zone is not None else ()
-                lights = [
-                    light
-                    for light in saved.lights or members
-                    if light in members and self._adapter(light) is not None
-                ]
-                if not lights:
-                    logger.info(
-                        "Zone {} has none of its lights left; not resuming it", saved.zone_id
-                    )
-                    await self._store.delete_assignments([saved.zone_id])
-                    continue
-                await self._take_over(saved.zone_id, lights)
-                running = self._resumed(saved, lights)
-                self._running[saved.zone_id] = running
-                if running.runtime is not None:
-                    self._host.add_runtime(running.runtime)
-                await self._persist(saved.zone_id)
+            await self._resume_saved()
             await self._sync(self._known_lights())
         self._event_bus.emit(ZonesChanged())
+
+    async def replace_state(self, restore: Callable[[], Awaitable[None]]) -> None:
+        """Swap in a backup, holding the lock throughout. restore() writes it to state.db
+        and reloads the looks.
+
+        The running zones stop without touching their lights; the backup's running zones
+        then start as a Start would, so their lights are taken, captured if new and
+        switched on. A light that nothing runs on any more is put back how it was.
+        """
+        async with self._lock:
+            before = [light for running in self._running.values() for light in running.lights]
+            await self._stop(*self._running)
+            try:
+                await restore()
+            finally:
+                self._zones = {zone.id: zone for zone in await self._store.load_zones()}
+                started = await self._resume_saved()
+                await self._sync([*before, *self._known_lights()], power_on=started)
+        self._event_bus.emit(ZonesChanged())
+
+    async def _resume_saved(self) -> list[str]:
+        """Rebuild the running zones saved in state.db, oldest first. Returns their lights."""
+        for saved in await self._store.load_assignments():
+            zone = self._zones.get(saved.zone_id)
+            members = self._lights_of(zone) if zone is not None else ()
+            lights = [
+                light
+                for light in saved.lights or members
+                if light in members and self._adapter(light) is not None
+            ]
+            if not lights:
+                logger.info("Zone {} has none of its lights left; not resuming it", saved.zone_id)
+                await self._store.delete_assignments([saved.zone_id])
+                continue
+            await self._take_over(saved.zone_id, lights)
+            running = self._resumed(saved, lights)
+            self._running[saved.zone_id] = running
+            if running.runtime is not None:
+                self._host.add_runtime(running.runtime)
+            await self._persist(saved.zone_id)
+        return [light for running in self._running.values() for light in running.lights]
 
     async def set_preview_only(self, on: bool) -> None:
         """Preview-only: looks run and stream to the web preview; the lights are left alone.
