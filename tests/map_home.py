@@ -7,9 +7,14 @@ lights from the vendored home.json.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from types import MappingProxyType
 from typing import Any
 
+import numpy as np
+
+from dj_ledfx.effects.ledset import LedSet, LedSource, PlacedLeds, Space, build_ledset
 from dj_ledfx.home.model import Anchor, Box2, Furniture, Home, Location, Room, SubZone, Wall
 
 WEST = ((0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0))
@@ -41,3 +46,20 @@ def tiny_home(**changes: Any) -> Home:
         location=Location("Test", 10.0, 20.0),
     )
     return replace(home, **changes)
+
+
+def leds_at(
+    points: Sequence[Sequence[float]],
+    *,
+    ceiling: float | None = 3.0,
+    anchors: Mapping[str, Sequence[float]] | None = None,
+) -> LedSet:
+    """One light's LEDs at these map positions, in a zone with this ceiling and anchors."""
+    space = Space(
+        anchors=MappingProxyType(
+            {name: np.asarray(p, dtype=np.float32) for name, p in (anchors or {}).items()}
+        ),
+        ceiling=ceiling,
+    )
+    placed = PlacedLeds.from_positions(np.asarray(points, dtype=np.float64).reshape(-1, 3))
+    return build_ledset([LedSource("light", len(points), placed=placed)], space)
