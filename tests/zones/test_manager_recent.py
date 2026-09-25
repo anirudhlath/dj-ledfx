@@ -44,7 +44,7 @@ async def test_every_way_a_look_stops_is_remembered_newest_first(make_home: Home
     await manager.stop_all()
     _at(home, 7)
     await manager.start("desk", breathe)
-    await manager.start("desk", breathe)  # the same look again: nothing stopped
+    await manager.start("desk", breathe)  # the same look again: hidden while it runs
     _at(home, 8)
     await manager.off("desk")  # the same zone and look as at 19:00: one entry, the newest stop
 
@@ -148,3 +148,29 @@ async def test_a_sub_zone_made_again_under_the_same_id_starts_with_no_looks(
     await home.manager.home_changed()
 
     assert await home.manager.recent() == []
+
+
+async def test_a_group_deleted_while_its_look_runs_leaves_no_look_to_start_again(
+    make_home: HomeFactory,
+) -> None:
+    home = await make_home([FakeLight("a")], [zone_record("shelf", "a")])
+    await home.manager.start("shelf", home.look("classic-breathe"))
+
+    await home.manager.delete_group("shelf")
+
+    assert await home.manager.recent() == []
+    assert await home.store.load_recent() == []
+
+
+async def test_a_running_sub_zone_removed_from_the_map_leaves_no_look_to_start_again(
+    make_home: HomeFactory,
+) -> None:
+    view = FakeHome(rooms={"west": ["a"]}, sub_zones={"desk": ["a"]})
+    home = await make_home([FakeLight("a")], [], view=view)
+    await home.manager.start("desk", home.look("classic-breathe"))
+
+    del view.sub_zones["desk"]
+    await home.manager.home_changed()
+
+    assert await home.manager.recent() == []
+    assert await home.store.load_recent() == []

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Iterable
+from typing import Any
+
 import numpy as np
 import pytest
-from conftest import FakeLight
+from conftest import FakeLight, Hold
 from zone_home import FakeHome, HomeFactory, zone_record
 
 from dj_ledfx.effects.ledset import PlacedLeds, Space
@@ -122,6 +126,40 @@ async def test_deleting_a_running_sub_zone_turns_it_off_and_restores_its_lights(
     with pytest.raises(ZoneNotFoundError):
         home.manager.get_zone("desk")
     assert len(home.changes) == heard + 1
+
+
+async def test_two_running_sub_zones_deleted_one_while_the_other_stops_both_turn_off(
+    make_home: HomeFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    view = FakeHome(rooms={"west": ["a", "b"]}, sub_zones={"desk": ["a"], "shelf": ["b"]})
+    home = await make_home(_lights("a", "b"), [], view=view)
+    await home.manager.start("desk", home.look("classic-breathe"))
+    await home.manager.start("shelf", home.look("classic-strobe"))
+    hold, forget = Hold(), home.store.delete_assignments
+
+    async def held(zone_ids: Iterable[str], **kwargs: Any) -> None:
+        if not hold.entered.is_set():  # the first home_changed stops the desk: held here
+            hold.entered.set()
+            await hold.release.wait()
+        await forget(zone_ids, **kwargs)
+
+    monkeypatch.setattr(home.store, "delete_assignments", held)
+    del view.sub_zones["desk"]
+    first = asyncio.create_task(home.manager.home_changed())
+    await hold.entered.wait()
+    del view.sub_zones["shelf"]  # the map changes again while the desk is stopping
+    second = asyncio.create_task(home.manager.home_changed())
+    hold.release.set()
+    await asyncio.gather(first, second)
+
+    assert home.manager.running() == [] and home.host.runtimes == {}
+    for light in ("a", "b"):
+        assert ("restore", f"{light}0".encode()) in home.lights[light].calls
+        assert light not in home.routes.routes
+    assert await home.store.load_assignments() == []
+    view.rooms["west"] = ["b", "a"]
+    await home.manager.home_changed()  # and the next edit still works
+    assert [zone.id for zone in home.manager.zones()] == ["home", "west"]
 
 
 async def test_a_running_room_redraws_its_leds_when_a_light_moves_inside_it(

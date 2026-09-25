@@ -543,16 +543,11 @@ class ZoneManager:
         LED set.
         """
         async with self._lock:
-            now_derived = {zone.id for zone in self._home.zone_records()}
-            gone = [
-                zone_id
-                for zone_id in self._running
-                if zone_id not in now_derived
-                and (zone := self._zones.get(zone_id)) is not None
-                and zone.kind in DERIVED_KINDS
-            ]
-            released = await self._stop(*gone, remember=False)  # gone from the map
+            # The zones gone are read from the records just loaded: the map may change
+            # again while a stop awaits, and the next call stops what that change removed.
             await self._load_zones()
+            gone = [zone_id for zone_id in self._running if zone_id not in self._zones]
+            released = await self._stop(*gone, remember=False)  # gone from the map
             joined, touched = await self._follow_members()
             redrawn = self._redraw()
             await self._sync([*released, *touched, *redrawn], power_on=joined)
@@ -761,11 +756,10 @@ class ZoneManager:
         if not lights:
             raise ZoneError(f"{zone.name} has no lights")
         take_overs, touched = await self._take_over(zone_id, lights)
-        previous = self._running.pop(zone_id, None)
-        if previous is not None:
-            self._host.remove_runtime(zone_id)
-            if _look_id_of(previous) != look.id and (stopped := self._stopped(zone_id, previous)):
-                await self._store.remember(stopped)  # a new look replaced it
+        previous: _Running | None = None
+        stopped: list[StoppedLook] = []
+        if zone_id in self._running:  # the new start ends the run before it
+            previous, stopped = self._end_run(zone_id, remember=True)
         brightness = _brightness_of(previous) if previous is not None else 1.0
         runtime = self._new_runtime(zone_id, look, lights, brightness)
         running = _Running(
@@ -773,7 +767,7 @@ class ZoneManager:
         )
         self._running[zone_id] = running
         self._host.add_runtime(runtime)
-        await self._persist(zone_id)
+        await self._persist(zone_id, stopped=stopped)
         released = [x for x in previous.lights if x not in lights] if previous else []
         await self._sync([*lights, *touched, *released], power_on=lights)
         return StartResult(self._info(zone_id, running), tuple(take_overs))
@@ -865,7 +859,8 @@ class ZoneManager:
             if not lost:
                 continue
             kept = [x for x in other.lights if x not in wanted_set]
-            zone_name = self._zones[other_id].name
+            zone = self._zones.get(other_id)
+            zone_name = zone.name if zone is not None else other_id
             look_name = self._look_name(other)
             take_overs.append(TakeOver(other_id, zone_name, look_name, tuple(lost), not kept))
             if not kept:
@@ -882,20 +877,25 @@ class ZoneManager:
         Their looks join "Start again" (ruling 19) unless remember is False: a zone being
         deleted can't start again, and a restore brings its own list.
         """
-        stopped = [zone_id for zone_id in zone_ids if zone_id in self._running]
+        ended = [zone_id for zone_id in zone_ids if zone_id in self._running]
         lights: list[str] = []
         recent: list[StoppedLook] = []
-        for zone_id in stopped:
-            running = self._running.pop(zone_id)
+        for zone_id in ended:
+            running, stopped = self._end_run(zone_id, remember=remember)
             lights += running.lights
-            if remember:
-                recent += self._stopped(zone_id, running)
-            self._host.remove_runtime(zone_id)
-        if stopped:
-            await self._store.delete_assignments(stopped)
-        if recent:
-            await self._store.remember(recent)
+            recent += stopped
+        if ended:
+            await self._store.delete_assignments(ended, stopped=recent)
         return lights
+
+    def _end_run(self, zone_id: str, *, remember: bool) -> tuple[_Running, list[StoppedLook]]:
+        """Every end of a run: Off, a take-over, a new start on the zone. The run and its
+        runtime are forgotten; returns the run, and its look as "Start again" remembers
+        it, unless remember is False. A look started again on its zone is remembered too:
+        recent() leaves it out while it runs."""
+        running = self._running.pop(zone_id)
+        self._host.remove_runtime(zone_id)
+        return running, self._stopped(zone_id, running) if remember else []
 
     def _stopped(self, zone_id: str, running: _Running) -> list[StoppedLook]:
         """A run that ends, as "Start again" remembers it: only a saved look, which one tap
@@ -917,7 +917,8 @@ class ZoneManager:
         zone_id = self.owner_of(device_id)
         return None if zone_id is None else self._running[zone_id].runtime
 
-    async def _persist(self, zone_id: str) -> None:
+    async def _persist(self, zone_id: str, *, stopped: Sequence[StoppedLook] = ()) -> None:
+        """Save a running zone's assignment, with the looks its start stopped."""
         running = self._running[zone_id]
         lights, since = tuple(running.lights), running.since
         if running.saved is not None:  # kept as saved, so a later version may read it
@@ -933,7 +934,7 @@ class ZoneManager:
                 lights=lights,
                 started_at=since,
             )
-        await self._store.save_assignment(assignment)
+        await self._store.save_assignment(assignment, stopped=stopped)
 
     def _info(self, zone_id: str, running: _Running) -> RunningZoneInfo:
         runtime = running.runtime

@@ -131,52 +131,32 @@ class ZoneStore:
         ]
         return sorted(assignments, key=lambda a: (a.started_at, a.zone_id))
 
-    async def save_assignment(self, assignment: Assignment) -> None:
-        await self._db.write(
-            "INSERT INTO zone_assignments "
-            "(zone_id, look_id, look, brightness, lights, started_at) VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(zone_id) DO UPDATE SET look_id=excluded.look_id, look=excluded.look, "
-            "brightness=excluded.brightness, lights=excluded.lights, "
-            "started_at=excluded.started_at",
-            (
-                assignment.zone_id,
-                assignment.look_id,
-                assignment.look_json,
-                assignment.brightness,
-                json.dumps(list(assignment.lights)),
-                assignment.started_at.isoformat(),
-            ),
+    async def save_assignment(
+        self, assignment: Assignment, *, stopped: Iterable[StoppedLook] = ()
+    ) -> None:
+        """Save a zone's assignment, and remember the looks that stopped for it (a new
+        look replacing the one it ran), in one transaction."""
+        await self._db.write_many(
+            [self._assignment_statement(assignment), *self._remember_statements(stopped)]
         )
 
-    async def delete_assignments(self, zone_ids: Iterable[str]) -> None:
-        await self._db.write_many(
-            [("DELETE FROM zone_assignments WHERE zone_id=?", (zone_id,)) for zone_id in zone_ids]
-        )
+    async def delete_assignments(
+        self, zone_ids: Iterable[str], *, stopped: Iterable[StoppedLook] = ()
+    ) -> None:
+        """Forget zones' assignments, and remember the looks that stopped with them, in one
+        transaction."""
+        statements: list[Statement] = [
+            ("DELETE FROM zone_assignments WHERE zone_id=?", (zone_id,)) for zone_id in zone_ids
+        ]
+        statements += self._remember_statements(stopped)
+        if statements:
+            await self._db.write_many(statements)
 
     async def remember(self, stopped: Iterable[StoppedLook]) -> None:
-        """Remember looks that stopped, for "Start again" (ruling 19). Each zone and look
-        keeps its newest stop, and only the RECENT_LIMIT newest stay."""
-        statements: list[Statement] = [
-            (
-                "INSERT INTO recent_looks (zone_id, look_id, started_at, stopped_at) "
-                "VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(zone_id, look_id) DO UPDATE SET started_at=excluded.started_at, "
-                "stopped_at=excluded.stopped_at "
-                "WHERE excluded.stopped_at >= recent_looks.stopped_at",
-                (entry.zone_id, entry.look_id, _utc(entry.started_at), _utc(entry.stopped_at)),
-            )
-            for entry in stopped
-        ]
-        if not statements:
-            return
-        statements.append(
-            (
-                "DELETE FROM recent_looks WHERE rowid NOT IN (SELECT rowid FROM recent_looks "
-                "ORDER BY stopped_at DESC, started_at DESC LIMIT ?)",
-                (RECENT_LIMIT,),
-            )
-        )
-        await self._db.write_many(statements)
+        """Remember looks that stopped, for "Start again" (ruling 19)."""
+        statements = self._remember_statements(stopped)
+        if statements:
+            await self._db.write_many(statements)
 
     async def load_recent(self) -> list[StoppedLook]:
         """The remembered looks, the newest stop first; of two stopped together, the newer
@@ -230,6 +210,49 @@ class ZoneStore:
         )
         await self._db.write_many(statements)
         logger.info("Migrated {} scene(s) to {} zone(s)", len(scenes), len(zones))
+
+    @staticmethod
+    def _assignment_statement(assignment: Assignment) -> Statement:
+        return (
+            "INSERT INTO zone_assignments "
+            "(zone_id, look_id, look, brightness, lights, started_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(zone_id) DO UPDATE SET look_id=excluded.look_id, look=excluded.look, "
+            "brightness=excluded.brightness, lights=excluded.lights, "
+            "started_at=excluded.started_at",
+            (
+                assignment.zone_id,
+                assignment.look_id,
+                assignment.look_json,
+                assignment.brightness,
+                json.dumps(list(assignment.lights)),
+                assignment.started_at.isoformat(),
+            ),
+        )
+
+    @staticmethod
+    def _remember_statements(stopped: Iterable[StoppedLook]) -> list[Statement]:
+        """Each zone and look keeps its newest stop, and only the RECENT_LIMIT newest stay.
+        No statements when nothing stopped."""
+        statements: list[Statement] = [
+            (
+                "INSERT INTO recent_looks (zone_id, look_id, started_at, stopped_at) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(zone_id, look_id) DO UPDATE SET started_at=excluded.started_at, "
+                "stopped_at=excluded.stopped_at "
+                "WHERE excluded.stopped_at >= recent_looks.stopped_at",
+                (entry.zone_id, entry.look_id, _utc(entry.started_at), _utc(entry.stopped_at)),
+            )
+            for entry in stopped
+        ]
+        if statements:
+            statements.append(
+                (
+                    "DELETE FROM recent_looks WHERE rowid NOT IN (SELECT rowid FROM recent_looks "
+                    "ORDER BY stopped_at DESC, started_at DESC LIMIT ?)",
+                    (RECENT_LIMIT,),
+                )
+            )
+        return statements
 
     @staticmethod
     def _delete_statements(zone_id: str) -> list[Statement]:
