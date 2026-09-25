@@ -11,7 +11,7 @@ import functools
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.resources import files
 from typing import Any
 
@@ -47,8 +47,23 @@ def handoff_home_json() -> Mapping[str, Any]:
     return data
 
 
+# The rooms the owner has named over home.json (ruling 18). The web spec and the renders call
+# the room with id corridor "Entrance". The design files are never edited by hand, so the seed
+# renames it, and once a handoff names the room so itself this changes nothing.
+OWNER_ROOM_NAMES: Mapping[str, str] = {"corridor": "Entrance"}
+
+
+def with_owner_names(home: Home) -> Home:
+    """The map, with the owner's names for its rooms (OWNER_ROOM_NAMES)."""
+    rooms = tuple(
+        replace(room, name=OWNER_ROOM_NAMES[room.id]) if room.id in OWNER_ROOM_NAMES else room
+        for room in home.rooms
+    )
+    return replace(home, rooms=rooms)
+
+
 def seed_home() -> Home:
-    return home_from_dict(handoff_home_json())
+    return with_owner_names(home_from_dict(handoff_home_json()))
 
 
 def _seed_light(light: Mapping[str, Any]) -> SeedLight:

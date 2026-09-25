@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from dj_ledfx.home.seed import normalise_name, seed_home, seed_lights
+from map_home import EAST, tiny_home
+
+from dj_ledfx.home.model import Room
+from dj_ledfx.home.seed import (
+    OWNER_ROOM_NAMES,
+    normalise_name,
+    seed_home,
+    seed_lights,
+    with_owner_names,
+)
 from dj_ledfx.home.shapes import LED_ORDERS, shape_to_dict
 
 DESIGN = Path(__file__).parents[2] / "docs" / "design" / "web-app"
@@ -62,3 +72,21 @@ def test_seed_lights_carry_the_handoff_placements() -> None:
 def test_names_are_matched_without_case_or_punctuation() -> None:
     assert normalise_name("  Desk  Lamp-2 ") == "desk lamp 2"
     assert normalise_name("DESK_lamp 2") == normalise_name("desk lamp (2)")
+
+
+def test_the_seed_names_the_corridor_entrance_and_keeps_every_other_name() -> None:
+    raw = {room["id"]: room["name"] for room in _raw()["rooms"]}
+    seeded = {room.id: room.name for room in seed_home().rooms}
+
+    assert OWNER_ROOM_NAMES == {"corridor": "Entrance"}  # the owner's decision, 2026-09-24
+    assert "corridor" in raw
+    assert seeded == {**raw, "corridor": "Entrance"}
+
+
+def test_the_owner_names_rename_a_room_once_and_leave_the_rest() -> None:
+    hall = Room("corridor", "Hall", EAST, (6.0, 2.0))
+    entrance = replace(hall, name="Entrance")
+
+    assert with_owner_names(tiny_home(rooms=(hall,))).rooms == (entrance,)
+    assert with_owner_names(tiny_home(rooms=(entrance,))) == tiny_home(rooms=(entrance,))
+    assert with_owner_names(tiny_home()) == tiny_home()
