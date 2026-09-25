@@ -26,6 +26,8 @@ const PAGES = ROUTES.filter((path) => path !== '/next/system')
 
 async function open(page: Page, path: string) {
   await page.goto(path)
+  // The mock build renders once MSW's worker is up (main.tsx), so wait for the chrome, then its fonts.
+  await expect(page.getByRole('banner')).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
 }
 

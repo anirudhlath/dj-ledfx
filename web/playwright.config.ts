@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test'
 
-// Runs against the production bundle (vite preview), at /next, the way FastAPI serves it.
+// Runs against the mock build (vite preview --mode mock) at /next, the way FastAPI serves the real
+// one: the same bundle, with MSW playing ?scenario= (the hero by default).
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -19,7 +20,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run build && npm run preview',
+    command: 'npm run build:mock && npm run preview -- --mode mock',
     url: 'http://localhost:4174/next/',
     reuseExistingServer: false,
   },

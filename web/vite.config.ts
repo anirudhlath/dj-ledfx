@@ -3,13 +3,17 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
-// Served by FastAPI at /next until the F11 cut-over (engine spec §10).
-export default defineConfig({
+// Served by FastAPI at /next until the F11 cut-over (engine spec §10). `--mode mock` builds the app
+// with its mocks into dist-mock for Playwright. Only dev and that build get MSW's worker from
+// public/; production has no public dir (decision 11).
+export default defineConfig(({ mode }) => ({
   base: '/next/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
+  publicDir: mode === 'production' ? false : 'public',
+  build: { outDir: mode === 'mock' ? 'dist-mock' : 'dist' },
   server: {
     port: 5174,
     strictPort: true,
@@ -27,4 +31,4 @@ export default defineConfig({
     restoreMocks: true,
     unstubGlobals: true,
   },
-})
+}))
