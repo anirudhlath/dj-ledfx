@@ -18,15 +18,6 @@ from typing import Any
 from dj_ledfx.home.model import Home, home_from_dict
 from dj_ledfx.home.shapes import Placement, check_led_order, shape_from_dict
 
-# The fields of each shape kind, as home.json's lights hold them.
-_SHAPE_FIELDS: Mapping[str, tuple[str, ...]] = {
-    "point": ("position",),
-    "line": ("path",),
-    "bent-line": ("path",),
-    "cylinder": ("base", "height", "radius"),
-    "grid": ("center", "width", "depth", "rotation"),
-}
-
 
 @dataclass(frozen=True, slots=True)
 class SeedLight:
@@ -67,20 +58,17 @@ def seed_home() -> Home:
 
 
 def _seed_light(light: Mapping[str, Any]) -> SeedLight:
+    """A home.json light as a seed. Its placement is always unconfirmed: the seed is the
+    designer's estimate (spec §6.2), whatever its confirmed field says."""
     kind = str(light["shape"])
-    fields = {key: light[key] for key in _SHAPE_FIELDS.get(kind, ()) if light.get(key) is not None}
-    shape = shape_from_dict({"kind": kind, **fields})
+    shape = shape_from_dict({**light, "kind": kind})
     return SeedLight(
         id=str(light["id"]),
         name=str(light["name"]),
         room=str(light["room"]),
         sub_zone=light.get("subZone"),
         leds=int(light["leds"]),
-        placement=Placement(
-            shape=shape,
-            led_order=check_led_order(kind, light.get("ledOrder")),
-            confirmed=bool(light.get("confirmed", False)),
-        ),
+        placement=Placement(shape, check_led_order(kind, light.get("ledOrder"))),
     )
 
 

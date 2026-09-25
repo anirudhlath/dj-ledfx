@@ -12,6 +12,7 @@ from map_home import EAST, tiny_home
 from dj_ledfx.home.model import Room
 from dj_ledfx.home.seed import (
     OWNER_ROOM_NAMES,
+    _seed_light,
     normalise_name,
     seed_home,
     seed_lights,
@@ -90,3 +91,16 @@ def test_the_owner_names_rename_a_room_once_and_leave_the_rest() -> None:
     assert with_owner_names(tiny_home(rooms=(hall,))).rooms == (entrance,)
     assert with_owner_names(tiny_home(rooms=(entrance,))) == tiny_home(rooms=(entrance,))
     assert with_owner_names(tiny_home()) == tiny_home()
+
+
+def test_a_seed_marked_confirmed_in_its_source_still_seeds_unconfirmed() -> None:
+    light = {
+        "id": "lamp",
+        "name": "Lamp",
+        "room": "west",
+        "shape": "point",
+        "position": [1.0, 1.0, 1.0],
+        "leds": 1,
+        "confirmed": True,
+    }
+    assert not _seed_light(light).placement.confirmed  # seeds are estimates (spec §6.2)

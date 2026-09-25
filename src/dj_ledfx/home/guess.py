@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from dataclasses import replace
 
 import numpy as np
+from loguru import logger
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.lights import LightEntry
@@ -81,7 +81,7 @@ def guess_placements(
             continue
         seed = matches.get(light.id)
         if seed is not None:
-            guesses[light.id] = replace(seed.placement, confirmed=False, confirmed_at=None)
+            guesses[light.id] = seed.placement
         else:
             loose.append(light.id)
     for light_id, point in zip(loose, _spread(home, len(loose)), strict=True):
@@ -117,12 +117,18 @@ def moved_scene_placements(
 ) -> dict[str, Placement]:
     """Device id -> its old scene placement on the map: offset from its room's label point
     by its position relative to its scene's centre, at guess height. The first scene that
-    placed a device wins; a device with no known room goes to the largest room."""
+    placed a device wins; a device with no known room goes to the largest room. A placement
+    that can't be moved (a coordinate that isn't finite, a shape the map refuses) is logged
+    and skipped, and its light is guessed like any unplaced one: a bad old scene never
+    stops the app (spec §8)."""
     first: dict[str, ScenePlacement] = {}
     for placement in scene:
         first.setdefault(placement.device_id, placement)
     by_scene: dict[str, list[ScenePlacement]] = {}
     for placement in first.values():
+        if not all(math.isfinite(value) for value in placement.position):
+            _skipped(placement, "its position isn't finite")
+            continue
         by_scene.setdefault(placement.scene_id, []).append(placement)
     fallback = largest_room(home)
     moved: dict[str, Placement] = {}
@@ -133,9 +139,21 @@ def moved_scene_placements(
             offset = _to_map(np.asarray(member.position) - centre)
             height = min(max(GUESS_HEIGHT_M + offset[2], 0.0), home.ceiling)
             at = np.array([room.label_at[0] + offset[0], room.label_at[1] + offset[1], height])
-            shape = _scene_shape(member, at)
+            try:
+                shape = _scene_shape(member, at)
+            except ValueError as exc:  # a ShapeError too
+                _skipped(member, str(exc))
+                continue
             moved[member.device_id] = Placement(shape, check_led_order(shape.kind, None))
     return moved
+
+
+def _skipped(placement: ScenePlacement, reason: str) -> None:
+    logger.warning(
+        "Light {}: its old scene placement can't be moved onto the map ({}); guessing instead",
+        placement.device_id,
+        reason,
+    )
 
 
 def first_placements(
@@ -149,8 +167,7 @@ def first_placements(
     a spread guess for every light still unplaced. Devices no longer known are skipped."""
     matches = seed_matches(lights, seeds)
     placements: dict[str, Placement] = {
-        light_id: replace(seed.placement, confirmed=False, confirmed_at=None)
-        for light_id, seed in matches.items()
+        light_id: seed.placement for light_id, seed in matches.items()
     }
     light_of: Mapping[str, str] = {
         device: entry.id for entry in lights for device in entry.devices
