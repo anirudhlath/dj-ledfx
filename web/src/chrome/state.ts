@@ -3,8 +3,6 @@
 import type { TempoSource } from '@/api/contract'
 import type { Connection } from '@/api/live-store'
 
-export type { Connection, TempoSource }
-
 export interface TempoState {
   source: TempoSource
   /**

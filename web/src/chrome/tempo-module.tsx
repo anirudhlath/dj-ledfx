@@ -1,9 +1,10 @@
 import type { ReactElement, ReactNode } from 'react'
+import type { TempoSource } from '@/api/contract'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import type { IconName } from '@/design/icons'
 import { formatBpm } from '@/lib/format'
-import type { TempoSource, TempoState } from './state'
+import type { TempoState } from './state'
 
 export interface TempoModuleProps extends TempoState {
   /** "bar": the desktop top bar. "strip": the phone strip under the header on Live. */

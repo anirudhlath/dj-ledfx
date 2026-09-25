@@ -1,5 +1,5 @@
 import { Icon } from '@/design/icon'
-import type { Connection } from './state'
+import type { Connection } from '@/api/live-store'
 
 export interface ConnectionIndicatorProps {
   connection: Connection

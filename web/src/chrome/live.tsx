@@ -2,7 +2,7 @@
 // tempo module and nothing else, and each draws nothing until its data has arrived.
 import { AttentionButton } from './attention-button'
 import { ConnectionIndicator } from './connection-indicator'
-import { useAttentionCounts, useConnection, usePreviewOnly, useTempo } from './hooks'
+import { useAttentionTotal, useConnection, useConnectionUnlessLive, usePreviewOnly, useTempo } from './hooks'
 import { PreviewOnlySwitch } from './preview-only-switch'
 import { TempoModule } from './tempo-module'
 
@@ -38,11 +38,23 @@ export function ChromePreviewOnly({ variant }: { variant: Variant }) {
 }
 
 export function ChromeAttention({ variant }: { variant: Variant }) {
-  const counts = useAttentionCounts()
-  if (counts === null) return null
-  return <AttentionButton variant={variant} count={counts.total} />
+  const total = useAttentionTotal()
+  if (total === null) return null
+  return <AttentionButton variant={variant} count={total} />
 }
 
 export function ChromeConnection({ variant }: { variant: Variant }) {
-  return <ConnectionIndicator variant={variant} connection={useConnection()} />
+  return variant === 'bar' ? <BarConnection /> : <HeaderConnection />
+}
+
+/** The top bar's "Live 60 fps": it follows the frame rate. */
+function BarConnection() {
+  return <ConnectionIndicator variant="bar" connection={useConnection()} />
+}
+
+/** The phone header shows the link only while it isn't live, so a new frame rate redraws nothing. */
+function HeaderConnection() {
+  const connection = useConnectionUnlessLive()
+  if (connection === null) return null
+  return <ConnectionIndicator variant="header" connection={connection} />
 }

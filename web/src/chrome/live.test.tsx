@@ -11,6 +11,7 @@ import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
 import { fakeSockets } from '@/test/fake-socket'
 import { attentionAbout, HERO_NOW, seedLive } from '@/test/live'
+import { setViewportWidth } from '@/test/viewport'
 import { countAttention } from './hooks'
 
 // Each chrome part, and the top bar around them, counts its renders.
@@ -69,6 +70,16 @@ describe('the chrome on the live store', () => {
         }
       }
     })
+    expect(renders).toEqual({})
+  })
+
+  // Part 3 (E5): the phone header shows the link only while it isn't live.
+  it("redraws nothing on the phone when the live frame rate changes", () => {
+    setViewportWidth(390)
+    seedLive()
+    renderApp('/next/live')
+    resetRenders()
+    act(() => liveStore.setState({ connection: { status: 'live', fps: 42 } }))
     expect(renders).toEqual({})
   })
 

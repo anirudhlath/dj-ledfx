@@ -27,6 +27,11 @@ export function useConnection(): Connection {
   return useLive((state) => state.connection)
 }
 
+/** The link while it isn't live; null while it is, so the phone header ignores the frame rate. */
+export function useConnectionUnlessLive(): Connection | null {
+  return useLive((state) => (state.connection.status === 'live' ? null : state.connection))
+}
+
 /** The link's status alone: the shell's news follows it, and not the frame rate. */
 export function useConnectionStatus(): Connection['status'] {
   return useLive((state) => state.connection.status)
@@ -43,8 +48,14 @@ export function countAttention(items: readonly AttentionItem[]): AttentionCounts
   return { total: items.length, lights, inputs }
 }
 
-export function useAttentionCounts(): AttentionCounts | null {
-  return useLiveShallow(({ attention }) => (attention === null ? null : countAttention(attention)))
+/** How many items need attention; null before the server's first attention snapshot. */
+export function useAttentionTotal(): number | null {
+  return useLive(({ attention }) => (attention === null ? null : attention.length))
+}
+
+/** How many of one kind need attention, for a nav dot; null before the first snapshot. */
+export function useAttentionCount(kind: 'lights' | 'inputs'): number | null {
+  return useLive(({ attention }) => (attention === null ? null : countAttention(attention)[kind]))
 }
 
 /** The server's preview only (its `transport`); null until it has said. F3 wires the switch's action. */
