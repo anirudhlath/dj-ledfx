@@ -8,14 +8,9 @@ export class FakeSocket implements LiveSocket {
   onmessage: ((event: MessageEvent) => void) | null = null
   onclose: ((event: CloseEvent) => void) | null = null
   onerror: ((event: Event) => void) | null = null
-  readonly url: string
   /** What the client sent, parsed. */
   readonly sent: ClientCommand[] = []
   closed = false
-
-  constructor(url: string) {
-    this.url = url
-  }
 
   send(data: string): void {
     this.sent.push(JSON.parse(data) as ClientCommand)
@@ -35,7 +30,7 @@ export class FakeSocket implements LiveSocket {
   }
 
   /** The server sends raw text or a binary frame. */
-  sayRaw(data: string | ArrayBuffer): void {
+  sayRaw(data: string | ArrayBuffer | Blob): void {
     this.onmessage?.({ data } as MessageEvent)
   }
 
@@ -56,8 +51,8 @@ export function fakeSockets(): { sockets: FakeSocket[]; open: OpenSocket } {
   const sockets: FakeSocket[] = []
   return {
     sockets,
-    open: (url) => {
-      const socket = new FakeSocket(url)
+    open: () => {
+      const socket = new FakeSocket()
       sockets.push(socket)
       return socket
     },

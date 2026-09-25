@@ -37,11 +37,12 @@ describe('decodeFrame', () => {
     expect(frames.get('rope')?.rgb).toEqual(rgb(2, 2, 2))
   })
 
-  it('takes seq 1 again once a reconnect has reset the seqs', () => {
+  // M7: the same seq again, the one frame the store would otherwise skip.
+  it('takes a seq it has seen once a reconnect has reset the seqs', () => {
     decodeFrame(encodeFrame(2, 'rope', 500, rgb(1, 1, 1)), 2, frames, 0)
     frames.resetSeqs()
-    decodeFrame(encodeFrame(2, 'rope', 1, rgb(2, 2, 2)), 2, frames, 1)
-    expect(frames.get('rope')).toMatchObject({ seq: 1, rgb: rgb(2, 2, 2) })
+    decodeFrame(encodeFrame(2, 'rope', 500, rgb(2, 2, 2)), 2, frames, 1)
+    expect(frames.get('rope')).toMatchObject({ seq: 500, rgb: rgb(2, 2, 2) })
   })
 
   it('writes into the same buffer while the LED count stays the same', () => {

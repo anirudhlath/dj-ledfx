@@ -2,18 +2,22 @@
 // server says (the live store) and the frames it streams (the FrameStore), and feeds the beat clock.
 // When the link drops it says so at once and retries after 1, 2, 4 and 8 s, then every 10 s. On
 // the way back it resyncs: frame seqs, the beat clock, and REST data through onResync.
-import { ClockOffset, clientNow, type BeatClock } from './beat'
+import { ClockOffset, clientNow, normaliseBeat, type BeatClock } from './beat'
+import type { FrameStream } from './contract'
 import { decodeFrame, type FrameStore, type FrameVersion } from './frames'
 import { applyMessage, type LiveStore } from './live-store'
 import { parseMessage, type Command } from './ws-messages'
 
-export const BACKOFF_S = [1, 2, 4, 8, 10]
-/** A link silent this long is dead: the server sends stats every second. */
-export const SILENCE_MS = 3000
-export const BEAT_FPS = 30
-export const FRAME_FPS = 60
+const BACKOFF_S = [1, 2, 4, 8, 10]
+/**
+ * A link silent this long is dead: the server sends stats every second. A link live this long
+ * has held, so a drop after it starts the backoff from 1 s again.
+ */
+const SILENCE_MS = 3000
+const BEAT_FPS = 30
+const FRAME_FPS = 60
 /** The most a v1 link (engine M1) sends. */
-export const V1_FRAME_FPS = 30
+const V1_FRAME_FPS = 30
 const TICK_MS = 1000
 
 /** What the client needs of a WebSocket. The browser's WebSocket is one. */
@@ -27,7 +31,7 @@ export interface LiveSocket {
   onerror: ((event: Event) => void) | null
 }
 export type OpenSocket = (url: string) => LiveSocket
-export const openWebSocket: OpenSocket = (url) => new WebSocket(url)
+const openWebSocket: OpenSocket = (url) => new WebSocket(url)
 
 /** The page's own /ws, which the Vite proxy and FastAPI both serve. */
 export function liveSocketUrl(location: Pick<Location, 'protocol' | 'host'> = window.location): string {
@@ -74,15 +78,20 @@ export class LiveClient {
   private everLive = false
   private attempt = 0
   private frameAckId: number | null = null
+  /** The frame subscription awaiting its answer asked for v2, so a refusal can ask for v1. */
+  private frameAskV2 = false
   private frameVersion: FrameVersion | null = null
   private frameCap = V1_FRAME_FPS
-  private lastWindow = 0
+  /** Last second's frame count; null while the first window since the link came up is partial. */
+  private lastWindow: number | null = null
+  private liveSince = 0
   private lastHeardAt = 0
+  private lastTickAt = 0
   private nextId = 1
+  private streams: FrameStream[] = ['live']
   private signals: string[] | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private tickTimer: ReturnType<typeof setInterval> | null = null
-  private running = false
 
   constructor(options: LiveClientOptions) {
     this.url = options.url
@@ -95,14 +104,13 @@ export class LiveClient {
   }
 
   start(): void {
-    if (this.running) return
-    this.running = true
+    if (this.tickTimer !== null) return
+    this.lastTickAt = this.clock()
     this.tickTimer = setInterval(() => this.tick(), TICK_MS)
     this.connect()
   }
 
   stop(): void {
-    this.running = false
     if (this.tickTimer !== null) clearInterval(this.tickTimer)
     if (this.retryTimer !== null) clearTimeout(this.retryTimer)
     this.tickTimer = null
@@ -114,16 +122,25 @@ export class LiveClient {
 
   /** §9.4's "Try now": retry at once rather than wait out the backoff. */
   retryNow(): void {
-    if (!this.running || this.socket !== null) return
+    if (this.tickTimer === null || this.socket !== null) return
     if (this.retryTimer !== null) clearTimeout(this.retryTimer)
     this.retryTimer = null
     this.connect()
   }
 
+  /**
+   * The frame streams: `live` alone until F4 opens a preview, then `preview` too while it's open
+   * (engine M2 ends a preview nobody watches, its Spec Ruling 9). Asked again after a reconnect.
+   */
+  subscribeFrames(streams: FrameStream[]): void {
+    this.streams = streams
+    if (this.opened) this.sendFrames()
+  }
+
   /** The `signals` channel (F6, F8): these names, or every signal. Sent again after a reconnect. */
-  subscribeSignals(names?: string[]): void {
-    this.signals = names ?? []
-    if (this.opened) this.sendSignals()
+  subscribeSignals(names: string[] = []): void {
+    this.signals = names
+    if (this.opened) this.sendSignals(names)
   }
 
   private connect(): void {
@@ -133,7 +150,6 @@ export class LiveClient {
     this.opened = false
     this.heard = false
     this.frameAckId = null
-    this.frameVersion = null
     this.lastHeardAt = this.clock()
     socket.onopen = () => {
       if (this.socket === socket) this.subscribe()
@@ -148,19 +164,16 @@ export class LiveClient {
   private subscribe(): void {
     this.opened = true
     this.send({ action: 'subscribe_beat', fps: BEAT_FPS })
-    this.frameAckId = this.send({
-      action: 'subscribe_frames',
-      fps: FRAME_FPS,
-      protocol: 2,
-      // Engine M2 ends a preview nobody watches (its Spec Ruling 9), so the preview stream is F4's
-      // to ask for while its preview is open.
-      streams: ['live'],
-    })
-    if (this.signals !== null) this.sendSignals()
+    this.sendFrames()
+    if (this.signals !== null) this.sendSignals(this.signals)
   }
 
-  private sendSignals(): void {
-    const names = this.signals ?? []
+  private sendFrames(): void {
+    this.frameAckId = this.send({ action: 'subscribe_frames', fps: FRAME_FPS, protocol: 2, streams: this.streams })
+    this.frameAskV2 = true
+  }
+
+  private sendSignals(names: string[]): void {
     this.send(names.length > 0 ? { action: 'subscribe_signals', names } : { action: 'subscribe_signals' })
   }
 
@@ -173,18 +186,23 @@ export class LiveClient {
   private receive(data: unknown): void {
     const now = this.clock()
     this.lastHeardAt = now
-    if (!this.heard) this.firstWord()
+    if (!this.heard) this.firstWord(now)
+    else if (this.attempt > 0 && now - this.liveSince >= SILENCE_MS / 1000) this.attempt = 0
     if (typeof data === 'string') this.receiveText(data, now)
+    // binaryType is 'arraybuffer', so anything else is a server's mistake.
+    else if (!(data instanceof ArrayBuffer)) this.frames.reject()
     // A frame before the ack is dropped: its version isn't known yet (decision 1).
-    else if (data instanceof ArrayBuffer && this.frameVersion !== null) {
-      decodeFrame(data, this.frameVersion, this.frames, now)
-    }
+    else if (this.frameVersion !== null) decodeFrame(data, this.frameVersion, this.frames, now)
   }
 
-  /** The first message on a socket: the link is live. After a drop, that's a reconnect. */
-  private firstWord(): void {
+  /**
+   * The first message on a socket: the link is live. After a drop, that's a reconnect. The backoff
+   * starts again only once the link has held for SILENCE_MS: a server that answers and then dies
+   * mustn't be retried, and resynced, every second.
+   */
+  private firstWord(now: number): void {
     this.heard = true
-    this.attempt = 0
+    this.liveSince = now
     if (this.everLive) {
       // The server may have restarted: seqs count from 1 again, the beat re-anchors, and REST data
       // is fetched again (§9.4, "Resync everything on reconnect").
@@ -194,8 +212,7 @@ export class LiveClient {
       this.onResync()
     }
     this.everLive = true
-    this.lastWindow = 0
-    this.frames.sampleFps()
+    this.lastWindow = null
     this.store.setState({ connection: { status: 'live', fps: null } })
   }
 
@@ -210,20 +227,28 @@ export class LiveClient {
       this.frameCap = this.frameVersion === 2 ? Math.min(FRAME_FPS, message.fps ?? FRAME_FPS) : V1_FRAME_FPS
       return
     }
-    applyMessage(this.store, message, now)
+    if (message.channel === 'error' && message.id === this.frameAckId && this.frameAskV2) {
+      // Refused v2 frames: ask for today's instead, once, rather than show Live with none.
+      this.frameAckId = this.send({ action: 'subscribe_frames', fps: V1_FRAME_FPS })
+      this.frameAskV2 = false
+      return
+    }
     if (message.channel === 'beat') {
-      const beat = this.store.getState().beat
-      if (beat === null) return
+      // The store and the clock share the one Beat.
+      const beat = normaliseBeat(message, now)
+      this.store.setState({ beat })
       if (beat.serverTime !== null) this.offset.add(beat.serverTime, now)
       this.beatClock.receive(beat, this.offset.value)
+      return
     }
+    applyMessage(this.store, message, now)
   }
 
   private drop(socket: LiveSocket): void {
     if (this.socket !== socket) return // an old socket's late close
     this.detach()
     socket.close()
-    if (!this.running) return
+    if (this.tickTimer === null) return
     this.attempt += 1
     this.store.setState({ connection: { status: 'reconnecting', attempt: this.attempt } })
     this.retryTimer = setTimeout(() => {
@@ -247,14 +272,24 @@ export class LiveClient {
 
   /** Once a second: the silence watchdog, and the frame rate for "Live 60 fps". */
   private tick(): void {
+    const now = this.clock()
+    // A tick more than twice late (a stalled tab, a laptop waking) measured the stall, not the
+    // server: the silence check waits a tick for the socket's queued messages.
+    const late = now - this.lastTickAt > (2 * TICK_MS) / 1000
+    this.lastTickAt = now
     const socket = this.socket
-    if (socket !== null && this.clock() - this.lastHeardAt > SILENCE_MS / 1000) {
+    if (socket !== null && !late && now - this.lastHeardAt > SILENCE_MS / 1000) {
       this.drop(socket)
       return
     }
     const connection = this.store.getState().connection
     if (connection.status !== 'live') return
     const current = this.frames.sampleFps()
+    if (this.lastWindow === null) {
+      // The window since the first message was part of a second: it would read low.
+      this.lastWindow = 0
+      return
+    }
     const fps = measuredFps(this.lastWindow, current, this.frameCap)
     this.lastWindow = current
     // Only a change is stored, so a steady 60 fps re-renders nothing.
