@@ -5,16 +5,22 @@ import { BeatClock } from './beat'
 import { FrameStore } from './frames'
 import { LiveClient, liveSocketUrl, type OpenSocket } from './live-client'
 import { liveStore } from './live-store'
-import { queryClient, resync } from './queries'
+import { queryClient, refetchOnNews, resync } from './queries'
 
 export const frames = new FrameStore()
 export const beatClock = new BeatClock()
 
 let client: LiveClient | null = null
+let stopRefetching: (() => void) | null = null
 
-/** Starts the live client, stopping any this started before: there is one socket at a time. */
+/**
+ * Starts the live client, stopping any this started before: there is one socket at a time. What the
+ * socket names and REST doesn't know sends REST back for it (refetchOnNews).
+ */
 export function startDataLayer(options: { openSocket?: OpenSocket; url?: string } = {}): LiveClient {
   client?.stop()
+  stopRefetching?.()
+  stopRefetching = refetchOnNews(liveStore, queryClient)
   client = new LiveClient({
     url: options.url ?? liveSocketUrl(),
     store: liveStore,
