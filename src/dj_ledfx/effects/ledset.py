@@ -36,6 +36,12 @@ def _no_points() -> Mapping[str, NDArray[np.float32]]:
     return MappingProxyType({})
 
 
+def _same_points(
+    one: Mapping[str, NDArray[np.float32]], other: Mapping[str, NDArray[np.float32]]
+) -> bool:
+    return one.keys() == other.keys() and all(np.array_equal(one[k], other[k]) for k in one)
+
+
 @dataclass(frozen=True, slots=True)
 class DeviceSlice:
     device_id: str
@@ -97,6 +103,22 @@ class Space:
     rooms: tuple[str, ...] = ()
     ceiling: float | None = None
     centre: Vec3 | None = None
+
+    # By value, so a map edit that leaves the geometry as it was (a rename, a light moved
+    # elsewhere) leaves the running zones as they are.
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Space):
+            return NotImplemented
+        return (
+            self.rooms == other.rooms
+            and self.ceiling == other.ceiling
+            and self.centre == other.centre
+            and _same_points(self.anchors, other.anchors)
+            and _same_points(self.anchor_points, other.anchor_points)
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.rooms, self.ceiling, self.centre, tuple(self.anchors)))
 
 
 NO_SPACE = Space()

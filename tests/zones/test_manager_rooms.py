@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 from conftest import FakeLight, Hold
-from zone_home import FakeHome, HomeFactory, zone_record
+from map_home import tiny_home
+from zone_home import FakeHome, HomeFactory, build_home, zone_record
 
 from dj_ledfx.effects.ledset import PlacedLeds, Space
 from dj_ledfx.home.map import RESERVED_ZONE_IDS
+from dj_ledfx.home.shapes import PointShape
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.zones.model import ALL_LIGHTS_ZONE_ID, HOME_ZONE_ID, ZoneError, ZoneNotFoundError
@@ -233,3 +236,30 @@ async def test_a_device_found_in_a_running_room_joins_it(make_home: HomeFactory)
     west = home.host.runtimes["west"]
     assert west.leds.count == 8 and home.routes.routes["part"].source is west
     assert part.names() == ["capture", "prepare_stream"]  # it streams; never switched on
+
+
+# M2 review A9 = M7: an edit that leaves a running zone's lights and geometry as they were
+# leaves the zone alone, and a new space keeps the zone's frames coming.
+async def test_map_edits_that_leave_a_running_room_as_it_was_leave_its_frames_alone(
+    tmp_path: Path,
+) -> None:
+    home = await build_home(tmp_path, _lights("a", "b"), [], plan=tiny_home())
+    home_map = home.home_map
+    assert home_map is not None
+    try:
+        await home_map.set_placement("a", PointShape((1.0, 1.0, 1.0)))
+        await home_map.set_placement("b", PointShape((6.0, 1.0, 1.0)))
+        await home.manager.start("west", home.look("classic-breathe"))
+        runtime = home.host.runtimes["west"]
+        ring, leds = runtime.ring, runtime.leds
+
+        await home_map.update_sub_zone("desk", name="Corner")
+        await home_map.update_anchor("sofa", name="Couch")
+        await home_map.set_placement("b", PointShape((7.0, 3.0, 1.0)))  # within the east room
+        assert runtime.ring is ring and runtime.leds is leds
+
+        await home_map.update_anchor("sofa", position=(6.5, 2.0, 0.5))
+        assert runtime.ring is ring and runtime.leds is not leds
+        assert runtime.space.anchors["sofa"].tolist() == [6.5, 2.0, 0.5]
+    finally:
+        await home.db.close()

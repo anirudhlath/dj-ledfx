@@ -606,7 +606,7 @@ class ZoneManager:
             if runtime is None:
                 continue
             lights = self._zone_lights(running.lights)
-            if list(runtime.lights) != lights or runtime.space is not space:
+            if list(runtime.lights) != lights or runtime.space != space:
                 runtime.set_lights(lights, space)
 
     def _members(self, zone: ZoneRecord) -> tuple[str, ...]:
