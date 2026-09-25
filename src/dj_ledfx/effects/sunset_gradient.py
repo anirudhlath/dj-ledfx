@@ -93,8 +93,6 @@ class SunsetGradient(ParamField):
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
-        if leds.count == 0:
-            return np.zeros((0, 3), dtype=np.float32)
         # warmth 0.5 is a straight gradient; more bends it so the warm stops climb higher
         along = height01(leds) ** np.float32(2.0 ** (2.0 * float(values["warmth"]) - 1.0))
         sun = leds.anchors.get(values["anchor"]) if values["anchor"] else None

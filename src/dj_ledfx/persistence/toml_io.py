@@ -513,17 +513,7 @@ async def _export_recent(db: StateDB) -> dict[str, Any]:
     recent = await ZoneStore(db).load_recent()
     if not recent:
         return {}
-    return {
-        "recent": [
-            {
-                "zone_id": entry.zone_id,
-                "look_id": entry.look_id,
-                "started_at": entry.started_at,
-                "stopped_at": entry.stopped_at,
-            }
-            for entry in recent
-        ]
-    }
+    return {"recent": [dataclasses.asdict(entry) for entry in recent]}
 
 
 def _stopped_look(info: object) -> StoppedLook | None:

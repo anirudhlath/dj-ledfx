@@ -283,14 +283,7 @@ def start_out(result: StartResult, index: LightIndex) -> StartResponse:
 
 
 def recent_look_out(info: RecentLookInfo) -> RecentLook:
-    return RecentLook(
-        zone_id=info.zone_id,
-        zone_name=info.zone_name,
-        look_id=info.look_id,
-        look_name=info.look_name,
-        started_at=info.started_at,
-        stopped_at=info.stopped_at,
-    )
+    return RecentLook.model_validate(info, from_attributes=True)
 
 
 # --- preview (web spec §12.3) -----------------------------------------------------------
@@ -500,7 +493,7 @@ def anchor_out(anchor: home_model.Anchor) -> Anchor:
 
 
 def sub_zone_out(sub: home_model.SubZone) -> SubZone:
-    return SubZone(id=sub.id, name=sub.name, room=sub.room, polygon=list(sub.polygon))
+    return SubZone.model_validate(sub, from_attributes=True)
 
 
 def shape_in(shape: AnyShape) -> shapes.LightShape:

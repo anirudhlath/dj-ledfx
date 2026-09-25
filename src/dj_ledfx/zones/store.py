@@ -162,7 +162,8 @@ class ZoneStore:
         """The remembered looks, the newest stop first; of two stopped together, the newer
         start first."""
         rows = await self._db.fetch_all(
-            "SELECT zone_id, look_id, started_at, stopped_at FROM recent_looks"
+            "SELECT zone_id, look_id, started_at, stopped_at FROM recent_looks "
+            "ORDER BY stopped_at DESC, started_at DESC"  # UTC text sorts as time does
         )
         recent: list[StoppedLook] = []
         for zone_id, look_id, started_at, stopped_at in rows:
@@ -173,7 +174,7 @@ class ZoneStore:
                 logger.warning("Zone {}: unreadable times for look {}; left out", zone_id, look_id)
                 continue
             recent.append(StoppedLook(zone_id, look_id, as_utc(started), as_utc(stopped)))
-        return sorted(recent, key=lambda entry: (entry.stopped_at, entry.started_at), reverse=True)
+        return recent
 
     async def migrate_scenes_once(self) -> None:
         """Turn each scene into a device-group zone, once (spec §6.5). Nothing runs after."""
