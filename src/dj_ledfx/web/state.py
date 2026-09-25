@@ -10,6 +10,7 @@ from dj_ledfx.devices.lights import LightIndex
 if TYPE_CHECKING:
     from fastapi import Request
 
+    from dj_ledfx.home.map import HomeMap
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.zones.attention import AttentionFeed
@@ -61,3 +62,7 @@ def get_attention(request: Request) -> AttentionFeed:
 def light_index(app: Any) -> LightIndex:
     """Which devices make which light, as of now: rebuilt on every call (it's cheap)."""
     return LightIndex.from_manager(app.state.device_manager)
+
+
+def get_home_map(request: Request) -> HomeMap:
+    return cast("HomeMap", _required(request, "home_map", "Home map edits"))

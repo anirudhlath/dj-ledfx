@@ -48,6 +48,7 @@ async def test_lights_come_with_their_status_and_numbers(tmp_path: Path) -> None
         "shape": None,
         "ledOrder": "",
         "confirmed": False,
+        "confirmedAt": None,
         "status": "own-effect",
         "statusSince": "2026-09-24T19:00:00Z",
         "ownEffect": "Glow",

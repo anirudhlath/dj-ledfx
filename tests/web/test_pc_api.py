@@ -46,8 +46,8 @@ async def test_the_pc_is_one_light_with_parts(tmp_path: Path) -> None:
         6,
     )
     assert pc["parts"] == [
-        {"id": KEYBOARD, "name": "Keyboard", "leds": 4},
-        {"id": RAM, "name": "RAM", "leds": 2},
+        {"id": KEYBOARD, "name": "Keyboard", "leds": 4, "shape": None},
+        {"id": RAM, "name": "RAM", "leds": 2, "shape": None},
     ]
     assert (pc["status"], pc["sendFps"], pc["droppedPct"]) == ("streaming", 50.0, 2.0)
     assert pc["address"] == f"fake://{KEYBOARD}"

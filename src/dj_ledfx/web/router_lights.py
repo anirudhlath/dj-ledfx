@@ -18,6 +18,7 @@ async def list_lights(request: Request) -> list[api.Light]:
     devices = request.app.state.device_manager
     stats = {entry.device_id: entry for entry in request.app.state.scheduler.get_device_stats()}
     index = light_index(request.app)
+    home_map = request.app.state.home_map
     states = {state.device_id: state for state in monitor.light_states(index)}
     lights: list[api.Light] = []
     for entry in index.entries:
@@ -26,7 +27,7 @@ async def list_lights(request: Request) -> list[api.Light]:
         if state is None or not parts:
             continue
         if entry.is_pc:
-            lights.append(api.pc_out(entry, parts, state, stats))
+            lights.append(api.pc_out(entry, parts, state, stats, home_map=home_map))
         else:
-            lights.append(api.light_out(parts[0], state, stats.get(entry.id)))
+            lights.append(api.light_out(parts[0], state, stats.get(entry.id), home_map=home_map))
     return lights

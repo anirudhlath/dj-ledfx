@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -19,6 +19,10 @@ from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.color import rgb_to_hex
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.registry import get_effect_classes
+from dj_ledfx.home import model as home_model
+from dj_ledfx.home import shapes
+from dj_ledfx.home.map import HomeMap
+from dj_ledfx.home.model import WallKind
 from dj_ledfx.looks import model as looks
 from dj_ledfx.looks.model import Blend, Category, InputKind, LayerType, Scope, TransitionKind
 from dj_ledfx.types import RGB, DeviceStats
@@ -260,6 +264,224 @@ def start_out(result: StartResult, index: LightIndex) -> StartResponse:
     return StartResponse.model_validate(fields)
 
 
+# --- the home map (web spec §12.2) ------------------------------------------------------
+
+Vec2 = tuple[float, float]
+Vec3 = tuple[float, float, float]
+
+
+class Room(ContractModel):
+    id: str
+    name: str
+    polygon: list[Vec2]
+    label_at: Vec2
+
+
+class SubZone(ContractModel):
+    id: str
+    name: str
+    room: str
+    polygon: list[Vec2]
+
+
+class Anchor(ContractModel):
+    id: str
+    name: str
+    position: Vec3
+    points: list[Vec3] | None = None
+    confirmed: bool = False
+
+
+class Wall(ContractModel):
+    a: Vec2
+    b: Vec2
+    kind: WallKind
+    west_facing: bool
+    exterior: bool
+    thickness: float
+
+
+class Box2(ContractModel):
+    min: Vec2
+    max: Vec2
+
+
+class Furniture(ContractModel):
+    id: str
+    name: str
+    height: float
+    z0: float = 0.0
+    confirmed: bool = False
+    box: tuple[float, float, float, float] | None = None  # x0, y0, x1, y1
+    polygon: list[Vec2] | None = None
+
+
+class Location(ContractModel):
+    name: str
+    lat: float
+    lon: float
+    confirmed: bool = False
+
+
+class Outdoor(ContractModel):
+    courtyard: list[Vec2] = Field(default_factory=list)
+    balcony: list[Vec2] = Field(default_factory=list)
+    courtyard_opens_to: str = ""
+    balcony_off_room: str = ""
+
+
+class Home(ContractModel):
+    outline: list[Vec2]
+    rooms: list[Room]
+    sub_zones: list[SubZone]
+    walls: list[Wall]
+    columns: list[Box2]
+    furniture: list[Furniture]  # read-only in M2 (ruling 10)
+    anchors: list[Anchor]
+    ceiling: float
+    beams: float
+    wall_cut_height: float
+    north_offset_deg: float
+    location: Location | None = None
+    outdoor: Outdoor = Field(default_factory=Outdoor)
+
+
+class HomeSettings(ContractModel):
+    """PUT /home: only what's sent changes."""
+
+    north_offset_deg: float | None = None
+    ceiling: float | None = None
+    beams: float | None = None
+    location: Location | None = None
+
+
+class AnchorIn(ContractModel):
+    name: str
+    position: Vec3
+    points: list[Vec3] = Field(default_factory=list)
+
+
+class AnchorUpdate(ContractModel):
+    name: str | None = None
+    position: Vec3 | None = None
+    points: list[Vec3] | None = None
+    confirmed: bool | None = None
+
+
+class SubZoneIn(ContractModel):
+    name: str
+    room: str
+    polygon: list[Vec2]
+
+
+class SubZoneUpdate(ContractModel):
+    name: str | None = None
+    room: str | None = None
+    polygon: list[Vec2] | None = None
+
+
+class PointShape(ContractModel):
+    kind: Literal["point"]
+    position: Vec3
+
+
+class LineShape(ContractModel):
+    kind: Literal["line"]
+    path: tuple[Vec3, Vec3]
+
+
+class BentLineShape(ContractModel):
+    kind: Literal["bent-line"]
+    path: list[Vec3]
+
+
+class CylinderShape(ContractModel):
+    kind: Literal["cylinder"]
+    base: Vec3
+    height: float
+    radius: float
+
+
+class GridShape(ContractModel):
+    kind: Literal["grid"]
+    center: Vec3
+    width: float
+    depth: float
+    rotation: Vec3 = (0.0, 0.0, 0.0)  # turn, tilt, roll in degrees; only a grid has one
+
+
+AnyShape = PointShape | LineShape | BentLineShape | CylinderShape | GridShape
+LightShape = Annotated[AnyShape, Field(discriminator="kind")]
+
+
+class PlacementIn(ContractModel):
+    """PUT /lights/{id}/placement (ruling 16). Without ledOrder, a shape of the same kind
+    keeps its order and a new kind takes its first."""
+
+    shape: LightShape
+    led_order: str | None = None
+
+
+class Placement(ContractModel):
+    shape: LightShape
+    led_order: str
+    confirmed: bool
+    confirmed_at: datetime | None = None
+
+
+def home_out(home: home_model.Home) -> Home:
+    return Home.model_validate(home_model.home_to_dict(home))
+
+
+def anchor_out(anchor: home_model.Anchor) -> Anchor:
+    return Anchor(
+        id=anchor.id,
+        name=anchor.name,
+        position=anchor.position,
+        points=list(anchor.points) or None,
+        confirmed=anchor.confirmed,
+    )
+
+
+def sub_zone_out(sub: home_model.SubZone) -> SubZone:
+    return SubZone(id=sub.id, name=sub.name, room=sub.room, polygon=list(sub.polygon))
+
+
+def shape_in(shape: AnyShape) -> shapes.LightShape:
+    """The engine's shape; shape_from_dict checks what Pydantic can't (ShapeError: 400)."""
+    return shapes.shape_from_dict(shape.model_dump(by_alias=True))
+
+
+def placement_out(placement: shapes.Placement) -> Placement:
+    return Placement.model_validate(
+        {
+            "shape": shapes.shape_to_dict(placement.shape),
+            "led_order": placement.led_order,
+            "confirmed": placement.confirmed,
+            "confirmed_at": placement.confirmed_at,
+        }
+    )
+
+
+def _placed(home_map: HomeMap | None, target_id: str) -> dict[str, Any]:
+    """A light's place on the map, as Light's fields."""
+    if home_map is None:
+        return {}
+    fields: dict[str, Any] = {
+        "room": home_map.room_of(target_id),
+        "sub_zone": home_map.sub_zone_of(target_id),
+    }
+    placement = home_map.placement(target_id)
+    if placement is not None:
+        fields |= {
+            "shape": shapes.shape_to_dict(placement.shape),
+            "led_order": placement.led_order,
+            "confirmed": placement.confirmed,
+            "confirmed_at": placement.confirmed_at,
+        }
+    return fields
+
+
 # --- lights and attention ----------------------------------------------------------
 
 
@@ -273,12 +495,13 @@ class LightPart(ContractModel):
     id: str  # the part's device id, which places it on its own (ruling 4; not in the contract)
     name: str
     leds: int
+    shape: LightShape | None = None  # its own placement; None shares the PC's (ruling 4)
 
 
 class Light(ContractModel):
     id: str
     name: str
-    room: str | None = None  # placement fields arrive with the home map (M2)
+    room: str | None = None
     sub_zone: str | None = None
     model: str
     protocol: LightProtocol
@@ -286,9 +509,10 @@ class Light(ContractModel):
     capabilities: list[Literal["colour", "multizone", "matrix", "effects"]]
     built_in_effects: list[str]
     parts: list[LightPart] | None = None
-    shape: dict[str, Any] | None = None
+    shape: LightShape | None = None
     led_order: str = ""
     confirmed: bool = False
+    confirmed_at: datetime | None = None  # when it was confirmed; not in the contract
     status: LightStatus  # the contract's LightStatus plus "idle"
     status_since: datetime
     own_effect: str | None = None
@@ -342,7 +566,13 @@ def built_in_effects(caps: DeviceCapabilities) -> list[str]:
     ]
 
 
-def light_out(managed: ManagedDevice, state: LightState, stats: DeviceStats | None) -> Light:
+def light_out(
+    managed: ManagedDevice,
+    state: LightState,
+    stats: DeviceStats | None,
+    *,
+    home_map: HomeMap | None = None,
+) -> Light:
     adapter, tracker = managed.adapter, managed.tracker
     info, caps = adapter.device_info, adapter.capabilities
     effects = built_in_effects(caps)
@@ -375,6 +605,7 @@ def light_out(managed: ManagedDevice, state: LightState, stats: DeviceStats | No
             "firmware": caps.firmware_version,
             "power": state.power,
             "colour": _hex(state.colour),
+            **_placed(home_map, state.device_id),
         }
     )
 
@@ -384,6 +615,8 @@ def pc_out(
     parts: Sequence[ManagedDevice],
     state: LightState,
     stats: Mapping[str, DeviceStats],
+    *,
+    home_map: HomeMap | None = None,
 ) -> Light:
     """The PC as one light (spec §6.3): its parts' LEDs, capabilities and effects together,
     the largest latency, the slowest streaming part's send rate and the worst drop rate.
@@ -409,7 +642,10 @@ def pc_out(
             "leds": entry.leds,
             "capabilities": [name for name, on in flags.items() if on],
             "built_in_effects": effects,
-            "parts": [{"id": p.id, "name": p.name, "leds": p.leds} for p in entry.parts],
+            "parts": [
+                {"id": p.id, "name": p.name, "leds": p.leds, "shape": _part_shape(home_map, p.id)}
+                for p in entry.parts
+            ],
             "status": state.status,
             "status_since": state.since,
             "own_effect": state.own_effect,
@@ -425,8 +661,14 @@ def pc_out(
             "address": first.device_info.address,
             "power": state.power,
             "colour": _hex(state.colour),
+            **_placed(home_map, entry.id),
         }
     )
+
+
+def _part_shape(home_map: HomeMap | None, part_id: str) -> dict[str, Any] | None:
+    placement = home_map.placement(part_id) if home_map is not None else None
+    return shapes.shape_to_dict(placement.shape) if placement is not None else None
 
 
 def light_stats(index: LightIndex, stats: Iterable[DeviceStats]) -> list[dict[str, Any]]:

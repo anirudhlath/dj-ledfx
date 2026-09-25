@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.engine import EffectEngine
     from dj_ledfx.effects.presets import PresetStore
     from dj_ledfx.events import EventBus
+    from dj_ledfx.home.map import HomeMap
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
@@ -104,6 +105,7 @@ def create_app(
     attention_feed: AttentionFeed | None = None,
     frame_feed: FrameFeed | None = None,
     frame_watchers: Watchers | None = None,
+    home_map: HomeMap | None = None,
 ) -> FastAPI:
     # One schema per type, under the contract's name (not Look-Input / Look-Output).
     app = FastAPI(title="dj-ledfx", separate_input_output_schemas=False)
@@ -132,6 +134,7 @@ def create_app(
     app.state.attention_feed = attention_feed
     app.state.frame_feed = frame_feed
     app.state.frame_watchers = frame_watchers
+    app.state.home_map = home_map
     app.state.ws_sessions = set()  # open /ws sessions: pushes go to them, ws.close_all ends them
     app.state.ws_closing = False
 
@@ -153,6 +156,7 @@ def create_app(
     from dj_ledfx.web.router_config import router as config_router
     from dj_ledfx.web.router_devices import router as devices_router
     from dj_ledfx.web.router_effects import router as effects_router
+    from dj_ledfx.web.router_home import router as home_router
     from dj_ledfx.web.router_lights import router as lights_router
     from dj_ledfx.web.router_looks import router as looks_router
     from dj_ledfx.web.router_scene import router as scene_router
@@ -166,6 +170,7 @@ def create_app(
     app.include_router(zones_router, prefix="/api")
     app.include_router(lights_router, prefix="/api")
     app.include_router(attention_router, prefix="/api")
+    app.include_router(home_router, prefix="/api")
 
     from dj_ledfx.web.ws import ws_endpoint
 

@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from zone_home import Home, build_home
 
 from dj_ledfx.config import AppConfig
+from dj_ledfx.home.model import Home as HomeModel
 from dj_ledfx.types import DeviceStats
 from dj_ledfx.web.app import create_app
 from dj_ledfx.zones.attention import AttentionFeed
@@ -36,9 +37,13 @@ class Api:
 
 @asynccontextmanager
 async def api_home(
-    tmp_path: Path, lights: Sequence[FakeLight], zones: Sequence[ZoneRecord]
+    tmp_path: Path,
+    lights: Sequence[FakeLight],
+    zones: Sequence[ZoneRecord],
+    *,
+    plan: HomeModel | None = None,
 ) -> AsyncIterator[Api]:
-    home = await build_home(tmp_path, lights, zones)
+    home = await build_home(tmp_path, lights, zones, plan=plan)
     stats: list[DeviceStats] = []
     monitor = LightMonitor(
         devices=home.devices, zones=home.manager, event_bus=home.bus, now=lambda: home.clock[0]
@@ -68,6 +73,7 @@ async def api_home(
         zone_manager=home.manager,
         light_monitor=monitor,
         attention_feed=feed,
+        home_map=home.home_map,
     )
     transport = httpx.ASGITransport(app=app)
     try:
