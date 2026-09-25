@@ -1,21 +1,21 @@
 // Binary LED frames (spec §12.4), decoded into buffers the stage reads in place.
 //   v1 (engine M1): [2B id_len LE][id UTF-8][4B seq LE][RGB × leds]
 //   v2 (engine M2): [1B stream: 0x01 live | 0x02 preview][2B id_len LE][id UTF-8][4B seq LE][RGB × leds]
-// Once a light has its buffer, decoding a frame allocates nothing, and React never subscribes to
-// any of this: 60 fps of frames must cost no renders (§13.1). The stage (F2) reads `live` and
+// Once a light has its buffer, decoding a frame allocates only a view of the message, and React
+// never subscribes to any of this: 60 fps of frames must cost no renders (§13.1). The stage (F2) reads `live` and
 // `preview` on each animation frame, and redraws when `version` has moved.
 import type { FrameStream, Id } from './contract'
 
 export type FrameVersion = 1 | 2
 
-export const STREAM_BYTE: Record<FrameStream, number> = { live: 0x01, preview: 0x02 }
+const STREAM_BYTE: Record<FrameStream, number> = { live: 0x01, preview: 0x02 }
 
 export interface LightFrame {
   /** RGB bytes, three per LED: the same array while the LED count stays the same. */
   rgb: Uint8Array
   /** The server's sequence number for this light and stream; -1 once a reconnect resets it. */
   seq: number
-  /** LEDs in the frame. */
+  /** LEDs in the frame: set with the buffer. */
   count: number
   /** When it arrived, in the client clock's seconds. */
   at: number
@@ -27,7 +27,7 @@ export interface LightFrame {
 const MAX_IDS = 1024
 
 /** Light ids by their UTF-8 bytes: after the first frame, an id is compared, never decoded. */
-export class IdTable {
+class IdTable {
   private readonly byLength = new Map<number, { bytes: Uint8Array; id: Id }[]>()
   private readonly decoder = new TextDecoder('utf-8', { fatal: true })
   private size = 0
@@ -110,15 +110,11 @@ export class FrameStore {
 /** Decodes one binary message into `frames`. False, and counted, when it's malformed. */
 export function decodeFrame(data: ArrayBuffer, version: FrameVersion, frames: FrameStore, now: number): boolean {
   const bytes = new Uint8Array(data)
-  let offset = 0
-  let target = frames.live
-  if (version === 2) {
-    const stream = bytes.length > 0 ? bytes[0] : -1
-    if (stream === STREAM_BYTE.live) target = frames.live
-    else if (stream === STREAM_BYTE.preview) target = frames.preview
-    else return frames.reject()
-    offset = 1
-  }
+  // v1 has no stream byte: its frames are live. An empty v2 message reads undefined: rejected.
+  const stream = version === 2 ? bytes[0] : STREAM_BYTE.live
+  const target = stream === STREAM_BYTE.live ? frames.live : stream === STREAM_BYTE.preview ? frames.preview : null
+  if (target === null) return frames.reject()
+  let offset = version === 2 ? 1 : 0
   if (bytes.length < offset + 2) return frames.reject()
   const idLength = bytes[offset] | (bytes[offset + 1] << 8)
   offset += 2
@@ -141,13 +137,16 @@ export function decodeFrame(data: ArrayBuffer, version: FrameVersion, frames: Fr
   const rgb = frame.rgb
   for (let i = 0; i < length; i++) rgb[i] = bytes[offset + i]
   frame.seq = seq
-  frame.count = length / 3
   frame.at = now
   frame.recent += 1
   frames.version += 1
   frames.lastFrameAt = Date.now()
   return true
 }
+
+const encoder = new TextEncoder()
+/** Each id's UTF-8 bytes: the mock encodes every light's id at 60 fps. */
+const idBytesCache = new Map<Id, Uint8Array>()
 
 /** One frame as the server sends it: for the mock server and the tests. */
 export function encodeFrame(
@@ -157,14 +156,23 @@ export function encodeFrame(
   rgb: Uint8Array,
   stream: FrameStream = 'live',
 ): ArrayBuffer {
-  const idBytes = new TextEncoder().encode(id)
+  let idBytes = idBytesCache.get(id)
+  if (idBytes === undefined) {
+    idBytes = encoder.encode(id)
+    idBytesCache.set(id, idBytes)
+  }
   const head = version === 2 ? 1 : 0
-  const out = new Uint8Array(head + 2 + idBytes.length + 4 + rgb.length)
-  const view = new DataView(out.buffer)
+  const length = idBytes.length
+  const out = new Uint8Array(head + 2 + length + 4 + rgb.length)
   if (version === 2) out[0] = STREAM_BYTE[stream]
-  view.setUint16(head, idBytes.length, true)
+  out[head] = length & 0xff
+  out[head + 1] = length >> 8
   out.set(idBytes, head + 2)
-  view.setUint32(head + 2 + idBytes.length, seq >>> 0, true)
-  out.set(rgb, head + 6 + idBytes.length)
+  const at = head + 2 + length
+  out[at] = seq & 0xff
+  out[at + 1] = (seq >>> 8) & 0xff
+  out[at + 2] = (seq >>> 16) & 0xff
+  out[at + 3] = seq >>> 24
+  out.set(rgb, at + 4)
   return out.buffer
 }
