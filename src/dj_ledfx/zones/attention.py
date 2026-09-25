@@ -114,9 +114,9 @@ class AttentionFeed:
         if managed is None:
             return device_id
         name = managed.adapter.device_info.name
-        index = self._devices.lights
-        entry = index.get(index.light_of(device_id))
-        return f"{entry.name} {name}" if entry is not None and entry.is_pc else name
+        light_id = self._devices.lights.light_of(device_id)
+        entry = self._devices.lights.get(light_id)
+        return f"{entry.name} {name}" if entry is not None and light_id != device_id else name
 
     def _offline_lights(self, now: datetime) -> list[AttentionItem]:
         items: list[AttentionItem] = []

@@ -623,50 +623,6 @@ def built_in_effects(caps: DeviceCapabilities) -> list[str]:
 
 
 def light_out(
-    managed: ManagedDevice,
-    state: LightState,
-    stats: DeviceStats | None,
-    *,
-    home_map: HomeMap | None = None,
-) -> Light:
-    adapter, tracker = managed.adapter, managed.tracker
-    info, caps = adapter.device_info, adapter.capabilities
-    effects = built_in_effects(caps)
-    flags = {
-        "colour": caps.colour,
-        "multizone": caps.multizone,
-        "matrix": caps.matrix,
-        "effects": bool(effects),
-    }
-    return Light.model_validate(
-        {
-            "id": state.device_id,
-            "name": info.name,
-            "model": caps.model or info.device_type,
-            "protocol": caps.protocol,
-            "leds": adapter.led_count,
-            "capabilities": [name for name, on in flags.items() if on],
-            "built_in_effects": effects,
-            "status": state.status,
-            "status_since": state.since,
-            "own_effect": state.own_effect,
-            "latency": {
-                "measured_ms": round(tracker.effective_latency_ms - tracker.manual_offset_ms, 1),
-                "estimated": not adapter.supports_latency_probing,
-            },
-            "send_fps": round(stats.send_fps, 1) if stats else 0.0,
-            "dropped_pct": round(stats.dropped_pct, 2) if stats else 0.0,
-            "address": info.address,
-            "mac": info.mac,
-            "firmware": caps.firmware_version,
-            "power": state.power,
-            "colour": _hex(state.colour),
-            **_placed(home_map, state.device_id),
-        }
-    )
-
-
-def pc_out(
     entry: LightEntry,
     parts: Sequence[ManagedDevice],
     state: LightState,
@@ -674,9 +630,11 @@ def pc_out(
     *,
     home_map: HomeMap | None = None,
 ) -> Light:
-    """The PC as one light (spec §6.3): its parts' LEDs, capabilities and effects together,
-    the largest latency, the slowest streaming part's send rate and the worst drop rate.
-    state is its combined state (zones.lights.combine_states)."""
+    """A light, from its devices (parts: the entry's managed devices, in order). The PC is
+    one light (spec §6.3): its parts' LEDs, capabilities and effects together, the largest
+    latency, and its parts' numbers combined as _combined does. A PC has no model, MAC or
+    firmware of its own, and lists its parts. state is the light's state; the PC's is its
+    parts' combined (zones.lights.combine_states)."""
     effects: list[str] = []
     flags = dict.fromkeys(("colour", "multizone", "matrix", "effects"), False)
     for managed in parts:
@@ -686,22 +644,25 @@ def pc_out(
         flags["multizone"] = flags["multizone"] or caps.multizone
         flags["matrix"] = flags["matrix"] or caps.matrix
     flags["effects"] = bool(effects)
-    numbers = [stats[d] for d in entry.devices if d in stats]
-    sending = [entry_stats.send_fps for entry_stats in numbers if entry_stats.send_fps > 0]
+    send_fps, dropped_pct = _combined([stats[d] for d in entry.devices if d in stats])
     first = parts[0].adapter
+    info, caps = first.device_info, first.capabilities
+    pc = entry.is_pc
     return Light.model_validate(
         {
             "id": entry.id,
             "name": entry.name,
-            "model": first.capabilities.protocol,
-            "protocol": first.capabilities.protocol,
-            "leds": entry.leds,
+            "model": caps.protocol if pc else caps.model or info.device_type,
+            "protocol": caps.protocol,
+            "leds": sum(managed.adapter.led_count for managed in parts),
             "capabilities": [name for name, on in flags.items() if on],
             "built_in_effects": effects,
             "parts": [
                 {"id": p.id, "name": p.name, "leds": p.leds, "shape": _part_shape(home_map, p.id)}
                 for p in entry.parts
-            ],
+            ]
+            if pc
+            else None,
             "status": state.status,
             "status_since": state.since,
             "own_effect": state.own_effect,
@@ -712,14 +673,23 @@ def pc_out(
                 ),
                 "estimated": any(not m.adapter.supports_latency_probing for m in parts),
             },
-            "send_fps": round(min(sending), 1) if sending else 0.0,
-            "dropped_pct": round(max((s.dropped_pct for s in numbers), default=0.0), 2),
-            "address": first.device_info.address,
+            "send_fps": round(send_fps, 1),
+            "dropped_pct": round(dropped_pct, 2),
+            "address": info.address,
+            "mac": None if pc else info.mac,
+            "firmware": None if pc else caps.firmware_version,
             "power": state.power,
             "colour": _hex(state.colour),
             **_placed(home_map, entry.id),
         }
     )
+
+
+def _combined(parts: Sequence[DeviceStats]) -> tuple[float, float]:
+    """A light's send rate and drop rate from its parts': the slowest part that sends, and
+    the worst drop rate."""
+    sending = [part.send_fps for part in parts if part.send_fps > 0]
+    return min(sending, default=0.0), max((part.dropped_pct for part in parts), default=0.0)
 
 
 def _part_shape(home_map: HomeMap | None, part_id: str) -> dict[str, Any] | None:
@@ -728,21 +698,21 @@ def _part_shape(home_map: HomeMap | None, part_id: str) -> dict[str, Any] | None
 
 
 def light_stats(index: LightIndex, stats: Iterable[DeviceStats]) -> list[dict[str, Any]]:
-    """The stats channel's per-light entries (web spec §12.4), numbers combined as pc_out
-    combines them."""
+    """The stats channel's per-light entries (web spec §12.4), numbers combined as
+    light_out combines them."""
     by_device = {entry.device_id: entry for entry in stats if entry.device_id}
     out: list[dict[str, Any]] = []
     for light in index.entries:
         parts = [by_device[d] for d in light.devices if d in by_device]
         if not parts:
             continue
-        sending = [part.send_fps for part in parts if part.send_fps > 0]
+        send_fps, dropped_pct = _combined(parts)
         out.append(
             {
                 "id": light.id,
-                "send_fps": min(sending, default=0.0),
+                "send_fps": send_fps,
                 "latency_ms": max(part.effective_latency_ms for part in parts),
-                "dropped_pct": max(part.dropped_pct for part in parts),
+                "dropped_pct": dropped_pct,
             }
         )
     return out

@@ -160,17 +160,13 @@ class HomeMap:
             return led_positions(own.shape, adapter.led_count, own.led_order, adapter.geometry)
         index = self.lights()
         entry = index.get(index.light_of(device_id))
-        if entry is None or not entry.is_pc:
+        shared = self._placements.get(entry.id) if entry is not None else None
+        if entry is None or shared is None:
             return None
-        shared = self._placements.get(entry.id)
-        if shared is None:
-            return None
-        start = 0
-        for part in entry.parts:
+        for part, start, stop in entry.part_slices():  # a PC part takes the PC's placement
             if part.id == device_id:
                 whole = led_positions(shared.shape, entry.leds, shared.led_order)
-                return PlacedLeds.from_positions(whole.pos[start : start + part.leds])
-            start += part.leds
+                return PlacedLeds.from_positions(whole.pos[start:stop])
         return None  # a device with no LEDs
 
     def room_at(self, x: float, y: float) -> str | None:

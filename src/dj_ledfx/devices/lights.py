@@ -4,7 +4,8 @@ OpenRGB devices, which are one light with parts.
 An OpenRGB device's stable id is openrgb:<host>:<port>:<index>, so the devices of one
 OpenRGB server share openrgb:<host>:<port>: that is the PC's light id. Each part keeps its
 own device, adapter, latency and LED order. A device with no LEDs stays in the light's
-devices (so zones and attention still find it) but is no part.
+devices (so zones and attention still find it) but is no part. Every other light has one
+part: itself.
 """
 
 from __future__ import annotations
@@ -51,11 +52,20 @@ class LightEntry:
     name: str
     devices: tuple[str, ...]  # device ids, in part order; one for a plain light
     leds: int
-    parts: tuple[LightPart, ...] = ()
+    parts: tuple[LightPart, ...]  # a plain light's one part is itself
 
     @property
     def is_pc(self) -> bool:
         return self.devices != (self.id,)
+
+    def part_slices(self) -> tuple[tuple[LightPart, int, int], ...]:
+        """Each part, and where its LEDs sit among the light's: start, stop."""
+        out: list[tuple[LightPart, int, int]] = []
+        start = 0
+        for part in self.parts:
+            out.append((part, start, start + part.leds))
+            start += part.leds
+        return tuple(out)
 
 
 class LightIndex:
@@ -79,8 +89,13 @@ class LightIndex:
             if split is None:
                 if device_id not in plain:
                     order.append(device_id)
+                    leds = max(0, info.led_count)
                     plain[device_id] = LightEntry(
-                        device_id, info.name, (device_id,), max(0, info.led_count)
+                        device_id,
+                        info.name,
+                        (device_id,),
+                        leds,
+                        (LightPart(device_id, info.name, leds),),
                     )
                 continue
             server, device_index = split

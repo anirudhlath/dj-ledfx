@@ -44,16 +44,11 @@ def light_frames(
     for entry in index.entries:
         if not any(device in device_frames for device in entry.devices):
             continue
-        if not entry.is_pc:
-            out[entry.id] = device_frames[entry.id]
-            continue
         frame = np.zeros((entry.leds, 3), dtype=np.uint8)
-        start = 0
-        for part in entry.parts:
+        for part, start, stop in entry.part_slices():
             colors = device_frames.get(part.id)
             if colors is not None:
-                count = min(part.leds, colors.shape[0])
+                count = min(stop - start, colors.shape[0])
                 frame[start : start + count] = colors[:count]
-            start += part.leds
         out[entry.id] = frame
     return out

@@ -43,9 +43,13 @@ def test_the_pcs_devices_are_one_light_with_parts() -> None:
     assert (lamp.id, lamp.devices, lamp.parts, lamp.is_pc) == (
         "lifx-lamp",
         ("lifx-lamp",),
-        (),
+        (LightPart("lifx-lamp", "Lamp", 1),),  # a plain light is one part: itself
         False,
     )
+    assert [(part.id, start, stop) for part, start, stop in pc.part_slices()] == [
+        (f"{SERVER}:0", 0, 104),
+        (f"{SERVER}:1", 104, 112),
+    ]
 
 
 def test_parts_follow_the_device_index_and_offline_parts_stay() -> None:

@@ -26,8 +26,5 @@ async def list_lights(request: Request) -> list[api.Light]:
         parts = [m for d in entry.devices if (m := devices.get_by_stable_id(d)) is not None]
         if state is None or not parts:
             continue
-        if entry.is_pc:
-            lights.append(api.pc_out(entry, parts, state, stats, home_map=home_map))
-        else:
-            lights.append(api.light_out(parts[0], state, stats.get(entry.id), home_map=home_map))
+        lights.append(api.light_out(entry, parts, state, stats, home_map=home_map))
     return lights

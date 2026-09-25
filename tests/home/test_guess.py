@@ -5,7 +5,7 @@ import math
 import pytest
 from map_home import tiny_home
 
-from dj_ledfx.devices.lights import LightEntry
+from dj_ledfx.devices.lights import LightEntry, LightPart
 from dj_ledfx.home.geometry import point_in_polygon
 from dj_ledfx.home.guess import (
     GUESS_HEIGHT_M,
@@ -25,7 +25,8 @@ CANDLE = Placement(CylinderShape((1.0, 1.0, 0.8), 0.12, 0.02), "bottom-to-top")
 
 
 def _light(light_id: str, name: str | None = None, *devices: str) -> LightEntry:
-    return LightEntry(light_id, name or light_id, devices or (light_id,), 1)
+    parts = tuple(LightPart(device, device, 1) for device in devices or (light_id,))
+    return LightEntry(light_id, name or light_id, devices or (light_id,), len(parts), parts)
 
 
 def _seed(name: str, room: str, placement: Placement = CANDLE) -> SeedLight:
