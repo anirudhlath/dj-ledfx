@@ -104,7 +104,7 @@ export const api = {
   /** Preview only (§5.6) is the engine's `preview_only` setting today. */
   setPreviewOnly: (on: boolean) => request<unknown>('PUT', apiPath('/api/config'), { engine: { preview_only: on } }),
 
-  // Pending: engine M2 (mocked until it lands)
+  // Served since engine M2: the home map, placements, previews and "Start again"
   home: () => request<Home>('GET', apiPath('/api/home')),
   updateHome: (body: HomeSettings) => request<Home>('PUT', apiPath('/api/home'), body),
   addAnchor: (body: AnchorIn) => request<Anchor>('POST', apiPath('/api/home/anchors'), body),

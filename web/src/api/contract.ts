@@ -10,7 +10,7 @@ export type Id = string
 /** Every REST path the backend serves today. */
 export type ApiPath = keyof paths
 
-// ── Served today (engine M1) ──────────────────────────────────────────────────────────────
+// ── Served since engine M1 ────────────────────────────────────────────────────────────────
 export type Look = Schemas['Look']
 export type Layer = Schemas['Layer']
 export type LookModifiers = Schemas['LookModifiers']
@@ -27,95 +27,57 @@ export type TakeOver = Schemas['TakeOver']
 export type AttentionItem = Schemas['AttentionItem']
 export type InputKind = NonNullable<Look['needs']>[number]
 export type LightStatus = Schemas['Light']['status']
-/** A light (§12.2). The backend types `shape` loosely until engine M2 serves the home map. */
-export type Light = Omit<Schemas['Light'], 'shape'> & { shape?: LightShape | null }
+export type Light = Schemas['Light']
+export type LightPart = Schemas['LightPart']
 /** One light on the socket's `lights` channel. */
 export type LightUpdate = Pick<Light, 'id' | 'status' | 'statusSince' | 'ownEffect' | 'power' | 'colour'>
 
-// ── Pending: engine M2 (home map, preview runtimes, frame protocol v2) ────────────────────
-// §12.2's Home, Room, SubZone, Anchor and LightShape; home.json's names for what §12.2 leaves out
-// (decision 4). Each type has engine M2's name and shape (its web/contract.py), but for Home.size
-// and Room.hasLights, which F1 keeps from home.json and M2 is asked to serve.
+// ── Served since engine M2 (home map, preview runtimes, frame protocol v2) ────────────────
+// §12.2's Home, Room, SubZone, Anchor and LightShape, with home.json's names for what §12.2
+// leaves out (decision 4). Where F1's hand-written types and engine M2's differed, M2's won.
 export type Vec2 = [number, number]
 export type Vec3 = [number, number, number]
-export interface Room { id: Id; name: string; polygon: Vec2[]; labelAt: Vec2; hasLights: boolean }
-export interface SubZone { id: Id; name: string; room: Id; polygon: Vec2[] }
-export interface Anchor { id: Id; name: string; position: Vec3; points?: Vec3[] | null; confirmed: boolean }
-export interface Wall {
-  a: Vec2
-  b: Vec2
-  kind: 'wall' | 'window' | 'glass-door'
-  westFacing: boolean
-  exterior: boolean
-  thickness: number
-}
-export interface Box2 { min: Vec2; max: Vec2 }
-export interface Furniture {
-  id: Id
-  name: string
-  height: number
-  z0: number
-  confirmed: boolean
-  /** [x0, y0, x1, y1] on the plan, for a box; a piece of another shape has a polygon. */
-  box?: [number, number, number, number] | null
-  polygon?: Vec2[] | null
-}
-export interface Outdoor { courtyard: Vec2[]; balcony: Vec2[]; courtyardOpensTo: string; balconyOffRoom: Id }
-export interface Location { name: string; lat: number; lon: number; confirmed: boolean }
-export interface Home {
-  outline: Vec2[]
-  rooms: Room[]
-  subZones: SubZone[]
-  walls: Wall[]
-  columns: Box2[]
-  furniture: Furniture[]
-  anchors: Anchor[]
-  ceiling: number
-  beams: number
-  northOffsetDeg: number
-  location?: Location | null
-  size: { eastWest: number; northSouth: number }
-  wallCutHeight: number
-  outdoor: Outdoor
-}
+export type Home = Schemas['Home']
+export type HomeSize = Schemas['HomeSize']
+export type Room = Schemas['Room']
+export type SubZone = Schemas['SubZone']
+export type Anchor = Schemas['Anchor']
+export type Wall = Schemas['Wall']
+export type Box2 = Schemas['Box2']
+export type Furniture = Schemas['Furniture']
+export type Outdoor = Schemas['Outdoor']
+export type Location = Schemas['Location']
 /** PUT /home: "north, ceiling, beams, location" (§12.3). Only what's sent changes. */
-export interface HomeSettings { northOffsetDeg?: number; ceiling?: number; beams?: number; location?: Location }
-export interface AnchorIn { name: string; position: Vec3; points?: Vec3[] }
-export interface AnchorUpdate { name?: string; position?: Vec3; points?: Vec3[]; confirmed?: boolean }
-export type SubZoneIn = Omit<SubZone, 'id'>
-export type SubZoneUpdate = Partial<SubZoneIn>
-export type LightShape =
-  | { kind: 'point'; position: Vec3 }
-  | { kind: 'line'; path: [Vec3, Vec3] }
-  | { kind: 'bent-line'; path: Vec3[] }
-  | { kind: 'cylinder'; base: Vec3; height: number; radius: number }
-  | { kind: 'grid'; center: Vec3; width: number; depth: number; rotation: Vec3 }
+export type HomeSettings = Schemas['HomeSettings']
+export type AnchorIn = Schemas['AnchorIn']
+export type AnchorUpdate = Schemas['AnchorUpdate']
+export type SubZoneIn = Schemas['SubZoneIn']
+export type SubZoneUpdate = Schemas['SubZoneUpdate']
+export type PointShape = Schemas['PointShape']
+export type LineShape = Schemas['LineShape']
+export type BentLineShape = Schemas['BentLineShape']
+export type CylinderShape = Schemas['CylinderShape']
+export type GridShape = Schemas['GridShape']
+export type LightShape = PointShape | LineShape | BentLineShape | CylinderShape | GridShape
 /**
  * PUT /lights/{id}/placement: "shape, position, rotation, size, ledOrder" (§12.3). Without a
  * ledOrder, a shape of the same kind keeps its order (engine M2 plan, Spec Ruling 16).
  */
-export interface PlacementIn { shape: LightShape; ledOrder?: string }
+export type PlacementIn = Schemas['PlacementIn']
 /** A light's placement: what the placement requests answer, and the guess per light it placed. */
-export interface Placement { shape: LightShape; ledOrder: string; confirmed: boolean; confirmedAt?: string | null }
-export interface PreviewRequest { zoneId: Id; lookId?: Id; look?: Look }
-export interface PreviewStarted { previewId: Id }
+export type Placement = Schemas['Placement']
+export type PreviewRequest = Schemas['PreviewRequest']
+export type PreviewStarted = Schemas['PreviewStarted']
 /** PUT /preview/{id}: the editor's look as it is now, saved or not. */
-export interface PreviewUpdate { look: Look }
+export type PreviewUpdate = Schemas['PreviewUpdate']
 /** The binary frame's stream byte (§12.4): 0x01 live, 0x02 preview. */
 export type FrameStream = 'live' | 'preview'
 /**
  * A look that stopped, for State-Nothing-Running's "Start again" (§9.4): GET /api/running/recent
- * answers these, newest stop first. §12.2 has no such type; the engine M2 plan's Spec Ruling 19
- * shapes it. One tap starts it again with `api.start(zoneId, { lookId })`.
+ * answers these, newest stop first (the engine M2 plan's Spec Ruling 19). One tap starts it again
+ * with `api.start(zoneId, { lookId })`.
  */
-export interface RecentLook {
-  zoneId: Id
-  zoneName: string
-  lookId: Id
-  lookName: string
-  startedAt: string
-  stoppedAt: string
-}
+export type RecentLook = Schemas['RecentLook']
 
 // ── Pending: engine M3 (the tempo source chain) ───────────────────────────────────────────
 export type TempoSource = 'prodjlink' | 'music' | 'internal'
@@ -167,27 +129,7 @@ export interface Inputs {
 export type SignalValue = number | string | boolean
 export interface Signal { name: string; value: SignalValue; unit?: string; usedBy: Id[] }
 
-/**
- * The pending types' names, as the backend's schema names them. LightShape is a union there, so
- * its five shapes (PointShape, …) are the names that arrive.
- */
-export type PendingSchema =
-  | 'Home' | 'Room' | 'SubZone' | 'Anchor' | 'Wall' | 'Box2' | 'Furniture' | 'Location' | 'Outdoor'
-  | 'HomeSettings' | 'AnchorIn' | 'AnchorUpdate' | 'SubZoneIn' | 'SubZoneUpdate'
-  | 'PointShape' | 'LineShape' | 'BentLineShape' | 'CylinderShape' | 'GridShape' | 'PlacementIn' | 'Placement'
-  | 'PreviewRequest' | 'PreviewStarted' | 'PreviewUpdate' | 'RecentLook' | 'Deck' | 'Inputs' | 'Signal'
+/** The pending types' names, as the backend's schema will name them. */
+export type PendingSchema = 'Deck' | 'Inputs' | 'Signal'
 /** The pending REST paths (§12.3), with FastAPI's parameter names. */
-export type PendingPath =
-  | '/api/home'
-  | '/api/home/anchors'
-  | '/api/home/anchors/{anchor_id}'
-  | '/api/home/subzones'
-  | '/api/home/subzones/{sub_zone_id}'
-  | '/api/lights/{light_id}/placement'
-  | '/api/lights/{light_id}/placement/confirm'
-  | '/api/lights/placement/guess'
-  | '/api/preview'
-  | '/api/preview/{preview_id}'
-  | '/api/running/recent'
-  | '/api/inputs'
-  | '/api/signals'
+export type PendingPath = '/api/inputs' | '/api/signals'

@@ -245,7 +245,8 @@ export class MockServer {
     this.wallClock = options.wallClock ?? (() => Date.now())
     const state = buildScenario(options.scenario ?? 'hero', new Date(this.wallClock()))
     this.state = this.protocol === 1 ? asEngineM1(state) : state
-    this.routes = this.protocol === 1 ? this.servedRoutes() : [...this.servedRoutes(), ...this.pendingRoutes()]
+    this.routes =
+      this.protocol === 1 ? this.servedRoutes() : [...this.servedRoutes(), ...this.m2Routes(), ...this.pendingRoutes()]
     this.startedAt = this.clock()
     this.nextFrameAt = this.startedAt
     this.nextStatsAt = this.startedAt + STATS_MS
@@ -532,10 +533,9 @@ export class MockServer {
     })
   }
 
-  /** What engine M1 doesn't serve, so a 404 with protocol 1. */
-  private pendingRoutes(): Route[] {
-    return compile<PendingPath>({
-      // Engine M2
+  /** Engine M2's routes: engine M1 doesn't serve them, so a 404 with protocol 1. */
+  private m2Routes(): Route[] {
+    return compile<ApiPath>({
       '/api/home': {
         GET: () => ok(this.state.home),
         PUT: (_, body) => ok(Object.assign(this.state.home, body as HomeSettings)),
@@ -587,8 +587,12 @@ export class MockServer {
         DELETE: ({ preview_id }) => this.stopPreview(preview_id),
       },
       '/api/running/recent': { GET: () => ok(this.recentLooks()) },
+    })
+  }
 
-      // Engine M3, M6 and M7
+  /** What no engine serves yet (M3, M6 and M7), so a 404 with protocol 1. */
+  private pendingRoutes(): Route[] {
+    return compile<PendingPath>({
       '/api/inputs': { GET: () => ok(this.state.inputs) },
       '/api/signals': { GET: () => ok(this.state.signals) },
     })
@@ -646,8 +650,10 @@ export class MockServer {
     return light.shape == null ? notFound(`Light '${light.id}' has no placement`) : ok(this.placement(light, light.shape))
   }
 
+  /** A PUT on an anchor or a sub-zone: as engine M2 does, a field sent as null stays as it was. */
   private update<T extends { id: Id }>(items: T[], id: Id, body: unknown): MockReply {
-    return withOne(items, (item) => item.id === id, `No '${id}'`, (item) => ok(Object.assign(item, body as Partial<T>, { id })))
+    const sent = Object.fromEntries(Object.entries(body as Partial<T>).filter(([, value]) => value != null))
+    return withOne(items, (item) => item.id === id, `No '${id}'`, (item) => ok(Object.assign(item, sent, { id })))
   }
 
   private remove<T extends { id: Id }>(items: T[], id: Id): MockReply {

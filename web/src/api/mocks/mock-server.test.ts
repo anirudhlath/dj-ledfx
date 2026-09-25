@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HERO_NOW, startMockServer } from '@/test/live'
 import { BeatClock } from '../beat'
-import type { Light, Look, Placement, RecentLook, Zone } from '../contract'
+import type { Home, Light, Look, Placement, RecentLook, Zone } from '../contract'
 import { FrameStore, decodeFrame } from '../frames'
 import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
@@ -261,6 +261,14 @@ describe('the REST API', () => {
     const watched = start()
     vi.advanceTimersByTime(20_000)
     expect(update(watched)).toBe(204)
+  })
+
+  it('keeps a sub-zone field sent as null, as engine M2 does, and changes what is sent', () => {
+    const server = startMockServer()
+    const home = server.handle('GET', '/api/home').body as Home
+    const sub = home.subZones[0]
+    const reply = server.handle('PUT', `/api/home/subzones/${sub.id}`, { name: 'Reading nook', room: null, polygon: null })
+    expect(reply).toEqual({ status: 200, body: { ...sub, name: 'Reading nook' } })
   })
 
   it('answers what it does not serve with 404 Not Found', () => {
