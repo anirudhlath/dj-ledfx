@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from dj_ledfx.devices.adapter import DeviceAdapter
     from dj_ledfx.devices.manager import DeviceManager
     from dj_ledfx.effects.field import FieldEffect
+    from dj_ledfx.effects.ledset import Space
     from dj_ledfx.events import EventBus
     from dj_ledfx.looks.model import Look
     from dj_ledfx.looks.store import LookStore
@@ -72,12 +73,12 @@ T = TypeVar("T")
 
 
 class RuntimeHost(Protocol):
-    """Renders the running zones and the preview: the effect engine. Runtimes are keyed by
-    ZoneRuntime.key, the zone id for a zone."""
+    """Renders the running zones and the preview: the effect engine. It keeps each
+    runtime by identity, so a preview never replaces its zone's own runtime."""
 
     def add_runtime(self, runtime: ZoneRuntime) -> None: ...
 
-    def remove_runtime(self, key: str) -> None: ...
+    def remove_runtime(self, runtime: ZoneRuntime) -> None: ...
 
 
 class RouteTable(Protocol):
@@ -172,6 +173,9 @@ class ZoneManager:
         self._power_versions: dict[str, int] = {}  # moves on with every change to _power
         self._versions = itertools.count(1)
         self._deferred_power_on: set[str] = set()
+        # The previews the engine hosts (web spec §12.3), and what each calls when its zone
+        # is gone or has no lights.
+        self._previews: dict[ZoneRuntime, Callable[[], None]] = {}
         self._lock = asyncio.Lock()
 
     async def load(self) -> None:
@@ -221,6 +225,10 @@ class ZoneManager:
             for running in self._running.values()
             if (runtime := running.runtime) is not None
         ]
+
+    def preview_runtimes(self) -> list[ZoneRuntime]:
+        """The previews' runtimes, for the web app's preview stream."""
+        return list(self._previews)
 
     def running_info(self, zone_id: str) -> RunningZoneInfo | None:
         running = self._running.get(zone_id)
@@ -503,30 +511,29 @@ class ZoneManager:
             await self._sync(changed)
         self._event_bus.emit(ZonesChanged())
 
-    def preview_runtime(self, key: str, zone_id: str, look: Look) -> ZoneRuntime:
-        """A runtime that shows a look on a zone in the web app only (spec §4.1): all the
-        zone's lights where the map puts them, at the zone's brightness if it runs. It
-        gets no route, so nothing reaches a light, and no light is read or captured.
-        Nothing is sent, so it renders one frame ahead and asks no light its latency."""
+    def start_preview(self, zone_id: str, look: Look, on_end: Callable[[], None]) -> ZoneRuntime:
+        """Show a look on a zone in the web app only (spec §4.1): all the zone's lights where
+        the map puts them, at the zone's brightness if it runs. It gets no route, so nothing
+        reaches a light, and no light is read or captured. Nothing is sent, so it renders one
+        frame ahead and asks no light its latency. It follows the zone's lights (_redraw);
+        when the zone is gone or has no lights it ends, and on_end is called."""
         validate_look(look)
         zone = self.get_zone(zone_id)
         lights = self._members(zone)
         if not lights:
             raise ZoneError(f"{zone.name} has no lights")
         running = self._running.get(zone_id)
-        return ZoneRuntime(
-            zone_id,
-            look,
-            self._zone_lights(lights),
-            key=key,
-            clock=self._clock,
-            latency_s=lambda _device_id: None,
-            fps=self._fps,
-            max_lookahead_s=self._max_lookahead_s,
-            brightness=_brightness_of(running) if running is not None else 1.0,
-            now=self._now,
-            space=self._home.space(),
+        brightness = _brightness_of(running) if running is not None else 1.0
+        runtime = self._new_runtime(
+            zone_id, look, lights, brightness, latency_s=lambda _: None, watched=lambda: True
         )
+        self._previews[runtime] = on_end
+        self._host.add_runtime(runtime)
+        return runtime
+
+    def end_preview(self, runtime: ZoneRuntime) -> None:
+        if self._previews.pop(runtime, None) is not None:
+            self._host.remove_runtime(runtime)
 
     async def home_changed(self) -> None:
         """The home map changed: a light moved, or a room, sub-zone or anchor changed.
@@ -599,15 +606,25 @@ class ZoneManager:
     def _redraw(self) -> None:
         """Rebuild the LED set of every running zone whose lights changed (they joined or
         left it, moved on the map, or came back different) or whose space changed. Every
-        change to a running zone's lights ends here."""
+        change to a running zone's lights ends here. A preview follows its zone's lights
+        the same way, and ends when the zone is gone or has none."""
         space = self._home.space()
         for running in self._running.values():
-            runtime = running.runtime
-            if runtime is None:
-                continue
-            lights = self._zone_lights(running.lights)
-            if list(runtime.lights) != lights or runtime.space != space:
-                runtime.set_lights(lights, space)
+            if running.runtime is not None:
+                self._follow(running.runtime, running.lights, space)
+        for runtime, on_end in list(self._previews.items()):
+            zone = self._zones.get(runtime.zone_id)
+            members = self._members(zone) if zone is not None else ()
+            if members:
+                self._follow(runtime, members, space)
+            else:
+                self.end_preview(runtime)
+                on_end()
+
+    def _follow(self, runtime: ZoneRuntime, device_ids: Iterable[str], space: Space) -> None:
+        lights = self._zone_lights(device_ids)
+        if list(runtime.lights) != lights or runtime.space != space:
+            runtime.set_lights(lights, space)
 
     def _members(self, zone: ZoneRecord) -> tuple[str, ...]:
         return tuple(light for light in self._lights_of(zone) if self._adapter(light) is not None)
@@ -638,6 +655,8 @@ class ZoneManager:
             self._zones[zone_id] = zone
             if lights is not None and zone_id in self._running:
                 await self._regroup(zone_id, list(zone.lights))
+            elif lights is not None:
+                self._redraw()  # a preview on the group
         self._event_bus.emit(ZonesChanged())
         return self.get_zone(zone_id)
 
@@ -648,6 +667,7 @@ class ZoneManager:
             released = await self._stop(zone_id, remember=False)  # it can't start again
             await self._store.delete_zone(zone_id)
             del self._zones[zone_id]
+            self._redraw()  # a preview on the group ends
             await self._sync(released)
         self._event_bus.emit(ZonesChanged())
 
@@ -768,21 +788,30 @@ class ZoneManager:
         return StartResult(self._info(zone_id, running), tuple(take_overs))
 
     def _new_runtime(
-        self, zone_id: str, look: Look, lights: Iterable[str], brightness: float
+        self,
+        zone_id: str,
+        look: Look,
+        lights: Iterable[str],
+        brightness: float,
+        *,
+        latency_s: Callable[[str], float | None] | None = None,
+        watched: Callable[[], bool] | None = None,
     ) -> ZoneRuntime:
+        """A zone's runtime. A preview's passes its own latency (none) and watched (always:
+        it exists only to be watched)."""
         return ZoneRuntime(
             zone_id,
             look,
             self._zone_lights(lights),
             clock=self._clock,
-            latency_s=self._latency_s,
+            latency_s=latency_s or self._latency_s,
             fps=self._fps,
             max_lookahead_s=self._max_lookahead_s,
             brightness=brightness,
             space=self._home.space(),
             now=self._now,
             on_state_change=self._state_changed,
-            watched=self._frames_watched,
+            watched=watched or self._frames_watched,
         )
 
     def _state_changed(self, runtime: ZoneRuntime) -> None:
@@ -874,7 +903,8 @@ class ZoneManager:
         it, unless remember is False. A look started again on its zone is remembered too:
         recent() leaves it out while it runs."""
         running = self._running.pop(zone_id)
-        self._host.remove_runtime(zone_id)
+        if running.runtime is not None:
+            self._host.remove_runtime(running.runtime)
         return running, self._stopped(zone_id, running) if remember else []
 
     def _stopped(self, zone_id: str, running: _Running) -> list[StoppedLook]:

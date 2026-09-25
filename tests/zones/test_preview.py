@@ -22,9 +22,7 @@ class Watch:
 
 
 def _previews(home: Home, watch: Watch, **kwargs: Any) -> PreviewManager:
-    return PreviewManager(
-        home.manager, home.host, lambda: watch.watching, clock=lambda: watch.now, **kwargs
-    )
+    return PreviewManager(home.manager, lambda: watch.watching, clock=lambda: watch.now, **kwargs)
 
 
 # M1 review, constraint 1: a preview must never collide with its zone's own runtime.
@@ -43,8 +41,8 @@ async def test_a_preview_runs_beside_its_zone_and_never_touches_the_lights(
     preview_id = previews.start("z", home.look("classic-strobe"))
 
     [runtime] = previews.runtimes()
-    assert (runtime.key, runtime.zone_id) == (f"preview:{preview_id}", "z")
-    assert home.host.runtimes["z"] is zone_runtime and home.host.runtimes[runtime.key] is runtime
+    assert runtime.zone_id == "z" and home.manager.preview_runtimes() == [runtime]
+    assert home.host.hosted == [zone_runtime, runtime]  # beside the zone's own
     runtime.tick(100.0)
     assert runtime.ring.count == 1 and runtime.leds.count == 8
     assert home.routes.routes == routes  # no route: nothing it renders reaches a light
@@ -54,7 +52,7 @@ async def test_a_preview_runs_beside_its_zone_and_never_touches_the_lights(
 
     previews.stop(preview_id)
 
-    assert set(home.host.runtimes) == {"z"} and previews.runtimes() == []
+    assert home.host.hosted == [zone_runtime] and previews.runtimes() == []
 
 
 # Review Focus 1: a browser tab closed mid-preview sends no DELETE /preview.
@@ -78,7 +76,7 @@ async def test_a_preview_nobody_watches_ends_by_itself(make_home: HomeFactory) -
     task.cancel()
     await asyncio.wait([task])
 
-    assert previews.runtimes() == [] and home.host.runtimes == {}
+    assert previews.runtimes() == [] and home.host.hosted == []
     with pytest.raises(PreviewNotFoundError):
         previews.update(preview_id, home.look("classic-breathe"))
     assert a.calls == []  # the light was never touched
@@ -94,7 +92,7 @@ async def test_a_new_preview_replaces_the_last_and_a_bad_request_changes_nothing
     second = previews.start("z", home.look("classic-breathe"))
 
     [runtime] = previews.runtimes()
-    assert runtime.key == f"preview:{second}" and list(home.host.runtimes) == [runtime.key]
+    assert home.host.hosted == [runtime]
     with pytest.raises(PreviewNotFoundError):
         previews.stop(first)
     previews.update(second, home.look("classic-color-chase"))
@@ -108,21 +106,54 @@ async def test_a_new_preview_replaces_the_last_and_a_bad_request_changes_nothing
     assert previews.runtimes() == [runtime]  # the failed requests left it running
 
 
+# M2 review A2 + E7: the preview follows the map inside the zone manager's own redraw.
 async def test_a_preview_follows_the_map_and_ends_with_its_zone(make_home: HomeFactory) -> None:
-    view = FakeHome(rooms={"west": ["a"]})
-    home = await make_home([FakeLight("a"), FakeLight("b")], [], view=view)
+    view = FakeHome(rooms={"west": ["a"], "east": ["c"]})
+    home = await make_home([FakeLight("a"), FakeLight("b"), FakeLight("c")], [], view=view)
     previews = _previews(home, Watch())
     preview_id = previews.start("west", home.look("classic-strobe"))
-
-    view.rooms["west"].append("b")
-    await previews.home_changed()
-
     [runtime] = previews.runtimes()
-    assert runtime.key == f"preview:{preview_id}" and runtime.leds.count == 8
-    assert home.host.runtimes == {runtime.key: runtime}
+    leds = runtime.leds
+
+    view.rooms["east"].append("b")  # nothing the preview shows
+    await home.manager.home_changed()
+    assert previews.runtimes() == [runtime] and runtime.leds is leds
+
+    view.rooms["east"].remove("b")
+    view.rooms["west"].append("b")
+    await home.manager.home_changed()
+    assert previews.runtimes() == [runtime] and runtime.leds.count == 8
+    assert home.host.hosted == [runtime]
 
     del view.rooms["west"]
-    await home.manager.home_changed()  # the map's listeners run in order: the zones first
-    await previews.home_changed()
+    await home.manager.home_changed()
 
-    assert previews.runtimes() == [] and home.host.runtimes == {}
+    assert previews.runtimes() == [] and home.host.hosted == []
+    with pytest.raises(PreviewNotFoundError):
+        previews.stop(preview_id)
+
+
+async def test_a_preview_of_a_group_ends_when_the_group_is_deleted(
+    make_home: HomeFactory,
+) -> None:
+    home = await make_home([FakeLight("a")], [zone_record("shelf", "a")])
+    previews = _previews(home, Watch())
+    previews.start("shelf", home.look("classic-strobe"))
+
+    await home.manager.delete_group("shelf")
+
+    assert previews.runtimes() == [] and home.host.hosted == []
+
+
+async def test_a_preview_follows_the_map_a_backup_brings(make_home: HomeFactory) -> None:
+    view = FakeHome(rooms={"west": ["a"]})
+    home = await make_home([FakeLight("a")], [], view=view)
+    previews = _previews(home, Watch())
+    previews.start("west", home.look("classic-strobe"))
+
+    async def restore() -> None:
+        del view.rooms["west"]  # the backup's map has no west room
+
+    await home.manager.replace_state(restore)
+
+    assert previews.runtimes() == [] and home.host.hosted == []

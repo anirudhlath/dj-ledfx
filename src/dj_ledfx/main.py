@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -257,16 +258,14 @@ async def _run(args: argparse.Namespace) -> None:
         max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
         preview_only=config.engine.preview_only is True,
         home=MapZones(home_map),
-        frames_watched=watchers.watching_live,
+        frames_watched=partial(watchers.watching, "live"),
     )
     await zone_manager.load()
     # Before any light connects, so no light is restored and then taken over again.
     await zone_manager.resume()
-    previews = PreviewManager(zone_manager, engine, watchers.watching_preview)
-    # The zones follow the map first; then a preview follows its zone's lights.
-    home_map.on_change(zone_manager.home_changed)
-    home_map.on_change(previews.home_changed)
-    frame_feed = FrameFeed(zone_manager, previews)
+    previews = PreviewManager(zone_manager, partial(watchers.watching, "preview"))
+    home_map.on_change(zone_manager.home_changed)  # the zones, and the preview, follow the map
+    frame_feed = FrameFeed(zone_manager.live_runtimes, zone_manager.preview_runtimes)
 
     light_monitor = LightMonitor(devices=device_manager, zones=zone_manager, event_bus=event_bus)
     attention_feed = AttentionFeed(

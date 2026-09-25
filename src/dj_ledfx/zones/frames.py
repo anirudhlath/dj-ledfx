@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Collection, Iterable
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,7 +28,7 @@ STREAMS: tuple[Stream, ...] = ("live", "preview")
 
 class Watchers:
     """Which streams each session watches. A session is keyed by its subscription object,
-    which lives as long as the session and clears itself when the session ends."""
+    which lives as long as the session and sets no streams when the session ends."""
 
     def __init__(self) -> None:
         self._streams: dict[int, frozenset[str]] = {}
@@ -40,37 +40,24 @@ class Watchers:
         else:
             self._streams.pop(id(owner), None)
 
-    def clear(self, owner: object) -> None:
-        self._streams.pop(id(owner), None)
-
-    def watching(self) -> bool:
-        return bool(self._streams)
-
-    def watching_live(self) -> bool:
-        return any("live" in streams for streams in self._streams.values())
-
-    def watching_preview(self) -> bool:
-        return any("preview" in streams for streams in self._streams.values())
+    def watching(self, stream: Stream) -> bool:
+        """Whether any session watches the stream. main hands the zones and the previews
+        partial(watching, "live") and partial(watching, "preview")."""
+        return any(stream in streams for streams in self._streams.values())
 
 
-class _LiveRuntimes(Protocol):
-    def live_runtimes(self) -> list[ZoneRuntime]: ...
-
-
-class _PreviewRuntimes(Protocol):
-    def runtimes(self) -> list[ZoneRuntime]: ...
+Runtimes = Callable[[], list["ZoneRuntime"]]
 
 
 class FrameFeed:
     def __init__(
         self,
-        zones: _LiveRuntimes,
-        previews: _PreviewRuntimes | None = None,
+        live: Runtimes,
+        previews: Runtimes = list,
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._zones = zones
-        self._previews = previews
+        self._runtimes: dict[Stream, Runtimes] = {"live": live, "preview": previews}
         self._clock = clock  # the engine's clock: rings are keyed by time.monotonic()
 
     def frames(
@@ -78,13 +65,9 @@ class FrameFeed:
     ) -> dict[str, NDArray[np.uint8]]:
         """Each device's colours now, in 8 bits, by device id: every device's, or the wanted
         ones'. A runtime's frame is converted once, and only when a device in it is wanted."""
-        if stream == "live":
-            runtimes = self._zones.live_runtimes()
-        else:
-            runtimes = self._previews.runtimes() if self._previews is not None else []
         now = self._clock()
         out: dict[str, NDArray[np.uint8]] = {}
-        for runtime in runtimes:
+        for runtime in self._runtimes[stream]():
             pieces = [
                 piece
                 for light in runtime.lights

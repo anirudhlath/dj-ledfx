@@ -117,12 +117,8 @@ class ZoneRuntime:
         now: Callable[[], datetime] = utcnow,
         on_state_change: Callable[[ZoneRuntime], None] | None = None,
         watched: Callable[[], bool] = lambda: True,
-        key: str | None = None,
     ) -> None:
         self.zone_id = zone_id
-        # What the engine hosts it under: the zone id, or preview:<id> for a preview, so
-        # a preview never replaces its zone's own runtime.
-        self.key = key or zone_id
         # Called when the zone crashes, turns slow or recovers by itself; the zone
         # manager tells the running channel.
         self._on_state_change = on_state_change

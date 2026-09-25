@@ -80,14 +80,16 @@ def test_v1_frames_come_from_the_live_stream_while_the_session_watches_it() -> N
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
         ws.send_json({"action": "subscribe_frames", "fps": 30, "id": 1})
         texts, frames = receive(ws)
-        assert watchers.watching_live() and not watchers.watching_preview()
+        assert watchers.watching("live") and not watchers.watching("preview")
 
     assert {"channel": "ack", "id": 1, "action": "subscribe_frames", "protocol": 1} in texts
     name, seq = b"lamp", 1
     assert frames[0] == struct.pack("<H", len(name)) + name + struct.pack("<I", seq) + bytes(
         [7] * 6
     )
-    assert not watchers.watching()  # the session ended, so it watches nothing
+    assert not watchers.watching("live") and not watchers.watching(
+        "preview"
+    )  # the session ended, so it watches nothing
 
 
 SERVER = "openrgb:localhost:6742"
@@ -134,7 +136,7 @@ def test_v2_frames_carry_the_stream_and_the_light_id() -> None:
             }
         )
         texts, frames = receive(ws)
-        assert watchers.watching_live() and watchers.watching_preview()
+        assert watchers.watching("live") and watchers.watching("preview")
 
     assert {"channel": "ack", "id": 7, "action": "subscribe_frames", "protocol": 2} in texts
     got = {(frame[0], _light_id(frame)): _rgb(frame) for frame in frames}
@@ -162,4 +164,4 @@ def test_a_bad_frame_subscription_is_refused_with_the_reason() -> None:
         },
         {"channel": "error", "id": 9, "detail": "Unknown frame protocol 3; expected 1 or 2"},
     ]
-    assert not watchers.watching()
+    assert not watchers.watching("live") and not watchers.watching("preview")

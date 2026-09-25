@@ -34,11 +34,10 @@ async def test_a_preview_renders_for_the_web_app_only(api: Api) -> None:
         "/api/preview", json={"zoneId": "desk", "lookId": "classic-strobe"}
     )
 
-    assert started.status_code == 201
-    preview_id = started.json()["previewId"]
+    assert started.status_code == 201 and started.json()["previewId"].startswith("preview-")
     [runtime] = api.previews.runtimes()
-    assert (runtime.key, runtime.look.id) == (f"preview:{preview_id}", "classic-strobe")
-    assert set(api.home.host.runtimes) == {"desk", f"preview:{preview_id}"}
+    assert (runtime.zone_id, runtime.look.id) == ("desk", "classic-strobe")
+    assert api.home.host.hosted == [api.home.host.runtimes["desk"], runtime]
     assert api.home.lights["lamp"].calls == []  # the zone's own look runs on, untouched
     running = (await api.client.get("/api/running")).json()["zones"]
     assert [zone["lookId"] for zone in running] == ["classic-breathe"]
@@ -58,7 +57,7 @@ async def test_the_editor_changes_a_draft_preview_then_ends_it(api: Api) -> None
     assert changed.status_code == 204 and runtime.look.name == "Slower breathe"
 
     assert (await api.client.delete(f"/api/preview/{preview_id}")).status_code == 204
-    assert api.previews.runtimes() == [] and set(api.home.host.runtimes) == set()
+    assert api.previews.runtimes() == [] and api.home.host.hosted == []
     gone = await api.client.delete(f"/api/preview/{preview_id}")
     assert gone.status_code == 404 and gone.json()["detail"] == f"No preview '{preview_id}'"
 
@@ -107,7 +106,7 @@ async def test_a_room_preview_ends_when_its_last_light_leaves_the_room(tmp_path:
 
         await api.client.put(place, json={"shape": IN_THE_EAST_ROOM})
 
-        assert api.previews.runtimes() == [] and api.home.host.runtimes == {}
+        assert api.previews.runtimes() == [] and api.home.host.hosted == []
         gone = await api.client.delete(f"/api/preview/{preview_id}")
         assert gone.status_code == 404
 

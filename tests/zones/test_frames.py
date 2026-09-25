@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import partial
+
 import numpy as np
 from conftest import FakeLight
 from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
@@ -11,17 +13,17 @@ from dj_ledfx.zones.preview import PreviewManager
 
 def test_watchers_say_who_watches_which_stream() -> None:
     watchers, tab, other = Watchers(), object(), object()
-    assert not watchers.watching()
+    assert not watchers.watching("live") and not watchers.watching("preview")
 
     watchers.set(tab, ["live", "nonsense"])
     watchers.set(other, ["preview"])
-    assert watchers.watching_live() and watchers.watching_preview()
+    assert watchers.watching("live") and watchers.watching("preview")
 
     watchers.set(tab, [])
-    assert not watchers.watching_live() and watchers.watching_preview()
-    watchers.clear(other)
-    watchers.clear(other)  # twice is fine: a session clears itself as it ends
-    assert not watchers.watching()
+    assert not watchers.watching("live") and watchers.watching("preview")
+    watchers.set(other, [])
+    watchers.set(other, [])  # twice is fine: a session sets none as it ends
+    assert not watchers.watching("preview")
 
 
 # M1 review, constraint 2: the web app's frames come from the rings, not the send loops.
@@ -32,8 +34,10 @@ async def test_the_live_stream_has_every_zone_light_and_the_preview_stream_its_o
         [FakeLight("lamp"), FakeLight("tile", caps=TILE)], [zone_record("z", "lamp", "tile")]
     )
     await home.manager.start("z", BREATHE_AND_GLOW)  # the tile runs Glow itself
-    previews = PreviewManager(home.manager, home.host, lambda: True)
-    feed = FrameFeed(home.manager, previews, clock=lambda: 100.0)
+    previews = PreviewManager(home.manager, lambda: True)
+    feed = FrameFeed(
+        home.manager.live_runtimes, home.manager.preview_runtimes, clock=lambda: 100.0
+    )
     runtime = home.host.runtimes["z"]
     assert feed.frames("live") == {} and feed.frames("preview") == {}  # nothing rendered yet
 
@@ -64,12 +68,12 @@ async def test_a_zone_draws_lights_running_their_own_effect_only_while_live_is_w
     home = await make_home(
         [FakeLight("tile", caps=TILE)],
         [zone_record("z", "tile")],
-        frames_watched=watchers.watching_live,
+        frames_watched=partial(watchers.watching, "live"),
     )
     await home.manager.start("z", GLOW)
     runtime = home.host.runtimes["z"]
     now = [100.0]
-    feed = FrameFeed(home.manager, None, clock=lambda: now[0])
+    feed = FrameFeed(home.manager.live_runtimes, clock=lambda: now[0])
 
     runtime.tick(100.0)
     assert not feed.frames("live")["tile"].any()

@@ -202,7 +202,6 @@ async def import_state(request: Request) -> dict[str, str]:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {exc}") from exc
     looks = get_looks(request)
     home_map = request.app.state.home_map  # None where the app has no map
-    previews = request.app.state.previews
 
     async def restore() -> None:
         try:
@@ -212,7 +211,5 @@ async def import_state(request: Request) -> dict[str, str]:
             if home_map is not None:
                 await home_map.load()  # before the zones resume on the backup's map
 
-    await get_zones(request).replace_state(restore)
-    if previews is not None:
-        await previews.home_changed()  # a preview moves to its zone's lights, or ends
+    await get_zones(request).replace_state(restore)  # a preview follows the backup's map
     return {"status": "ok"}

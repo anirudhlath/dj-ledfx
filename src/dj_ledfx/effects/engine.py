@@ -16,14 +16,15 @@ if TYPE_CHECKING:
 class EffectEngine:
     """Renders every running zone once a frame (spec §4.1).
 
-    The zone manager adds and removes the zones' runtimes: this is its RuntimeHost. Each
-    runtime renders for now plus its own horizon into its own ring buffer.
+    The zone manager adds and removes the runtimes, the zones' and the preview's: this is
+    its RuntimeHost, and it keeps them by identity. Each runtime renders for now plus its
+    own horizon into its own ring buffer.
     """
 
     def __init__(self, fps: int = 60) -> None:
         self._fps = fps
         self._frame_period = 1.0 / fps
-        self._runtimes: dict[str, ZoneRuntime] = {}
+        self._runtimes: dict[ZoneRuntime, None] = {}  # in the order they were added
         self._running = False
         self._render_times: deque[float] = deque(maxlen=fps * 10)
 
@@ -36,17 +37,17 @@ class EffectEngine:
     @property
     def fill_level(self) -> float:
         """The emptiest running zone's ring buffer fill; 1.0 when nothing runs."""
-        return min((runtime.ring.fill_level for runtime in self._runtimes.values()), default=1.0)
+        return min((runtime.ring.fill_level for runtime in self._runtimes), default=1.0)
 
     def add_runtime(self, runtime: ZoneRuntime) -> None:
-        self._runtimes[runtime.key] = runtime
+        self._runtimes[runtime] = None
 
-    def remove_runtime(self, key: str) -> None:
-        self._runtimes.pop(key, None)
+    def remove_runtime(self, runtime: ZoneRuntime) -> None:
+        self._runtimes.pop(runtime, None)
 
     def tick(self, now: float) -> None:
         started = time.monotonic()
-        for runtime in self._runtimes.values():
+        for runtime in self._runtimes:
             runtime.tick(now)
         elapsed = time.monotonic() - started
         metrics.RENDER_DURATION.observe(elapsed)

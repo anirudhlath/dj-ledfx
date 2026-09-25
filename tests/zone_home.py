@@ -50,16 +50,24 @@ def zone_record(zone_id: str, *lights: str, name: str | None = None) -> ZoneReco
 
 
 class FakeHost:
-    """Stands in for the engine: it only keeps the runtimes it is given."""
+    """Stands in for the engine: it only keeps the runtimes it is given, in order."""
 
     def __init__(self) -> None:
-        self.runtimes: dict[str, ZoneRuntime] = {}
+        self.hosted: list[ZoneRuntime] = []
+        self.zones: ZoneManager | None = None  # tells the previews apart
 
     def add_runtime(self, runtime: ZoneRuntime) -> None:
-        self.runtimes[runtime.key] = runtime
+        self.hosted.append(runtime)
 
-    def remove_runtime(self, key: str) -> None:
-        self.runtimes.pop(key, None)
+    def remove_runtime(self, runtime: ZoneRuntime) -> None:
+        if runtime in self.hosted:
+            self.hosted.remove(runtime)
+
+    @property
+    def runtimes(self) -> dict[str, ZoneRuntime]:
+        """The zones' runtimes it hosts, by zone id: every one but the previews."""
+        previews = self.zones.preview_runtimes() if self.zones is not None else []
+        return {rt.zone_id: rt for rt in self.hosted if rt not in previews}
 
 
 class FakeRoutes:
@@ -261,6 +269,7 @@ async def assemble(
         home=view or NO_HOME,
         frames_watched=frames_watched or (lambda: True),
     )
+    host.zones = manager
     if home_map is not None:
         home_map.on_change(manager.home_changed)
     home = Home(

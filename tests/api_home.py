@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC
+from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -49,9 +50,7 @@ async def api_home(
 ) -> AsyncIterator[Api]:
     home = await build_home(tmp_path, lights, zones, plan=plan)
     watchers = Watchers()
-    previews = PreviewManager(home.manager, home.host, watchers.watching_preview)
-    if home.home_map is not None:  # after the zone manager's listener, as main does it
-        home.home_map.on_change(previews.home_changed)
+    previews = PreviewManager(home.manager, partial(watchers.watching, "preview"))
     stats: list[DeviceStats] = []
     monitor = LightMonitor(
         devices=home.devices, zones=home.manager, event_bus=home.bus, now=lambda: home.clock[0]
