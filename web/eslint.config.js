@@ -24,4 +24,21 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
     },
   },
+  {
+    // §12: the app reaches the server through src/api/ only, and never imports the mocks (decision
+    // 11: app/boot.tsx loads them with a dynamic import that a production build drops). Tests may.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/api/**', 'src/test/**', 'src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [{ group: ['@/api/mocks/*', '**/api/mocks/*'], message: 'The mocks load only through app/boot.tsx (decision 11).' }] },
+      ],
+      'no-restricted-globals': [
+        'error',
+        { name: 'fetch', message: 'Requests go through src/api/rest.ts (§12).' },
+        { name: 'WebSocket', message: 'The socket is src/api/live-client.ts (§12).' },
+      ],
+    },
+  },
 ])
