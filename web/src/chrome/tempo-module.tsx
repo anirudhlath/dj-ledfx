@@ -1,9 +1,10 @@
 import type { ReactElement, ReactNode } from 'react'
+import type { TempoSource } from '@/api/contract'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import type { IconName } from '@/design/icons'
 import { formatBpm } from '@/lib/format'
-import type { TempoSource, TempoState } from './state'
+import type { TempoState } from './state'
 
 export interface TempoModuleProps extends TempoState {
   /** "bar": the desktop top bar. "strip": the phone strip under the header on Live. */
@@ -20,11 +21,20 @@ const SOURCE: Record<TempoSource, { label: string; icon: IconName }> = {
   internal: { label: 'Internal', icon: 'tempo' },
 }
 
-/** §6.2 TempoModule. F0 draws a still beat; F3 drives the pips from the beat clock (§5.4). */
+/** §9.3's Idle: nothing to report, nothing wrong. */
+const NO_DJ = { label: 'No DJ', icon: 'deck' } as const satisfies (typeof SOURCE)[TempoSource]
+
+/**
+ * §6.2 TempoModule. F1 draws the beat in the bar that each beat message carries; F3 drives the pips
+ * from the beat clock (§5.4). With no DJ (`bpm` null) it's §9.3's Idle: a quiet "No DJ" where the
+ * source is, and no BPM or pips.
+ */
 export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceClick, renderSource, onTap }: TempoModuleProps) {
-  const { label, icon } = SOURCE[source]
+  const idle = bpm === null
+  const { label, icon } = idle ? NO_DJ : SOURCE[source]
   const staleNote = stale && <span className="sr-only">, stale</span>
   const pips = <Pips beat={stale ? null : beat} variant={variant} />
+  const tone = idle ? 'text-text-3' : stale ? 'text-signal' : 'text-text-2'
 
   if (variant === 'strip') {
     return (
@@ -38,16 +48,19 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
           className="flex h-(--phone-tempo-h) items-center gap-3 rounded-card border border-line bg-raised pr-1 pl-3 @max-[20.5rem]:gap-2"
         >
           {/* The label gives way first, so a long source ("Pro DJ Link") never pushes TAP out. */}
-          <span className={cx('inline-flex min-w-0 items-center gap-1.5 text-data font-semibold', stale ? 'text-signal' : 'text-text-2')}>
+          <span className={cx('inline-flex min-w-0 items-center gap-1.5 text-data font-semibold', tone)}>
             <Icon name={icon} size={16} />
             <span className="min-w-0 truncate">{label}</span>
             {staleNote}
           </span>
-          <span className="num text-bpm font-semibold tracking-[-0.02em]">
-            {formatBpm(bpm)}
-            <span className="sr-only"> BPM</span>
-          </span>
-          {pips}
+          {!idle && (
+            <span className="num text-bpm font-semibold tracking-[-0.02em]">
+              {formatBpm(bpm)}
+              <span className="sr-only"> BPM</span>
+            </span>
+          )}
+          {/* Idle, the pips' room keeps TAP at the strip's end. */}
+          {idle ? <span className="flex-1" /> : pips}
           {/* The face is Phone-Live.png's; touch-target grows its hit area to --touch-min (§6). */}
           <button
             type="button"
@@ -66,7 +79,12 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
       type="button"
       aria-haspopup="dialog"
       onClick={onSourceClick}
-      className={cx('inline-flex h-7 items-center gap-1.5 rounded-chip bg-control px-2 text-meta font-semibold', stale ? 'text-signal' : 'text-text-2')}
+      className={cx(
+        'inline-flex h-7 items-center gap-1.5 rounded-chip px-2 text-meta font-semibold',
+        // Idle is a quiet chip (§9.3, State-Sheet.png): outlined, not filled.
+        idle ? 'border border-line bg-transparent' : 'bg-control',
+        tone,
+      )}
     >
       <Icon name={icon} size={14} />
       <span className="tablet:sr-only">{label}</span>
@@ -84,12 +102,14 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
       className="flex h-10 items-center gap-3 rounded-tile border border-line bg-raised px-1.5"
     >
       {renderSource ? renderSource(sourceButton) : sourceButton}
-      <span className="flex items-baseline gap-1.25">
-        <span className="num text-bpm font-semibold tracking-[-0.02em] text-text">{formatBpm(bpm)}</span>
-        <span className="text-[10px] font-semibold tracking-[0.08em] text-text-3">BPM</span>
-      </span>
-      {pips}
-      <span className="num text-[11.5px] whitespace-nowrap text-text-3 tablet:hidden">bar {bar}</span>
+      {!idle && (
+        <span className="flex items-baseline gap-1.25">
+          <span className="num text-bpm font-semibold tracking-[-0.02em] text-text">{formatBpm(bpm)}</span>
+          <span className="text-[10px] font-semibold tracking-[0.08em] text-text-3">BPM</span>
+        </span>
+      )}
+      {!idle && pips}
+      {bar !== null && <span className="num text-[11.5px] whitespace-nowrap text-text-3 tablet:hidden">bar {bar}</span>}
       <button
         type="button"
         onClick={onTap}

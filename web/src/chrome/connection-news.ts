@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Connection } from './state'
+import type { Connection } from '@/api/live-store'
 
 /**
  * What the status region says about the link: nothing at first, "Reconnecting" when it drops,

@@ -1,0 +1,42 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fakeSockets } from '@/test/fake-socket'
+import { HERO_NOW, startMockDataLayer } from '@/test/live'
+import { frames, liveClient, startDataLayer } from './live'
+import { liveStore } from './live-store'
+import { buildScenario } from './mocks/scenarios'
+import { queries, queryClient } from './queries'
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(HERO_NOW)
+})
+
+describe('startDataLayer', () => {
+  it("fills the app's stores from the server", async () => {
+    startMockDataLayer()
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(liveStore.getState().attention).toHaveLength(1)
+    expect(liveStore.getState().connection.status).toBe('live')
+    expect(frames.live.size).toBeGreaterThan(0)
+  })
+
+  // I6: a zone made on another device reaches this one's zones.
+  it('refetches the zones when what runs names one REST never served', () => {
+    const { open } = fakeSockets()
+    startDataLayer({ openSocket: open, url: 'ws://test/ws' })
+    queryClient.setQueryData(queries.zones().queryKey, [])
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+    liveStore.setState({ running: { zones: [{ ...buildScenario('hero').running[0], zoneId: 'group-9' }], overlays: [] } })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['zones'] })
+  })
+
+  it('keeps one client: starting again stops the first', () => {
+    const { sockets, open } = fakeSockets()
+    const first = startDataLayer({ openSocket: open, url: 'ws://test/ws' })
+    const second = startDataLayer({ openSocket: open, url: 'ws://test/ws' })
+    expect(second).not.toBe(first)
+    expect(liveClient()).toBe(second)
+    expect(sockets).toHaveLength(2)
+    expect(sockets[0].closed).toBe(true)
+  })
+})

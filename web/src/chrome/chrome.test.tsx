@@ -1,12 +1,13 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import type { Connection } from '@/api/live-store'
 import { Announcer } from '@/design/announcer'
 import { Popover } from '@/design/overlays'
 import { AttentionButton } from './attention-button'
 import { ConnectionIndicator } from './connection-indicator'
 import { useConnectionNews } from './connection-news'
-import { HERO_CHROME, type Connection, type TempoState } from './state'
+import { HERO_CHROME, type TempoState } from './state'
 import { PreviewOnlySwitch } from './preview-only-switch'
 import { TempoModule } from './tempo-module'
 
@@ -58,6 +59,30 @@ describe('TempoModule', () => {
     expect(source).toHaveClass('text-signal')
     expect(screen.queryByRole('img')).toBeNull()
     expect(screen.getByRole('group', { name: 'Tempo' })).toHaveTextContent('118.0')
+  })
+
+  // D2: §9.3's Idle. Engine M1 with no DJ has no tempo to show.
+  it.each(['bar', 'strip'] as const)('idle (%s): "No DJ" in a quiet chip, with no BPM or pips, and TAP', (variant) => {
+    render(<TempoModule variant={variant} source="prodjlink" bpm={null} beat={null} bar={null} stale={false} />)
+    const tempo = screen.getByRole('group', { name: 'Tempo' })
+    expect(within(tempo).getByText('No DJ')).toBeInTheDocument()
+    expect(tempo).not.toHaveTextContent(/Pro DJ Link|BPM|0\.0/)
+    expect(within(tempo).queryByRole('img')).toBeNull()
+    expect(within(tempo).getByRole('button', { name: 'Tap' })).toBeInTheDocument()
+  })
+
+  it('idle: the source button stays, quiet, for the source popover (desktop)', () => {
+    render(<TempoModule variant="bar" source="prodjlink" bpm={null} beat={null} bar={null} stale={false} />)
+    const source = screen.getByRole('button', { name: 'No DJ' })
+    expect(source).toHaveAttribute('aria-haspopup', 'dialog')
+    expect(source).toHaveClass('text-text-3', 'border-line', 'bg-transparent')
+  })
+
+  // Engine M1's beat counts no bars (decision 9).
+  it('leaves the bar out when the source counts none', () => {
+    render(<TempoModule variant="bar" {...HERO_CHROME.tempo} bar={null} />)
+    // Not even the label: "bar " with no number is what a null left behind.
+    expect(screen.getByRole('group', { name: 'Tempo' })).not.toHaveTextContent(/bar/)
   })
 })
 
@@ -144,6 +169,19 @@ describe('ConnectionIndicator', () => {
     rerender(<ConnectionIndicator variant={variant} connection={reconnecting} />)
     expect(screen.queryByRole('status')).toBeNull()
   })
+
+  // F0 review: before the server's first word, the link claims nothing.
+  it.each(['bar', 'header'] as const)('shows nothing while it first connects (%s)', (variant) => {
+    const { container } = render(<ConnectionIndicator variant={variant} connection={{ status: 'connecting' }} />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  // Decision 3: no frames yet, so no frame rate.
+  it('shows Live alone until it has measured the frame rate', () => {
+    render(<ConnectionIndicator variant="bar" connection={{ status: 'live', fps: null }} />)
+    expect(screen.getByText('Live')).toBeInTheDocument()
+    expect(screen.queryByText(/fps/)).toBeNull()
+  })
 })
 
 describe('connection news', () => {
@@ -164,5 +202,15 @@ describe('connection news', () => {
     rerender(<Region connection={{ status: 'live', fps: 60 }} />)
     expect(status).toHaveTextContent(/^Live again$/)
     expect(screen.getByRole('status')).toBe(status)
+  })
+
+  it('says nothing on the first connect, and Reconnecting when it fails', () => {
+    const { rerender } = render(<Region connection={{ status: 'connecting' }} />)
+    const status = screen.getByRole('status')
+    expect(status).toBeEmptyDOMElement()
+    rerender(<Region connection={{ status: 'live', fps: null }} />)
+    expect(status).toBeEmptyDOMElement()
+    rerender(<Region connection={{ status: 'reconnecting', attempt: 1 }} />)
+    expect(status).toHaveTextContent(/^Reconnecting$/)
   })
 })

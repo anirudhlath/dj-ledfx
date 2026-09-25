@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { HERO_NOW } from '@/test/live'
 import { formatBpm, formatDayDateTime, formatDayTime, formatTime } from './format'
 
 describe('format', () => {
-  const hero = new Date(2026, 8, 23, 19, 14)
+  const hero = HERO_NOW
 
   it('writes the clocks the chrome shows', () => {
     expect(formatDayDateTime(hero)).toBe('Wed 23 Sep · 19:14')

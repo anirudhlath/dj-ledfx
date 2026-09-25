@@ -1,0 +1,326 @@
+{
+  "$comment": "The 29 built-in looks as the UI presents them. id is a stable slug; inputs lists what the look needs to do its job (empty = runs on its own). thumbnail is the motion-portrait motif id used by <LookThumb> (see reference/Looks.html).",
+  "categories": [
+    {
+      "id": "ambient",
+      "name": "Ambient",
+      "blurb": "No input — they run on their own."
+    },
+    {
+      "id": "tempo",
+      "name": "Tempo",
+      "blurb": "Land on the beat: internal, Pro DJ Link or the music."
+    },
+    {
+      "id": "audio",
+      "name": "Audio",
+      "blurb": "Follow Music Assistant: loudness, beat, spectrum."
+    },
+    {
+      "id": "home",
+      "name": "Home",
+      "blurb": "Across the whole apartment."
+    },
+    {
+      "id": "firmware",
+      "name": "Firmware",
+      "blurb": "Each light’s own built-in effects."
+    }
+  ],
+  "looks": [
+    {
+      "id": "sunset",
+      "name": "Sunset",
+      "category": "ambient",
+      "inputs": [],
+      "description": "A slow gradient from warm at the floor to deep blue at the ceiling, with the Candles on LIFX Flame.",
+      "thumbnail": "sunset",
+      "scope": "any-zone"
+    },
+    {
+      "id": "fireflies",
+      "name": "Fireflies",
+      "category": "ambient",
+      "inputs": [],
+      "description": "Fireflies wander the room; a lamp only glows while one drifts through it.",
+      "thumbnail": "fireflies",
+      "scope": "any-zone"
+    },
+    {
+      "id": "embers",
+      "name": "Embers",
+      "category": "ambient",
+      "inputs": [],
+      "description": "The Candles and the Tube run LIFX Flame while embers rise from the floor and climb the other lamps.",
+      "thumbnail": "embers",
+      "scope": "any-zone"
+    },
+    {
+      "id": "rain",
+      "name": "Rain storm",
+      "category": "ambient",
+      "inputs": [],
+      "description": "Rain runs down the lamps, and lightning strikes a random spot, lighting each lamp by distance.",
+      "thumbnail": "rain",
+      "scope": "any-zone"
+    },
+    {
+      "id": "snow",
+      "name": "Snow",
+      "category": "ambient",
+      "inputs": [],
+      "description": "Snow drifts down and catches on the lamps as it passes.",
+      "thumbnail": "snow",
+      "scope": "any-zone"
+    },
+    {
+      "id": "aurora",
+      "name": "Aurora",
+      "category": "ambient",
+      "inputs": [],
+      "description": "Aurora curtains drift near the ceiling; the Candles and the Tube run LIFX Morph in the same palette.",
+      "thumbnail": "aurora",
+      "scope": "any-zone"
+    },
+    {
+      "id": "lava",
+      "name": "Lava",
+      "category": "ambient",
+      "inputs": [],
+      "description": "A slow 3D plasma in lava colours that never quite repeats.",
+      "thumbnail": "lava",
+      "scope": "any-zone"
+    },
+    {
+      "id": "carousel",
+      "name": "Color carousel",
+      "category": "ambient",
+      "inputs": [],
+      "description": "Each lamp’s hue comes from its angle around the room, so a rainbow slowly circles you.",
+      "thumbnail": "carousel",
+      "scope": "any-zone"
+    },
+    {
+      "id": "ripples",
+      "name": "Ripples",
+      "category": "ambient",
+      "inputs": [],
+      "description": "Drops land on the floor and send rings outward; lamps shimmer as the rings pass.",
+      "thumbnail": "ripples",
+      "scope": "any-zone"
+    },
+    {
+      "id": "focus",
+      "name": "Focus",
+      "category": "ambient",
+      "inputs": [],
+      "description": "Calm and warm near the sofa, busier and more colourful further away.",
+      "thumbnail": "focus",
+      "scope": "any-zone"
+    },
+    {
+      "id": "spotlights",
+      "name": "Spotlights",
+      "category": "ambient",
+      "inputs": [],
+      "description": "Two soft spotlights drift from lamp to lamp.",
+      "thumbnail": "spotlights",
+      "scope": "any-zone"
+    },
+    {
+      "id": "bursts",
+      "name": "Beat bursts",
+      "category": "tempo",
+      "inputs": [
+        "tempo"
+      ],
+      "description": "Every beat fires particles out of the TV, with a bigger burst on the downbeat.",
+      "thumbnail": "bursts",
+      "scope": "any-zone"
+    },
+    {
+      "id": "shockwave",
+      "name": "Shockwave + beam",
+      "category": "tempo",
+      "inputs": [
+        "tempo"
+      ],
+      "description": "A sphere of light expands from the TV every beat while a lighthouse beam turns once per bar.",
+      "thumbnail": "shockwave",
+      "scope": "any-zone"
+    },
+    {
+      "id": "vortex",
+      "name": "Vortex",
+      "category": "tempo",
+      "inputs": [
+        "tempo"
+      ],
+      "description": "Particles spiral up around the room, kicked faster on each beat.",
+      "thumbnail": "vortex",
+      "scope": "any-zone"
+    },
+    {
+      "id": "comets",
+      "name": "Twin comets",
+      "category": "tempo",
+      "inputs": [
+        "tempo"
+      ],
+      "description": "Two comets chase lamp to lamp, landing on each beat.",
+      "thumbnail": "comets",
+      "scope": "any-zone"
+    },
+    {
+      "id": "fountain",
+      "name": "Fountain",
+      "category": "tempo",
+      "inputs": [
+        "tempo"
+      ],
+      "description": "A fountain on the coffee table sprays particles, with a bigger burst on every beat.",
+      "thumbnail": "fountain",
+      "scope": "any-zone"
+    },
+    {
+      "id": "flock",
+      "name": "Flock",
+      "category": "tempo",
+      "inputs": [
+        "tempo"
+      ],
+      "description": "A flock swirls as one and scatters on every other downbeat.",
+      "thumbnail": "flock",
+      "scope": "any-zone"
+    },
+    {
+      "id": "ball",
+      "name": "Bouncing ball",
+      "category": "tempo",
+      "inputs": [
+        "tempo"
+      ],
+      "description": "One ball ricochets around the room and lands exactly on every beat.",
+      "thumbnail": "ball",
+      "scope": "any-zone"
+    },
+    {
+      "id": "scanner",
+      "name": "Scanner",
+      "category": "tempo",
+      "inputs": [
+        "tempo"
+      ],
+      "description": "A horizontal plane sweeps floor to ceiling and back every two beats.",
+      "thumbnail": "scanner",
+      "scope": "any-zone"
+    },
+    {
+      "id": "checker",
+      "name": "3D checker",
+      "category": "tempo",
+      "inputs": [
+        "tempo"
+      ],
+      "description": "1 m cubes swap colours on each beat, like a disco floor in 3D.",
+      "thumbnail": "checker",
+      "scope": "any-zone"
+    },
+    {
+      "id": "speakers",
+      "name": "Speaker waves",
+      "category": "audio",
+      "inputs": [
+        "music"
+      ],
+      "description": "Kicks send wavefronts out from the speakers, snares bloom between them, hi-hats sparkle up high.",
+      "thumbnail": "speakers",
+      "scope": "any-zone"
+    },
+    {
+      "id": "spectrum",
+      "name": "Room spectrum",
+      "category": "audio",
+      "inputs": [
+        "music"
+      ],
+      "description": "Height is frequency; bass lights the floor, treble the ceiling.",
+      "thumbnail": "spectrum",
+      "scope": "any-zone"
+    },
+    {
+      "id": "tide",
+      "name": "Tide",
+      "category": "audio",
+      "inputs": [
+        "music"
+      ],
+      "description": "A water line rises and falls with loudness, with foam at the surface.",
+      "thumbnail": "tide",
+      "scope": "any-zone"
+    },
+    {
+      "id": "drop",
+      "name": "Drop moment",
+      "category": "audio",
+      "inputs": [
+        "music",
+        "tempo"
+      ],
+      "description": "A calm verse, a build where a plane rises and the strobe doubles each bar, then a white flash and shockwaves on the drop.",
+      "thumbnail": "drop",
+      "scope": "any-zone"
+    },
+    {
+      "id": "homesunset",
+      "name": "Home sunset",
+      "category": "home",
+      "inputs": [
+        "sun"
+      ],
+      "description": "The sunset in every room, with a warm sun that follows the real one across the apartment.",
+      "thumbnail": "homesunset",
+      "scope": "whole-home"
+    },
+    {
+      "id": "wisp",
+      "name": "Wisp",
+      "category": "home",
+      "inputs": [],
+      "description": "Two wisps roam room to room; each lamp glows only while one passes.",
+      "thumbnail": "wisp",
+      "scope": "whole-home"
+    },
+    {
+      "id": "goodnight",
+      "name": "Goodnight",
+      "category": "home",
+      "inputs": [
+        "home-assistant"
+      ],
+      "description": "A warm glow walks through the home switching rooms off behind it, and leaves the bedroom on a night light.",
+      "thumbnail": "goodnight",
+      "scope": "whole-home"
+    },
+    {
+      "id": "doorbell",
+      "name": "Doorbell ripple",
+      "category": "home",
+      "inputs": [
+        "home-assistant"
+      ],
+      "description": "The doorbell sends a golden ring from the front door through every room, over whatever is running.",
+      "thumbnail": "doorbell",
+      "scope": "whole-home"
+    },
+    {
+      "id": "firmware",
+      "name": "Firmware showcase",
+      "category": "firmware",
+      "inputs": [],
+      "description": "Every light runs its own built-in effect. Lights without one, like the Govee lamp, get a streamed copy.",
+      "thumbnail": "firmware",
+      "scope": "any-zone"
+    }
+  ]
+}

@@ -12,7 +12,7 @@ const LIVE: PageMeta = {
   title: 'Live',
   context: ({ now }) => formatDayDateTime(now),
   phoneTitle: 'Home',
-  phoneContext: ({ now, chrome }) => `${formatDayTime(now)} · sun sets ${chrome.sunset}`,
+  phoneContext: ({ now, sunset }) => `${formatDayTime(now)} · sun sets ${sunset}`,
   tempoStrip: true,
 }
 const LOOKS: PageMeta = { title: 'Looks' }

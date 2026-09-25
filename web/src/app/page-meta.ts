@@ -1,9 +1,9 @@
 import { useMatches } from 'react-router'
-import type { ChromeState } from '@/chrome/state'
 
 export interface MetaContext {
   now: Date
-  chrome: ChromeState
+  /** Today's sunset, 24 h: the fixture until F6 (decision 10). */
+  sunset: string
 }
 
 /** What the chrome shows for a route (spec §4.1, §4.2). Set as the route's `handle`. */

@@ -10,6 +10,8 @@ const HANDOFF = 'docs/design/web-app'
 const COPIES = [
   { name: 'tokens.css', copy: 'web/src/styles/tokens.css' },
   { name: 'icons.ts', copy: 'web/src/design/icons.ts' },
+  { name: 'home.json', copy: 'web/src/api/mocks/home.json' },
+  { name: 'looks.json', copy: 'web/src/api/mocks/looks.json' },
 ]
 
 const read = (path: string) => readFileSync(resolve(REPO, path))

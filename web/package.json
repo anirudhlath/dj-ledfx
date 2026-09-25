@@ -5,20 +5,25 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/check-dist.ts",
+    "build:mock": "tsc -b && vite build --mode mock",
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "api:types": "node scripts/api-types.ts",
+    "api:check": "node scripts/api-types.ts --check"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource/instrument-sans": "^5.3.0",
     "@fontsource/instrument-serif": "^5.3.0",
+    "@tanstack/react-query": "^5.103.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "react-router": "^7.18.4"
+    "react-router": "^7.18.4",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -38,6 +43,8 @@
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.12.0",
     "jsdom": "^30.1.1",
+    "msw": "^2.15.0",
+    "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.70.1",

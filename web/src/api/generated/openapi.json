@@ -1,0 +1,3422 @@
+{
+  "components": {
+    "schemas": {
+      "ActiveEffectResponse": {
+        "properties": {
+          "effect": {
+            "title": "Effect",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "effect",
+          "params"
+        ],
+        "title": "ActiveEffectResponse",
+        "type": "object"
+      },
+      "AssignGroupRequest": {
+        "properties": {
+          "group": {
+            "title": "Group",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group"
+        ],
+        "title": "AssignGroupRequest",
+        "type": "object"
+      },
+      "AttentionItem": {
+        "properties": {
+          "actions": {
+            "items": {
+              "enum": [
+                "restart",
+                "details",
+                "retry",
+                "open"
+              ],
+              "type": "string"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "light-offline",
+              "zone-crashed",
+              "zone-slow",
+              "input-disconnected",
+              "input-stale",
+              "frames-dropping"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "high",
+              "normal"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/AttentionSubject"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "severity",
+          "kind",
+          "subject",
+          "title",
+          "detail",
+          "since",
+          "actions"
+        ],
+        "title": "AttentionItem",
+        "type": "object"
+      },
+      "AttentionSubject": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "light",
+              "zone",
+              "input"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "title": "AttentionSubject",
+        "type": "object"
+      },
+      "Brightness": {
+        "properties": {
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "Brightness",
+        "type": "object"
+      },
+      "CreateGroup": {
+        "properties": {
+          "lights": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lights",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "lights"
+        ],
+        "title": "CreateGroup",
+        "type": "object"
+      },
+      "CreatePresetRequest": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreatePresetRequest",
+        "type": "object"
+      },
+      "DeviceResponse": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "device_type": {
+            "title": "Device Type",
+            "type": "string"
+          },
+          "effective_latency_ms": {
+            "default": 0.0,
+            "title": "Effective Latency Ms",
+            "type": "number"
+          },
+          "frames_dropped": {
+            "default": 0,
+            "title": "Frames Dropped",
+            "type": "integer"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "led_count": {
+            "title": "Led Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "send_fps": {
+            "default": 0.0,
+            "title": "Send Fps",
+            "type": "number"
+          },
+          "status": {
+            "default": "online",
+            "enum": [
+              "online",
+              "offline",
+              "reconnecting"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "device_type",
+          "led_count",
+          "address"
+        ],
+        "title": "DeviceResponse",
+        "type": "object"
+      },
+      "GeometrySchema": {
+        "properties": {
+          "direction": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction"
+          },
+          "length": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length"
+          },
+          "pixel_pitch": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pixel Pitch"
+          },
+          "tiles": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tiles"
+          },
+          "type": {
+            "enum": [
+              "point",
+              "strip",
+              "matrix",
+              "unknown"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "GeometrySchema",
+        "type": "object"
+      },
+      "GroupRequest": {
+        "properties": {
+          "color": {
+            "default": "#00e5ff",
+            "title": "Color",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "GroupRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Layer": {
+        "properties": {
+          "blend": {
+            "default": "normal",
+            "enum": [
+              "add",
+              "screen",
+              "normal",
+              "multiply",
+              "max"
+            ],
+            "title": "Blend",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "mask": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask"
+          },
+          "mirror": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mirror"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "opacity": {
+            "default": 1.0,
+            "title": "Opacity",
+            "type": "number"
+          },
+          "schema": {
+            "items": {
+              "$ref": "#/components/schemas/SettingSchema"
+            },
+            "title": "Schema",
+            "type": "array"
+          },
+          "settings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SettingValue"
+            },
+            "title": "Settings",
+            "type": "object"
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transform"
+          },
+          "type": {
+            "enum": [
+              "field",
+              "particles",
+              "firmware"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "visible": {
+            "default": true,
+            "title": "Visible",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "kind"
+        ],
+        "title": "Layer",
+        "type": "object"
+      },
+      "Light": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "builtInEffects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Builtineffects",
+            "type": "array"
+          },
+          "capabilities": {
+            "items": {
+              "enum": [
+                "colour",
+                "multizone",
+                "matrix",
+                "effects"
+              ],
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "colour": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colour"
+          },
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "droppedPct": {
+            "title": "Droppedpct",
+            "type": "number"
+          },
+          "firmware": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firmware"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "latency": {
+            "$ref": "#/components/schemas/LightLatency"
+          },
+          "ledOrder": {
+            "default": "",
+            "title": "Ledorder",
+            "type": "string"
+          },
+          "leds": {
+            "title": "Leds",
+            "type": "integer"
+          },
+          "mac": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mac"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ownEffect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owneffect"
+          },
+          "parts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LightPart"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parts"
+          },
+          "power": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power"
+          },
+          "protocol": {
+            "enum": [
+              "LIFX",
+              "Govee",
+              "OpenRGB"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "room": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room"
+          },
+          "sendFps": {
+            "title": "Sendfps",
+            "type": "number"
+          },
+          "shape": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shape"
+          },
+          "status": {
+            "enum": [
+              "streaming",
+              "own-effect",
+              "streamed-copy",
+              "offline",
+              "switched-off",
+              "reconnecting",
+              "idle"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "statusSince": {
+            "format": "date-time",
+            "title": "Statussince",
+            "type": "string"
+          },
+          "subZone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subzone"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "model",
+          "protocol",
+          "leds",
+          "capabilities",
+          "builtInEffects",
+          "status",
+          "statusSince",
+          "latency",
+          "sendFps",
+          "droppedPct",
+          "address"
+        ],
+        "title": "Light",
+        "type": "object"
+      },
+      "LightLatency": {
+        "properties": {
+          "estimated": {
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "measuredMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measuredms"
+          },
+          "overrideMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overridems"
+          }
+        },
+        "required": [
+          "measuredMs",
+          "estimated"
+        ],
+        "title": "LightLatency",
+        "type": "object"
+      },
+      "LightPart": {
+        "properties": {
+          "leds": {
+            "title": "Leds",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "leds"
+        ],
+        "title": "LightPart",
+        "type": "object"
+      },
+      "Look": {
+        "properties": {
+          "builtIn": {
+            "default": false,
+            "title": "Builtin",
+            "type": "boolean"
+          },
+          "category": {
+            "enum": [
+              "ambient",
+              "tempo",
+              "audio",
+              "home",
+              "firmware"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "derivedFrom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivedfrom"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "layers": {
+            "items": {
+              "$ref": "#/components/schemas/Layer"
+            },
+            "title": "Layers",
+            "type": "array"
+          },
+          "modifiers": {
+            "$ref": "#/components/schemas/LookModifiers"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "needs": {
+            "items": {
+              "enum": [
+                "tempo",
+                "music",
+                "home-assistant",
+                "sun"
+              ],
+              "type": "string"
+            },
+            "title": "Needs",
+            "type": "array"
+          },
+          "scope": {
+            "default": "any-zone",
+            "enum": [
+              "any-zone",
+              "whole-home"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "starred": {
+            "default": false,
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "thumbnail": {
+            "default": "",
+            "title": "Thumbnail",
+            "type": "string"
+          },
+          "transition": {
+            "$ref": "#/components/schemas/Transition"
+          },
+          "uses": {
+            "items": {
+              "enum": [
+                "tempo",
+                "music",
+                "home-assistant",
+                "sun"
+              ],
+              "type": "string"
+            },
+            "title": "Uses",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "category"
+        ],
+        "title": "Look",
+        "type": "object"
+      },
+      "LookModifiers": {
+        "properties": {
+          "brightnessCap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brightnesscap"
+          },
+          "downbeatFlash": {
+            "default": false,
+            "title": "Downbeatflash",
+            "type": "boolean"
+          },
+          "evening": {
+            "default": false,
+            "title": "Evening",
+            "type": "boolean"
+          },
+          "trailsS": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trailss"
+          }
+        },
+        "title": "LookModifiers",
+        "type": "object"
+      },
+      "MappingResponse": {
+        "properties": {
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "type": {
+            "enum": [
+              "linear",
+              "radial"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "params"
+        ],
+        "title": "MappingResponse",
+        "type": "object"
+      },
+      "Overlay": {
+        "properties": {
+          "endsAt": {
+            "format": "date-time",
+            "title": "Endsat",
+            "type": "string"
+          },
+          "lookId": {
+            "title": "Lookid",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lookId",
+          "name",
+          "trigger",
+          "endsAt",
+          "progress"
+        ],
+        "title": "Overlay",
+        "type": "object"
+      },
+      "PlacementResponse": {
+        "properties": {
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/GeometrySchema"
+          },
+          "led_count": {
+            "title": "Led Count",
+            "type": "integer"
+          },
+          "position": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Position",
+            "type": "array"
+          },
+          "strip_index": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strip Index"
+          }
+        },
+        "required": [
+          "device_id",
+          "position",
+          "geometry",
+          "led_count"
+        ],
+        "title": "PlacementResponse",
+        "type": "object"
+      },
+      "PresetResponse": {
+        "properties": {
+          "effect_class": {
+            "title": "Effect Class",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "effect_class",
+          "params"
+        ],
+        "title": "PresetResponse",
+        "type": "object"
+      },
+      "Running": {
+        "properties": {
+          "overlays": {
+            "items": {
+              "$ref": "#/components/schemas/Overlay"
+            },
+            "title": "Overlays",
+            "type": "array"
+          },
+          "zones": {
+            "items": {
+              "$ref": "#/components/schemas/RunningZone"
+            },
+            "title": "Zones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "zones"
+        ],
+        "title": "Running",
+        "type": "object"
+      },
+      "RunningZone": {
+        "properties": {
+          "brightness": {
+            "title": "Brightness",
+            "type": "number"
+          },
+          "covers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Covers",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunningZoneError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunningZoneFps"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lights": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lights",
+            "type": "array"
+          },
+          "lookId": {
+            "title": "Lookid",
+            "type": "string"
+          },
+          "lookName": {
+            "title": "Lookname",
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "slow",
+              "crashed",
+              "waiting",
+              "transition"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "transition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunningZoneTransition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waitingFor": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "tempo",
+                    "music",
+                    "home-assistant",
+                    "sun"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waitingfor"
+          },
+          "zoneId": {
+            "title": "Zoneid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "zoneId",
+          "lookId",
+          "lookName",
+          "since",
+          "brightness",
+          "lights",
+          "state"
+        ],
+        "title": "RunningZone",
+        "type": "object"
+      },
+      "RunningZoneError": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "layer": {
+            "title": "Layer",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layer",
+          "message",
+          "at"
+        ],
+        "title": "RunningZoneError",
+        "type": "object"
+      },
+      "RunningZoneFps": {
+        "properties": {
+          "actual": {
+            "title": "Actual",
+            "type": "number"
+          },
+          "target": {
+            "title": "Target",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "actual",
+          "target"
+        ],
+        "title": "RunningZoneFps",
+        "type": "object"
+      },
+      "RunningZoneTransition": {
+        "properties": {
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "cut",
+              "fade",
+              "wipe",
+              "spread",
+              "dissolve"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          }
+        },
+        "required": [
+          "from",
+          "kind",
+          "progress"
+        ],
+        "title": "RunningZoneTransition",
+        "type": "object"
+      },
+      "SceneResponse": {
+        "properties": {
+          "bounds": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bounds"
+          },
+          "mapping": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MappingResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "placements": {
+            "items": {
+              "$ref": "#/components/schemas/PlacementResponse"
+            },
+            "title": "Placements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "placements"
+        ],
+        "title": "SceneResponse",
+        "type": "object"
+      },
+      "SetEffectRequest": {
+        "properties": {
+          "effect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          }
+        },
+        "title": "SetEffectRequest",
+        "type": "object"
+      },
+      "SettingSchema": {
+        "properties": {
+          "bindable": {
+            "default": false,
+            "title": "Bindable",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "type": {
+            "enum": [
+              "number",
+              "colour",
+              "palette",
+              "anchor",
+              "point",
+              "zone",
+              "lights",
+              "range",
+              "boolean",
+              "choice"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type"
+        ],
+        "title": "SettingSchema",
+        "type": "object"
+      },
+      "SettingValue": {
+        "properties": {
+          "binding": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binding"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "SettingValue",
+        "type": "object"
+      },
+      "Starred": {
+        "properties": {
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "starred"
+        ],
+        "title": "Starred",
+        "type": "object"
+      },
+      "StartRequest": {
+        "properties": {
+          "look": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Look"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lookId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookid"
+          },
+          "transition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Transition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "StartRequest",
+        "type": "object"
+      },
+      "StartResponse": {
+        "properties": {
+          "brightness": {
+            "title": "Brightness",
+            "type": "number"
+          },
+          "covers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Covers",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunningZoneError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunningZoneFps"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lights": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lights",
+            "type": "array"
+          },
+          "lookId": {
+            "title": "Lookid",
+            "type": "string"
+          },
+          "lookName": {
+            "title": "Lookname",
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "slow",
+              "crashed",
+              "waiting",
+              "transition"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "takeOvers": {
+            "items": {
+              "$ref": "#/components/schemas/TakeOver"
+            },
+            "title": "Takeovers",
+            "type": "array"
+          },
+          "transition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunningZoneTransition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waitingFor": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "tempo",
+                    "music",
+                    "home-assistant",
+                    "sun"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waitingfor"
+          },
+          "zoneId": {
+            "title": "Zoneid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "zoneId",
+          "lookId",
+          "lookName",
+          "since",
+          "brightness",
+          "lights",
+          "state"
+        ],
+        "title": "StartResponse",
+        "type": "object"
+      },
+      "TakeOver": {
+        "properties": {
+          "lights": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lights",
+            "type": "array"
+          },
+          "lookName": {
+            "title": "Lookname",
+            "type": "string"
+          },
+          "stopped": {
+            "title": "Stopped",
+            "type": "boolean"
+          },
+          "zoneId": {
+            "title": "Zoneid",
+            "type": "string"
+          },
+          "zoneName": {
+            "title": "Zonename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "zoneId",
+          "zoneName",
+          "lookName",
+          "lights",
+          "stopped"
+        ],
+        "title": "TakeOver",
+        "type": "object"
+      },
+      "Transition": {
+        "properties": {
+          "durationS": {
+            "default": 0.0,
+            "title": "Durations",
+            "type": "number"
+          },
+          "kind": {
+            "default": "cut",
+            "enum": [
+              "cut",
+              "fade",
+              "wipe",
+              "spread",
+              "dissolve"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "Transition",
+        "type": "object"
+      },
+      "UpdateGroup": {
+        "properties": {
+          "lights": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lights"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "UpdateGroup",
+        "type": "object"
+      },
+      "UpdateMappingRequest": {
+        "properties": {
+          "params": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Params",
+            "type": "object"
+          },
+          "type": {
+            "enum": [
+              "linear",
+              "radial"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "UpdateMappingRequest",
+        "type": "object"
+      },
+      "UpdatePlacementRequest": {
+        "properties": {
+          "direction": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "enum": [
+                  "point",
+                  "strip",
+                  "matrix"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "led_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Led Count"
+          },
+          "length": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          }
+        },
+        "title": "UpdatePlacementRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Zone": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "home",
+              "room",
+              "sub-zone",
+              "group"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "lights": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lights",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "lights"
+        ],
+        "title": "Zone",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "dj-ledfx",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/attention": {
+      "get": {
+        "operationId": "list_attention_api_attention_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AttentionItem"
+                  },
+                  "title": "Response List Attention Api Attention Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Attention"
+      }
+    },
+    "/api/config": {
+      "get": {
+        "operationId": "get_config_api_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Config Api Config Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Config"
+      },
+      "put": {
+        "operationId": "update_config_api_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Config"
+      }
+    },
+    "/api/config/export": {
+      "get": {
+        "operationId": "export_config_api_config_export_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Export Config"
+      }
+    },
+    "/api/config/import": {
+      "post": {
+        "operationId": "import_config_api_config_import_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Import Config Api Config Import Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Import Config"
+      }
+    },
+    "/api/devices": {
+      "get": {
+        "operationId": "list_devices_api_devices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceResponse"
+                  },
+                  "title": "Response List Devices Api Devices Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Devices"
+      }
+    },
+    "/api/devices/discover": {
+      "post": {
+        "operationId": "discover_devices_api_devices_discover_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Discover Devices Api Devices Discover Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Discover Devices"
+      }
+    },
+    "/api/devices/groups": {
+      "get": {
+        "operationId": "list_groups_api_devices_groups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Groups Api Devices Groups Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Groups"
+      },
+      "post": {
+        "operationId": "create_group_api_devices_groups_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Group Api Devices Groups Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Group"
+      }
+    },
+    "/api/devices/groups/{name}": {
+      "delete": {
+        "operationId": "delete_group_api_devices_groups__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Group Api Devices Groups  Name  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Group"
+      }
+    },
+    "/api/devices/scan": {
+      "post": {
+        "description": "Trigger device discovery via DiscoveryOrchestrator if available, else fallback.",
+        "operationId": "scan_devices_api_devices_scan_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Scan Devices Api Devices Scan Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Scan Devices"
+      }
+    },
+    "/api/devices/{name}": {
+      "delete": {
+        "description": "Unregister (remove) a device by name.",
+        "operationId": "unregister_device_api_devices__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Unregister Device Api Devices  Name  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unregister Device"
+      }
+    },
+    "/api/devices/{name}/group": {
+      "put": {
+        "operationId": "assign_device_group_api_devices__name__group_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Assign Device Group Api Devices  Name  Group Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assign Device Group"
+      }
+    },
+    "/api/devices/{name}/identify": {
+      "post": {
+        "operationId": "identify_device_api_devices__name__identify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Identify Device"
+      }
+    },
+    "/api/devices/{name}/latency": {
+      "put": {
+        "operationId": "update_device_latency_api_devices__name__latency_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Update Device Latency Api Devices  Name  Latency Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Device Latency"
+      }
+    },
+    "/api/effects": {
+      "get": {
+        "operationId": "list_effects_api_effects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Effects Api Effects Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Effects"
+      }
+    },
+    "/api/effects/active": {
+      "get": {
+        "operationId": "get_active_effect_api_effects_active_get",
+        "parameters": [
+          {
+            "description": "The zone whose classic effect this is",
+            "in": "query",
+            "name": "zone",
+            "required": true,
+            "schema": {
+              "description": "The zone whose classic effect this is",
+              "title": "Zone",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveEffectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Active Effect"
+      },
+      "put": {
+        "description": "New settings apply in place; another effect starts its classic look on the zone.",
+        "operationId": "set_active_effect_api_effects_active_put",
+        "parameters": [
+          {
+            "description": "The zone whose classic effect this is",
+            "in": "query",
+            "name": "zone",
+            "required": true,
+            "schema": {
+              "description": "The zone whose classic effect this is",
+              "title": "Zone",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEffectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveEffectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Active Effect"
+      }
+    },
+    "/api/lights": {
+      "get": {
+        "operationId": "list_lights_api_lights_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Light"
+                  },
+                  "title": "Response List Lights Api Lights Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Lights"
+      }
+    },
+    "/api/looks": {
+      "get": {
+        "operationId": "list_looks_api_looks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Look"
+                  },
+                  "title": "Response List Looks Api Looks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Looks"
+      },
+      "post": {
+        "description": "Save a look as a new one (\"Mine\"). Built-ins are never overwritten.",
+        "operationId": "create_look_api_looks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Look"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Look"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Look"
+      }
+    },
+    "/api/looks/{look_id}": {
+      "delete": {
+        "operationId": "delete_look_api_looks__look_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "look_id",
+            "required": true,
+            "schema": {
+              "title": "Look Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Look"
+      },
+      "get": {
+        "operationId": "get_look_api_looks__look_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "look_id",
+            "required": true,
+            "schema": {
+              "title": "Look Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Look"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Look"
+      },
+      "put": {
+        "operationId": "update_look_api_looks__look_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "look_id",
+            "required": true,
+            "schema": {
+              "title": "Look Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Look"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Look"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Look"
+      }
+    },
+    "/api/looks/{look_id}/starred": {
+      "put": {
+        "operationId": "set_starred_api_looks__look_id__starred_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "look_id",
+            "required": true,
+            "schema": {
+              "title": "Look Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Starred"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Look"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Starred"
+      }
+    },
+    "/api/presets": {
+      "get": {
+        "operationId": "list_presets_api_presets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PresetResponse"
+                  },
+                  "title": "Response List Presets Api Presets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Presets"
+      },
+      "post": {
+        "description": "Save the classic effect the zone plays, with its settings.",
+        "operationId": "save_preset_api_presets_post",
+        "parameters": [
+          {
+            "description": "The zone whose classic effect this is",
+            "in": "query",
+            "name": "zone",
+            "required": true,
+            "schema": {
+              "description": "The zone whose classic effect this is",
+              "title": "Zone",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePresetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Preset"
+      }
+    },
+    "/api/presets/{name}": {
+      "delete": {
+        "operationId": "delete_preset_api_presets__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Preset Api Presets  Name  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Preset"
+      },
+      "put": {
+        "operationId": "update_preset_api_presets__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEffectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Preset"
+      }
+    },
+    "/api/presets/{name}/load": {
+      "post": {
+        "description": "Play the preset's effect, with its settings, on the zone.",
+        "operationId": "load_preset_api_presets__name__load_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The zone whose classic effect this is",
+            "in": "query",
+            "name": "zone",
+            "required": true,
+            "schema": {
+              "description": "The zone whose classic effect this is",
+              "title": "Zone",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveEffectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Load Preset"
+      }
+    },
+    "/api/running": {
+      "get": {
+        "operationId": "list_running_api_running_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Running"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Running"
+      }
+    },
+    "/api/running/stop-all": {
+      "post": {
+        "operationId": "stop_all_api_running_stop_all_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Stop All"
+      }
+    },
+    "/api/scene": {
+      "get": {
+        "operationId": "get_scene_api_scene_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Scene",
+        "tags": [
+          "scene"
+        ]
+      }
+    },
+    "/api/scene/devices": {
+      "get": {
+        "operationId": "get_scene_devices_api_scene_devices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlacementResponse"
+                  },
+                  "title": "Response Get Scene Devices Api Scene Devices Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Scene Devices",
+        "tags": [
+          "scene"
+        ]
+      }
+    },
+    "/api/scene/devices/{device_name}": {
+      "delete": {
+        "operationId": "delete_scene_device_api_scene_devices__device_name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_name",
+            "required": true,
+            "schema": {
+              "title": "Device Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Scene Device Api Scene Devices  Device Name  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Scene Device",
+        "tags": [
+          "scene"
+        ]
+      },
+      "put": {
+        "description": "Add or update a device placement.",
+        "operationId": "update_scene_device_api_scene_devices__device_name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_name",
+            "required": true,
+            "schema": {
+              "title": "Device Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlacementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Scene Device",
+        "tags": [
+          "scene"
+        ]
+      }
+    },
+    "/api/scene/mapping": {
+      "put": {
+        "operationId": "update_mapping_api_scene_mapping_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMappingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Mapping",
+        "tags": [
+          "scene"
+        ]
+      }
+    },
+    "/api/state/export": {
+      "get": {
+        "operationId": "export_state_api_state_export_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Export State"
+      }
+    },
+    "/api/state/import": {
+      "post": {
+        "description": "Restore a backup: the running looks give way to the file's, which start as a Start\nwould (ZoneManager.replace_state).",
+        "operationId": "import_state_api_state_import_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Import State Api State Import Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Import State"
+      }
+    },
+    "/api/zones": {
+      "get": {
+        "operationId": "list_zones_api_zones_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Zone"
+                  },
+                  "title": "Response List Zones Api Zones Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Zones"
+      }
+    },
+    "/api/zones/groups": {
+      "post": {
+        "operationId": "create_group_api_zones_groups_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGroup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Zone"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Group"
+      }
+    },
+    "/api/zones/groups/{zone_id}": {
+      "delete": {
+        "description": "Delete a group. A running group is turned off first.",
+        "operationId": "delete_group_api_zones_groups__zone_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Group"
+      },
+      "put": {
+        "operationId": "update_group_api_zones_groups__zone_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGroup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Zone"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Group"
+      }
+    },
+    "/api/zones/{zone_id}/brightness": {
+      "put": {
+        "operationId": "set_brightness_api_zones__zone_id__brightness_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Brightness"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunningZone"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Brightness"
+      }
+    },
+    "/api/zones/{zone_id}/off": {
+      "post": {
+        "description": "Stop the zone's look and put its lights back how they were. Idempotent.",
+        "operationId": "turn_off_api_zones__zone_id__off_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Turn Off"
+      }
+    },
+    "/api/zones/{zone_id}/restart": {
+      "post": {
+        "operationId": "restart_zone_api_zones__zone_id__restart_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunningZone"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restart Zone"
+      }
+    },
+    "/api/zones/{zone_id}/start": {
+      "post": {
+        "description": "Put a look on a zone: a saved look by id, or an unsaved draft.",
+        "operationId": "start_zone_api_zones__zone_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Zone"
+      }
+    }
+  }
+}

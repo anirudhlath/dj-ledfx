@@ -53,8 +53,11 @@ uv run python scripts/lifx_record_fixtures.py  # Record the LAN's LIFX replies i
 docker compose up -d --build     # Deploy: from the main checkout ~/code/private/dj-ledfx, after a merge (see Deployment)
 docker compose logs app          # The deployed app's log
 cd web && npm install            # New web app (F0–F11): install dependencies
-cd web && npm run dev            # Dev server at http://localhost:5174/next/ (proxies /api and /ws to :8080)
-cd web && npm run build          # Type-check and build web/dist; FastAPI serves it at /next
+cd web && npm run dev            # Dev server at http://localhost:5174/next/ (proxies /api and /ws to :8080); add ?scenario=<name> to run on the mocks (?still holds the beat, ?protocol=1 speaks as engine M1)
+cd web && npm run build          # Type-check and build web/dist; fails if MSW got in or the JS passes §14's budget; FastAPI serves it at /next
+cd web && npm run build:mock     # Build web/dist-mock: the app on its mocks (the hero unless ?scenario=), which e2e serves
+cd web && npm run api:types      # Regenerate web/src/api/generated/ from the backend's code, after any API change
+cd web && npm run api:check      # Fail if the generated types aren't the backend's; `-- --url http://127.0.0.1:8080` also compares a running server (GET only)
 cd web && npm test               # Vitest: unit and component tests
 cd web && npm run lint           # ESLint (npx tsc -b type-checks)
 cd web && npx playwright install chromium  # Once per machine
@@ -128,9 +131,12 @@ frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 + Base UI; served at /next until F11):
 - `src/styles/tokens.css`, `src/design/icons.ts` — byte copies of `docs/design/web-app/`, changed only by `cp` (keep search-and-replace away from them); `src/design/payload.node.test.ts` fails if either drifts
 - `src/design/` — the spec's §6.1 primitives and `Icon`, and the page's one status region (`Announcer`, `useAnnounce()`)
-- `src/chrome/` — the §6.2 always-within-reach cluster; `state.ts` holds its data types (`ChromeState`, `TempoState`, `Connection`) and `useChrome()` (a hero fixture until F1/F3)
+- `src/chrome/` — the §6.2 always-within-reach cluster; `live.tsx` puts each part on its own slice of the live store (`hooks.ts`) and draws nothing before its data; `state.ts` holds the chrome's data types and `HERO_CHROME`, which the specimen draws and which supplies the server name and the sunset until F6; preview only is the server's `transport`, read from the live store
+- `src/api/` — the data layer (§12); components never call `fetch` or touch the socket. `generated/` (the backend's OpenAPI schema and openapi-typescript's types, committed), `contract.ts` (generated aliases, and the pending types later engine milestones serve), `rest.ts` (`api.*`), `live-client.ts` (the one socket: backoff, silence watchdog, resync, frame protocol handshake), `live-store.ts` (zustand; `useLive(selector)`), `frames.ts` (`FrameStore`: reused typed arrays React never watches), `beat.ts` (`BeatClock`), `queries.ts` (TanStack Query), `live.ts` (the app's singletons; `startDataLayer()`, and `resetDataLayer()` for tests)
+- `src/api/mocks/` — `MockServer` plays a §12.5 scenario (REST, channels, animated frames) from byte copies of `home.json` and `looks.json`; MSW puts it behind fetch and WebSocket in dev (`?scenario=`) and in `dist-mock`; tests reach it through `inMemorySockets()`
+- `scripts/dump_openapi.py` prints the backend's OpenAPI schema from the code, with no server
 - `src/shell/` — rail, top bar, tab bar, phone header; `AppShell` swaps desktop and phone chrome at the phone breakpoint without remounting the page
-- `src/app/` — routes (§4.3), each with a `PageMeta` handle for its titles and context lines; pages sit in a pathless route whose `errorElement` keeps the chrome, and the root route's catches `AppShell` itself
+- `src/app/` — `boot.tsx` (starts the mocks when asked, then the data layer and the router; `main.tsx` only calls it), routes (§4.3), each with a `PageMeta` handle for its titles and context lines; pages sit in a pathless route whose `errorElement` keeps the chrome, and the root route's catches `AppShell` itself
 - `src/pages/` — placeholders, not-found and error pages (all drawn by `EmptyState`), and the unlinked `/system` specimen
 - `src/lib/` — formatters and the viewport and clock hooks (`useIsPhone`, `useNow`)
 - `e2e/` — Playwright specs and the committed screenshot baselines
@@ -206,6 +212,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern; `tests/web/conftest.py` shares `mock_deps()`, `write_dist()` and `static_client()` for `create_app`
 - `tests/web/` covers all REST routers and WebSocket hub; `tests/test_main.py` runs the app in a subprocess and checks a SIGTERM shutdown logs no traceback
 - Gates compare with a baseline: no new mypy errors (compare `uv run mypy src/` output with the branch's starting point) and no format findings; perf benchmarks are deselected (`-m perf` runs them)
+- `tests/web/test_openapi_types.py` fails when `web/src/api/generated/openapi.json` isn't the backend's schema; `cd web && npm run api:types` regenerates it
 
 ## Gotchas
 
@@ -245,7 +252,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Web app: where tokens.css has a token, use its utility (`text-data`, `h-(--touch-min)`), never an arbitrary value equal to it
 - Web app: `@import "./tokens.css" theme(static)` keeps every token as a CSS variable, even ones no class uses
 - Web app: Vite's dev and preview servers only answer below `/next/` — a bare `/next` is a 404 there and a missing asset gets index.html; FastAPI handles both (tests/web/test_next_static.py)
-- Web app: React Router won't match a bare `/next` against a `/next/` basename, so `main.tsx` passes `routerBasename(import.meta.env.BASE_URL)`; Vitest reports `BASE_URL` as `/` whatever `base` says, so tests pass `routerBasename('/next/')`
+- Web app: React Router won't match a bare `/next` against a `/next/` basename, so `app/boot.tsx` passes `routerBasename(import.meta.env.BASE_URL)`; Vitest reports `BASE_URL` as `/` whatever `base` says, so tests pass `routerBasename('/next/')`
 - Web app: Base UI tooltips are visual only (their popups are `aria-hidden`); icon-only triggers still need `aria-label`
 - Web app: Base UI clones a `trigger` element and adds props and a ref, so a component used as one spreads the rest of `ComponentProps<'button'>` onto its button (React 19 passes `ref` as a prop; see `AttentionButton`)
 - Web app: axe's region rule flags a popup portaled loose into `<body>` unless it's a dialog; the Select list portals into the dialog or `<main>` around its trigger, and a new overlay joins `OVERLAYS` in `e2e/shell.spec.ts`
@@ -254,5 +261,17 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Web app: where a render draws a control smaller than `--touch-min`, keep the drawn face and add the `touch-target` utility from app.css (`max-md:touch-target` on a phone-only control, like TempoModule's TAP); it grows the hit area and never shrinks one
 - Web app: `AppShell`'s root alone pads by all four `env(safe-area-inset-*)` (index.html sets `viewport-fit=cover`), in both layouts; a phone turned sideways is wider than the phone breakpoint and gets the desktop chrome. Keep insets off the rail, the bars and `<main>`. e2e fakes a notch with CDP `Emulation.setSafeAreaInsetsOverride` and checks landmark edges
 - Web app: jsdom has no `matchMedia`; component tests resize with `setViewportWidth()` from `src/test/viewport.ts`
-- Web app: `npm run e2e` builds and serves the bundle on :4174 with `strictPort` and no server reuse, so only one worktree can run it at a time
+- Web app: `npm run e2e` builds the mock bundle (`dist-mock`) and serves it on :4174, and the production bundle on :4175 for e2e/production.spec.ts (no backend, so it says Reconnecting), both with `strictPort` and no server reuse, so only one worktree can run it at a time; `vite preview` proxies nothing, so e2e never reaches a real server
 - Web app: Playwright baselines are per OS (`*-linux.png`); re-record with `npm run e2e -- --update-snapshots` only after comparing with the reference renders by eye
+- Web app: a backend API change (a route, a contract model) needs `cd web && npm run api:types` in the same commit, or tests/web/test_openapi_types.py fails; when the backend starts serving a type `contract.ts` wrote by hand, `contract.test.ts` fails `tsc -b` until the hand-written type becomes the generated alias
+- Web app: MSW's worker comes from the msw package (`msw/mockServiceWorker.js`), served by the `mswWorker()` plugin in vite.config.ts in dev and emitted into `dist-mock`, never into a production build; `scripts/check-dist.ts` fails `npm run build` if MSW, the mock fixtures or home.json gets in. ESLint keeps `@/api/mocks/*`, `fetch` and `WebSocket` inside src/api/
+- Web app: if MSW's worker fails to register (plain http off localhost), app/boot.tsx draws "The mocks didn't start" with the browser's reason instead of a blank page
+- Web app: the chrome and the pages read the live store a slice at a time (`useLive(selector)`); a selector that builds an object needs `useLiveShallow`, or its component redraws on every message. Frames never go into React state
+- Web app: the beat clock and the link's watchdog run on `performance.now()` (`clientNow()`), which Playwright's `page.clock.setFixedTime` leaves running; the mock's times come from `Date`, so a fixed clock still shows the renders' times
+- Web app: e2e runs on the mock, which renders only once MSW's worker is up, so a Playwright test waits for the data (`open()` in e2e/shell.spec.ts waits for the attention button, whatever it says) before `document.fonts.ready`; a test that measures the tempo waits for it with `tempo()`, and a screenshot opens with `openStill()` (`?still` holds the beat)
+- Web app: a test running a `MockServer` through `inMemorySockets()` advances fake timers with `await vi.advanceTimersByTimeAsync()`, because the socket delivers in microtasks; `startMockServer()` and `startMockDataLayer()` in src/test/live.ts start one on `Date.now()` and stop it after the test; `startDataLayer()` stops the client it started before, so there is one socket at a time
+- Web app: the shared test setup calls `resetDataLayer()` after each test (the client stopped; the live store, frames, beat clock and REST cache empty); a component test that needs the server's data seeds it with `seedLive()` from src/test/live.ts
+- Web app: the owner renamed room `corridor` for display through `OWNER_ROOM_NAMES` in src/api/mocks/fixtures.ts, as engine M2's seed does; the byte copy of home.json stays as it is, and a room name is read through `roomName()` or the fixtures, never from the JSON
+- Web app: "Start again" is `api.recentLooks()` (`GET /api/running/recent`), newest stop first; one tap is `api.start(zoneId, { lookId })`, and the mock remembers stops as engine M2 does
+- Web app: Vitest strips types without checking them, so `npx tsc -b` is the type gate: a class with two members of one name runs in Vitest with the later one silently winning
+- Web app: MSW's Node server makes Node 26 print `ExperimentalWarning: localStorage is not available` in node-environment tests; it's harmless

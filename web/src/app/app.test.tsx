@@ -1,10 +1,11 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect } from 'react'
-import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router'
+import type { RouteObject } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderApp } from '@/test/app'
+import { HERO_NOW, seedLive } from '@/test/live'
 import { setViewportWidth } from '@/test/viewport'
-import { routerBasename } from './router'
 import { routes } from './routes'
 
 /** The real routes, with one test-only page beside the real pages. */
@@ -20,17 +21,12 @@ function Broken(): never {
   throw new Error('boom')
 }
 
-function renderApp(path: string, routeList: RouteObject[] = routes) {
-  // Vite's base, as main.tsx gets it. Vitest reports '/' for import.meta.env.BASE_URL, so it's literal.
-  const router = createMemoryRouter(routeList, { basename: routerBasename('/next/'), initialEntries: [path] })
-  render(<RouterProvider router={router} />)
-  return router
-}
-
-// The hero moment; the shared setup puts the real clock back after each test.
+// The hero moment, with the hero's server already heard; the shared setup puts the real clock back
+// and empties the store after each test.
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
-  vi.setSystemTime(new Date(2026, 8, 23, 19, 14))
+  vi.setSystemTime(HERO_NOW)
+  seedLive()
 })
 
 describe('routes', () => {
@@ -63,7 +59,7 @@ describe('routes', () => {
   // rest of the app is still a click away.
   it('shows its own error page inside the shell when a page throws', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    renderApp('/next/broken', withPage({ path: 'broken', element: <Broken /> }))
+    renderApp('/next/broken', { routes: withPage({ path: 'broken', element: <Broken /> }) })
     const heading = await screen.findByRole('heading', { name: 'Something broke' })
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
@@ -77,7 +73,7 @@ describe('routes', () => {
 
   it('shows a whole-page error, with its own landmark, when the shell itself throws', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    renderApp('/next/live', [{ ...routes[0], element: <Broken /> }])
+    renderApp('/next/live', { routes: [{ ...routes[0], element: <Broken /> }] })
     const main = await screen.findByRole('main')
     expect(within(main).getByRole('heading', { level: 1, name: 'Something broke' })).toBeInTheDocument()
     expect(within(main).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
@@ -173,7 +169,7 @@ it('swaps the chrome live across the breakpoint without remounting the page', as
     }, [])
     return <p>probe</p>
   }
-  renderApp('/next/probe', withPage({ path: 'probe', element: <Probe /> }))
+  renderApp('/next/probe', { routes: withPage({ path: 'probe', element: <Probe /> }) })
   expect(await screen.findByText('probe')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'dj-ledfx home' })).toBeInTheDocument()
 

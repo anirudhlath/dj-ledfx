@@ -24,9 +24,38 @@ const ROUTES = [
 // Every product page. /next/system is a specimen, and some of its rows are wider than a phone.
 const PAGES = ROUTES.filter((path) => path !== '/next/system')
 
+/** Whether the page has the phone's chrome: narrower than the 768 px where it swaps. */
+function isPhone(page: Page): boolean {
+  return (page.viewportSize()?.width ?? 0) < 768
+}
+
+/**
+ * Opens a page and waits for the chrome's first data from the mock (the hero, unless the path asks
+ * for another scenario): the attention button, whatever it says. A test that measures the tempo
+ * waits for it with tempo().
+ */
 async function open(page: Page, path: string) {
   await page.goto(path)
+  // The mock build renders once MSW's worker is up (app/boot.tsx), so the chrome comes first, then its fonts.
+  await expect(page.getByRole('banner').getByRole('button', { name: /needs attention$|^All good$/ })).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
+}
+
+/** The banner's tempo module, once the first beat has drawn it. */
+async function tempo(page: Page): Promise<Locator> {
+  const group = page.getByRole('banner').getByRole('group', { name: 'Tempo' })
+  await expect(group).toBeVisible()
+  return group
+}
+
+/**
+ * open(), with the beat held, the tempo drawn and the frame rate settled, so a screenshot is the
+ * same every run. Both screenshots show the banner's tempo; the phone shows no frame rate while live.
+ */
+async function openStill(page: Page, path: string) {
+  await open(page, `${path}?still`)
+  await tempo(page)
+  if (!isPhone(page)) await expect(page.getByRole('banner').getByText('60 fps')).toBeVisible({ timeout: 10_000 })
 }
 
 /** axe's findings for the page as it stands, one line per rule. */
@@ -71,9 +100,9 @@ function spill(group: Locator): Promise<number> {
 async function expectTapInside(page: Page, modules: number) {
   await open(page, '/next/system')
   await expect(page.getByText('Always within reach')).toBeVisible()
-  const groups = await page.getByRole('group', { name: 'Tempo' }).all()
-  expect(groups).toHaveLength(modules)
-  for (const [i, group] of groups.entries()) {
+  const tempos = page.getByRole('group', { name: 'Tempo' })
+  await expect(tempos).toHaveCount(modules)
+  for (const [i, group] of (await tempos.all()).entries()) {
     expect(await spill(group), `Tempo group ${i + 1}`).toBeLessThanOrEqual(0)
   }
 }
@@ -83,8 +112,9 @@ test.beforeEach(async ({ page }) => {
 })
 
 // Done when (spec §13.1 M0): the chrome matches Main.png at 1440 × 900 and Phone-Live.png at 390 × 844.
+// Since F1 the chrome is the mock's hero, beat held; the pixels are F0's.
 test('Live chrome', async ({ page }) => {
-  await open(page, '/next/live')
+  await openStill(page, '/next/live')
   await expect(page).toHaveScreenshot('live.png')
 })
 
@@ -157,13 +187,14 @@ test.describe('desktop', () => {
   // screen; on a phone the page scrolls inside <main>, so a screenshot would show only its top
   // (axe checks the whole phone page above).
   test('System specimen', async ({ page }) => {
-    await open(page, '/next/system')
+    await openStill(page, '/next/system')
     await expect(page.getByText('Always within reach')).toBeVisible()
     await expect(page).toHaveScreenshot('system.png')
   })
 
   test('the keyboard walks the rail, then the cluster', async ({ page }) => {
     await open(page, '/next/live')
+    await tempo(page)
     const names: string[] = []
     for (let i = 0; i < 11; i += 1) {
       await page.keyboard.press('Tab')
@@ -219,10 +250,10 @@ test.describe('desktop', () => {
         expect(documentWidth, `${path}: the document`).toBeLessThanOrEqual(width)
         expect(mainOverflow, `${path}: <main>`).toBeLessThanOrEqual(0)
       }
-      if (width < 768) {
+      if (isPhone(page)) {
         await open(page, '/next/live')
         // The phone tempo strip is fluid: TAP must stay inside it down to 320 px (WCAG reflow).
-        expect(await spill(page.getByRole('group', { name: 'Tempo' }))).toBeLessThanOrEqual(0)
+        expect(await spill(await tempo(page))).toBeLessThanOrEqual(0)
       }
     })
   }
@@ -242,6 +273,7 @@ test.describe('desktop', () => {
         .evaluateAll((groups) => groups.map((g) => ({ width: g.getBoundingClientRect().width, gap: getComputedStyle(g).columnGap })))
     await page.setViewportSize({ width: 320, height: 900 })
     await open(page, '/next/live')
+    await tempo(page)
     const [phone] = await strips()
     await page.setViewportSize({ width: 1440, height: 900 })
     await open(page, '/next/system')
@@ -258,7 +290,7 @@ test.describe('phone', () => {
   // hit area fills a 44 px band centred on it.
   test('TAP answers a touch anywhere in a 44 px band on phone', async ({ page }) => {
     await open(page, '/next/live')
-    const box = await page.getByRole('group', { name: 'Tempo' }).getByRole('button', { name: 'Tap' }).boundingBox()
+    const box = await (await tempo(page)).getByRole('button', { name: 'Tap' }).boundingBox()
     if (!box) throw new Error('TAP is not on screen')
     const [x, middle] = [box.x + box.width / 2, box.y + box.height / 2]
     const hits = await page.evaluate(
@@ -283,6 +315,7 @@ test.describe('phone', () => {
     const insets = { top: 47, right: 0, bottom: 34, left: 0 }
     await notch(page, insets)
     await open(page, '/next/live')
+    await tempo(page) // part of the chrome measured
     expect(await outsideSafeArea(page, insets)).toEqual([])
   })
 
@@ -294,6 +327,7 @@ test.describe('phone', () => {
     await page.setViewportSize({ width, height })
     await notch(page, insets)
     await open(page, '/next/live')
+    await tempo(page) // part of the chrome measured
     expect(await outsideSafeArea(page, insets)).toEqual([])
 
     // The page itself never scrolls; the rail and <main> scroll by themselves.

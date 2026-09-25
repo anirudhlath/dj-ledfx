@@ -188,7 +188,7 @@ def create_app(
         if assets_dir.is_dir():
             app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-        @app.get("/{full_path:path}")
+        @app.get("/{full_path:path}", include_in_schema=False)
         async def spa_fallback(full_path: str) -> FileResponse:
             """Serve index.html for all non-API routes (SPA client-side routing)."""
             if full_path.startswith("api/"):
