@@ -16,7 +16,15 @@ from loguru import logger
 
 from dj_ledfx.effects.context import render_context
 from dj_ledfx.effects.firmware import FirmwareEffect
-from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
+from dj_ledfx.effects.ledset import (
+    NO_ROOM,
+    NO_SPACE,
+    LedSet,
+    LedSource,
+    PlacedLeds,
+    Space,
+    build_ledset,
+)
 from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.looks.model import (
     Layer,
@@ -67,12 +75,15 @@ def _layout(look: Look) -> list[tuple[str, str, str, bool]]:
 
 @dataclass(frozen=True, slots=True)
 class ZoneLight:
-    """One light as its zone sees it."""
+    """One light as its zone sees it: where the home map puts its LEDs (None: not placed)
+    and its room's index in the zone's Space.rooms."""
 
     device_id: str
     led_count: int
     caps: DeviceCapabilities
     geometry: DeviceGeometry | None = None
+    placed: PlacedLeds | None = None
+    room: int = NO_ROOM
 
 
 class ZoneRuntime:
@@ -90,6 +101,7 @@ class ZoneRuntime:
         max_lookahead_s: float = 1.0,
         brightness: float = 1.0,
         seed: int = 0,
+        space: Space = NO_SPACE,
         timer: Callable[[], float] = time.perf_counter,
         now: Callable[[], datetime] = utcnow,
         on_state_change: Callable[[ZoneRuntime], None] | None = None,
@@ -129,6 +141,7 @@ class ZoneRuntime:
         self._capacity = int(max_lookahead_s * fps) + 2
         self.ring: RingBuffer
         self.leds: LedSet
+        self._space = space
         self._place(lights)
         self._compile()
 
@@ -137,6 +150,10 @@ class ZoneRuntime:
     @property
     def lights(self) -> tuple[ZoneLight, ...]:
         return self._lights
+
+    @property
+    def space(self) -> Space:
+        return self._space
 
     @property
     def field_effect(self) -> FieldEffect | None:
@@ -203,8 +220,11 @@ class ZoneRuntime:
 
     # --- changes --------------------------------------------------------------------
 
-    def set_lights(self, lights: Sequence[ZoneLight]) -> None:
-        """Rebuild the LED set and start a fresh ring, so no route outlives its frames."""
+    def set_lights(self, lights: Sequence[ZoneLight], space: Space | None = None) -> None:
+        """Rebuild the LED set, in a new space if one is given, and start a fresh ring,
+        so no route outlives its frames."""
+        if space is not None:
+            self._space = space
         self._place(lights)
         self._plan_claims()
 
@@ -319,7 +339,13 @@ class ZoneRuntime:
     def _place(self, lights: Sequence[ZoneLight]) -> None:
         self._lights = tuple(lights)
         self.leds = build_ledset(
-            [LedSource(light.device_id, light.led_count, light.geometry) for light in self._lights]
+            [
+                LedSource(
+                    light.device_id, light.led_count, light.geometry, light.placed, light.room
+                )
+                for light in self._lights
+            ],
+            self._space,
         )
         self.ring = RingBuffer(self._capacity)
         self._emulated &= {light.device_id for light in self._lights}

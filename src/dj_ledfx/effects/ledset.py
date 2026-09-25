@@ -1,15 +1,17 @@
 """A zone's LEDs in one fixed order, with positions (spec §5.1).
 
-M1 has no home map, so build_ledset() lays the zone's devices side by side along x,
-each in its own geometry: matrices hang with row 0 at the top, strips follow their
-direction, and anything else is a vertical strip with its first LED at the bottom.
-M2 replaces the layout with home-map placements; the arrays stay the same.
+Each light's LEDs sit where the home map puts them: home/shapes.py turns a placement into
+PlacedLeds. A light the map doesn't place yet (or whose placement is for another LED
+count) is laid out as M1 did, in its own geometry beside the other unplaced lights, and
+that group is moved to the placed lights' mean, or to the home's centre when nothing is
+placed, so an effect never sees it at the origin. The set also carries the zone's Space:
+the anchors, rooms and ceiling its effects can ask about.
 """
 
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from types import MappingProxyType
 
@@ -25,6 +27,13 @@ from dj_ledfx.spatial.geometry import (
 
 LED_PITCH_M = 0.03
 DEVICE_GAP_M = 0.5
+NO_ROOM = -1
+
+Vec3 = tuple[float, float, float]
+
+
+def _no_points() -> Mapping[str, NDArray[np.float32]]:
+    return MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,13 +47,71 @@ class DeviceSlice:
         return self.stop - self.start
 
 
+@dataclass(frozen=True, eq=False, slots=True)
+class PlacedLeds:
+    """One light's LEDs where the home map puts them, in LED order."""
+
+    pos: NDArray[np.float64]  # (n, 3) metres on the map
+    local: NDArray[np.float64]  # (n, 3) 0..1 within the light's own shape, z up
+    local_u: NDArray[np.float64]  # (n,) 0..1 along the LED order
+
+    @property
+    def count(self) -> int:
+        return int(self.pos.shape[0])
+
+    @classmethod
+    def from_positions(cls, pos: NDArray[np.float64]) -> PlacedLeds:
+        """LEDs at these positions, their local positions taken from their own bounds."""
+        points = np.asarray(pos, dtype=np.float64).reshape(-1, 3)
+        if len(points) == 0:
+            return cls(points, np.zeros((0, 3)), np.zeros(0))
+        local = _normalise(points, points.min(axis=0), points.max(axis=0))
+        return cls(points, local, _along(len(points)))
+
+    # By value, so ZoneLights compare as the zone manager expects (numpy's == doesn't).
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PlacedLeds):
+            return NotImplemented
+        return (
+            np.array_equal(self.pos, other.pos)
+            and np.array_equal(self.local, other.local)
+            and np.array_equal(self.local_u, other.local_u)
+        )
+
+    def __hash__(self) -> int:
+        return hash(self.pos.tobytes())
+
+
+@dataclass(frozen=True, eq=False)
+class Space:
+    """What a zone's effects know of the home around its LEDs (spec §5.1, §6.1).
+
+    anchors: each anchor's position, (3,). anchor_points: every point of each anchor,
+    (k, 3), so the speaker pair has two. rooms: room ids, indexed by LedSet.room.
+    ceiling: metres, None without a map. centre: where unplaced lights gather when
+    none of the zone's lights is placed.
+    """
+
+    anchors: Mapping[str, NDArray[np.float32]] = field(default_factory=_no_points)
+    anchor_points: Mapping[str, NDArray[np.float32]] = field(default_factory=_no_points)
+    rooms: tuple[str, ...] = ()
+    ceiling: float | None = None
+    centre: Vec3 | None = None
+
+
+NO_SPACE = Space()
+
+
 @dataclass(frozen=True, slots=True)
 class LedSource:
-    """One device's share of a zone: its id, LED count and own geometry."""
+    """One device's share of a zone: its id, LED count and own geometry, and where the
+    home map puts its LEDs (None: not placed) in which room (an index into Space.rooms)."""
 
     device_id: str
     led_count: int
     geometry: DeviceGeometry | None = None
+    placed: PlacedLeds | None = None
+    room: int = NO_ROOM
 
 
 @dataclass(frozen=True, eq=False)
@@ -53,14 +120,18 @@ class LedSet:
     npos: NDArray[np.float32]  # (N, 3) normalised to the zone's bounds
     local: NDArray[np.float32]  # (N, 3) normalised to each device's own bounds
     local_u: NDArray[np.float32]  # (N,) position along the device's LED order
-    room: NDArray[np.int32]  # (N,) room ids, all 0 until M2
+    room: NDArray[np.int32]  # (N,) index into space.rooms, NO_ROOM for none
     device: NDArray[np.int32]  # (N,) index into `slices`
-    anchors: Mapping[str, NDArray[np.float32]]
     slices: tuple[DeviceSlice, ...]
+    space: Space = NO_SPACE
 
     @property
     def count(self) -> int:
         return int(self.pos.shape[0])
+
+    @property
+    def anchors(self) -> Mapping[str, NDArray[np.float32]]:
+        return self.space.anchors
 
     @cached_property
     def _by_device(self) -> Mapping[str, DeviceSlice]:
@@ -90,34 +161,47 @@ class LedSet:
             local_u=self.local_u[index],
             room=self.room[index],
             device=self.device[index],
-            anchors=self.anchors,
             slices=tuple(slices),
+            space=self.space,
         )
 
 
-def build_ledset(sources: Sequence[LedSource], gap_m: float = DEVICE_GAP_M) -> LedSet:
+def build_ledset(
+    sources: Sequence[LedSource], space: Space = NO_SPACE, gap_m: float = DEVICE_GAP_M
+) -> LedSet:
     positions: list[NDArray[np.float64]] = []
     locals_: list[NDArray[np.float64]] = []
     along: list[NDArray[np.float64]] = []
     owners: list[NDArray[np.int32]] = []
+    rooms: list[NDArray[np.int32]] = []
     slices: list[DeviceSlice] = []
+    loose: list[int] = []  # which entries of `positions` the map doesn't place
     cursor_x = 0.0
     start = 0
     for index, source in enumerate(sources):
         count = max(0, source.led_count)
         if count:
-            local = _local_positions(source.geometry, count)
-            low = local.min(axis=0)
-            high = local.max(axis=0)
-            placed = local - low
-            placed[:, 0] += cursor_x
-            cursor_x += float(high[0] - low[0]) + gap_m
-            positions.append(placed)
-            locals_.append(_normalise(local, low, high))
-            along.append(np.arange(count) / (count - 1) if count > 1 else np.zeros(1))
+            placed = source.placed
+            if placed is not None and placed.count == count:
+                positions.append(placed.pos)
+                locals_.append(placed.local)
+                along.append(placed.local_u)
+            else:
+                local = _local_positions(source.geometry, count)
+                low = local.min(axis=0)
+                high = local.max(axis=0)
+                laid = local - low
+                laid[:, 0] += cursor_x
+                cursor_x += float(high[0] - low[0]) + gap_m
+                loose.append(len(positions))
+                positions.append(laid)
+                locals_.append(_normalise(local, low, high))
+                along.append(_along(count))
             owners.append(np.full(count, index, dtype=np.int32))
+            rooms.append(np.full(count, source.room, dtype=np.int32))
         slices.append(DeviceSlice(source.device_id, start, start + count))
         start += count
+    _gather(positions, loose, space.centre)
 
     pos = np.concatenate(positions) if positions else np.zeros((0, 3))
     npos = _normalise(pos, pos.min(axis=0), pos.max(axis=0)) if len(pos) else pos
@@ -126,11 +210,36 @@ def build_ledset(sources: Sequence[LedSource], gap_m: float = DEVICE_GAP_M) -> L
         npos=npos.astype(np.float32),
         local=(np.concatenate(locals_) if locals_ else np.zeros((0, 3))).astype(np.float32),
         local_u=(np.concatenate(along) if along else np.zeros(0)).astype(np.float32),
-        room=np.zeros(len(pos), dtype=np.int32),
+        room=np.concatenate(rooms) if rooms else np.zeros(0, dtype=np.int32),
         device=np.concatenate(owners) if owners else np.zeros(0, dtype=np.int32),
-        anchors=MappingProxyType({}),
         slices=tuple(slices),
+        space=space,
     )
+
+
+def _gather(
+    positions: list[NDArray[np.float64]], loose: Sequence[int], centre: Vec3 | None
+) -> None:
+    """Move the unplaced lights, as one group, so the middle of their bounds sits at the
+    placed lights' mean, or at the home's centre when nothing is placed."""
+    if not loose:
+        return
+    unplaced = set(loose)
+    placed = [points for index, points in enumerate(positions) if index not in unplaced]
+    if placed:
+        target = np.concatenate(placed).mean(axis=0)
+    elif centre is not None:
+        target = np.asarray(centre, dtype=np.float64)
+    else:
+        return
+    group = np.concatenate([positions[index] for index in loose])
+    shift = target - (group.min(axis=0) + group.max(axis=0)) / 2.0
+    for index in loose:
+        positions[index] = positions[index] + shift
+
+
+def _along(count: int) -> NDArray[np.float64]:
+    return np.arange(count) / (count - 1) if count > 1 else np.zeros(1)
 
 
 def _normalise(
