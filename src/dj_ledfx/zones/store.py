@@ -6,7 +6,7 @@ import json
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
@@ -15,7 +15,9 @@ from dj_ledfx.timing import as_utc, utcnow
 from dj_ledfx.zones.model import (
     ALL_LIGHTS_ZONE_ID,
     DERIVED_KINDS,
+    RECENT_LIMIT,
     Assignment,
+    StoppedLook,
     ZoneKind,
     ZoneRecord,
 )
@@ -50,6 +52,11 @@ def _time(text: str, zone_id: str) -> datetime:
         logger.warning("Zone {}: unreadable start time {!r}; using now", zone_id, text)
         return utcnow()
     return as_utc(value)
+
+
+def _utc(when: datetime) -> str:
+    """A time as UTC text, so that recent_looks' text compares as the times do."""
+    return as_utc(when).astimezone(UTC).isoformat()
 
 
 class ZoneStore:
@@ -143,6 +150,48 @@ class ZoneStore:
         await self._db.write_many(
             [("DELETE FROM zone_assignments WHERE zone_id=?", (zone_id,)) for zone_id in zone_ids]
         )
+
+    async def remember(self, stopped: Iterable[StoppedLook]) -> None:
+        """Remember looks that stopped, for "Start again" (ruling 19). Each zone and look
+        keeps its newest stop, and only the RECENT_LIMIT newest stay."""
+        statements: list[Statement] = [
+            (
+                "INSERT INTO recent_looks (zone_id, look_id, started_at, stopped_at) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(zone_id, look_id) DO UPDATE SET started_at=excluded.started_at, "
+                "stopped_at=excluded.stopped_at "
+                "WHERE excluded.stopped_at >= recent_looks.stopped_at",
+                (entry.zone_id, entry.look_id, _utc(entry.started_at), _utc(entry.stopped_at)),
+            )
+            for entry in stopped
+        ]
+        if not statements:
+            return
+        statements.append(
+            (
+                "DELETE FROM recent_looks WHERE rowid NOT IN (SELECT rowid FROM recent_looks "
+                "ORDER BY stopped_at DESC, started_at DESC LIMIT ?)",
+                (RECENT_LIMIT,),
+            )
+        )
+        await self._db.write_many(statements)
+
+    async def load_recent(self) -> list[StoppedLook]:
+        """The remembered looks, the newest stop first; of two stopped together, the newer
+        start first."""
+        rows = await self._db.fetch_all(
+            "SELECT zone_id, look_id, started_at, stopped_at FROM recent_looks"
+        )
+        recent: list[StoppedLook] = []
+        for zone_id, look_id, started_at, stopped_at in rows:
+            try:
+                started = datetime.fromisoformat(started_at)
+                stopped = datetime.fromisoformat(stopped_at)
+            except ValueError:
+                logger.warning("Zone {}: unreadable times for look {}; left out", zone_id, look_id)
+                continue
+            recent.append(StoppedLook(zone_id, look_id, as_utc(started), as_utc(stopped)))
+        return sorted(recent, key=lambda entry: (entry.stopped_at, entry.started_at), reverse=True)
 
     async def migrate_scenes_once(self) -> None:
         """Turn each scene into a device-group zone, once (spec §6.5). Nothing runs after."""

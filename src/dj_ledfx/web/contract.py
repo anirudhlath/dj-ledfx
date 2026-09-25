@@ -29,7 +29,13 @@ from dj_ledfx.types import RGB, DeviceStats
 from dj_ledfx.zones import attention
 from dj_ledfx.zones.attention import AttentionAction, AttentionKind, Severity, SubjectType
 from dj_ledfx.zones.lights import LightState, LightStatus
-from dj_ledfx.zones.model import RunningZoneInfo, StartResult, ZoneKind, ZoneRecord
+from dj_ledfx.zones.model import (
+    RecentLookInfo,
+    RunningZoneInfo,
+    StartResult,
+    ZoneKind,
+    ZoneRecord,
+)
 from dj_ledfx.zones.runtime import ZoneState
 
 
@@ -189,6 +195,18 @@ class TakeOver(ContractModel):
     stopped: bool  # it had none left, so it stopped
 
 
+class RecentLook(ContractModel):
+    """A look that stopped, for "Start again" (web spec §9.4). §12.2 has no such type: the
+    M2 plan's ruling 19 shapes it, and F1 types it by hand until the backend serves it."""
+
+    zone_id: str
+    zone_name: str
+    look_id: str
+    look_name: str
+    started_at: datetime
+    stopped_at: datetime
+
+
 class StartRequest(ContractModel):
     look_id: str | None = None
     look: Look | None = None  # an unsaved draft
@@ -262,6 +280,17 @@ def start_out(result: StartResult, index: LightIndex) -> StartResponse:
     ]
     fields = {**_running_fields(result.running, index), "take_overs": take_overs}
     return StartResponse.model_validate(fields)
+
+
+def recent_look_out(info: RecentLookInfo) -> RecentLook:
+    return RecentLook(
+        zone_id=info.zone_id,
+        zone_name=info.zone_name,
+        look_id=info.look_id,
+        look_name=info.look_name,
+        started_at=info.started_at,
+        stopped_at=info.stopped_at,
+    )
 
 
 # --- preview (web spec §12.3) -----------------------------------------------------------

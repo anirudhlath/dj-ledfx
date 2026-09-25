@@ -39,8 +39,10 @@ from dj_ledfx.zones.model import (
     Assignment,
     CrashInfo,
     PreviewOnlyChanged,
+    RecentLookInfo,
     RunningZoneInfo,
     StartResult,
+    StoppedLook,
     TakeOver,
     ZoneError,
     ZoneNotFoundError,
@@ -118,6 +120,13 @@ class _Running:
     # A derived zone's lights on the map when it last looked (home_changed): only lights
     # that join these are taken over, so one a newer zone took doesn't come back.
     members: tuple[str, ...] = ()
+
+
+def _look_id_of(running: _Running) -> str:
+    """The id of the look a running zone plays, or the saved one while it can't be read."""
+    if running.runtime is not None:
+        return running.runtime.look.id
+    return running.saved.look_id if running.saved is not None else ""
 
 
 class ZoneManager:
@@ -216,6 +225,33 @@ class ZoneManager:
     def running_info(self, zone_id: str) -> RunningZoneInfo | None:
         running = self._running.get(zone_id)
         return None if running is None else self._info(zone_id, running)
+
+    async def recent(self) -> list[RecentLookInfo]:
+        """The looks "Start again" offers (ruling 19), newest first, with today's names. A
+        zone that's gone or holds no lights, a deleted look and a look running on its zone
+        now are left out, but stay remembered: each comes back with its zone."""
+        zones = {zone.id: zone for zone in self.zones()}
+        recent: list[RecentLookInfo] = []
+        for entry in await self._store.load_recent():
+            zone = zones.get(entry.zone_id)
+            running = self._running.get(entry.zone_id)
+            if zone is None or (running is not None and _look_id_of(running) == entry.look_id):
+                continue
+            try:
+                look = self._looks.get(entry.look_id)
+            except LookNotFoundError:
+                continue
+            recent.append(
+                RecentLookInfo(
+                    zone_id=entry.zone_id,
+                    zone_name=zone.name,
+                    look_id=entry.look_id,
+                    look_name=look.name,
+                    started_at=entry.started_at,
+                    stopped_at=entry.stopped_at,
+                )
+            )
+        return recent
 
     def owner_of(self, device_id: str) -> str | None:
         for zone_id, running in self._running.items():
@@ -321,7 +357,7 @@ class ZoneManager:
         """
         async with self._lock:
             before = [light for running in self._running.values() for light in running.lights]
-            await self._stop(*self._running)
+            await self._stop(*self._running, remember=False)  # the backup brings its own list
             try:
                 await restore()
             finally:
@@ -515,7 +551,7 @@ class ZoneManager:
                 and (zone := self._zones.get(zone_id)) is not None
                 and zone.kind in DERIVED_KINDS
             ]
-            released = await self._stop(*gone)
+            released = await self._stop(*gone, remember=False)  # gone from the map
             await self._load_zones()
             joined, touched = await self._follow_members()
             redrawn = self._redraw()
@@ -621,7 +657,7 @@ class ZoneManager:
         """Delete a group. A running group is turned off first."""
         async with self._lock:
             self._group(zone_id)
-            released = await self._stop(zone_id)
+            released = await self._stop(zone_id, remember=False)  # it can't start again
             await self._store.delete_zone(zone_id)
             del self._zones[zone_id]
             await self._sync(released)
@@ -728,6 +764,8 @@ class ZoneManager:
         previous = self._running.pop(zone_id, None)
         if previous is not None:
             self._host.remove_runtime(zone_id)
+            if _look_id_of(previous) != look.id and (stopped := self._stopped(zone_id, previous)):
+                await self._store.remember(stopped)  # a new look replaced it
         brightness = _brightness_of(previous) if previous is not None else 1.0
         runtime = self._new_runtime(zone_id, look, lights, brightness)
         running = _Running(
@@ -838,16 +876,36 @@ class ZoneManager:
             touched += kept
         return take_overs, touched
 
-    async def _stop(self, *zone_ids: str) -> list[str]:
-        """Forget running zones. Returns their lights, which the caller syncs (releases)."""
+    async def _stop(self, *zone_ids: str, remember: bool = True) -> list[str]:
+        """Forget running zones. Returns their lights, which the caller syncs (releases).
+
+        Their looks join "Start again" (ruling 19) unless remember is False: a zone being
+        deleted can't start again, and a restore brings its own list.
+        """
         stopped = [zone_id for zone_id in zone_ids if zone_id in self._running]
         lights: list[str] = []
+        recent: list[StoppedLook] = []
         for zone_id in stopped:
-            lights += self._running.pop(zone_id).lights
+            running = self._running.pop(zone_id)
+            lights += running.lights
+            if remember:
+                recent += self._stopped(zone_id, running)
             self._host.remove_runtime(zone_id)
         if stopped:
             await self._store.delete_assignments(stopped)
+        if recent:
+            await self._store.remember(recent)
         return lights
+
+    def _stopped(self, zone_id: str, running: _Running) -> list[StoppedLook]:
+        """A run that ends, as "Start again" remembers it: only a saved look, which one tap
+        can start again. A draft, or a look deleted meanwhile, is left out."""
+        look_id = _look_id_of(running)
+        try:
+            self._looks.get(look_id)
+        except LookNotFoundError:
+            return []
+        return [StoppedLook(zone_id, look_id, running.since, self._now())]
 
     def _set_lights(self, running: _Running, lights: list[str]) -> None:
         running.lights = lights

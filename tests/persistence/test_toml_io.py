@@ -2,7 +2,7 @@
 
 import errno
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -13,7 +13,7 @@ from dj_ledfx.home.shapes import CylinderShape, GridShape, Placement, PointShape
 from dj_ledfx.home.store import HomeStore
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.persistence.toml_io import export_toml, import_toml, migrate_from_toml
-from dj_ledfx.zones.model import Assignment, ZoneRecord
+from dj_ledfx.zones.model import Assignment, StoppedLook, ZoneRecord
 from dj_ledfx.zones.store import ZoneStore
 
 
@@ -489,3 +489,55 @@ shape = { kind = "cylinder", base = [1.0, 1.0, 0.0], height = 0.5, radius = 0.05
     assert placements == {
         "tube": Placement(CylinderShape((1.0, 1.0, 0.0), 0.5, 0.05), "bottom-to-top", True)
     }
+
+
+@pytest.mark.asyncio
+async def test_start_again_round_trips_and_keeps_the_newer_stop(db, tmp_path: Path) -> None:
+    at = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    shelf = StoppedLook("shelf", "classic-strobe", at, at + timedelta(minutes=9))
+    await ZoneStore(db).remember(
+        [StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=5)), shelf]
+    )
+    text = await export_toml(db)
+    assert "[[recent]]" in text
+
+    fresh = StateDB(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        desk_here = StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=20))
+        shelf_here = StoppedLook("shelf", "classic-strobe", at, at + timedelta(minutes=1))
+        await ZoneStore(fresh).remember([desk_here, shelf_here])
+
+        await import_toml(fresh, text)
+
+        assert await ZoneStore(fresh).load_recent() == [desk_here, shelf]
+    finally:
+        await fresh.close()
+
+
+@pytest.mark.asyncio
+async def test_import_skips_start_again_entries_it_cannot_use(db) -> None:
+    text = """
+[[recent]]
+zone_id = "desk"
+look_id = "classic-breathe"
+started_at = 2026-09-24T19:00:00Z
+stopped_at = 2026-09-24T19:05:00Z
+
+[[recent]]
+zone_id = "shelf"
+look_id = "classic-strobe"
+started_at = "not a time"
+stopped_at = 2026-09-24T19:05:00Z
+
+[[recent]]
+look_id = "classic-strobe"
+started_at = 2026-09-24T19:00:00Z
+stopped_at = 2026-09-24T19:05:00Z
+"""
+    await import_toml(db, text)
+
+    at = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    assert await ZoneStore(db).load_recent() == [
+        StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=5))
+    ]

@@ -30,7 +30,7 @@ async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
 
 
 async def test_migration_005_adds_the_map_and_the_placements(db: StateDB) -> None:
-    assert await db.get_schema_version() == 5
+    assert await db.get_schema_version() >= 5
     columns = [row[1] for row in await db.fetch_all("PRAGMA table_info(placements)")]
     assert columns == [
         "target_id",

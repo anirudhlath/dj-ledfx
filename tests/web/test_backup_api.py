@@ -104,3 +104,25 @@ async def test_restore_brings_back_the_map_before_the_rooms_resume(tmp_path: Pat
         assert [(light["room"], light["shape"]) for light in lights] == [("west", corner)]
         running = [(r.zone_id, r.look_id) for r in new.home.manager.running()]
         assert running == [("west", "classic-breathe")]  # on the backup's map
+
+
+async def test_restore_brings_back_start_again_and_remembers_nothing_it_stops(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "old").mkdir()
+    (tmp_path / "new").mkdir()
+    async with api_home(tmp_path / "old", [FakeLight("a")], [DESK]) as old:
+        await old.home.manager.start("desk", old.home.look("classic-breathe"))
+        await old.home.manager.off("desk")
+        backup = (await old.client.get("/api/state/export")).text
+
+    async with api_home(tmp_path / "new", [FakeLight("a")], [DESK]) as new:
+        await new.home.manager.start("desk", new.home.look("classic-strobe"))
+
+        resp = await new.client.post("/api/state/import", content=backup)
+
+        assert resp.status_code == 200
+        recent = (await new.client.get("/api/running/recent")).json()
+        assert [(entry["zoneId"], entry["lookId"]) for entry in recent] == [
+            ("desk", "classic-breathe")
+        ]

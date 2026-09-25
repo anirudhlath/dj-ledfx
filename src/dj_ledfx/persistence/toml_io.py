@@ -16,9 +16,12 @@ Export format:
   [home]                      — the home map: body (home.json-shaped JSON), updated_at
   [placements."<target id>"]  — where a light or PC part sits: shape (a table), led_order,
                                 confirmed, confirmed_at
+  [[recent]]                  — the looks "Start again" offers, newest first: zone_id,
+                                look_id, started_at, stopped_at
 
 Import merges into what is there. Zones and looks in the file replace those with the
-same id, and each running entry becomes that zone's assignment.
+same id, and each running entry becomes that zone's assignment. Each recent look merges
+by zone and look, keeping the newer stop.
 """
 
 from __future__ import annotations
@@ -41,7 +44,7 @@ from dj_ledfx.looks.store import STAR_LOOK, UPSERT_LOOK
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.timing import as_utc, utcnow
 from dj_ledfx.types import clamp01
-from dj_ledfx.zones.model import Assignment, ZoneKind, ZoneRecord
+from dj_ledfx.zones.model import Assignment, StoppedLook, ZoneKind, ZoneRecord
 from dj_ledfx.zones.store import ZoneStore
 
 if TYPE_CHECKING:
@@ -185,6 +188,7 @@ async def export_toml(db: StateDB) -> str:
 
     doc.update(await _export_home(db))
     doc.update(await _export_zones_and_looks(db))
+    doc.update(await _export_recent(db))
     return tomli_w.dumps(doc)
 
 
@@ -335,6 +339,7 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
 
     await _import_home(db, data)
     await _import_zones_and_looks(db, data)
+    await _import_recent(db, data)
 
 
 async def _export_zones_and_looks(db: StateDB) -> dict[str, Any]:
@@ -512,6 +517,53 @@ async def _import_home(db: StateDB, data: dict[str, Any]) -> None:
             logger.warning("import_toml: skipped the placement of '{}' ({})", target_id, exc)
             continue
         await store.save_placement(target_id, placement)
+
+
+async def _export_recent(db: StateDB) -> dict[str, Any]:
+    """The looks "Start again" offers (ruling 19), as an array of tables."""
+    recent = await ZoneStore(db).load_recent()
+    if not recent:
+        return {}
+    return {
+        "recent": [
+            {
+                "zone_id": entry.zone_id,
+                "look_id": entry.look_id,
+                "started_at": entry.started_at,
+                "stopped_at": entry.stopped_at,
+            }
+            for entry in recent
+        ]
+    }
+
+
+def _stopped_look(info: object) -> StoppedLook | None:
+    if not isinstance(info, dict):
+        return None
+    zone_id, look_id = info.get("zone_id"), info.get("look_id")
+    started_at, stopped_at = info.get("started_at"), info.get("stopped_at")
+    if (
+        not isinstance(zone_id, str)
+        or not isinstance(look_id, str)
+        or not isinstance(started_at, datetime)
+        or not isinstance(stopped_at, datetime)
+    ):
+        return None
+    return StoppedLook(zone_id, look_id, as_utc(started_at), as_utc(stopped_at))
+
+
+async def _import_recent(db: StateDB, data: dict[str, Any]) -> None:
+    """Merges the backup's recent looks into what's there: each zone and look keeps the
+    newer stop (ZoneStore.remember)."""
+    entries = data.get("recent")
+    recent: list[StoppedLook] = []
+    for info in entries if isinstance(entries, list) else []:
+        entry = _stopped_look(info)
+        if entry is None:
+            logger.warning("import_toml: skipped a recent look it can't read")
+            continue
+        recent.append(entry)
+    await ZoneStore(db).remember(recent)
 
 
 # --- First-Launch Migration ---

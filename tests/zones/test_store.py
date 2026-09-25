@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest_asyncio
 
 from dj_ledfx.persistence.state_db import StateDB
-from dj_ledfx.zones.model import ALL_LIGHTS_ZONE_ID, Assignment, ZoneRecord
+from dj_ledfx.zones.model import (
+    ALL_LIGHTS_ZONE_ID,
+    RECENT_LIMIT,
+    Assignment,
+    StoppedLook,
+    ZoneRecord,
+)
 from dj_ledfx.zones.store import ZoneStore, new_group_id
 
 
@@ -119,3 +125,42 @@ async def test_derived_zones_follow_the_map_and_take_their_assignments_with_them
     zones = {zone.id: (zone.kind, zone.lights) for zone in await store.load_zones()}
     assert zones == {"group-1": ("group", ("a",)), "home": ("home", ()), "west": ("room", ())}
     assert await store.load_assignments() == []  # the desk's went with it
+
+
+async def test_migration_006_adds_the_recent_looks(db: StateDB) -> None:
+    assert await db.get_schema_version() == 6
+    columns = [row[1] for row in await db.fetch_all("PRAGMA table_info(recent_looks)")]
+    assert columns == ["zone_id", "look_id", "started_at", "stopped_at"]
+
+
+async def test_each_zone_and_look_keeps_its_newest_stop_compared_in_utc(db: StateDB) -> None:
+    store = ZoneStore(db)
+    at = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    half_past = datetime(2026, 9, 24, 21, 30, tzinfo=timezone(timedelta(hours=2)))  # 19:30 UTC
+    newest = StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=45))
+
+    await store.remember([StoppedLook("desk", "classic-breathe", at, half_past)])
+    await store.remember([newest])
+    await store.remember([StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=10))])
+
+    assert await store.load_recent() == [newest]
+
+
+async def test_only_the_newest_stops_are_kept(db: StateDB) -> None:
+    store = ZoneStore(db)
+    at = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    minute = timedelta(minutes=1)
+    await store.remember(
+        [StoppedLook(f"zone-{n}", "classic-strobe", at, at + n * minute) for n in range(12)]
+    )
+    await store.remember(
+        [StoppedLook("late", "classic-strobe", at + 11 * minute, at + 11 * minute)]
+    )
+
+    recent = await store.load_recent()
+
+    assert len(recent) == RECENT_LIMIT
+    assert [entry.zone_id for entry in recent] == [
+        "late",  # it stopped with zone-11 but started later
+        *(f"zone-{n}" for n in range(11, 2, -1)),
+    ]

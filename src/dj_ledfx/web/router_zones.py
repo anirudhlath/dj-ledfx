@@ -60,6 +60,13 @@ async def list_running(request: Request) -> api.Running:
     return api.running_out(get_zones(request).running(), light_index(request.app))
 
 
+@router.get("/running/recent")
+async def list_recent(request: Request) -> list[api.RecentLook]:
+    """The looks that stopped, newest first, for "Start again". One tap starts one again
+    through POST /zones/{zone_id}/start with its lookId (M2 plan, ruling 19)."""
+    return [api.recent_look_out(info) for info in await get_zones(request).recent()]
+
+
 @router.post("/zones/{zone_id}/start")
 async def start_zone(request: Request, zone_id: str, body: api.StartRequest) -> api.StartResponse:
     """Put a look on a zone: a saved look by id, or an unsaved draft."""
