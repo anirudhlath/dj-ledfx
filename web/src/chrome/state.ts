@@ -7,7 +7,11 @@ export type { Connection, TempoSource }
 
 export interface TempoState {
   source: TempoSource
-  bpm: number
+  /**
+   * null: no DJ (engine M1's beat at 0 BPM), §9.3's Idle. The module says "No DJ" in a quiet chip
+   * and draws no BPM or pips; TAP stays.
+   */
+  bpm: number | null
   /** Beat in the bar, 1–4. null: the beat doesn't move (stopped, stale, or 0 BPM), so no pip lights. */
   beat: number | null
   /** null: the source counts no bars (engine M1's beat), and the module leaves "bar N" out. */
@@ -38,8 +42,8 @@ export interface ChromeState {
 
 /**
  * The §12.5 "hero" scenario's chrome, as drawn in Main.png and Phone-Live.png. The System specimen
- * draws it, and hooks.ts serves its preview only, server name and sunset until F3 and F6 own them
- * (decision 10).
+ * draws it, and hooks.ts serves its server name and sunset until F6 owns them (decision 10).
+ * Preview only is the server's now (its transport); only the switch's action waits for F3.
  */
 export const HERO_CHROME: ChromeState = {
   tempo: { source: 'music', bpm: 121.8, beat: 2, bar: 42, stale: false },

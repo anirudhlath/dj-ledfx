@@ -110,15 +110,28 @@ describe('the chrome on the live store', () => {
     expect(within(bar).queryByRole('group', { name: 'Tempo' })).toBeNull()
   })
 
-  // Review focus 3: engine M1 with no DJ sends a beat at 0 BPM, stopped, with no bar.
-  it('holds the pips still when no DJ plays', () => {
+  // Review focus 3: engine M1 with no DJ sends a beat at 0 BPM, stopped, with no bar. D2: that's
+  // §9.3's Idle, "No DJ" in a quiet chip, not "Pro DJ Link 0.0".
+  it('says No DJ, with no BPM and the pips still, when no DJ plays', () => {
     renderApp('/next/live')
     act(() => applyMessage(liveStore, beatMessage(hero, 0, 0, 1), 0))
     const tempo = within(screen.getByRole('banner')).getByRole('group', { name: 'Tempo' })
-    expect(within(tempo).getByRole('button', { name: 'Pro DJ Link' })).toBeInTheDocument()
-    expect(tempo).toHaveTextContent('0.0BPM')
+    expect(within(tempo).getByRole('button', { name: 'No DJ' })).toHaveClass('text-text-3')
+    expect(tempo).not.toHaveTextContent(/Pro DJ Link|0\.0|BPM/)
     expect(within(tempo).queryByRole('img')).toBeNull()
-    expect(tempo).not.toHaveTextContent(/bar \d/)
+    expect(tempo).not.toHaveTextContent(/bar/)
+    expect(within(tempo).getByRole('button', { name: 'Tap' })).toBeInTheDocument()
+  })
+
+  // D3: preview only is the server's (its transport), not the fixture's.
+  it("shows the server's preview only, and nothing before the server says", () => {
+    renderApp('/next/live')
+    const bar = screen.getByRole('banner')
+    expect(within(bar).queryByRole('switch', { name: 'Preview only' })).toBeNull()
+    act(() => applyMessage(liveStore, { channel: 'transport', state: 'simulating' }, 0))
+    expect(within(bar).getByRole('switch', { name: 'Preview only' })).toBeChecked()
+    act(() => applyMessage(liveStore, { channel: 'transport', state: 'playing' }, 0))
+    expect(within(bar).getByRole('switch', { name: 'Preview only' })).not.toBeChecked()
   })
 })
 

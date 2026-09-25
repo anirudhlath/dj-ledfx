@@ -5,14 +5,17 @@ import type { AttentionItem } from '@/api/contract'
 import { useLive, useLiveShallow, type Connection } from '@/api/live-store'
 import { HERO_CHROME, type AttentionCounts, type TempoState } from './state'
 
-/** The tempo module's values. BPM to one decimal (§10); the beat in the bar only while it moves. */
+/**
+ * The tempo module's values. BPM to one decimal (§10), or null for §9.3's "No DJ": engine M1 with no
+ * DJ sends Pro DJ Link at 0 BPM. The beat in the bar only while it moves.
+ */
 export function useTempo(): TempoState | null {
   return useLiveShallow(({ beat }) =>
     beat === null
       ? null
       : {
           source: beat.source,
-          bpm: Math.round(beat.bpm * 10) / 10,
+          bpm: beat.source === 'prodjlink' && beat.bpm <= 0 ? null : Math.round(beat.bpm * 10) / 10,
           beat: beat.playing ? beat.beatInBar : null,
           bar: beat.bar,
           stale: beat.stale,
@@ -44,9 +47,9 @@ export function useAttentionCounts(): AttentionCounts | null {
   return useLiveShallow(({ attention }) => (attention === null ? null : countAttention(attention)))
 }
 
-/** The fixture until F3 wires the switch to the server (decision 10). */
-export function usePreviewOnly(): boolean {
-  return HERO_CHROME.previewOnly
+/** The server's preview only (its `transport`); null until it has said. F3 wires the switch's action. */
+export function usePreviewOnly(): boolean | null {
+  return useLive((state) => state.previewOnly)
 }
 
 /** The fixture until F6 (decision 10). */

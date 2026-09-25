@@ -60,6 +60,23 @@ describe('TempoModule', () => {
     expect(screen.getByRole('group', { name: 'Tempo' })).toHaveTextContent('118.0')
   })
 
+  // D2: §9.3's Idle. Engine M1 with no DJ has no tempo to show.
+  it.each(['bar', 'strip'] as const)('idle (%s): "No DJ" in a quiet chip, with no BPM or pips, and TAP', (variant) => {
+    render(<TempoModule variant={variant} source="prodjlink" bpm={null} beat={null} bar={null} stale={false} />)
+    const tempo = screen.getByRole('group', { name: 'Tempo' })
+    expect(within(tempo).getByText('No DJ')).toBeInTheDocument()
+    expect(tempo).not.toHaveTextContent(/Pro DJ Link|BPM|0\.0/)
+    expect(within(tempo).queryByRole('img')).toBeNull()
+    expect(within(tempo).getByRole('button', { name: 'Tap' })).toBeInTheDocument()
+  })
+
+  it('idle: the source button stays, quiet, for the source popover (desktop)', () => {
+    render(<TempoModule variant="bar" source="prodjlink" bpm={null} beat={null} bar={null} stale={false} />)
+    const source = screen.getByRole('button', { name: 'No DJ' })
+    expect(source).toHaveAttribute('aria-haspopup', 'dialog')
+    expect(source).toHaveClass('text-text-3', 'border-line', 'bg-transparent')
+  })
+
   // Engine M1's beat counts no bars (decision 9).
   it('leaves the bar out when the source counts none', () => {
     render(<TempoModule variant="bar" {...HERO_CHROME.tempo} bar={null} />)

@@ -32,7 +32,9 @@ export function ChromeTempoStrip() {
 }
 
 export function ChromePreviewOnly({ variant }: { variant: Variant }) {
-  return <PreviewOnlySwitch variant={variant} on={usePreviewOnly()} />
+  const on = usePreviewOnly()
+  if (on === null) return null
+  return <PreviewOnlySwitch variant={variant} on={on} />
 }
 
 export function ChromeAttention({ variant }: { variant: Variant }) {
