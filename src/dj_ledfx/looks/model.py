@@ -171,11 +171,22 @@ def look_from_dict(data: Mapping[str, Any]) -> Look:
     )
 
 
+_PLAIN_TYPES = {
+    "color": "colour",
+    "color_list": "palette",
+    "bool": "boolean",
+    "anchor": "anchor",
+    "point": "point",
+    "zone": "zone",
+    "device_set": "lights",  # the contract's name wins (engine spec §1)
+}
+
+
 def _schema_entry(key: str, param: EffectParam) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "key": key,
         "label": param.label or key.replace("_", " ").capitalize(),
-        "bindable": False,  # bindings arrive in M7
+        "bindable": param.bindable,
     }
     if param.type in ("float", "int"):
         entry.update(
@@ -184,12 +195,14 @@ def _schema_entry(key: str, param: EffectParam) -> dict[str, Any]:
             max=param.max if param.max is not None else 1.0,
             step=param.step if param.step is not None else (1 if param.type == "int" else 0.01),
         )
-    elif param.type == "color":
-        entry["type"] = "colour"
-    elif param.type == "color_list":
-        entry["type"] = "palette"
-    elif param.type == "bool":
-        entry["type"] = "boolean"
+    elif param.type == "range":
+        entry.update(
+            type="range",
+            min=param.min if param.min is not None else 0.0,
+            max=param.max if param.max is not None else 1.0,
+        )
+    elif param.type in _PLAIN_TYPES:
+        entry["type"] = _PLAIN_TYPES[param.type]
     else:
         entry.update(type="choice", options=list(param.choices or []))
     return entry

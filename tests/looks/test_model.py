@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
+import numpy as np
 import pytest
 
+from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.context import RenderContext
+from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.firmware_lifx import LifxFlame
+from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.strip_adapter import StripAdapter
 from dj_ledfx.looks.model import (
     Layer,
@@ -20,6 +26,7 @@ from dj_ledfx.looks.model import (
     validate_look,
     visible_field_layer,
 )
+from dj_ledfx.types import FloatRGB
 
 
 def _layer(**overrides: Any) -> dict[str, Any]:
@@ -224,3 +231,53 @@ def test_defaults() -> None:
     assert look.transition == Transition()
     assert look.scope == "any-zone"
     assert not look.built_in
+
+
+class _EveryType(FieldEffect, register=False):
+    PARAMS: ClassVar[dict[str, EffectParam]] = {
+        "centre": EffectParam(type="anchor", default="", label="Centre"),
+        "at": EffectParam(type="point", default=(0.0, 0.0, 0.0)),
+        "zone": EffectParam(type="zone", default=""),
+        "lights": EffectParam(type="device_set", default=[]),
+        "band": EffectParam(type="range", default=(0.0, 1.0), min=0.0, max=3.0),
+        "level": EffectParam(type="float", default=0.5, min=0.0, max=1.0, bindable=True),
+    }
+
+    @classmethod
+    def parameters(cls) -> dict[str, EffectParam]:
+        return cls.PARAMS
+
+    def __init__(
+        self,
+        centre: str = "",
+        at: Any = None,
+        zone: str = "",
+        lights: Any = None,
+        band: Any = None,
+        level: float = 0.5,
+    ) -> None:
+        pass
+
+    def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
+        return np.zeros((leds.count, 3), dtype=np.float32)
+
+
+def test_the_new_setting_types_reach_the_schema_in_the_contracts_names() -> None:
+    Effect._registry["every_type"] = _EveryType  # conftest drops it after the test
+    schema = {entry["key"]: entry for entry in setting_schema("every_type")}
+    assert {key: entry["type"] for key, entry in schema.items()} == {
+        "centre": "anchor",
+        "at": "point",
+        "zone": "zone",
+        "lights": "lights",
+        "band": "range",
+        "level": "number",
+    }
+    assert schema["centre"] == {
+        "key": "centre",
+        "label": "Centre",
+        "bindable": False,
+        "type": "anchor",
+    }
+    assert (schema["band"]["min"], schema["band"]["max"]) == (0.0, 3.0)
+    assert schema["level"]["bindable"] is True
