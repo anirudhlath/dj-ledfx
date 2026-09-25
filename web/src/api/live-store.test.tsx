@@ -4,7 +4,7 @@ import type { AttentionItem, Deck, RunningZone } from './contract'
 import {
   EMPTY_LIVE, applyMessage, createLiveStore, liveStore, resetLiveStore, useLive, type LiveState, type LiveStore,
 } from './live-store'
-import type { DeviceStat, ServerMessage } from './ws-messages'
+import type { DeviceStat, LightStat, ServerMessage } from './ws-messages'
 
 const ZONE: RunningZone = {
   zoneId: 'zone-a',
@@ -63,6 +63,13 @@ describe('applyMessage', () => {
   ])('stores %s', (_, message, expected) => {
     applyMessage(store, message, 0)
     expect(store.getState()).toMatchObject(expected)
+  })
+
+  // I2: engine M2 keeps `devices` per device and adds §12.4's per-light `lights`.
+  it("keys the stats by light when the server sends §12.4's lights", () => {
+    const light: LightStat = { id: 'rope', send_fps: 60, latency_ms: 42, dropped_pct: 0.5 }
+    applyMessage(store, { channel: 'stats', devices: [STAT], lights: [light] }, 0)
+    expect(store.getState().stats).toEqual({ rope: light })
   })
 
   it('reads transport "playing" as preview only off', () => {

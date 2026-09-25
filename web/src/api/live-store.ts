@@ -7,7 +7,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import { normaliseBeat, type Beat } from './beat'
 import type { AttentionItem, Deck, Id, Inputs, LightUpdate, Overlay, RunningZone, SignalValue } from './contract'
-import type { DeviceStat, ServerMessage } from './ws-messages'
+import type { LightStat, ServerMessage } from './ws-messages'
 
 /** The link: before its first message, live (with the measured frame rate), or retrying. */
 export type Connection =
@@ -22,7 +22,7 @@ export interface LiveState {
   decks: Deck[] | null
   running: { zones: RunningZone[]; overlays: Overlay[] } | null
   lights: Record<Id, LightUpdate> | null
-  stats: Record<Id, DeviceStat> | null
+  stats: Record<Id, LightStat> | null
   attention: AttentionItem[] | null
   previewOnly: boolean | null
   inputs: Inputs | null
@@ -51,8 +51,8 @@ export function createLiveStore(): LiveStore {
 /** The app's store. The shared test setup resets it after every test. */
 export const liveStore = createLiveStore()
 
-export function resetLiveStore(store: LiveStore = liveStore): void {
-  store.setState({ ...EMPTY_LIVE }, true)
+export function resetLiveStore(): void {
+  liveStore.setState({ ...EMPTY_LIVE }, true)
 }
 
 function byId<T extends { id: Id }>(items: T[]): Record<Id, T> {
@@ -75,7 +75,8 @@ export function applyMessage(store: LiveStore, message: ServerMessage, receivedA
       store.setState({ lights: byId(message.lights) })
       return
     case 'stats':
-      store.setState({ stats: byId(message.devices) })
+      // Per light from engine M2; engine M1 knows only devices, which are its lights.
+      store.setState({ stats: byId(message.lights ?? message.devices) })
       return
     case 'attention':
       store.setState({ attention: message.items })

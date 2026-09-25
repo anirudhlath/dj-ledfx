@@ -49,7 +49,15 @@ export interface DeviceStat {
   connected: boolean
   status: string
 }
-export interface StatsMessage { channel: 'stats'; devices: DeviceStat[] }
+/** One light's link (§12.4). Engine M2 sends these as `lights`; engine M1 has only `devices`. */
+export interface LightStat {
+  id: Id
+  send_fps: number
+  latency_ms: number
+  dropped_pct: number
+}
+/** `devices` is per device, the PC's parts included; `lights` (engine M2) is per light. */
+export interface StatsMessage { channel: 'stats'; devices: DeviceStat[]; lights?: LightStat[] }
 export interface StatusMessage { channel: 'status'; ok: boolean; device_count: number; avg_render_ms: number; transport: string }
 /** A command's answer. `protocol: 2` switches the session's frames to v2 (decision 1). */
 export interface AckMessage { channel: 'ack'; id: number | null; action: string; protocol?: number; fps?: number }
@@ -62,26 +70,37 @@ export type ServerMessage =
   | BeatMessage | DecksMessage | RunningMessage | LightsMessage | AttentionMessage | TransportMessage
   | StatsMessage | StatusMessage | AckMessage | ErrorMessage | InputsMessage | SignalsMessage | FxMessage
 
-export type ClientCommand =
-  | { action: 'subscribe_beat'; id: number; fps: number }
-  | { action: 'subscribe_frames'; id: number; fps: number; protocol: 2; streams: FrameStream[]; lights?: Id[] }
-  | { action: 'subscribe_signals'; id: number; names?: string[] }
-  | { action: 'subscribe_fx'; id: number; on: boolean }
-  | { action: 'tap'; id: number; client_time: number }
-type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never
 /** A command before the client numbers it. */
-export type Command = WithoutId<ClientCommand>
+export type Command =
+  | { action: 'subscribe_beat'; fps: number }
+  | { action: 'subscribe_frames'; fps: number; protocol: 2; streams: FrameStream[]; lights?: Id[] }
+  /** Today's frames (engine M1): a server that refuses v2 gets asked this instead. */
+  | { action: 'subscribe_frames'; fps: number }
+  | { action: 'subscribe_signals'; names?: string[] }
+  | { action: 'subscribe_fx'; on: boolean }
+  | { action: 'tap'; client_time: number }
+export type ClientCommand = Command & { id: number }
 
-// Snapshots whose list the stores rely on: without it, the message is dropped, not stored.
-const LISTS: Partial<Record<string, string>> = {
-  running: 'zones',
-  lights: 'lights',
-  attention: 'items',
-  stats: 'devices',
-  decks: 'decks',
+const IS = {
+  list: (value: unknown) => Array.isArray(value),
+  object: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
+  string: (value: unknown) => typeof value === 'string',
+  number: (value: unknown) => typeof value === 'number',
+}
+// The field each message's store relies on: without it, the message is dropped, not stored.
+const PAYLOADS: Partial<Record<string, [field: string, kind: keyof typeof IS]>> = {
+  beat: ['bpm', 'number'],
+  running: ['zones', 'list'],
+  lights: ['lights', 'list'],
+  attention: ['items', 'list'],
+  stats: ['devices', 'list'],
+  decks: ['decks', 'list'],
+  inputs: ['inputs', 'object'],
+  signals: ['values', 'object'],
+  transport: ['state', 'string'],
 }
 
-/** A server message, or null for text that isn't one (bad JSON, no channel, a snapshot missing its list). */
+/** A server message, or null for text that isn't one (bad JSON, no channel, a message missing its payload). */
 export function parseMessage(text: string): ServerMessage | null {
   let value: unknown
   try {
@@ -92,8 +111,8 @@ export function parseMessage(text: string): ServerMessage | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
   if (typeof record.channel !== 'string') return null
-  const list = LISTS[record.channel]
-  if (list !== undefined && !Array.isArray(record[list])) return null
-  if (record.channel === 'beat' && typeof record.bpm !== 'number') return null
+  const payload = PAYLOADS[record.channel]
+  if (payload !== undefined && !IS[payload[1]](record[payload[0]])) return null
+  if (record.channel === 'stats' && record.lights !== undefined && !IS.list(record.lights)) return null
   return value as ServerMessage
 }
