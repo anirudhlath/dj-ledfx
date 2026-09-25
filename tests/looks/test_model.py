@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
+import numpy as np
 import pytest
 
+from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.context import RenderContext
+from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.firmware_lifx import LifxFlame
+from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.strip_adapter import StripAdapter
 from dj_ledfx.looks.model import (
+    LIGHTS_SETTING,
     Layer,
     Look,
     LookError,
@@ -19,7 +26,10 @@ from dj_ledfx.looks.model import (
     setting_schema,
     validate_look,
     visible_field_layer,
+    visible_field_layers,
 )
+from dj_ledfx.looks.selectors import Selector
+from dj_ledfx.types import FloatRGB
 
 
 def _layer(**overrides: Any) -> dict[str, Any]:
@@ -159,7 +169,11 @@ def test_looks_m1_cannot_run_are_refused_with_the_reason(
         ([_layer(type="firmware", kind="breathe")], "firmware"),
         ([_layer(kind="lifx_flame", settings={})], "field"),
         ([_layer(settings={"beats_per_cycle": {"value": 99.0}})], "above max"),
-        ([_layer(id="a"), _layer(id="b")], "one streamed layer"),
+        (
+            [_layer(type="firmware", kind="lifx_flame", settings={"lights": {"value": "type:"}})],
+            "one word",
+        ),
+        ([_layer(settings={"lights": {"value": ["lamp"]}})], "M4"),
     ],
 )
 def test_layer_problems_are_refused(layers: list[dict[str, Any]], reason: str) -> None:
@@ -224,3 +238,110 @@ def test_defaults() -> None:
     assert look.transition == Transition()
     assert look.scope == "any-zone"
     assert not look.built_in
+
+
+class _EveryType(FieldEffect, register=False):
+    PARAMS: ClassVar[dict[str, EffectParam]] = {
+        "centre": EffectParam(type="anchor", default="", label="Centre"),
+        "at": EffectParam(type="point", default=(0.0, 0.0, 0.0)),
+        "zone": EffectParam(type="zone", default=""),
+        "lights": EffectParam(type="device_set", default=[]),
+        "band": EffectParam(type="range", default=(0.0, 1.0), min=0.0, max=3.0),
+        "level": EffectParam(type="float", default=0.5, min=0.0, max=1.0, bindable=True),
+    }
+
+    @classmethod
+    def parameters(cls) -> dict[str, EffectParam]:
+        return cls.PARAMS
+
+    def __init__(
+        self,
+        centre: str = "",
+        at: Any = None,
+        zone: str = "",
+        lights: Any = None,
+        band: Any = None,
+        level: float = 0.5,
+    ) -> None:
+        pass
+
+    def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
+        return np.zeros((leds.count, 3), dtype=np.float32)
+
+
+def test_the_new_setting_types_reach_the_schema_in_the_contracts_names() -> None:
+    Effect._registry["every_type"] = _EveryType  # conftest drops it after the test
+    schema = {entry["key"]: entry for entry in setting_schema("every_type")}
+    assert {key: entry["type"] for key, entry in schema.items()} == {
+        "centre": "anchor",
+        "at": "point",
+        "zone": "zone",
+        "lights": "lights",
+        "band": "range",
+        "level": "number",
+    }
+    assert schema["centre"] == {
+        "key": "centre",
+        "label": "Centre",
+        "bindable": False,
+        "type": "anchor",
+    }
+    assert (schema["band"]["min"], schema["band"]["max"]) == (0.0, 3.0)
+    assert schema["level"]["bindable"] is True
+
+
+def test_field_layers_stack_and_firmware_layers_pick_their_lights() -> None:
+    look = look_from_dict(
+        _look(
+            layers=[
+                _layer(id="a"),
+                _layer(id="b", blend="screen", opacity=0.5),
+                _layer(
+                    id="c",
+                    type="firmware",
+                    kind="lifx_flame",
+                    settings={LIGHTS_SETTING: {"value": "type:candle"}, "period": {"value": 3.0}},
+                ),
+            ]
+        )
+    )
+    validate_look(look)
+    assert [layer.id for layer in visible_field_layers(look)] == ["a", "b"]
+    flame = look.layers[2]
+    assert flame.lights == (Selector("type", "candle"),)
+    assert flame.settings == {"period": 3.0}  # the effect's own settings
+    assert look.layers[0].lights is None
+    assert make_effect(flame).get_params()["period"] == 3.0
+    written = look_to_dict(look)["layers"][2]["settings"]
+    assert written == {"period": {"value": 3.0}, "lights": {"value": ["type:candle"]}}
+
+
+def test_firmware_layers_offer_a_lights_setting() -> None:
+    assert setting_schema("lifx_flame")[-1] == {
+        "key": "lights",
+        "label": "Lights",
+        "bindable": False,
+        "type": "lights",
+    }
+    assert "lights" not in {entry["key"] for entry in setting_schema("breathe")}
+
+
+def test_strip_effects_offer_the_projection_settings() -> None:
+    schema = {entry["key"]: entry for entry in setting_schema("breathe")}
+    assert list(schema)[-3:] == ["mapping", "axis", "centre"]
+    assert schema["mapping"]["options"] == ["linear", "radial", "order"]
+    assert schema["centre"]["type"] == "anchor"
+    assert "mapping" not in {entry["key"] for entry in setting_schema("lifx_flame")}
+
+
+def test_a_strip_layer_takes_its_projection_from_its_settings() -> None:
+    effect = make_effect(
+        Layer(
+            id="l",
+            name="Breathe",
+            type="field",
+            kind="breathe",
+            settings={"beats_per_cycle": 2.0, "mapping": "radial", "centre": "sofa"},
+        )
+    )
+    assert isinstance(effect, StripAdapter) and effect.get_params()["beats_per_cycle"] == 2.0

@@ -1,25 +1,15 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 
 from dj_ledfx.persistence.state_db import StateDB
 
 
-@pytest_asyncio.fixture
-async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
-    state_db = StateDB(tmp_path / "state.db")
-    await state_db.open()
-    yield state_db
-    await state_db.close()
-
-
-async def test_schema_version_is_4(db: StateDB) -> None:
-    assert await db.get_schema_version() == 4
+async def test_schema_version_is_7(db: StateDB) -> None:
+    assert await db.get_schema_version() == 7
 
 
 async def test_new_tables_exist(db: StateDB) -> None:
@@ -80,7 +70,7 @@ async def test_upgrade_clears_what_the_old_transport_left(tmp_path: Path) -> Non
     db = StateDB(path)
     await db.open()
     try:
-        assert await db.get_schema_version() == 4
+        assert await db.get_schema_version() == 7
         assert await db.load_all_device_states() == {}
         assert await db.load_config("engine") == {"fps": "60"}
     finally:

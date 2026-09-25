@@ -73,3 +73,24 @@ def test_palette_lerp_single_color():
     result = palette_lerp(palette, positions)
     for i in range(3):
         np.testing.assert_array_equal(result[i], [128, 64, 32])
+
+
+def test_the_8_bit_colours_stay_within_1_of_exact_maths() -> None:
+    """Ruling: merging the float and 8-bit formulas may move a channel by at most 1."""
+    import colorsys
+
+    rng = np.random.default_rng(3)
+    hues, sats, vals = rng.random(500), rng.random(500), rng.random(500)
+    exact = np.array(
+        [colorsys.hsv_to_rgb(h, s, v) for h, s, v in zip(hues, sats, vals, strict=True)]
+    )
+    got = hsv_to_rgb_array(hues, sats, vals).astype(int)
+    assert np.abs(got - np.floor(exact * 255.0)).max() <= 1
+
+    palette = [(255, 0, 0), (0, 200, 90), (30, 60, 250)]
+    positions = rng.random(500)
+    stops = np.array(palette, dtype=np.float64)
+    at = np.linspace(0.0, 1.0, len(palette))
+    exact = np.stack([np.interp(positions, at, stops[:, c]) for c in range(3)], axis=1)
+    assert np.abs(palette_lerp(palette, positions).astype(int) - np.floor(exact)).max() <= 1
+    np.testing.assert_array_equal(palette_lerp(palette, at), palette)  # stops stay exact

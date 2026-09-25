@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -12,6 +13,12 @@ FloatRGB = NDArray[np.float32]  # shape (n_leds, 3), linear 0..1 per channel
 def clamp01(value: float) -> float:
     """A brightness or fraction held within 0..1."""
     return max(0.0, min(1.0, value))
+
+
+def is_finite_number(value: object) -> bool:
+    """An int or float that isn't a bool, NaN or infinite: what a setting or the map takes
+    as a number."""
+    return not isinstance(value, bool) and isinstance(value, int | float) and math.isfinite(value)
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC
+from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -17,11 +18,14 @@ from fastapi import FastAPI
 from zone_home import Home, build_home
 
 from dj_ledfx.config import AppConfig
+from dj_ledfx.home.model import Home as HomeModel
 from dj_ledfx.types import DeviceStats
 from dj_ledfx.web.app import create_app
 from dj_ledfx.zones.attention import AttentionFeed
+from dj_ledfx.zones.frames import Watchers
 from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.model import ZoneRecord
+from dj_ledfx.zones.preview import PreviewManager
 
 
 @dataclass
@@ -32,13 +36,21 @@ class Api:
     monitor: LightMonitor
     feed: AttentionFeed
     stats: list[DeviceStats]  # what the scheduler reports; tests append to it
+    previews: PreviewManager
+    watchers: Watchers  # who watches which frame stream; the previews ask it
 
 
 @asynccontextmanager
 async def api_home(
-    tmp_path: Path, lights: Sequence[FakeLight], zones: Sequence[ZoneRecord]
+    tmp_path: Path,
+    lights: Sequence[FakeLight],
+    zones: Sequence[ZoneRecord],
+    *,
+    plan: HomeModel | None = None,
 ) -> AsyncIterator[Api]:
-    home = await build_home(tmp_path, lights, zones)
+    home = await build_home(tmp_path, lights, zones, plan=plan)
+    watchers = Watchers()
+    previews = PreviewManager(home.manager, partial(watchers.watching, "preview"))
     stats: list[DeviceStats] = []
     monitor = LightMonitor(
         devices=home.devices, zones=home.manager, event_bus=home.bus, now=lambda: home.clock[0]
@@ -68,10 +80,13 @@ async def api_home(
         zone_manager=home.manager,
         light_monitor=monitor,
         attention_feed=feed,
+        home_map=home.home_map,
+        previews=previews,
     )
     transport = httpx.ASGITransport(app=app)
     try:
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            yield Api(home, app, client, monitor, feed, stats)
+            yield Api(home, app, client, monitor, feed, stats, previews, watchers)
     finally:
+        previews.close()
         await home.db.close()

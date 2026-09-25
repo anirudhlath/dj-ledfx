@@ -109,8 +109,14 @@ class AttentionFeed:
         self._running = False
 
     def _name(self, device_id: str) -> str:
+        """A light's name; a PC part's is the PC's and the part's ("PC RAM")."""
         managed = self._devices.get_by_stable_id(device_id)
-        return managed.adapter.device_info.name if managed is not None else device_id
+        if managed is None:
+            return device_id
+        name = managed.adapter.device_info.name
+        light_id = self._devices.lights.light_of(device_id)
+        entry = self._devices.lights.get(light_id)
+        return f"{entry.name} {name}" if entry is not None and light_id != device_id else name
 
     def _offline_lights(self, now: datetime) -> list[AttentionItem]:
         items: list[AttentionItem] = []

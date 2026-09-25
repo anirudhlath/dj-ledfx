@@ -67,7 +67,7 @@ async def test_changing_a_running_group_takes_over_and_releases_lights(
     assert home.manager.running_info("other") is None  # it had nothing left
     assert ("restore", b"a0") in a.calls and "a" not in home.routes.routes
     assert c.names().count("capture") == 1  # captured once, by the first zone
-    assert home.routes.routes["c"].ring is home.host.runtimes[group.id].ring
+    assert home.routes.routes["c"].source is home.host.runtimes[group.id]
     [saved] = await home.store.load_assignments()
     assert saved.lights == ("b", "c")
 

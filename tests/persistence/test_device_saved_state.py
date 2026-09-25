@@ -2,22 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
-import pytest_asyncio
 
 from dj_ledfx.persistence.state_db import StateDB
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path: Path) -> StateDB:  # type: ignore[misc]
-    db_path = tmp_path / "state.db"
-    state_db = StateDB(db_path)
-    await state_db.open()
-    yield state_db  # type: ignore[misc]
-    await state_db.close()
 
 
 def _make_state(led_count: int = 5, fill: int = 128) -> bytes:
@@ -75,7 +63,7 @@ async def test_save_device_state_upsert(db: StateDB) -> None:
 
 
 @pytest.mark.asyncio
-async def test_schema_version_is_4_after_migration(db: StateDB) -> None:
-    """Migrations up to 004 should have been applied, bumping schema to version 4."""
+async def test_schema_version_is_7_after_migration(db: StateDB) -> None:
+    """Migrations up to 007 should have been applied, bumping schema to version 7."""
     version = await db.get_schema_version()
-    assert version == 4
+    assert version == 7

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest_asyncio
 from api_home import Api, api_home
 from conftest import FakeLight
 
-from dj_ledfx.zones.model import ZoneRecord
+from dj_ledfx.devices.lights import LightIndex
+from dj_ledfx.web.contract import running_zone_out
+from dj_ledfx.zones.model import RunningZoneInfo, ZoneRecord
 
 ZONES = [
     ZoneRecord(id="desk", name="Desk", lights=("a", "b")),
@@ -155,3 +158,17 @@ async def test_the_openapi_schema_uses_the_contract_names(api: Api) -> None:
     assert {"zoneId", "lookName", "covers", "waitingFor"} <= set(
         schema["RunningZone"]["properties"]
     )
+
+
+def test_a_running_zone_says_which_rooms_it_covers() -> None:
+    info = RunningZoneInfo(
+        zone_id="home",
+        look_id="classic-breathe",
+        look_name="Breathe",
+        since=datetime(2026, 9, 24, 19, 0, tzinfo=UTC),
+        brightness=1.0,
+        lights=("a",),
+        state="running",
+        covers=("Kitchen", "Bedroom"),
+    )
+    assert running_zone_out(info, LightIndex(())).covers == ["Kitchen", "Bedroom"]

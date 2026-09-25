@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from conftest import ring_route
 
 import dj_ledfx.metrics as metrics_mod
 from dj_ledfx.beat.clock import BeatClock
@@ -11,7 +12,6 @@ from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.looks.builtin import builtin_looks
-from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
@@ -64,7 +64,7 @@ def test_ring_buffer_hands_out_its_frame_and_routes_copy_their_slice() -> None:
     assert buf.find_nearest(100.0) is frame
 
     for led_count in (3, 4):  # the slice's size, and a device with more LEDs
-        sent = DeviceRoute(ring=buf, start=1, stop=4, streaming=True).colors_at(100.0, led_count)
+        sent = ring_route(buf, start=1, stop=4).colors_at(100.0, led_count)
         assert sent is not None and not np.shares_memory(sent, colors)
         sent[:] = 0
     assert np.all(colors == 0.5)
@@ -89,7 +89,7 @@ def test_the_engine_renders_each_zone_it_hosts(clock: BeatClock) -> None:
     now = time.monotonic()
 
     engine.tick(now)
-    engine.remove_runtime("shelf")
+    engine.remove_runtime(shelf)
     engine.tick(now + 1 / 60)
 
     assert (desk.ring.count, shelf.ring.count) == (2, 1)
@@ -127,3 +127,19 @@ async def test_the_engine_renders_until_stopped(clock: BeatClock) -> None:
     await asyncio.wait_for(task, timeout=1.0)
 
     assert desk.ring.count >= 3
+
+
+# M2 review A3: runtimes are kept by identity, so a preview of a zone never replaces it.
+def test_a_preview_renders_beside_its_zone(clock: BeatClock) -> None:
+    engine = EffectEngine(fps=60)
+    desk, preview = _runtime("desk", clock), _runtime("desk", clock)
+    engine.add_runtime(desk)
+    engine.add_runtime(preview)
+    now = time.monotonic()
+
+    engine.tick(now)
+    engine.remove_runtime(preview)
+    engine.remove_runtime(preview)  # twice is fine
+    engine.tick(now + 1 / 60)
+
+    assert (desk.ring.count, preview.ring.count) == (2, 1)

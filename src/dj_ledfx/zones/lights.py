@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -26,6 +26,7 @@ from dj_ledfx.zones.model import LightsChanged, ZonesChanged
 from dj_ledfx.zones.runtime import LightMode
 
 if TYPE_CHECKING:
+    from dj_ledfx.devices.lights import LightIndex
     from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
     from dj_ledfx.events import EventBus
     from dj_ledfx.types import RGB
@@ -36,6 +37,31 @@ LightStatus = Literal[LightMode, "offline", "switched-off", "reconnecting", "idl
 ZONE_POLL_S = 5.0
 IDLE_POLL_S = 30.0
 MISSED_POLLS_OFFLINE = 3
+
+# Most active first (ruling 8): a light of several devices, the PC, shows the first status
+# any of its parts has.
+STATUS_BY_ACTIVITY: tuple[LightStatus, ...] = (
+    "own-effect",
+    "streamed-copy",
+    "streaming",
+    "switched-off",
+    "idle",
+    "reconnecting",
+    "offline",
+)
+_RANK = {status: rank for rank, status in enumerate(STATUS_BY_ACTIVITY)}
+
+
+def combine_states(light_id: str, states: Sequence[LightState]) -> LightState | None:
+    """A light's state from its devices' states: the most active one's status, since and
+    effect; on if any part is on, off only if all are; a colour only for one device."""
+    if not states:
+        return None
+    best = min(states, key=lambda state: _RANK[state.status])
+    powers = [state.power for state in states]
+    power = True if True in powers else False if all(p is False for p in powers) else None
+    colour = states[0].colour if len(states) == 1 else None
+    return replace(best, device_id=light_id, power=power, colour=colour)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +102,16 @@ class LightMonitor:
 
     def state(self, device_id: str) -> LightState | None:
         return self._states.get(device_id)
+
+    def light_states(self, index: LightIndex) -> list[LightState]:
+        """Each light's state, in the index's order: the PC's from its parts'."""
+        out: list[LightState] = []
+        for entry in index.entries:
+            parts = [self._states[d] for d in entry.devices if d in self._states]
+            state = combine_states(entry.id, parts)
+            if state is not None:
+                out.append(state)
+        return out
 
     def refresh(self) -> None:
         """Work every light's status out again. Emits LightsChanged if anything changed."""

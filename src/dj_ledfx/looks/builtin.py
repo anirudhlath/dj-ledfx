@@ -1,18 +1,24 @@
 """Built-in looks (spec §5.2).
 
-The Firmware showcase takes its metadata from the handoff's looks.json (vendored in
-data/looks.json, byte for byte). The six classic looks are today's effects; the handoff
-has no entry for them, so their names and descriptions live here.
+The handoff's looks take their metadata from its looks.json (vendored in data/looks.json,
+byte for byte), in its order: M2's six showcase looks and the Firmware showcase. The
+handoff has no layers, so they live here. The six classic looks are today's effects; the
+handoff has no entry for them, so their names and descriptions live here too.
 """
 
 from __future__ import annotations
 
 import functools
 import json
+from collections.abc import Mapping, Sequence
 from importlib.resources import files
 from typing import Any
 
+from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
+from dj_ledfx.home.model import Anchor
+from dj_ledfx.home.seed import normalise_name, seed_home
 from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.looks.selectors import parse_selector
 
 FIRMWARE_LOOK_ID = "firmware"
 
@@ -44,8 +50,64 @@ def handoff_looks() -> dict[str, dict[str, Any]]:
     return {str(entry["id"]): entry for entry in json.loads(raw)["looks"]}
 
 
-def _showcase() -> Look:
-    entry = handoff_looks()[FIRMWARE_LOOK_ID]
+def anchor_named_in(text: str, anchors: Sequence[Anchor]) -> str:
+    """The id of the one anchor whose name the text mentions as whole words, or "" when
+    it names none or more than one."""
+    words = f" {normalise_name(text)} "
+    named = [anchor.id for anchor in anchors if f" {normalise_name(anchor.name)} " in words]
+    return named[0] if len(named) == 1 else ""
+
+
+def _field(layer_id: str, name: str, kind: str, **settings: Any) -> Layer:
+    return Layer(id=layer_id, name=name, type="field", kind=kind, settings=settings)
+
+
+def _firmware(
+    layer_id: str, name: str, kind: str, *, lights: Sequence[str] = (), **settings: Any
+) -> Layer:
+    return Layer(
+        id=layer_id,
+        name=name,
+        type="firmware",
+        kind=kind,
+        settings=settings,
+        lights=tuple(parse_selector(text) for text in lights) or None,
+    )
+
+
+def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
+    """The layers of each handoff look this milestone can run, by look id."""
+    focus = handoff_looks()["focus"]["description"]
+    return {
+        "sunset": (
+            _field("sky", "Gradient", "sunset_gradient"),
+            _firmware("flame", "Candles", "lifx_flame", lights=["type:candle"]),
+        ),
+        "aurora": (
+            _field("curtains", "Curtains", "aurora_curtains"),
+            _firmware(
+                "morph",
+                "Morph",
+                "lifx_morph",
+                lights=["type:candle", "type:tube"],
+                palette=list(AURORA_PALETTE),
+            ),
+        ),
+        "lava": (_field("plasma", "Plasma", "lava_plasma"),),
+        "carousel": (_field("carousel", "Carousel", "color_carousel"),),
+        "ripples": (_field("ripples", "Ripples", "ripples"),),
+        "focus": (
+            _field(
+                "focus", "Focus", "focus_field", anchor=anchor_named_in(focus, seed_home().anchors)
+            ),
+        ),
+        FIRMWARE_LOOK_ID: tuple(
+            _firmware(layer_id, name, kind) for layer_id, name, kind in SHOWCASE_LAYERS
+        ),
+    }
+
+
+def _from_handoff(entry: Mapping[str, Any], layers: tuple[Layer, ...]) -> Look:
     return Look(
         id=entry["id"],
         name=entry["name"],
@@ -54,10 +116,7 @@ def _showcase() -> Look:
         thumbnail=entry["thumbnail"],
         scope=entry["scope"],
         needs=tuple(entry["inputs"]),
-        layers=tuple(
-            Layer(id=layer_id, name=name, type="firmware", kind=kind)
-            for layer_id, name, kind in SHOWCASE_LAYERS
-        ),
+        layers=layers,
         built_in=True,
     )
 
@@ -68,7 +127,7 @@ def _classic(kind: str, name: str) -> Look:
         id=look_id,
         name=name,
         category="tempo",
-        description=f"The classic {name.lower()} effect, played along the zone's lights in order.",
+        description=f"The classic {name.lower()} effect, swept across the zone from west to east.",
         thumbnail=look_id,
         uses=("tempo",),
         layers=(Layer(id="strip", name=name, type="field", kind=kind),),
@@ -78,4 +137,11 @@ def _classic(kind: str, name: str) -> Look:
 
 @functools.cache
 def builtin_looks() -> tuple[Look, ...]:
-    return (_showcase(), *(_classic(kind, name) for kind, name in CLASSIC_NAMES.items()))
+    """The handoff's looks that have layers here, in looks.json's order, then the classics."""
+    layers = _handoff_layers()
+    handoff = tuple(
+        _from_handoff(entry, layers[look_id])
+        for look_id, entry in handoff_looks().items()
+        if look_id in layers
+    )
+    return (*handoff, *(_classic(kind, name) for kind, name in CLASSIC_NAMES.items()))

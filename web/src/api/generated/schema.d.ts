@@ -268,6 +268,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/home": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Home */
+        get: operations["get_home_api_home_get"];
+        /**
+         * Update Home
+         * @description North, ceiling, beams and location; only what's sent changes.
+         */
+        put: operations["update_home_api_home_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/home/anchors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Anchor */
+        post: operations["add_anchor_api_home_anchors_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/home/anchors/{anchor_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Anchor */
+        put: operations["update_anchor_api_home_anchors__anchor_id__put"];
+        post?: never;
+        /** Delete Anchor */
+        delete: operations["delete_anchor_api_home_anchors__anchor_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/home/subzones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Sub Zone */
+        post: operations["add_sub_zone_api_home_subzones_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/home/subzones/{sub_zone_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Sub Zone */
+        put: operations["update_sub_zone_api_home_subzones__sub_zone_id__put"];
+        post?: never;
+        /**
+         * Delete Sub Zone
+         * @description A running sub-zone is turned off and its lights put back (Review Focus 4).
+         */
+        delete: operations["delete_sub_zone_api_home_subzones__sub_zone_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lights": {
         parameters: {
             query?: never;
@@ -279,6 +373,68 @@ export interface paths {
         get: operations["list_lights_api_lights_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lights/placement/guess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Guess Placements
+         * @description Spread the unplaced lights around their rooms, unconfirmed (spec §6.2).
+         */
+        post: operations["guess_placements_api_lights_placement_guess_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lights/{light_id}/placement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Place Light
+         * @description Place or move a light, or a PC part by its device id (ruling 4). Moving a light
+         *     doesn't confirm it (spec §6.2).
+         */
+        put: operations["place_light_api_lights__light_id__placement_put"];
+        post?: never;
+        /**
+         * Remove Placement
+         * @description Take a light off the map (§8.6's "Remove from the map").
+         */
+        delete: operations["remove_placement_api_lights__light_id__placement_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lights/{light_id}/placement/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Placement */
+        post: operations["confirm_placement_api_lights__light_id__placement_confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -401,6 +557,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Preview
+         * @description Replaces any previous preview. A request that fails leaves it as it was.
+         */
+        post: operations["start_preview_api_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/preview/{preview_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Preview
+         * @description The editor's live edits: taken in place where the layers allow.
+         */
+        put: operations["update_preview_api_preview__preview_id__put"];
+        post?: never;
+        /** Stop Preview */
+        delete: operations["stop_preview_api_preview__preview_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/running": {
         parameters: {
             query?: never;
@@ -410,6 +607,27 @@ export interface paths {
         };
         /** List Running */
         get: operations["list_running_api_running_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/running/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Recent
+         * @description The looks that stopped, newest first, for "Start again". One tap starts one again
+         *     through POST /zones/{zone_id}/start with its lookId (M2 plan, ruling 19).
+         */
+        get: operations["list_recent_api_running_recent_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -687,6 +905,66 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** Anchor */
+        Anchor: {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Points */
+            points?: [
+                number,
+                number,
+                number
+            ][] | null;
+            /** Position */
+            position: [
+                number,
+                number,
+                number
+            ];
+        };
+        /** AnchorIn */
+        AnchorIn: {
+            /** Name */
+            name: string;
+            /** Points */
+            points?: [
+                number,
+                number,
+                number
+            ][];
+            /** Position */
+            position: [
+                number,
+                number,
+                number
+            ];
+        };
+        /** AnchorUpdate */
+        AnchorUpdate: {
+            /** Confirmed */
+            confirmed?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Points */
+            points?: [
+                number,
+                number,
+                number
+            ][] | null;
+            /** Position */
+            position?: [
+                number,
+                number,
+                number
+            ] | null;
+        };
         /** AssignGroupRequest */
         AssignGroupRequest: {
             /** Group */
@@ -729,6 +1007,33 @@ export interface components {
              */
             type: "light" | "zone" | "input";
         };
+        /** BentLineShape */
+        BentLineShape: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "bent-line";
+            /** Path */
+            path: [
+                number,
+                number,
+                number
+            ][];
+        };
+        /** Box2 */
+        Box2: {
+            /** Max */
+            max: [
+                number,
+                number
+            ];
+            /** Min */
+            min: [
+                number,
+                number
+            ];
+        };
         /** Brightness */
         Brightness: {
             /** Value */
@@ -745,6 +1050,24 @@ export interface components {
         CreatePresetRequest: {
             /** Name */
             name: string;
+        };
+        /** CylinderShape */
+        CylinderShape: {
+            /** Base */
+            base: [
+                number,
+                number,
+                number
+            ];
+            /** Height */
+            height: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "cylinder";
+            /** Radius */
+            radius: number;
         };
         /** DeviceResponse */
         DeviceResponse: {
@@ -782,6 +1105,37 @@ export interface components {
              */
             status: "online" | "offline" | "reconnecting";
         };
+        /** Furniture */
+        Furniture: {
+            /** Box */
+            box?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Height */
+            height: number;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Polygon */
+            polygon?: [
+                number,
+                number
+            ][] | null;
+            /**
+             * Z0
+             * @default 0
+             */
+            z0: number;
+        };
         /** GeometrySchema */
         GeometrySchema: {
             /** Direction */
@@ -800,6 +1154,37 @@ export interface components {
              */
             type: "point" | "strip" | "matrix" | "unknown";
         };
+        /** GridShape */
+        GridShape: {
+            /** Center */
+            center: [
+                number,
+                number,
+                number
+            ];
+            /** Depth */
+            depth: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "grid";
+            /**
+             * Rotation
+             * @default [
+             *       0,
+             *       0,
+             *       0
+             *     ]
+             */
+            rotation: [
+                number,
+                number,
+                number
+            ];
+            /** Width */
+            width: number;
+        };
         /** GroupRequest */
         GroupRequest: {
             /**
@@ -814,6 +1199,57 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** Home */
+        Home: {
+            /** Anchors */
+            anchors: components["schemas"]["Anchor"][];
+            /** Beams */
+            beams: number;
+            /** Ceiling */
+            ceiling: number;
+            /** Columns */
+            columns: components["schemas"]["Box2"][];
+            /** Furniture */
+            furniture: components["schemas"]["Furniture"][];
+            location?: components["schemas"]["Location"] | null;
+            /** Northoffsetdeg */
+            northOffsetDeg: number;
+            outdoor?: components["schemas"]["Outdoor"];
+            /** Outline */
+            outline: [
+                number,
+                number
+            ][];
+            /** Rooms */
+            rooms: components["schemas"]["Room"][];
+            size: components["schemas"]["HomeSize"];
+            /** Subzones */
+            subZones: components["schemas"]["SubZone"][];
+            /** Wallcutheight */
+            wallCutHeight: number;
+            /** Walls */
+            walls: components["schemas"]["Wall"][];
+        };
+        /**
+         * HomeSettings
+         * @description PUT /home: only what's sent changes.
+         */
+        HomeSettings: {
+            /** Beams */
+            beams?: number | null;
+            /** Ceiling */
+            ceiling?: number | null;
+            location?: components["schemas"]["Location"] | null;
+            /** Northoffsetdeg */
+            northOffsetDeg?: number | null;
+        };
+        /** HomeSize */
+        HomeSize: {
+            /** Eastwest */
+            eastWest: number;
+            /** Northsouth */
+            northSouth: number;
         };
         /** Layer */
         Layer: {
@@ -878,6 +1314,8 @@ export interface components {
              * @default false
              */
             confirmed: boolean;
+            /** Confirmedat */
+            confirmedAt?: string | null;
             /** Droppedpct */
             droppedPct: number;
             /** Firmware */
@@ -914,9 +1352,7 @@ export interface components {
             /** Sendfps */
             sendFps: number;
             /** Shape */
-            shape?: {
-                [key: string]: unknown;
-            } | null;
+            shape?: (components["schemas"]["PointShape"] | components["schemas"]["LineShape"] | components["schemas"]["BentLineShape"] | components["schemas"]["CylinderShape"] | components["schemas"]["GridShape"]) | null;
             /**
              * Status
              * @enum {string}
@@ -941,8 +1377,47 @@ export interface components {
         };
         /** LightPart */
         LightPart: {
+            /** Id */
+            id: string;
             /** Leds */
             leds: number;
+            /** Name */
+            name: string;
+            /** Shape */
+            shape?: (components["schemas"]["PointShape"] | components["schemas"]["LineShape"] | components["schemas"]["BentLineShape"] | components["schemas"]["CylinderShape"] | components["schemas"]["GridShape"]) | null;
+        };
+        /** LineShape */
+        LineShape: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "line";
+            /** Path */
+            path: [
+                [
+                    number,
+                    number,
+                    number
+                ],
+                [
+                    number,
+                    number,
+                    number
+                ]
+            ];
+        };
+        /** Location */
+        Location: {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
             /** Name */
             name: string;
         };
@@ -1026,6 +1501,29 @@ export interface components {
              */
             type: "linear" | "radial";
         };
+        /** Outdoor */
+        Outdoor: {
+            /** Balcony */
+            balcony?: [
+                number,
+                number
+            ][];
+            /**
+             * Balconyoffroom
+             * @default
+             */
+            balconyOffRoom: string;
+            /** Courtyard */
+            courtyard?: [
+                number,
+                number
+            ][];
+            /**
+             * Courtyardopensto
+             * @default
+             */
+            courtyardOpensTo: string;
+        };
         /** Overlay */
         Overlay: {
             /**
@@ -1042,6 +1540,28 @@ export interface components {
             /** Trigger */
             trigger: string;
         };
+        /** Placement */
+        Placement: {
+            /** Confirmed */
+            confirmed: boolean;
+            /** Confirmedat */
+            confirmedAt?: string | null;
+            /** Ledorder */
+            ledOrder: string;
+            /** Shape */
+            shape: components["schemas"]["PointShape"] | components["schemas"]["LineShape"] | components["schemas"]["BentLineShape"] | components["schemas"]["CylinderShape"] | components["schemas"]["GridShape"];
+        };
+        /**
+         * PlacementIn
+         * @description PUT /lights/{id}/placement (ruling 16). Without ledOrder, a shape of the same kind
+         *     keeps its order and a new kind takes its first.
+         */
+        PlacementIn: {
+            /** Ledorder */
+            ledOrder?: string | null;
+            /** Shape */
+            shape: components["schemas"]["PointShape"] | components["schemas"]["LineShape"] | components["schemas"]["BentLineShape"] | components["schemas"]["CylinderShape"] | components["schemas"]["GridShape"];
+        };
         /** PlacementResponse */
         PlacementResponse: {
             /** Device Id */
@@ -1054,6 +1574,20 @@ export interface components {
             /** Strip Index */
             strip_index?: number | null;
         };
+        /** PointShape */
+        PointShape: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "point";
+            /** Position */
+            position: [
+                number,
+                number,
+                number
+            ];
+        };
         /** PresetResponse */
         PresetResponse: {
             /** Effect Class */
@@ -1064,6 +1598,67 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
+        };
+        /** PreviewRequest */
+        PreviewRequest: {
+            look?: components["schemas"]["Look"] | null;
+            /** Lookid */
+            lookId?: string | null;
+            /** Zoneid */
+            zoneId: string;
+        };
+        /** PreviewStarted */
+        PreviewStarted: {
+            /** Previewid */
+            previewId: string;
+        };
+        /** PreviewUpdate */
+        PreviewUpdate: {
+            look: components["schemas"]["Look"];
+        };
+        /**
+         * RecentLook
+         * @description A look that stopped, for "Start again" (web spec §9.4). §12.2 has no such type: the
+         *     M2 plan's ruling 19 shapes it, and F1 types it by hand until the backend serves it.
+         */
+        RecentLook: {
+            /** Lookid */
+            lookId: string;
+            /** Lookname */
+            lookName: string;
+            /**
+             * Startedat
+             * Format: date-time
+             */
+            startedAt: string;
+            /**
+             * Stoppedat
+             * Format: date-time
+             */
+            stoppedAt: string;
+            /** Zoneid */
+            zoneId: string;
+            /** Zonename */
+            zoneName: string;
+        };
+        /** Room */
+        Room: {
+            /** Haslights */
+            hasLights: boolean;
+            /** Id */
+            id: string;
+            /** Labelat */
+            labelAt: [
+                number,
+                number
+            ];
+            /** Name */
+            name: string;
+            /** Polygon */
+            polygon: [
+                number,
+                number
+            ][];
         };
         /** Running */
         Running: {
@@ -1230,6 +1825,44 @@ export interface components {
             /** Zoneid */
             zoneId: string;
         };
+        /** SubZone */
+        SubZone: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Polygon */
+            polygon: [
+                number,
+                number
+            ][];
+            /** Room */
+            room: string;
+        };
+        /** SubZoneIn */
+        SubZoneIn: {
+            /** Name */
+            name: string;
+            /** Polygon */
+            polygon: [
+                number,
+                number
+            ][];
+            /** Room */
+            room: string;
+        };
+        /** SubZoneUpdate */
+        SubZoneUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Polygon */
+            polygon?: [
+                number,
+                number
+            ][] | null;
+            /** Room */
+            room?: string | null;
+        };
         /** TakeOver */
         TakeOver: {
             /** Lights */
@@ -1304,6 +1937,30 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** Wall */
+        Wall: {
+            /** A */
+            a: [
+                number,
+                number
+            ];
+            /** B */
+            b: [
+                number,
+                number
+            ];
+            /** Exterior */
+            exterior: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "wall" | "window" | "glass-door";
+            /** Thickness */
+            thickness: number;
+            /** Westfacing */
+            westFacing: boolean;
         };
         /** Zone */
         Zone: {
@@ -1831,6 +2488,253 @@ export interface operations {
             };
         };
     };
+    get_home_api_home_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Home"];
+                };
+            };
+        };
+    };
+    update_home_api_home_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HomeSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Home"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_anchor_api_home_anchors_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnchorIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Anchor"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_anchor_api_home_anchors__anchor_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                anchor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnchorUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Anchor"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_anchor_api_home_anchors__anchor_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                anchor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_sub_zone_api_home_subzones_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubZoneIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubZone"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_sub_zone_api_home_subzones__sub_zone_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sub_zone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubZoneUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubZone"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_sub_zone_api_home_subzones__sub_zone_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sub_zone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_lights_api_lights_get: {
         parameters: {
             query?: never;
@@ -1847,6 +2751,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Light"][];
+                };
+            };
+        };
+    };
+    guess_placements_api_lights_placement_guess_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["Placement"];
+                    };
+                };
+            };
+        };
+    };
+    place_light_api_lights__light_id__placement_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                light_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlacementIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Placement"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_placement_api_lights__light_id__placement_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                light_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_placement_api_lights__light_id__placement_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                light_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Placement"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2192,6 +3213,101 @@ export interface operations {
             };
         };
     };
+    start_preview_api_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_preview_api_preview__preview_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_preview_api_preview__preview_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_running_api_running_get: {
         parameters: {
             query?: never;
@@ -2208,6 +3324,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Running"];
+                };
+            };
+        };
+    };
+    list_recent_api_running_recent_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecentLook"][];
                 };
             };
         };

@@ -2,25 +2,18 @@
 
 import errno
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
+from map_home import DESK_CORNER, tiny_home
 
+from dj_ledfx.home.shapes import CylinderShape, GridShape, Placement, PointShape
+from dj_ledfx.home.store import HomeStore
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.persistence.toml_io import export_toml, import_toml, migrate_from_toml
-from dj_ledfx.zones.model import Assignment, ZoneRecord
+from dj_ledfx.zones.model import Assignment, StoppedLook, ZoneRecord
 from dj_ledfx.zones.store import ZoneStore
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path: Path):
-    db_path = tmp_path / "state.db"
-    state_db = StateDB(db_path)
-    await state_db.open()
-    yield state_db
-    await state_db.close()
 
 
 @pytest.mark.asyncio
@@ -431,3 +424,130 @@ async def test_migration_leaves_a_file_it_cannot_rename(
 
     assert config[("engine", "fps")] == 90
     assert config_toml.exists()
+
+
+@pytest.mark.asyncio
+async def test_the_map_and_the_placements_round_trip(db, tmp_path: Path) -> None:
+    store = HomeStore(db)
+    await store.save_home(tiny_home(ceiling=2.6))
+    confirmed = Placement(
+        PointShape(DESK_CORNER), "", True, datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    )
+    await store.save_placement("lamp", confirmed)
+    part = Placement(GridShape((6.0, 3.0, 1.0), 0.4, 0.2, (0.0, 90.0, 0.0)), "columns")
+    await store.save_placement("openrgb:localhost:6742:1", part)
+    text = await export_toml(db)
+
+    fresh = StateDB(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        await import_toml(fresh, text)
+
+        assert await HomeStore(fresh).load_home() == tiny_home(ceiling=2.6)
+        assert await HomeStore(fresh).load_placements() == {
+            "lamp": confirmed,
+            "openrgb:localhost:6742:1": part,
+        }
+    finally:
+        await fresh.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_map_set_aside_travels_in_the_backup(db, tmp_path: Path) -> None:
+    store = HomeStore(db)
+    await store.load_home()
+    await db.write("UPDATE home_map SET body='{\"rooms\": []}' WHERE id=1")
+    await store.load_home()  # sets the unreadable map aside
+    text = await export_toml(db)
+    assert "[home_unreadable]" in text
+
+    fresh = StateDB(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        await import_toml(fresh, text)
+
+        kept = await fresh.fetch_all("SELECT body FROM home_map_unreadable")
+        assert kept == [('{"rooms": []}',)]
+    finally:
+        await fresh.close()
+
+
+@pytest.mark.asyncio
+async def test_import_skips_a_bad_map_and_bad_placements(db) -> None:
+    text = """
+[home]
+body = '{"rooms": []}'
+
+[placements.lamp]
+shape = { kind = "point", position = [1.0, 2.0] }
+
+[placements.rope]
+shape = { kind = "line", path = [[0.0, 0.0, 1.0], [2.0, 0.0, 1.0]] }
+led_order = "rows"
+
+[placements.bulb]
+shape = "a point"
+
+[placements.tube]
+confirmed = true
+shape = { kind = "cylinder", base = [1.0, 1.0, 0.0], height = 0.5, radius = 0.05 }
+"""
+    await import_toml(db, text)
+
+    assert await db.fetch_all("SELECT body FROM home_map") == []  # the map wasn't touched
+    placements = await HomeStore(db).load_placements()
+    assert placements == {
+        "tube": Placement(CylinderShape((1.0, 1.0, 0.0), 0.5, 0.05), "bottom-to-top", True)
+    }
+
+
+@pytest.mark.asyncio
+async def test_start_again_round_trips_and_keeps_the_newer_stop(db, tmp_path: Path) -> None:
+    at = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    shelf = StoppedLook("shelf", "classic-strobe", at, at + timedelta(minutes=9))
+    await ZoneStore(db).remember(
+        [StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=5)), shelf]
+    )
+    text = await export_toml(db)
+    assert "[[recent]]" in text
+
+    fresh = StateDB(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        desk_here = StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=20))
+        shelf_here = StoppedLook("shelf", "classic-strobe", at, at + timedelta(minutes=1))
+        await ZoneStore(fresh).remember([desk_here, shelf_here])
+
+        await import_toml(fresh, text)
+
+        assert await ZoneStore(fresh).load_recent() == [desk_here, shelf]
+    finally:
+        await fresh.close()
+
+
+@pytest.mark.asyncio
+async def test_import_skips_start_again_entries_it_cannot_use(db) -> None:
+    text = """
+[[recent]]
+zone_id = "desk"
+look_id = "classic-breathe"
+started_at = 2026-09-24T19:00:00Z
+stopped_at = 2026-09-24T19:05:00Z
+
+[[recent]]
+zone_id = "shelf"
+look_id = "classic-strobe"
+started_at = "not a time"
+stopped_at = 2026-09-24T19:05:00Z
+
+[[recent]]
+look_id = "classic-strobe"
+started_at = 2026-09-24T19:00:00Z
+stopped_at = 2026-09-24T19:05:00Z
+"""
+    await import_toml(db, text)
+
+    at = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    assert await ZoneStore(db).load_recent() == [
+        StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=5))
+    ]

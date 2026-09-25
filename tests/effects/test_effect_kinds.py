@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 from conftest import render_ctx
+from map_home import leds_at
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
@@ -107,21 +108,82 @@ def test_unknown_kinds_raise_key_error() -> None:
 
 def test_strip_adapter_plays_the_strip_along_the_leds_in_order() -> None:
     leds = build_ledset([LedSource("a", 3), LedSource("b", 2)])
-    colors = StripAdapter(_Ramp()).render(render_ctx(), leds)
+    adapter = StripAdapter(_Ramp())
+    adapter.set_params(mapping="order")
+    colors = adapter.render(render_ctx(), leds)
     assert colors.shape == (5, 3)
     assert colors.dtype == np.float32
     assert np.allclose(colors[:, 0], np.linspace(0, 255, 5).astype(np.uint8) / 255.0)
     assert np.all(colors[:, 1:] == 0.0)
 
 
+RAMP = np.linspace(0, 255, 4).astype(np.uint8) / 255.0  # the strip's 4 reds, in order
+
+
+def test_strip_adapter_projects_each_led_onto_an_axis() -> None:
+    leds = leds_at(
+        [[3.0, 0.0, 0.0], [0.0, 0.0, 2.0], [2.0, 0.0, 1.0], [1.0, 0.0, 3.0]], ceiling=None
+    )
+    adapter = StripAdapter(_Ramp())  # linear along east by default
+    assert np.allclose(adapter.render(render_ctx(), leds)[:, 0], RAMP[[3, 0, 2, 1]])
+    adapter.set_params(axis="up")
+    assert np.allclose(adapter.render(render_ctx(), leds)[:, 0], RAMP[[0, 2, 1, 3]])
+
+
+def test_strip_adapter_projects_radially_from_an_anchor_or_the_middle() -> None:
+    leds = leds_at(
+        [[0.0, 2.0, 0.0], [0.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 1.0, 0.0]],
+        ceiling=None,
+        anchors={"sofa": (0.0, 0.0, 0.0)},
+    )
+    adapter = StripAdapter(_Ramp())
+    adapter.set_params(mapping="radial", centre="sofa")
+    assert np.allclose(adapter.render(render_ctx(), leds)[:, 0], RAMP[[2, 0, 3, 1]])
+    adapter.set_params(centre="")  # the middle of the zone: y = 1.5
+    middle = adapter.render(render_ctx(), leds)[:, 0]
+    assert middle[0] == middle[3] and middle[1] == middle[2] and middle[1] > middle[0]
+
+
+# M2 review M11: the classics default to east, so a strip running north-south would
+# otherwise show one colour.
+@pytest.mark.parametrize(
+    ("points", "settings"),
+    [
+        ([[1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [1.0, 2.0, 1.0], [1.0, 3.0, 1.0]], {}),
+        ([[1.02, 0.0, 1.0], [1.0, 1.0, 1.0], [1.03, 2.0, 1.0], [1.01, 3.0, 1.0]], {}),
+        ([[2.0, 2.0, 1.0]] * 4, {"mapping": "radial"}),
+        (
+            [[2.0, 2.0, 1.0], [2.02, 2.0, 1.0], [2.0, 2.04, 1.0], [2.01, 2.0, 1.0]],
+            {"mapping": "radial"},
+        ),
+    ],
+    ids=["north-south", "north-south-jittered", "one-point", "within-5-cm-of-the-middle"],
+)
+def test_leds_spanning_under_5_cm_along_the_projection_play_in_led_order(
+    points: list[list[float]], settings: dict[str, str]
+) -> None:
+    adapter = StripAdapter(_Ramp())
+    adapter.set_params(**settings)
+    assert np.allclose(adapter.render(render_ctx(), leds_at(points, ceiling=None))[:, 0], RAMP)
+
+
 def test_strip_adapter_forwards_parameters() -> None:
     inner = _Ramp()
     adapter = StripAdapter(inner)
-    adapter.set_params(level=0.5)
+    adapter.set_params(level=0.5, mapping="radial")
     assert inner.level == 0.5
-    assert adapter.get_params() == {"level": 0.5}
-    with pytest.raises(ValueError):
-        adapter.set_params(level=2.0)
+    assert adapter.get_params() == {"level": 0.5}  # the strip effect's own settings
+    with pytest.raises(ValueError, match="above max"):
+        adapter.set_params(level=2.0, mapping="order")
+    with pytest.raises(ValueError, match="not in"):
+        adapter.set_params(mapping="spiral")
+    leds = leds_at(
+        [[3.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], ceiling=None
+    )
+    # A refused change changes nothing: still radial from the middle (x = 1.5), so the
+    # two outer LEDs match and so do the two inner ones; in LED order all four differ.
+    radial = adapter.render(render_ctx(), leds)[:, 0]
+    assert radial[0] == radial[1] and radial[2] == radial[3] and radial[0] > radial[2]
 
 
 def test_fire_storm_repeats_after_reseed() -> None:

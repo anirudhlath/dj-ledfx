@@ -14,6 +14,8 @@ from loguru import logger
 # Directory containing SQL migration files
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
+Statement = tuple[str, tuple[Any, ...]]  # one write for write_many: SQL and its parameters
+
 
 def coerce_config_values(raw: dict[str, str]) -> dict[str, object]:
     """Parse string values as JSON where possible (handles int, float, bool)."""
@@ -173,7 +175,7 @@ class StateDB:
         """Run one write statement and commit it."""
         await self._execute_write(sql, params)
 
-    async def write_many(self, statements: Sequence[tuple[str, tuple[Any, ...]]]) -> None:
+    async def write_many(self, statements: Sequence[Statement]) -> None:
         """Run several write statements as one transaction: all of them or none."""
 
         def _run() -> None:
@@ -189,6 +191,23 @@ class StateDB:
 
         async with self._lock:
             await asyncio.to_thread(_run)
+
+    async def has_mark(self, key: str) -> bool:
+        """Whether the run-once step `key` has run: mark_statement() wrote its mark."""
+        rows = await self._execute_read(
+            "SELECT 1 FROM config WHERE section='_meta' AND key=?", (key,)
+        )
+        return bool(rows)
+
+    @staticmethod
+    def mark_statement(key: str) -> Statement:
+        """The write that marks the run-once step `key` done. It goes in the step's own
+        write_many, so a crash can't leave the step done and unmarked."""
+        return (
+            "INSERT INTO config (section, key, value) VALUES ('_meta', ?, '1') "
+            "ON CONFLICT(section, key) DO UPDATE SET value=excluded.value",
+            (key,),
+        )
 
     async def load_config(self, section: str) -> dict[str, str]:
         """Return all key-value pairs for a config section."""
@@ -408,12 +427,16 @@ class StateDB:
             (scene_id, effect_class, params),
         )
 
-    async def load_scene_placements(self, scene_id: str) -> list[dict[str, Any]]:
-        """Return all placements for a scene as dicts."""
-        rows = await self._execute_read(
-            f"SELECT {', '.join(self._PLACEMENT_COLUMNS)} FROM scene_placements WHERE scene_id=?",
-            (scene_id,),
-        )
+    async def load_scene_placements(self, scene_id: str | None = None) -> list[dict[str, Any]]:
+        """Return a scene's placements as dicts; every scene's, by scene then device, for
+        None."""
+        columns = ", ".join(self._PLACEMENT_COLUMNS)
+        if scene_id is None:
+            sql = f"SELECT {columns} FROM scene_placements ORDER BY scene_id, device_id"
+            rows = await self._execute_read(sql)
+        else:
+            sql = f"SELECT {columns} FROM scene_placements WHERE scene_id=?"
+            rows = await self._execute_read(sql, (scene_id,))
         return [dict(zip(self._PLACEMENT_COLUMNS, row, strict=True)) for row in rows]
 
     async def save_placement(self, data: dict[str, Any]) -> None:

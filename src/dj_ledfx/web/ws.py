@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import struct
 from collections.abc import Callable
 from typing import Any
 
@@ -12,7 +11,9 @@ from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from dj_ledfx.web import contract
-from dj_ledfx.web.state import ClientSubscription
+from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
+from dj_ledfx.web.state import ClientSubscription, light_index
+from dj_ledfx.zones.frames import STREAMS
 from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
 
 _GOING_AWAY = 1001  # RFC 6455 close code: the server is going down
@@ -102,6 +103,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         logger.debug("WebSocket error: {}", e)
     finally:
         sessions.discard(session)
+        _watch(app, sub, [])  # a closed tab watches nothing: its preview can end
         session.ended.set_result(None)
         for t in tasks:
             t.cancel()
@@ -131,7 +133,7 @@ def _running_message(app: Any) -> dict[str, Any] | None:
     zones = getattr(app.state, "zone_manager", None)
     if zones is None:
         return None
-    running = contract.running_out(zones.running())
+    running = contract.running_out(zones.running(), light_index(app))
     return {"channel": "running", **running.model_dump(mode="json", by_alias=True)}
 
 
@@ -139,7 +141,7 @@ def _lights_message(app: Any) -> dict[str, Any] | None:
     monitor = getattr(app.state, "light_monitor", None)
     if monitor is None:
         return None
-    lights = [contract.light_update_out(state) for state in monitor.states()]
+    lights = [contract.light_update_out(s) for s in monitor.light_states(light_index(app))]
     return {
         "channel": "lights",
         "lights": [light.model_dump(mode="json", by_alias=True) for light in lights],
@@ -150,7 +152,8 @@ def _attention_message(app: Any) -> dict[str, Any] | None:
     feed = getattr(app.state, "attention_feed", None)
     if feed is None:
         return None
-    items = [contract.attention_out(item) for item in feed.items()]
+    index = light_index(app)
+    items = [contract.attention_out(item, index) for item in feed.items()]
     return {
         "channel": "attention",
         "items": [item.model_dump(mode="json", by_alias=True) for item in items],
@@ -248,36 +251,40 @@ async def _stats_poll(ws: WebSocket, app: Any) -> None:
 
 
 def stats_message(app: Any) -> dict[str, Any]:
-    """The stats channel's message: each device's send statistics."""
+    """The stats channel's message: each device's send statistics (the old UI), and each
+    light's (web spec §12.4)."""
     scheduler = app.state.scheduler
     try:
         stats = scheduler.get_device_stats()
-        # Each device's status by stable id: lights may share a name (the RAM sticks)
-        manager = app.state.device_manager
-        status_by_id: dict[str, str] = {}
-        try:
-            for d in manager.devices:
-                status_by_id[d.adapter.device_info.effective_id] = d.status
-        except Exception:
-            pass
-        return {
-            "channel": "stats",
-            "devices": [
-                {
-                    "id": s.device_id,
-                    "name": s.device_name,
-                    "send_fps": s.send_fps,
-                    "latency_ms": s.effective_latency_ms,
-                    "frames_dropped": s.frames_dropped,
-                    "dropped_pct": s.dropped_pct,
-                    "connected": s.connected,
-                    "status": status_by_id.get(s.device_id, "online"),
-                }
-                for s in stats
-            ],
-        }
     except Exception:
-        return {"channel": "stats", "devices": []}
+        return {"channel": "stats", "devices": [], "lights": []}
+    status_by_id: dict[str, str] = {}
+    try:  # each device's status by stable id: lights may share a name (the RAM sticks)
+        for d in app.state.device_manager.devices:
+            status_by_id[d.adapter.device_info.effective_id] = d.status
+    except Exception:
+        pass
+    try:
+        lights = contract.light_stats(light_index(app), stats)
+    except Exception:
+        lights = []
+    return {
+        "channel": "stats",
+        "devices": [
+            {
+                "id": s.device_id,
+                "name": s.device_name,
+                "send_fps": s.send_fps,
+                "latency_ms": s.effective_latency_ms,
+                "frames_dropped": s.frames_dropped,
+                "dropped_pct": s.dropped_pct,
+                "connected": s.connected,
+                "status": status_by_id.get(s.device_id, "online"),
+            }
+            for s in stats
+        ],
+        "lights": lights,
+    }
 
 
 async def _status_poll(ws: WebSocket, app: Any) -> None:
@@ -299,25 +306,65 @@ async def _status_poll(ws: WebSocket, app: Any) -> None:
 
 
 async def _frame_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
-    """Poll frame snapshots at client-requested rate, sending binary frames."""
+    """Send frames at the client's rate, in the protocol it subscribed with."""
+    seq = 0
     while True:
         if sub.frame_fps <= 0:
             await asyncio.sleep(0.5)
             continue
-        interval = 1.0 / sub.frame_fps
-        await asyncio.sleep(interval)
-        scheduler = app.state.scheduler
-        snapshots = dict(scheduler.frame_snapshots)
-        for name, (colors, seq) in snapshots.items():
-            if sub.frame_devices and name not in sub.frame_devices:
-                continue
-            # Binary format: [2B name_len LE][N name UTF-8][4B seq LE][RGB data]
-            name_bytes = name.encode("utf-8")
-            header = struct.pack("<H", len(name_bytes)) + name_bytes + struct.pack("<I", seq)
+        await asyncio.sleep(1.0 / sub.frame_fps)
+        seq += 1
+        for message in frame_messages(app, sub, seq):
             try:
-                await ws.send_bytes(header + colors.tobytes())
+                await ws.send_bytes(message)
             except Exception:
                 return
+
+
+def frame_messages(app: Any, sub: ClientSubscription, seq: int) -> list[bytes]:
+    """One tick's frames for a session: v1 by device from the live stream, or v2 by light
+    for each stream it watches."""
+    feed = getattr(app.state, "frame_feed", None)
+    if feed is None:
+        return []
+    if sub.frame_protocol == 1:
+        return [
+            encode_frame_v1(device_id, seq, colors)
+            for device_id, colors in feed.frames("live", set(sub.frame_devices) or None).items()
+        ]
+    index = light_index(app)
+    wanted = set(index.expand(sub.frame_lights)) or None  # a light's devices: the PC's parts
+    return [
+        encode_frame_v2(stream, light_id, seq, colors)
+        for stream in sub.frame_streams
+        for light_id, colors in light_frames(index, feed.frames(stream, wanted)).items()
+    ]
+
+
+def _subscribe_frames(sub: ClientSubscription, msg: dict[str, Any]) -> None:
+    """subscribe_frames: v2 with "protocol": 2 (ruling 3), else v1 as the old UI sends it.
+    Everything is checked before the subscription changes."""
+    protocol = msg.get("protocol", 1)
+    if protocol not in (1, 2):
+        raise ValueError(f"Unknown frame protocol {protocol!r}; expected 1 or 2")
+    if protocol == 1:
+        fps = min(float(msg.get("fps", 10)), 30.0)
+        sub.frame_devices = [str(device) for device in msg.get("devices") or []]
+        sub.frame_protocol, sub.frame_fps, sub.frame_streams = 1, fps, ["live"]
+        return
+    streams = [str(stream) for stream in msg.get("streams") or ["live"]]
+    unknown = [stream for stream in streams if stream not in STREAMS]
+    if unknown:
+        raise ValueError(f"Unknown frame stream {unknown[0]!r}; expected live or preview")
+    fps = min(float(msg.get("fps", 30)), 60.0)
+    sub.frame_lights = [str(light) for light in msg.get("lights") or []]
+    sub.frame_protocol, sub.frame_fps, sub.frame_streams = 2, fps, streams
+
+
+def _watch(app: Any, sub: ClientSubscription, streams: list[str]) -> None:
+    watchers = getattr(app.state, "frame_watchers", None)
+    if watchers is not None:
+        watchers.set(sub, streams)
 
 
 async def _handle_command(
@@ -337,15 +384,22 @@ async def _handle_command(
         await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
 
     elif action == "subscribe_frames":
-        sub.frame_fps = min(float(msg.get("fps", 10)), 30.0)
-        sub.frame_devices = msg.get("devices", [])
+        try:
+            _subscribe_frames(sub, msg)
+        except (TypeError, ValueError) as exc:
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(exc)})
+            return
+        _watch(app, sub, sub.frame_streams if sub.frame_fps > 0 else [])
         # Start frame polling if not already running
         has_frame_task = any(not t.done() and t.get_name() == "frame_poll" for t in tasks)
         if not has_frame_task and sub.frame_fps > 0:
             task = asyncio.create_task(_frame_poll(ws, app, sub))
             task.set_name("frame_poll")
             tasks.append(task)
-        await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
+        await _send_json(
+            ws,
+            {"channel": "ack", "id": cmd_id, "action": action, "protocol": sub.frame_protocol},
+        )
 
     else:
         await _send_json(

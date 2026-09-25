@@ -201,12 +201,15 @@ async def import_state(request: Request) -> dict[str, str]:
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {exc}") from exc
     looks = get_looks(request)
+    home_map = request.app.state.home_map  # None where the app has no map
 
     async def restore() -> None:
         try:
             await import_toml(db, text)
         finally:
             await looks.load()
+            if home_map is not None:
+                await home_map.load()  # before the zones resume on the backup's map
 
-    await get_zones(request).replace_state(restore)
+    await get_zones(request).replace_state(restore)  # a preview follows the backup's map
     return {"status": "ok"}

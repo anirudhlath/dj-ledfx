@@ -25,7 +25,6 @@ def ws_app():
     clock.last_deck_name = "CDJ-3000"
 
     scheduler = MagicMock()
-    scheduler.frame_snapshots = {}
     scheduler.get_device_stats.return_value = []
 
     app = create_app(

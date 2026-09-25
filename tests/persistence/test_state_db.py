@@ -5,18 +5,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 
 from dj_ledfx.persistence.state_db import StateDB
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path: Path):
-    db_path = tmp_path / "state.db"
-    state_db = StateDB(db_path)
-    await state_db.open()
-    yield state_db
-    await state_db.close()
 
 
 @pytest.mark.asyncio
@@ -30,9 +20,9 @@ async def test_creates_db_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_schema_version_is_4(db):
+async def test_schema_version_is_7(db):
     version = await db.get_schema_version()
-    assert version == 4
+    assert version == 7
 
 
 @pytest.mark.asyncio
@@ -59,9 +49,13 @@ async def test_tables_created(db):
         "device_saved_state",
         "devices",
         "groups",
+        "home_map",
+        "home_map_unreadable",
         "look_stars",
         "looks",
+        "placements",
         "presets",
+        "recent_looks",
         "scene_effect_state",
         "scene_placements",
         "scenes",
@@ -81,7 +75,7 @@ async def test_idempotent_open(tmp_path):
     db2 = StateDB(db_path)
     await db2.open()
     version = await db2.get_schema_version()
-    assert version == 4
+    assert version == 7
     await db2.close()
 
 
@@ -390,6 +384,38 @@ async def test_save_and_load_placement(db):
     assert placements[0]["device_id"] == "lifx:aa"
     assert placements[0]["position_x"] == 1.0
     assert placements[0]["geometry_type"] == "strip"
+
+
+async def test_every_scenes_placements_load_by_scene_then_device(db):
+    for device in ("lamp-b", "lamp-a"):
+        await db.upsert_device({"id": device, "name": device, "backend": "govee"})
+    for scene in ("s2", "s1"):
+        await db.save_scene({"id": scene, "name": scene.upper()})
+        for device in ("lamp-b", "lamp-a"):
+            await db.save_placement(
+                {
+                    "scene_id": scene,
+                    "device_id": device,
+                    "position_x": 0.0,
+                    "position_y": 0.0,
+                    "position_z": 0.0,
+                    "geometry_type": "point",
+                }
+            )
+    every = await db.load_scene_placements()
+    assert [(p["scene_id"], p["device_id"]) for p in every] == [
+        ("s1", "lamp-a"),
+        ("s1", "lamp-b"),
+        ("s2", "lamp-a"),
+        ("s2", "lamp-b"),
+    ]
+
+
+async def test_a_run_once_mark_is_written_with_its_step(db):
+    assert not await db.has_mark("step")
+    await db.write_many([db.mark_statement("step"), db.mark_statement("step")])
+    assert await db.has_mark("step") and not await db.has_mark("other")
+    assert await db.load_all_config() == {}  # marks aren't config
 
 
 # --- Task 10: Presets CRUD ---

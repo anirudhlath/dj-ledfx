@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+from types import MappingProxyType
+
 import numpy as np
 
-from dj_ledfx.effects.ledset import DEVICE_GAP_M, LedSource, build_ledset
+from dj_ledfx.effects.ledset import (
+    DEVICE_GAP_M,
+    LED_PITCH_M,
+    NO_ROOM,
+    LedSource,
+    PlacedLeds,
+    Space,
+    build_ledset,
+)
 from dj_ledfx.spatial.geometry import MatrixGeometry, PointGeometry, StripGeometry, TileLayout
 
 
@@ -41,7 +51,7 @@ def test_arrays_have_the_documented_shapes_and_types() -> None:
         assert array.shape == (6, 3), name
         assert array.dtype == np.float32, name
     assert leds.local_u.shape == (6,) and leds.local_u.dtype == np.float32
-    assert leds.room.dtype == np.int32 and leds.room.tolist() == [0] * 6
+    assert leds.room.dtype == np.int32 and leds.room.tolist() == [NO_ROOM] * 6
     assert leds.device.dtype == np.int32
     assert dict(leds.anchors) == {}
 
@@ -107,3 +117,57 @@ def test_empty_zone_has_no_leds() -> None:
     assert leds.count == 0
     assert leds.pos.shape == (0, 3)
     assert leds.slices == ()
+
+
+def _placed(*points: tuple[float, float, float]) -> PlacedLeds:
+    return PlacedLeds.from_positions(np.array(points, dtype=np.float64))
+
+
+def test_placed_lights_sit_where_the_map_puts_them() -> None:
+    rope = _placed((0.0, 1.0, 2.0), (1.0, 1.0, 2.0), (2.0, 1.0, 2.0))
+    lamp = _placed((5.0, 3.0, 0.5))
+    leds = build_ledset(
+        [LedSource("rope", 3, placed=rope, room=0), LedSource("lamp", 1, placed=lamp, room=1)]
+    )
+    assert np.allclose(leds.pos, [[0, 1, 2], [1, 1, 2], [2, 1, 2], [5, 3, 0.5]])
+    assert np.allclose(leds.local_u, [0.0, 0.5, 1.0, 0.0])
+    assert np.allclose(leds.local[:3, 0], [0.0, 0.5, 1.0])
+    assert leds.room.tolist() == [0, 0, 0, 1]
+    assert np.allclose(leds.npos[:, 0], [0.0, 0.2, 0.4, 1.0])  # the zone spans x 0..5
+
+
+def test_a_placement_for_another_led_count_is_not_used() -> None:
+    wrong = _placed((9.0, 9.0, 9.0), (9.0, 9.0, 9.5))
+    leds = build_ledset([LedSource("lamp", 5, placed=wrong)])
+    assert np.allclose(leds.local[:, 2], [0.0, 0.25, 0.5, 0.75, 1.0])  # M1's vertical strip
+    assert np.allclose(leds.pos[:, :2], 0.0)
+
+
+def test_unplaced_lights_gather_where_the_placed_ones_are() -> None:
+    rope = _placed((4.0, 2.0, 1.0), (6.0, 2.0, 1.0))
+    leds = build_ledset([LedSource("rope", 2, placed=rope), LedSource("new", 3)])
+    new = leds.pos[leds.device == 1]
+    assert np.allclose((new.min(axis=0) + new.max(axis=0)) / 2, [5.0, 2.0, 1.0])
+    assert np.allclose(np.diff(new[:, 2]), LED_PITCH_M)  # still M1's strip, moved
+
+
+def test_with_nothing_placed_the_lights_gather_at_the_homes_centre() -> None:
+    leds = build_ledset([LedSource("a", 1), LedSource("b", 1)], Space(centre=(4.0, 2.0, 1.0)))
+    assert np.allclose((leds.pos.min(axis=0) + leds.pos.max(axis=0)) / 2, [4.0, 2.0, 1.0])
+
+
+def test_the_space_travels_with_the_set_and_its_subsets() -> None:
+    sofa = np.array([1.0, 2.0, 0.5], dtype=np.float32)
+    space = Space(anchors=MappingProxyType({"sofa": sofa}), rooms=("west",), ceiling=3.0)
+    leds = build_ledset([LedSource("a", 2, room=0), LedSource("b", 1)], space)
+    _, sub = leds.subset({"b"})
+    assert sub.space is space and leds.anchors["sofa"] is sofa
+    assert sub.room.tolist() == [NO_ROOM]
+
+
+def test_placed_leds_compare_by_value() -> None:
+    points = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    same = PlacedLeds.from_positions(points.copy())
+    assert PlacedLeds.from_positions(points) == same
+    assert hash(PlacedLeds.from_positions(points)) == hash(same)
+    assert PlacedLeds.from_positions(points) != PlacedLeds.from_positions(points * 2)

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
 import pytest
+import pytest_asyncio
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
@@ -19,8 +21,11 @@ from dj_ledfx.devices.capabilities import (
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import NO_SIGNALS, RenderContext
 from dj_ledfx.effects.firmware import FirmwareEffect, Params
-from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.ring_buffer import RingBuffer
+from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.spatial.geometry import DeviceGeometry
 from dj_ledfx.types import DeviceInfo, DeviceStats, FloatRGB
 
@@ -270,6 +275,64 @@ class GlowFirmware(FirmwareEffect):
         return np.full((leds.count, 3), self.level, dtype=np.float32)
 
 
+@dataclass(frozen=True)
+class RingSource:
+    """What a route reads, as a zone runtime holds it: a ring and an LED set."""
+
+    ring: RingBuffer
+    leds: LedSet
+
+
+def ring_route(
+    ring: RingBuffer, *, start: int = 0, stop: int = 10, streaming: bool = True
+) -> DeviceRoute:
+    """A route to LEDs start..stop of ring's frames."""
+    leds = build_ledset([LedSource("before", start), LedSource("light", stop - start)])
+    return DeviceRoute(RingSource(ring, leds), "light", streaming)
+
+
+def span(route: DeviceRoute) -> tuple[int, int]:
+    """Where a route's LEDs sit in its zone's frame now."""
+    piece = route.source.leds.slice_for(route.device_id)
+    assert piece is not None
+    return piece.start, piece.stop
+
+
+# The PC: OpenRGB's devices on one server are one light with parts (devices/lights.py).
+SERVER = "openrgb:localhost:6742"
+OPENRGB = DeviceCapabilities(protocol="OpenRGB")
+KEYBOARD_AND_MOUSE = (("Keyboard", 4), ("Mouse", 2))
+
+
+def pc_lights(*parts: tuple[str, int]) -> list[FakeLight]:
+    """The PC's parts as fake lights, part i at SERVER:i: (name, LED count) each."""
+    return [
+        FakeLight(f"{SERVER}:{index}", name=name, led_count=leds, caps=OPENRGB)
+        for index, (name, leds) in enumerate(parts)
+    ]
+
+
+def pc_part_info(index: int, name: str, leds: int, *, ghost: bool = False) -> DeviceInfo:
+    """One of the PC's devices; a ghost knows only state.db's row, as main registers it."""
+    return DeviceInfo(
+        name=name,
+        device_type="openrgb",
+        led_count=leds,
+        address="" if ghost else "localhost:6742",
+        stable_id=f"{SERVER}:{index}",
+        backend="" if ghost else "openrgb",
+    )
+
+
+def lamp_info(stable_id: str = "lamp") -> DeviceInfo:
+    return DeviceInfo("Lamp", "lifx", 1, "", stable_id=stable_id, backend="lifx")
+
+
+def colours(count: int, value: int) -> NDArray[np.uint8]:
+    """count LEDs all at one 8-bit value."""
+    return np.full((count, 3), value, dtype=np.uint8)
+
+
 def device_stats(
     device_id: str, *, send_fps: float = 55.0, dropped_pct: float = 0.0
 ) -> DeviceStats:
@@ -312,3 +375,12 @@ def _effect_registry() -> Iterator[None]:
     yield
     Effect._registry.clear()
     Effect._registry.update(_EFFECTS)
+
+
+@pytest_asyncio.fixture
+async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
+    """An open state.db in the test's own directory."""
+    state_db = StateDB(tmp_path / "state.db")
+    await state_db.open()
+    yield state_db
+    await state_db.close()

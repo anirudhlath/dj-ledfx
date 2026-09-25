@@ -13,9 +13,17 @@ Export format:
   [stars]                     — looks = ids of starred looks, built in or saved
   [running."<zone id>"]       — what a zone runs: look_id, look (JSON), brightness,
                                 lights, started_at
+  [home]                      — the home map: body (home.json-shaped JSON), updated_at
+  [home_unreadable]           — a stored map that couldn't be read, set aside for repair:
+                                body, set_aside_at
+  [placements."<target id>"]  — where a light or PC part sits: shape (a table), led_order,
+                                confirmed, confirmed_at
+  [[recent]]                  — the looks "Start again" offers, newest first: zone_id,
+                                look_id, started_at, stopped_at
 
 Import merges into what is there. Zones and looks in the file replace those with the
-same id, and each running entry becomes that zone's assignment.
+same id, and each running entry becomes that zone's assignment. Each recent look merges
+by zone and look, keeping the newer stop.
 """
 
 from __future__ import annotations
@@ -30,12 +38,15 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 import tomli_w
 from loguru import logger
 
+from dj_ledfx.home.model import home_from_dict
+from dj_ledfx.home.shapes import Placement, placement_from_dict, placement_to_dict
+from dj_ledfx.home.store import HomeStore
 from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.looks.store import STAR_LOOK, UPSERT_LOOK
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.timing import as_utc, utcnow
 from dj_ledfx.types import clamp01
-from dj_ledfx.zones.model import Assignment, ZoneKind, ZoneRecord
+from dj_ledfx.zones.model import Assignment, StoppedLook, ZoneKind, ZoneRecord
 from dj_ledfx.zones.store import ZoneStore
 
 if TYPE_CHECKING:
@@ -177,7 +188,9 @@ async def export_toml(db: StateDB) -> str:
             }
         doc["presets"] = presets_doc
 
+    doc.update(await _export_home(db))
     doc.update(await _export_zones_and_looks(db))
+    doc.update(await _export_recent(db))
     return tomli_w.dumps(doc)
 
 
@@ -326,7 +339,9 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
         await db.save_preset(preset_name, effect_class, params_str)
         logger.debug("import_toml: saved preset '{}'", preset_name)
 
+    await _import_home(db, data)
     await _import_zones_and_looks(db, data)
+    await _import_recent(db, data)
 
 
 async def _export_zones_and_looks(db: StateDB) -> dict[str, Any]:
@@ -445,6 +460,89 @@ async def _import_zones_and_looks(db: StateDB, data: dict[str, Any]) -> None:
             logger.warning("import_toml: skipped what zone '{}' was running", zone_id)
             continue
         await store.save_assignment(assignment)
+
+
+async def _export_home(db: StateDB) -> dict[str, Any]:
+    """The home map and the placements (M2). The map's body is kept as saved, so a map
+    that needs repair still travels; import checks it."""
+    doc: dict[str, Any] = {}
+    rows = await db.fetch_all("SELECT body, updated_at FROM home_map WHERE id=1")
+    if rows:
+        doc["home"] = {"body": rows[0][0], "updated_at": rows[0][1]}
+    aside = await db.fetch_all("SELECT body, set_aside_at FROM home_map_unreadable WHERE id=1")
+    if aside:
+        doc["home_unreadable"] = {"body": aside[0][0], "set_aside_at": aside[0][1]}
+    placements = await HomeStore(db).load_placements()
+    if placements:
+        doc["placements"] = {
+            target_id: _placement_doc(placement) for target_id, placement in placements.items()
+        }
+    return doc
+
+
+def _placement_doc(placement: Placement) -> dict[str, Any]:
+    doc = placement_to_dict(placement)
+    if doc["confirmed_at"] is None:
+        del doc["confirmed_at"]  # TOML has no null
+    return doc
+
+
+async def _import_home(db: StateDB, data: dict[str, Any]) -> None:
+    store = HomeStore(db)
+    home = data.get("home")
+    if isinstance(home, dict) and isinstance(home.get("body"), str):
+        try:
+            await store.save_home(home_from_dict(json.loads(home["body"])))
+        except ValueError as exc:  # bad JSON, or a HomeError
+            logger.warning("import_toml: skipped the home map ({})", exc)
+    aside = data.get("home_unreadable")
+    if isinstance(aside, dict) and isinstance(aside.get("body"), str):
+        at = aside.get("set_aside_at")
+        await store.set_aside_unreadable(aside["body"], at if isinstance(at, str) else None)
+    for target_id, info in _tables(data, "placements").items():
+        try:
+            placement = placement_from_dict(info)
+        except ValueError as exc:  # ShapeError is a ValueError too
+            logger.warning("import_toml: skipped the placement of '{}' ({})", target_id, exc)
+            continue
+        await store.save_placement(target_id, placement)
+
+
+async def _export_recent(db: StateDB) -> dict[str, Any]:
+    """The looks "Start again" offers (ruling 19), as an array of tables."""
+    recent = await ZoneStore(db).load_recent()
+    if not recent:
+        return {}
+    return {"recent": [dataclasses.asdict(entry) for entry in recent]}
+
+
+def _stopped_look(info: object) -> StoppedLook | None:
+    if not isinstance(info, dict):
+        return None
+    zone_id, look_id = info.get("zone_id"), info.get("look_id")
+    started_at, stopped_at = info.get("started_at"), info.get("stopped_at")
+    if (
+        not isinstance(zone_id, str)
+        or not isinstance(look_id, str)
+        or not isinstance(started_at, datetime)
+        or not isinstance(stopped_at, datetime)
+    ):
+        return None
+    return StoppedLook(zone_id, look_id, as_utc(started_at), as_utc(stopped_at))
+
+
+async def _import_recent(db: StateDB, data: dict[str, Any]) -> None:
+    """Merges the backup's recent looks into what's there: each zone and look keeps the
+    newer stop (ZoneStore.remember)."""
+    entries = data.get("recent")
+    recent: list[StoppedLook] = []
+    for info in entries if isinstance(entries, list) else []:
+        entry = _stopped_look(info)
+        if entry is None:
+            logger.warning("import_toml: skipped a recent look it can't read")
+            continue
+        recent.append(entry)
+    await ZoneStore(db).remember(recent)
 
 
 # --- First-Launch Migration ---

@@ -5,14 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from dj_ledfx.devices.lights import LightIndex
+
 if TYPE_CHECKING:
     from fastapi import Request
 
+    from dj_ledfx.home.map import HomeMap
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.zones.attention import AttentionFeed
     from dj_ledfx.zones.lights import LightMonitor
     from dj_ledfx.zones.manager import ZoneManager
+    from dj_ledfx.zones.preview import PreviewManager
 
 
 @dataclass
@@ -21,7 +25,10 @@ class ClientSubscription:
 
     beat_fps: float = 10.0
     frame_fps: float = 0.0  # 0 = not subscribed
-    frame_devices: list[str] = field(default_factory=list)  # empty = all
+    frame_protocol: int = 1  # 2 once the client asks for it (web spec §12.4, ruling 3)
+    frame_devices: list[str] = field(default_factory=list)  # v1: device ids; empty = all
+    frame_lights: list[str] = field(default_factory=list)  # v2: light ids; empty = all
+    frame_streams: list[str] = field(default_factory=lambda: ["live"])  # v1: live only
 
 
 def get_db(request: Request) -> StateDB:
@@ -51,3 +58,16 @@ def get_light_monitor(request: Request) -> LightMonitor:
 
 def get_attention(request: Request) -> AttentionFeed:
     return cast("AttentionFeed", _required(request, "attention_feed", "Attention items"))
+
+
+def light_index(app: Any) -> LightIndex:
+    """Which devices make which light: the device manager's."""
+    return cast("LightIndex", app.state.device_manager.lights)
+
+
+def get_home_map(request: Request) -> HomeMap:
+    return cast("HomeMap", _required(request, "home_map", "Home map edits"))
+
+
+def get_previews(request: Request) -> PreviewManager:
+    return cast("PreviewManager", _required(request, "previews", "Previews"))

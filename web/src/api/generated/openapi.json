@@ -20,6 +20,204 @@
         "title": "ActiveEffectResponse",
         "type": "object"
       },
+      "Anchor": {
+        "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "points": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points"
+          },
+          "position": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Position",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "position"
+        ],
+        "title": "Anchor",
+        "type": "object"
+      },
+      "AnchorIn": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "position": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Position",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "position"
+        ],
+        "title": "AnchorIn",
+        "type": "object"
+      },
+      "AnchorUpdate": {
+        "properties": {
+          "confirmed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "points": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          }
+        },
+        "title": "AnchorUpdate",
+        "type": "object"
+      },
       "AssignGroupRequest": {
         "properties": {
           "group": {
@@ -125,6 +323,79 @@
         "title": "AttentionSubject",
         "type": "object"
       },
+      "BentLineShape": {
+        "properties": {
+          "kind": {
+            "const": "bent-line",
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Path",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "path"
+        ],
+        "title": "BentLineShape",
+        "type": "object"
+      },
+      "Box2": {
+        "properties": {
+          "max": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Max",
+            "type": "array"
+          },
+          "min": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Min",
+            "type": "array"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ],
+        "title": "Box2",
+        "type": "object"
+      },
       "Brightness": {
         "properties": {
           "value": {
@@ -170,6 +441,48 @@
           "name"
         ],
         "title": "CreatePresetRequest",
+        "type": "object"
+      },
+      "CylinderShape": {
+        "properties": {
+          "base": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Base",
+            "type": "array"
+          },
+          "height": {
+            "title": "Height",
+            "type": "number"
+          },
+          "kind": {
+            "const": "cylinder",
+            "title": "Kind",
+            "type": "string"
+          },
+          "radius": {
+            "title": "Radius",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "base",
+          "height",
+          "radius"
+        ],
+        "title": "CylinderShape",
         "type": "object"
       },
       "DeviceResponse": {
@@ -239,6 +552,90 @@
           "address"
         ],
         "title": "DeviceResponse",
+        "type": "object"
+      },
+      "Furniture": {
+        "properties": {
+          "box": {
+            "anyOf": [
+              {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Box"
+          },
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "height": {
+            "title": "Height",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "polygon": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Polygon"
+          },
+          "z0": {
+            "default": 0.0,
+            "title": "Z0",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "height"
+        ],
+        "title": "Furniture",
         "type": "object"
       },
       "GeometrySchema": {
@@ -311,6 +708,70 @@
         "title": "GeometrySchema",
         "type": "object"
       },
+      "GridShape": {
+        "properties": {
+          "center": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Center",
+            "type": "array"
+          },
+          "depth": {
+            "title": "Depth",
+            "type": "number"
+          },
+          "kind": {
+            "const": "grid",
+            "title": "Kind",
+            "type": "string"
+          },
+          "rotation": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Rotation",
+            "type": "array"
+          },
+          "width": {
+            "title": "Width",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "center",
+          "width",
+          "depth"
+        ],
+        "title": "GridShape",
+        "type": "object"
+      },
       "GroupRequest": {
         "properties": {
           "color": {
@@ -340,6 +801,185 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Home": {
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/Anchor"
+            },
+            "title": "Anchors",
+            "type": "array"
+          },
+          "beams": {
+            "title": "Beams",
+            "type": "number"
+          },
+          "ceiling": {
+            "title": "Ceiling",
+            "type": "number"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/Box2"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "furniture": {
+            "items": {
+              "$ref": "#/components/schemas/Furniture"
+            },
+            "title": "Furniture",
+            "type": "array"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Location"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "northOffsetDeg": {
+            "title": "Northoffsetdeg",
+            "type": "number"
+          },
+          "outdoor": {
+            "$ref": "#/components/schemas/Outdoor"
+          },
+          "outline": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Outline",
+            "type": "array"
+          },
+          "rooms": {
+            "items": {
+              "$ref": "#/components/schemas/Room"
+            },
+            "title": "Rooms",
+            "type": "array"
+          },
+          "size": {
+            "$ref": "#/components/schemas/HomeSize"
+          },
+          "subZones": {
+            "items": {
+              "$ref": "#/components/schemas/SubZone"
+            },
+            "title": "Subzones",
+            "type": "array"
+          },
+          "wallCutHeight": {
+            "title": "Wallcutheight",
+            "type": "number"
+          },
+          "walls": {
+            "items": {
+              "$ref": "#/components/schemas/Wall"
+            },
+            "title": "Walls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outline",
+          "rooms",
+          "subZones",
+          "walls",
+          "columns",
+          "furniture",
+          "anchors",
+          "ceiling",
+          "beams",
+          "wallCutHeight",
+          "size",
+          "northOffsetDeg"
+        ],
+        "title": "Home",
+        "type": "object"
+      },
+      "HomeSettings": {
+        "description": "PUT /home: only what's sent changes.",
+        "properties": {
+          "beams": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beams"
+          },
+          "ceiling": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ceiling"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Location"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "northOffsetDeg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Northoffsetdeg"
+          }
+        },
+        "title": "HomeSettings",
+        "type": "object"
+      },
+      "HomeSize": {
+        "properties": {
+          "eastWest": {
+            "title": "Eastwest",
+            "type": "number"
+          },
+          "northSouth": {
+            "title": "Northsouth",
+            "type": "number"
+          }
+        },
+        "required": [
+          "eastWest",
+          "northSouth"
+        ],
+        "title": "HomeSize",
         "type": "object"
       },
       "Layer": {
@@ -489,6 +1129,18 @@
             "title": "Confirmed",
             "type": "boolean"
           },
+          "confirmedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmedat"
+          },
           "droppedPct": {
             "title": "Droppedpct",
             "type": "number"
@@ -602,8 +1254,33 @@
           "shape": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "discriminator": {
+                  "mapping": {
+                    "bent-line": "#/components/schemas/BentLineShape",
+                    "cylinder": "#/components/schemas/CylinderShape",
+                    "grid": "#/components/schemas/GridShape",
+                    "line": "#/components/schemas/LineShape",
+                    "point": "#/components/schemas/PointShape"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PointShape"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LineShape"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BentLineShape"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CylinderShape"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GridShape"
+                  }
+                ]
               },
               {
                 "type": "null"
@@ -697,9 +1374,133 @@
       },
       "LightPart": {
         "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
           "leds": {
             "title": "Leds",
             "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "shape": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "bent-line": "#/components/schemas/BentLineShape",
+                    "cylinder": "#/components/schemas/CylinderShape",
+                    "grid": "#/components/schemas/GridShape",
+                    "line": "#/components/schemas/LineShape",
+                    "point": "#/components/schemas/PointShape"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PointShape"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LineShape"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BentLineShape"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CylinderShape"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GridShape"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shape"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "leds"
+        ],
+        "title": "LightPart",
+        "type": "object"
+      },
+      "LineShape": {
+        "properties": {
+          "kind": {
+            "const": "line",
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              }
+            ],
+            "title": "Path",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "path"
+        ],
+        "title": "LineShape",
+        "type": "object"
+      },
+      "Location": {
+        "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
           },
           "name": {
             "title": "Name",
@@ -708,9 +1509,10 @@
         },
         "required": [
           "name",
-          "leds"
+          "lat",
+          "lon"
         ],
-        "title": "LightPart",
+        "title": "Location",
         "type": "object"
       },
       "Look": {
@@ -883,6 +1685,56 @@
         "title": "MappingResponse",
         "type": "object"
       },
+      "Outdoor": {
+        "properties": {
+          "balcony": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Balcony",
+            "type": "array"
+          },
+          "balconyOffRoom": {
+            "default": "",
+            "title": "Balconyoffroom",
+            "type": "string"
+          },
+          "courtyard": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Courtyard",
+            "type": "array"
+          },
+          "courtyardOpensTo": {
+            "default": "",
+            "title": "Courtyardopensto",
+            "type": "string"
+          }
+        },
+        "title": "Outdoor",
+        "type": "object"
+      },
       "Overlay": {
         "properties": {
           "endsAt": {
@@ -915,6 +1767,118 @@
           "progress"
         ],
         "title": "Overlay",
+        "type": "object"
+      },
+      "Placement": {
+        "properties": {
+          "confirmed": {
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "confirmedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmedat"
+          },
+          "ledOrder": {
+            "title": "Ledorder",
+            "type": "string"
+          },
+          "shape": {
+            "discriminator": {
+              "mapping": {
+                "bent-line": "#/components/schemas/BentLineShape",
+                "cylinder": "#/components/schemas/CylinderShape",
+                "grid": "#/components/schemas/GridShape",
+                "line": "#/components/schemas/LineShape",
+                "point": "#/components/schemas/PointShape"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PointShape"
+              },
+              {
+                "$ref": "#/components/schemas/LineShape"
+              },
+              {
+                "$ref": "#/components/schemas/BentLineShape"
+              },
+              {
+                "$ref": "#/components/schemas/CylinderShape"
+              },
+              {
+                "$ref": "#/components/schemas/GridShape"
+              }
+            ],
+            "title": "Shape"
+          }
+        },
+        "required": [
+          "shape",
+          "ledOrder",
+          "confirmed"
+        ],
+        "title": "Placement",
+        "type": "object"
+      },
+      "PlacementIn": {
+        "description": "PUT /lights/{id}/placement (ruling 16). Without ledOrder, a shape of the same kind\nkeeps its order and a new kind takes its first.",
+        "properties": {
+          "ledOrder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ledorder"
+          },
+          "shape": {
+            "discriminator": {
+              "mapping": {
+                "bent-line": "#/components/schemas/BentLineShape",
+                "cylinder": "#/components/schemas/CylinderShape",
+                "grid": "#/components/schemas/GridShape",
+                "line": "#/components/schemas/LineShape",
+                "point": "#/components/schemas/PointShape"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PointShape"
+              },
+              {
+                "$ref": "#/components/schemas/LineShape"
+              },
+              {
+                "$ref": "#/components/schemas/BentLineShape"
+              },
+              {
+                "$ref": "#/components/schemas/CylinderShape"
+              },
+              {
+                "$ref": "#/components/schemas/GridShape"
+              }
+            ],
+            "title": "Shape"
+          }
+        },
+        "required": [
+          "shape"
+        ],
+        "title": "PlacementIn",
         "type": "object"
       },
       "PlacementResponse": {
@@ -958,6 +1922,38 @@
         "title": "PlacementResponse",
         "type": "object"
       },
+      "PointShape": {
+        "properties": {
+          "kind": {
+            "const": "point",
+            "title": "Kind",
+            "type": "string"
+          },
+          "position": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Position",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "position"
+        ],
+        "title": "PointShape",
+        "type": "object"
+      },
       "PresetResponse": {
         "properties": {
           "effect_class": {
@@ -980,6 +1976,162 @@
           "params"
         ],
         "title": "PresetResponse",
+        "type": "object"
+      },
+      "PreviewRequest": {
+        "properties": {
+          "look": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Look"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lookId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookid"
+          },
+          "zoneId": {
+            "title": "Zoneid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "zoneId"
+        ],
+        "title": "PreviewRequest",
+        "type": "object"
+      },
+      "PreviewStarted": {
+        "properties": {
+          "previewId": {
+            "title": "Previewid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "previewId"
+        ],
+        "title": "PreviewStarted",
+        "type": "object"
+      },
+      "PreviewUpdate": {
+        "properties": {
+          "look": {
+            "$ref": "#/components/schemas/Look"
+          }
+        },
+        "required": [
+          "look"
+        ],
+        "title": "PreviewUpdate",
+        "type": "object"
+      },
+      "RecentLook": {
+        "description": "A look that stopped, for \"Start again\" (web spec §9.4). §12.2 has no such type: the\nM2 plan's ruling 19 shapes it, and F1 types it by hand until the backend serves it.",
+        "properties": {
+          "lookId": {
+            "title": "Lookid",
+            "type": "string"
+          },
+          "lookName": {
+            "title": "Lookname",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "title": "Startedat",
+            "type": "string"
+          },
+          "stoppedAt": {
+            "format": "date-time",
+            "title": "Stoppedat",
+            "type": "string"
+          },
+          "zoneId": {
+            "title": "Zoneid",
+            "type": "string"
+          },
+          "zoneName": {
+            "title": "Zonename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "zoneId",
+          "zoneName",
+          "lookId",
+          "lookName",
+          "startedAt",
+          "stoppedAt"
+        ],
+        "title": "RecentLook",
+        "type": "object"
+      },
+      "Room": {
+        "properties": {
+          "hasLights": {
+            "title": "Haslights",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "labelAt": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Labelat",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "polygon": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Polygon",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "polygon",
+          "labelAt",
+          "hasLights"
+        ],
+        "title": "Room",
         "type": "object"
       },
       "Running": {
@@ -1550,6 +2702,135 @@
         "title": "StartResponse",
         "type": "object"
       },
+      "SubZone": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "polygon": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Polygon",
+            "type": "array"
+          },
+          "room": {
+            "title": "Room",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "room",
+          "polygon"
+        ],
+        "title": "SubZone",
+        "type": "object"
+      },
+      "SubZoneIn": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "polygon": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Polygon",
+            "type": "array"
+          },
+          "room": {
+            "title": "Room",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "room",
+          "polygon"
+        ],
+        "title": "SubZoneIn",
+        "type": "object"
+      },
+      "SubZoneUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "polygon": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Polygon"
+          },
+          "room": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room"
+          }
+        },
+        "title": "SubZoneUpdate",
+        "type": "object"
+      },
       "TakeOver": {
         "properties": {
           "lights": {
@@ -1773,6 +3054,69 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "Wall": {
+        "properties": {
+          "a": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "A",
+            "type": "array"
+          },
+          "b": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "B",
+            "type": "array"
+          },
+          "exterior": {
+            "title": "Exterior",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "wall",
+              "window",
+              "glass-door"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "thickness": {
+            "title": "Thickness",
+            "type": "number"
+          },
+          "westFacing": {
+            "title": "Westfacing",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "kind",
+          "westFacing",
+          "exterior",
+          "thickness"
+        ],
+        "title": "Wall",
         "type": "object"
       },
       "Zone": {
@@ -2398,6 +3742,296 @@
         "summary": "Set Active Effect"
       }
     },
+    "/api/home": {
+      "get": {
+        "operationId": "get_home_api_home_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Home"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Home"
+      },
+      "put": {
+        "description": "North, ceiling, beams and location; only what's sent changes.",
+        "operationId": "update_home_api_home_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HomeSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Home"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Home"
+      }
+    },
+    "/api/home/anchors": {
+      "post": {
+        "operationId": "add_anchor_api_home_anchors_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnchorIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Anchor"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Anchor"
+      }
+    },
+    "/api/home/anchors/{anchor_id}": {
+      "delete": {
+        "operationId": "delete_anchor_api_home_anchors__anchor_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "anchor_id",
+            "required": true,
+            "schema": {
+              "title": "Anchor Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Anchor"
+      },
+      "put": {
+        "operationId": "update_anchor_api_home_anchors__anchor_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "anchor_id",
+            "required": true,
+            "schema": {
+              "title": "Anchor Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnchorUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Anchor"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Anchor"
+      }
+    },
+    "/api/home/subzones": {
+      "post": {
+        "operationId": "add_sub_zone_api_home_subzones_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubZoneIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubZone"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Sub Zone"
+      }
+    },
+    "/api/home/subzones/{sub_zone_id}": {
+      "delete": {
+        "description": "A running sub-zone is turned off and its lights put back (Review Focus 4).",
+        "operationId": "delete_sub_zone_api_home_subzones__sub_zone_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sub_zone_id",
+            "required": true,
+            "schema": {
+              "title": "Sub Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Sub Zone"
+      },
+      "put": {
+        "operationId": "update_sub_zone_api_home_subzones__sub_zone_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sub_zone_id",
+            "required": true,
+            "schema": {
+              "title": "Sub Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubZoneUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubZone"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Sub Zone"
+      }
+    },
     "/api/lights": {
       "get": {
         "operationId": "list_lights_api_lights_get",
@@ -2418,6 +4052,149 @@
           }
         },
         "summary": "List Lights"
+      }
+    },
+    "/api/lights/placement/guess": {
+      "post": {
+        "description": "Spread the unplaced lights around their rooms, unconfirmed (spec §6.2).",
+        "operationId": "guess_placements_api_lights_placement_guess_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/Placement"
+                  },
+                  "title": "Response Guess Placements Api Lights Placement Guess Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Guess Placements"
+      }
+    },
+    "/api/lights/{light_id}/placement": {
+      "delete": {
+        "description": "Take a light off the map (§8.6's \"Remove from the map\").",
+        "operationId": "remove_placement_api_lights__light_id__placement_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "light_id",
+            "required": true,
+            "schema": {
+              "title": "Light Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Placement"
+      },
+      "put": {
+        "description": "Place or move a light, or a PC part by its device id (ruling 4). Moving a light\ndoesn't confirm it (spec §6.2).",
+        "operationId": "place_light_api_lights__light_id__placement_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "light_id",
+            "required": true,
+            "schema": {
+              "title": "Light Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlacementIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Placement"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Place Light"
+      }
+    },
+    "/api/lights/{light_id}/placement/confirm": {
+      "post": {
+        "operationId": "confirm_placement_api_lights__light_id__placement_confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "light_id",
+            "required": true,
+            "schema": {
+              "title": "Light Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Placement"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Placement"
       }
     },
     "/api/looks": {
@@ -2857,6 +4634,118 @@
         "summary": "Load Preset"
       }
     },
+    "/api/preview": {
+      "post": {
+        "description": "Replaces any previous preview. A request that fails leaves it as it was.",
+        "operationId": "start_preview_api_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Preview"
+      }
+    },
+    "/api/preview/{preview_id}": {
+      "delete": {
+        "operationId": "stop_preview_api_preview__preview_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "preview_id",
+            "required": true,
+            "schema": {
+              "title": "Preview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Preview"
+      },
+      "put": {
+        "description": "The editor's live edits: taken in place where the layers allow.",
+        "operationId": "update_preview_api_preview__preview_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "preview_id",
+            "required": true,
+            "schema": {
+              "title": "Preview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Preview"
+      }
+    },
     "/api/running": {
       "get": {
         "operationId": "list_running_api_running_get",
@@ -2873,6 +4762,29 @@
           }
         },
         "summary": "List Running"
+      }
+    },
+    "/api/running/recent": {
+      "get": {
+        "description": "The looks that stopped, newest first, for \"Start again\". One tap starts one again\nthrough POST /zones/{zone_id}/start with its lookId (M2 plan, ruling 19).",
+        "operationId": "list_recent_api_running_recent_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecentLook"
+                  },
+                  "title": "Response List Recent Api Running Recent Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Recent"
       }
     },
     "/api/running/stop-all": {

@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.params import EffectParam, check_setting
 from dj_ledfx.types import BeatContext
 
 
@@ -34,8 +34,9 @@ class Effect(ABC):  # noqa: B024
         if inspect.isabstract(cls):
             return
         params = cls.parameters()
-        if params:
-            sig = inspect.signature(cls.__init__)
+        sig = inspect.signature(cls.__init__)
+        takes_any = any(p.kind is p.VAR_KEYWORD for p in sig.parameters.values())
+        if params and not takes_any:
             init_params = {p for p in sig.parameters if p != "self"}
             missing = set(params.keys()) - init_params
             if missing:
@@ -58,14 +59,7 @@ class Effect(ABC):  # noqa: B024
         for key, value in kwargs.items():
             if key not in schema:
                 raise ValueError(f"Unknown parameter: {key}")
-            param = schema[key]
-            if param.type in ("float", "int"):
-                if param.min is not None and value < param.min:
-                    raise ValueError(f"{key}={value} below min {param.min}")
-                if param.max is not None and value > param.max:
-                    raise ValueError(f"{key}={value} above max {param.max}")
-            if param.type == "choice" and value not in (param.choices or []):
-                raise ValueError(f"{key}={value} not in {param.choices}")
+            check_setting(key, schema[key], value)
         self._apply_params(**kwargs)
 
     def _apply_params(self, **kwargs: Any) -> None:  # noqa: B027

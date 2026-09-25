@@ -1,6 +1,6 @@
 """The look model, shaped like the web app contract (web spec §12.2; engine spec §5.2).
 
-M1 runs one visible streamed layer plus any number of firmware layers. Everything else
+M2 blends any number of visible field layers under the firmware layers. Everything else
 the contract can describe is refused with the milestone that brings it.
 """
 
@@ -13,9 +13,10 @@ from typing import Any, Literal, get_args
 from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.firmware import FirmwareEffect
-from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.params import EffectParam, check_setting
 from dj_ledfx.effects.registry import get_effect_class
-from dj_ledfx.effects.strip_adapter import StripAdapter
+from dj_ledfx.effects.strip_adapter import PROJECTION_PARAMS, StripAdapter
+from dj_ledfx.looks.selectors import Selector, parse_selector
 
 LayerType = Literal["field", "particles", "firmware"]
 Blend = Literal["add", "screen", "normal", "multiply", "max"]
@@ -60,7 +61,10 @@ class Layer:
     visible: bool = True
     blend: Blend = "normal"
     opacity: float = 1.0
-    settings: Mapping[str, Any] = field(default_factory=dict)
+    settings: Mapping[str, Any] = field(default_factory=dict)  # the effect's own
+    # The lights a firmware layer picks (None: all of them). The contract carries it as
+    # the layer's `lights` setting (ruling 13).
+    lights: tuple[Selector, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,16 +125,32 @@ def _layer_from_dict(data: Mapping[str, Any], index: int) -> Layer:
     if not 0.0 <= opacity <= 1.0:
         raise LookError("Layer opacity must be between 0 and 1")
     kind = str(data.get("kind") or "")
+    name = str(data.get("name") or kind)
+    lights = _lights(name, settings.pop(LIGHTS_SETTING, None))
     return Layer(
         id=str(data.get("id") or f"layer-{index + 1}"),
-        name=str(data.get("name") or kind),
+        name=name,
         type=layer_type,
         kind=kind,
         visible=bool(data.get("visible", True)),
         blend=_choice(data.get("blend", "normal"), get_args(Blend), "blend mode"),
         opacity=opacity,
         settings=settings,
+        lights=lights,
     )
+
+
+def _lights(layer: str, value: Any) -> tuple[Selector, ...] | None:
+    """A layer's `lights` setting as selectors; None (all lights) when it's empty."""
+    if value is None or value == "" or value == []:
+        return None
+    try:
+        check_setting(LIGHTS_SETTING, LIGHTS_PARAM, value)
+        return tuple(
+            parse_selector(item) for item in ([value] if isinstance(value, str) else value)
+        )
+    except ValueError as exc:
+        raise LookError(f"Layer '{layer}': {exc}") from exc
 
 
 def look_from_dict(data: Mapping[str, Any]) -> Look:
@@ -171,11 +191,22 @@ def look_from_dict(data: Mapping[str, Any]) -> Look:
     )
 
 
+_PLAIN_TYPES = {
+    "color": "colour",
+    "color_list": "palette",
+    "bool": "boolean",
+    "anchor": "anchor",
+    "point": "point",
+    "zone": "zone",
+    "device_set": "lights",  # the contract's name wins (engine spec §1)
+}
+
+
 def _schema_entry(key: str, param: EffectParam) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "key": key,
         "label": param.label or key.replace("_", " ").capitalize(),
-        "bindable": False,  # bindings arrive in M7
+        "bindable": param.bindable,
     }
     if param.type in ("float", "int"):
         entry.update(
@@ -184,23 +215,34 @@ def _schema_entry(key: str, param: EffectParam) -> dict[str, Any]:
             max=param.max if param.max is not None else 1.0,
             step=param.step if param.step is not None else (1 if param.type == "int" else 0.01),
         )
-    elif param.type == "color":
-        entry["type"] = "colour"
-    elif param.type == "color_list":
-        entry["type"] = "palette"
-    elif param.type == "bool":
-        entry["type"] = "boolean"
+    elif param.type == "range":
+        entry.update(
+            type="range",
+            min=param.min if param.min is not None else 0.0,
+            max=param.max if param.max is not None else 1.0,
+        )
+    elif param.type in _PLAIN_TYPES:
+        entry["type"] = _PLAIN_TYPES[param.type]
     else:
         entry.update(type="choice", options=list(param.choices or []))
     return entry
 
 
+LIGHTS_SETTING = "lights"  # a firmware layer's light ids or type:<word> selectors
+LIGHTS_PARAM = EffectParam(type="device_set", default=None, label="Lights")
+
+
 def setting_schema(kind: str) -> list[dict[str, Any]]:
     try:
-        params = get_effect_class(kind).parameters()
+        cls = get_effect_class(kind)
     except KeyError:
         return []
-    return [_schema_entry(key, param) for key, param in params.items()]
+    entries = [_schema_entry(key, param) for key, param in cls.parameters().items()]
+    if issubclass(cls, FirmwareEffect):
+        entries.append(_schema_entry(LIGHTS_SETTING, LIGHTS_PARAM))
+    if issubclass(cls, StripEffect):
+        entries += [_schema_entry(key, param) for key, param in PROJECTION_PARAMS.items()]
+    return entries
 
 
 def _layer_to_dict(layer: Layer, *, for_storage: bool) -> dict[str, Any]:
@@ -217,6 +259,8 @@ def _layer_to_dict(layer: Layer, *, for_storage: bool) -> dict[str, Any]:
         "mirror": None,
         "transform": None,
     }
+    if layer.lights is not None:
+        data["settings"][LIGHTS_SETTING] = {"value": [s.text for s in layer.lights]}
     if not for_storage:
         data["schema"] = setting_schema(layer.kind)
     return data
@@ -253,33 +297,38 @@ def look_to_dict(
 
 
 def make_effect(layer: Layer) -> FieldEffect | FirmwareEffect:
-    """A fresh effect for the layer with its settings applied. Strip effects come wrapped."""
+    """A fresh effect for the layer with its settings applied. Strip effects come wrapped,
+    so the adapter takes its projection settings and passes the rest on."""
     try:
         cls = get_effect_class(layer.kind)
     except KeyError:
         raise LookError(f"Layer '{layer.name}' uses an unknown effect '{layer.kind}'") from None
-    effect = cls()
+    raw = cls()
+    effect: FieldEffect | FirmwareEffect
+    if layer.type == "firmware":
+        if not isinstance(raw, FirmwareEffect):
+            raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a firmware effect")
+        effect = raw
+    elif isinstance(raw, StripEffect):
+        effect = StripAdapter(raw)
+    elif isinstance(raw, FieldEffect):
+        effect = raw
+    else:
+        raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a field effect")
     try:
         effect.set_params(**layer.settings)
     except (TypeError, ValueError) as exc:
         raise LookError(f"Layer '{layer.name}': {exc}") from exc
-    if layer.type == "firmware":
-        if not isinstance(effect, FirmwareEffect):
-            raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a firmware effect")
-        return effect
-    if isinstance(effect, StripEffect):
-        return StripAdapter(effect)
-    if isinstance(effect, FieldEffect):
-        return effect
-    raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a field effect")
+    return effect
 
 
-def _visible_fields(look: Look) -> list[Layer]:
+def visible_field_layers(look: Look) -> list[Layer]:
+    """The streamed layers the runtime blends, bottom to top."""
     return [layer for layer in look.layers if layer.type == "field" and layer.visible]
 
 
 def visible_field_layer(look: Look) -> Layer | None:
-    fields = _visible_fields(look)
+    fields = visible_field_layers(look)
     return fields[0] if fields else None
 
 
@@ -288,7 +337,7 @@ def firmware_layers(look: Look) -> list[Layer]:
 
 
 def validate_look(look: Look) -> None:
-    """Raise LookError if M1 can't run the look."""
+    """Raise LookError if M2 can't run the look."""
     if not look.layers:
         raise LookError("A look needs at least one layer")
     if look.scope != "any-zone":
@@ -297,5 +346,8 @@ def validate_look(look: Look) -> None:
         raise LookError("Look modifiers arrive in M4")
     for layer in look.layers:
         make_effect(layer)
-    if len(_visible_fields(look)) > 1:
-        raise LookError("M1 plays one streamed layer; layer blending arrives in M2")
+        if layer.type != "firmware" and layer.lights is not None:
+            raise LookError(
+                f"Layer '{layer.name}': only a firmware layer picks its lights; "
+                "masks for streamed layers arrive in M4"
+            )

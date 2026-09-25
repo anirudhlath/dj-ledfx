@@ -1,7 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { components, paths } from './generated/schema'
 import type {
-  ApiPath, Furniture, Home, InputKind, Light, LightShape, LightStatus, Location, PendingPath, PendingSchema, RunningZone,
+  ApiPath, Furniture, Home, InputKind, Light, LightShape, LightStatus, Location, PendingPath, PendingSchema, Room,
+  RunningZone,
 } from './contract'
 
 describe('the contract', () => {
@@ -21,13 +22,22 @@ describe('the contract', () => {
     expectTypeOf<ApiPath>().toExtend<string>()
   })
 
-  // I4: each pending type carries engine M2's name, so the swap fails on the name, not later.
-  it("names the pending types and paths as engine M2's schema does", () => {
+  // I4: the names F1 wrote by hand for engine M2 are the ones M2's schema serves.
+  it("serves engine M2's types and paths under F1's names", () => {
     expectTypeOf<
       | 'Placement' | 'PlacementIn' | 'PreviewStarted' | 'PreviewUpdate' | 'HomeSettings' | 'AnchorIn' | 'AnchorUpdate'
-      | 'SubZoneIn' | 'SubZoneUpdate' | 'Box2' | 'Location' | 'Outdoor' | 'PointShape'
-    >().toExtend<PendingSchema>()
-    expectTypeOf<'/api/home/subzones/{sub_zone_id}'>().toExtend<PendingPath>()
+      | 'SubZoneIn' | 'SubZoneUpdate' | 'Box2' | 'Location' | 'Outdoor' | 'PointShape' | 'RecentLook'
+    >().toExtend<keyof components['schemas']>()
+    expectTypeOf<
+      | '/api/home' | '/api/home/subzones/{sub_zone_id}' | '/api/lights/{light_id}/placement' | '/api/preview/{preview_id}'
+      | '/api/running/recent'
+    >().toExtend<keyof paths>()
+  })
+
+  // I1: engine M2 serves the home's size and which rooms hold lights.
+  it("carries the home's size and each room's hasLights", () => {
+    expectTypeOf<Home['size']>().toEqualTypeOf<{ eastWest: number; northSouth: number }>()
+    expectTypeOf<Room['hasLights']>().toEqualTypeOf<boolean>()
   })
 
   // I3: engine M2 serves a home with no location and furniture drawn by polygon.
