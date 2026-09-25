@@ -2,7 +2,7 @@
 // byte copies of home.json and looks.json, so no name, position or description is typed here
 // (CLAUDE.md, "Web App Design"), except the owner's name for one room (decision 8). What the files don't say, the mock makes up in the API's shape:
 // addresses from the documentation range (RFC 5737), no MACs, and M1's latency heuristics.
-import type { Home, Id, InputKind, Light, LightShape, Location, Look, Room, Vec3, Zone } from '../contract'
+import type { Home, Id, InputKind, Light, LightShape, Location, Look, Room, RunningZone, Vec3, Zone } from '../contract'
 import homeJson from './home.json'
 import looksJson from './looks.json'
 
@@ -213,6 +213,23 @@ export function zoneFixtures(home: Home, lights: Light[]): Zone[] {
       (sub): Zone => ({ id: sub.id, name: sub.name, kind: 'sub-zone', lights: ids((light) => light.subZone === sub.id) }),
     ),
   ]
+}
+
+/**
+ * A zone running a look from `since`, as §12.2 has it and engine M1 starts one: its lights stream,
+ * but for one offline or switched off elsewhere, which rejoins when it's back (§6.4).
+ */
+export function runningZone(
+  home: Home,
+  lights: Light[],
+  zone: Pick<RunningZone, 'zoneId' | 'lookId' | 'lookName' | 'since' | 'brightness' | 'lights'>,
+): RunningZone {
+  const ids = new Set(zone.lights)
+  for (const light of lights) {
+    if (!ids.has(light.id) || light.status === 'offline' || light.status === 'switched-off') continue
+    Object.assign(light, { status: 'streaming', statusSince: zone.since, ownEffect: null, power: true, sendFps: 60 } satisfies Partial<Light>)
+  }
+  return { ...zone, covers: coversOf(home, lights, zone.lights), state: 'running', fps: { actual: 60, target: 60 } }
 }
 
 /** The rooms a zone's lights are in, in the order of its lights: §12.2's `covers`. */

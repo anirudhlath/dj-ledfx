@@ -75,26 +75,23 @@ function writeHsv(out: Uint8Array, at: number, hue: number, saturation: number, 
 }
 
 /**
- * Paints `count` LEDs of `spec` into `out` at `t` seconds. `beatPhase` is 0–1 through the beat,
- * `brightness` 0–1, and `seed` sets one light apart from another running the same look.
+ * Paints `spec` into `out`, three bytes per LED, at `t` seconds. `beatPhase` is 0–1 through the
+ * beat, `brightness` 0–1, and `seed` sets one light apart from another running the same look.
  */
-export function paint(
-  out: Uint8Array,
-  count: number,
-  spec: MotifSpec,
-  t: number,
-  beatPhase: number,
-  brightness: number,
-  seed: number,
-): void {
+export function paint(out: Uint8Array, spec: MotifSpec, t: number, beatPhase: number, brightness: number, seed: number): void {
+  const count = out.length / 3
   const onBeat = 1 - beatPhase
+  // What each light shares across its LEDs, worked out once per frame.
+  const drift = 8 * Math.sin(t * 0.2 + seed)
+  const breath = 0.4 * Math.sin(t * 0.8 + seed)
+  const level = clamp01(brightness)
   for (let i = 0; i < count; i++) {
     const x = count > 1 ? i / (count - 1) : 0.5
     let hue = spec.hue
     let value = 1
     switch (spec.motif) {
       case 'gradient':
-        hue += spec.spread * x + 8 * Math.sin(t * 0.2 + seed)
+        hue += spec.spread * x + drift
         value = 0.75 + 0.25 * Math.sin(t * 0.5 + x * 3)
         break
       case 'twinkle':
@@ -121,10 +118,10 @@ export function paint(
         break
       }
       case 'glow':
-        value = 0.6 + 0.4 * Math.sin(t * 0.8 + seed)
+        value = 0.6 + breath
         hue += spec.spread * x
         break
     }
-    writeHsv(out, i * 3, hue, 0.85, clamp01(value) * clamp01(brightness))
+    writeHsv(out, i * 3, hue, 0.85, clamp01(value) * level)
   }
 }

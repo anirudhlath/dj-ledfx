@@ -21,9 +21,12 @@ export class ApiError extends Error {
   }
 }
 
+/** A path template's parameters, FastAPI's `{name}`: apiPath fills them, and the mock server matches them. */
+export const PATH_PARAM = /\{(\w+)\}/g
+
 /** A path template with its parameters filled in and encoded. */
 export function apiPath(template: ApiPath | PendingPath, params: Record<string, string> = {}): string {
-  return template.replace(/\{(\w+)\}/g, (_, name: string) => {
+  return template.replace(PATH_PARAM, (_, name: string) => {
     const value = params[name]
     if (value === undefined) throw new Error(`${template} needs {${name}}`)
     return encodeURIComponent(value)

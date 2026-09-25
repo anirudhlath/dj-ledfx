@@ -6,7 +6,7 @@ import type {
   AttentionItem, Deck, Home, Id, Inputs, Light, Look, Overlay, RecentLook, RunningZone, Signal, TempoSource, Zone,
 } from '../contract'
 import {
-  HOME_ZONE, coversOf, homeFixture, lightFixtures, lookFixtures, lookName, partId, roomName, zoneFixtures,
+  HOME_ZONE, homeFixture, lightFixtures, lookFixtures, lookName, partId, roomName, runningZone, zoneFixtures,
 } from './fixtures'
 
 export const SCENARIOS = [
@@ -40,11 +40,6 @@ export interface ScenarioBeat {
   stale: boolean
 }
 
-export interface ScenarioLink {
-  /** The mock drops every session this long after the first one connects, and refuses new ones. */
-  dropAfterMs: number | null
-}
-
 export interface ScenarioState {
   name: ScenarioName
   home: Home
@@ -59,7 +54,8 @@ export interface ScenarioState {
   inputs: Inputs
   signals: Signal[]
   previewOnly: boolean
-  link: ScenarioLink
+  /** The mock drops every session this long after the first one connects, and refuses new ones. */
+  dropAfterMs: number | null
   /** "Start again" (§9.4): the looks that stopped, newest stop first, as engine M2 keeps them (decision 8). */
   recent: RecentLook[]
 }
@@ -84,26 +80,20 @@ const hhmm = (iso: string) => formatTime(new Date(iso))
 const joinNames = (names: string[]) =>
   names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 
-function lightOf(state: ScenarioState, id: Id): Light {
-  const light = state.lights.find((candidate) => candidate.id === id)
-  if (light === undefined) throw new Error(`No light ${id} in the fixtures`)
-  return light
+/** The one of `items` that `matches`; a scenario that asks for another is a mistake in this file. */
+function the<T>(items: T[], matches: (item: T) => boolean, what: string): T {
+  const item = items.find(matches)
+  if (item === undefined) throw new Error(`No ${what} in the fixtures`)
+  return item
 }
+
+const lightOf = (state: ScenarioState, id: Id): Light => the(state.lights, (light) => light.id === id, `light ${id}`)
+const zoneOf = (state: ScenarioState, id: Id): Zone => the(state.zones, (zone) => zone.id === id, `zone ${id}`)
+const runningOf = (state: ScenarioState, zoneId: Id): RunningZone =>
+  the(state.running, (zone) => zone.zoneId === zoneId, `running zone ${zoneId}`)
 
 function setLight(state: ScenarioState, id: Id, patch: Partial<Light>): void {
   Object.assign(lightOf(state, id), patch)
-}
-
-function zoneOf(state: ScenarioState, id: Id): Zone {
-  const zone = state.zones.find((candidate) => candidate.id === id)
-  if (zone === undefined) throw new Error(`No zone ${id} in the fixtures`)
-  return zone
-}
-
-function runningOf(state: ScenarioState, zoneId: Id): RunningZone {
-  const zone = state.running.find((candidate) => candidate.zoneId === zoneId)
-  if (zone === undefined) throw new Error(`Zone ${zoneId} is not running`)
-  return zone
 }
 
 /** A look that stopped on a zone, as "Start again" lists it. */
@@ -111,29 +101,19 @@ function stoppedLook(state: ScenarioState, zoneId: Id, lookId: Id, startedAt: st
   return { zoneId, zoneName: zoneOf(state, zoneId).name, lookId, lookName: lookName(lookId), startedAt, stoppedAt }
 }
 
-/** Starts a look on a zone. Its lights stream from `since`. */
+/** Starts a look on a zone (on some of its lights, with `lights`). Its lights stream from `since`. */
 function run(
   state: ScenarioState,
   zoneId: Id,
   lookId: Id,
   since: string,
   brightness: number,
-  lights: Id[] = zoneOf(state, zoneId).lights,
-  extra: Partial<RunningZone> = {},
+  { lights = zoneOf(state, zoneId).lights, ...extra }: Partial<RunningZone> = {},
 ): RunningZone {
-  const zone: RunningZone = {
-    zoneId,
-    lookId,
-    lookName: lookName(lookId),
-    since,
-    brightness,
-    lights,
-    covers: coversOf(state.home, state.lights, lights),
-    state: 'running',
-    fps: { actual: 60, target: 60 },
+  const zone = {
+    ...runningZone(state.home, state.lights, { zoneId, lookId, lookName: lookName(lookId), since, brightness, lights }),
     ...extra,
   }
-  for (const id of lights) setLight(state, id, { status: 'streaming', statusSince: since, power: true, sendFps: 60 })
   state.running.push(zone)
   return zone
 }
@@ -287,7 +267,7 @@ function base(name: ScenarioName, now: Date): ScenarioState {
     inputs: heroInputs(now),
     signals: heroSignals(),
     previewOnly: false,
-    link: { dropAfterMs: null },
+    dropAfterMs: null,
     recent: [],
   }
 }
@@ -309,7 +289,7 @@ function hero(state: ScenarioState, now: Date): void {
   const office = zoneOf(state, 'office').lights
   const taken = new Set([...living, ...office])
   const rest = state.lights.map((light) => light.id).filter((id) => !taken.has(id))
-  run(state, HOME_ZONE, 'homesunset', after(now, -70 * MINUTE), 0.85, rest)
+  run(state, HOME_ZONE, 'homesunset', after(now, -70 * MINUTE), 0.85, { lights: rest })
   run(state, 'living', 'fireflies', after(now, -9 * MINUTE), 0.7)
   run(state, 'office', 'comets', after(now, -4 * MINUTE), 1)
   heroLights(state, now)
@@ -349,17 +329,17 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
   problems(state, now) {
     inputsDown(state, now)
     const office = zoneOf(state, 'office').lights
-    const kitchen = run(state, 'kitchen', 'lava', after(now, -20 * MINUTE), 1, undefined, {
+    const kitchen = run(state, 'kitchen', 'lava', after(now, -20 * MINUTE), 1, {
       state: 'crashed',
       fps: null,
       error: { layer: 'Plasma', message: 'raised an error', at: after(now, -2 * MINUTE) },
     })
-    const living = run(state, 'living', 'embers', after(now, -24 * MINUTE), 0.7, undefined, {
+    const living = run(state, 'living', 'embers', after(now, -24 * MINUTE), 0.7, {
       state: 'slow',
       fps: { actual: 38, target: 60 },
     })
     const bedroom = zoneOf(state, 'bedroom').lights.filter((id) => !office.includes(id))
-    run(state, 'bedroom', 'sunset', after(now, -60 * MINUTE), 0.85, bedroom)
+    run(state, 'bedroom', 'sunset', after(now, -60 * MINUTE), 0.85, { lights: bedroom })
     run(state, 'office', 'comets', after(now, -4 * MINUTE), 1)
     heroLights(state, now)
     state.attention = orderAttention([
@@ -409,7 +389,7 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
   },
   reconnecting(state, now) {
     hero(state, now)
-    state.link = { dropAfterMs: 1000 }
+    state.dropAfterMs = 1000
   },
   'dj-playing'(state, now) {
     hero(state, now)

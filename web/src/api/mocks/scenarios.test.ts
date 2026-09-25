@@ -109,7 +109,7 @@ describe('the hero', () => {
     })
     expect(hhmm(hero.inputs.sun.sunset)).toBe(HERO_CHROME.sunset)
     expect(hero.previewOnly).toBe(false)
-    expect(hero.link.dropAfterMs).toBeNull()
+    expect(hero.dropAfterMs).toBeNull()
   })
 })
 
@@ -205,7 +205,7 @@ describe('the other scenarios', () => {
   })
 
   it('reconnecting drops the link a second after it connects', () => {
-    expect(buildScenario('reconnecting', NOW).link.dropAfterMs).toBe(1000)
+    expect(buildScenario('reconnecting', NOW).dropAfterMs).toBe(1000)
   })
 
   it('dj-playing has four decks, Player 2 the master, and the beat from Pro DJ Link', () => {
