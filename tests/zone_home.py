@@ -3,7 +3,7 @@ fakes for the engine (it hosts runtimes) and the scheduler (it holds routes)."""
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +14,7 @@ from conftest import FakeLight
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import DeviceManager
+from dj_ledfx.effects.ledset import NO_SPACE, PlacedLeds, Space
 from dj_ledfx.events import EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
@@ -22,8 +23,9 @@ from dj_ledfx.looks.store import LookStore
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.types import DeviceInfo
+from dj_ledfx.zones.home_view import NO_HOME, HomeView
 from dj_ledfx.zones.manager import ZoneManager
-from dj_ledfx.zones.model import ZoneRecord, ZonesChanged
+from dj_ledfx.zones.model import HOME_ZONE_ID, HOME_ZONE_NAME, ZoneRecord, ZonesChanged
 from dj_ledfx.zones.runtime import ZoneRuntime
 from dj_ledfx.zones.store import ZoneStore
 
@@ -81,6 +83,49 @@ class FakeRoutes:
 
 
 @dataclass
+class FakeHome:
+    """Stands in for the home map (zones/home_view.py): rooms and sub-zones with the lights
+    in them, in order. A test moves a light by changing these, then calls
+    manager.home_changed(), as the map's listener does. Room names are their ids,
+    capitalised."""
+
+    rooms: dict[str, list[str]] = field(default_factory=dict)
+    sub_zones: dict[str, list[str]] = field(default_factory=dict)
+    unplaced: list[str] = field(default_factory=list)  # in the whole home, in no room
+    placed_at: dict[str, PlacedLeds] = field(default_factory=dict)
+    space_now: Space = NO_SPACE
+
+    def zone_records(self) -> list[ZoneRecord]:
+        return [
+            ZoneRecord(HOME_ZONE_ID, HOME_ZONE_NAME, "home"),
+            *(ZoneRecord(room, room.capitalize(), "room") for room in self.rooms),
+            *(ZoneRecord(sub, sub.capitalize(), "sub-zone") for sub in self.sub_zones),
+        ]
+
+    def members(self, zone_id: str) -> tuple[str, ...]:
+        if zone_id == HOME_ZONE_ID:
+            placed = [light for lights in self.rooms.values() for light in lights]
+            return tuple(dict.fromkeys([*placed, *self.unplaced]))
+        return tuple(self.rooms.get(zone_id) or self.sub_zones.get(zone_id) or ())
+
+    def covers(self, device_ids: Iterable[str]) -> tuple[str, ...]:
+        ids = set(device_ids)
+        return tuple(room.capitalize() for room, lights in self.rooms.items() if ids & set(lights))
+
+    def placed(self, device_id: str) -> PlacedLeds | None:
+        return self.placed_at.get(device_id)
+
+    def room_of(self, device_id: str) -> str | None:
+        return next((room for room, lights in self.rooms.items() if device_id in lights), None)
+
+    def room_index(self) -> dict[str, int]:
+        return {room: index for index, room in enumerate(self.rooms)}
+
+    def space(self) -> Space:
+        return self.space_now
+
+
+@dataclass
 class Home:
     db: StateDB
     lights: dict[str, FakeLight]
@@ -92,6 +137,7 @@ class Home:
     bus: EventBus
     manager: ZoneManager
     clock: list[datetime]  # the manager's "now"; tests move it
+    view: HomeView = NO_HOME  # the home map the manager asks
     changes: list[ZonesChanged] = field(default_factory=list)
 
     def look(self, look_id: str) -> Look:
@@ -106,7 +152,12 @@ class Home:
         for light in self.lights.values():
             light.calls.clear()
         home = await assemble(
-            self.db, list(self.lights.values()), self.clock, preview_only, ghosts=ghosts
+            self.db,
+            list(self.lights.values()),
+            self.clock,
+            preview_only,
+            ghosts=ghosts,
+            view=self.view,
         )
         await home.manager.resume()
         return home
@@ -127,13 +178,14 @@ async def build_home(
     zones: Sequence[ZoneRecord],
     *,
     preview_only: bool = False,
+    view: HomeView | None = None,
 ) -> Home:
     db = StateDB(tmp_path / "state.db")
     await db.open()
     store = ZoneStore(db)
     for zone in zones:
         await store.save_zone(zone)
-    return await assemble(db, lights, [START], preview_only)
+    return await assemble(db, lights, [START], preview_only, view=view)
 
 
 async def assemble(
@@ -143,6 +195,7 @@ async def assemble(
     preview_only: bool,
     *,
     ghosts: bool = False,
+    view: HomeView | None = None,
 ) -> Home:
     """The app's objects around an open state.db and a set of lights."""
     bus = EventBus()
@@ -179,6 +232,7 @@ async def assemble(
         clock=BeatClock(),
         preview_only=preview_only,
         now=lambda: clock[0],
+        home=view or NO_HOME,
     )
     home = Home(
         db=db,
@@ -191,6 +245,7 @@ async def assemble(
         bus=bus,
         manager=manager,
         clock=clock,
+        view=view or NO_HOME,
     )
     bus.subscribe(ZonesChanged, home.changes.append)
     await manager.load()

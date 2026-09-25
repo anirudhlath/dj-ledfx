@@ -96,3 +96,26 @@ def test_group_ids() -> None:
     first, second = new_group_id(), new_group_id()
     assert first.startswith("group-") and len(first) == len("group-") + 8
     assert first != second
+
+
+async def test_derived_zones_follow_the_map_and_take_their_assignments_with_them(
+    db: StateDB,
+) -> None:
+    store = ZoneStore(db)
+    group = ZoneRecord(id="group-1", name="Shelf", lights=("a",))
+    await store.save_zone(group)
+    rooms = [
+        ZoneRecord("home", "Whole home", "home"),
+        ZoneRecord("west", "West", "room", lights=("ignored",)),
+        ZoneRecord("desk", "Desk", "sub-zone"),
+    ]
+    await store.sync_derived(rooms)
+    await store.save_assignment(
+        Assignment("desk", "classic-breathe", "{}", 1.0, ("a",), datetime(2026, 9, 24, tzinfo=UTC))
+    )
+
+    await store.sync_derived(rooms[:2])
+
+    zones = {zone.id: (zone.kind, zone.lights) for zone in await store.load_zones()}
+    assert zones == {"group-1": ("group", ("a",)), "home": ("home", ()), "west": ("room", ())}
+    assert await store.load_assignments() == []  # the desk's went with it

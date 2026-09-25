@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
 from dj_ledfx.timing import as_utc, utcnow
-from dj_ledfx.zones.model import ALL_LIGHTS_ZONE_ID, Assignment, ZoneKind, ZoneRecord
+from dj_ledfx.zones.model import (
+    ALL_LIGHTS_ZONE_ID,
+    DERIVED_KINDS,
+    Assignment,
+    ZoneKind,
+    ZoneRecord,
+)
 
 if TYPE_CHECKING:
     from dj_ledfx.persistence.state_db import StateDB
@@ -76,6 +83,26 @@ class ZoneStore:
     async def delete_zone(self, zone_id: str) -> None:
         """Delete a zone; its members and assignment go with it (FK cascade)."""
         await self._db.write("DELETE FROM zones WHERE id=?", (zone_id,))
+
+    async def sync_derived(self, zones: Sequence[ZoneRecord]) -> None:
+        """Make state.db's rooms, sub-zones and whole home match the map's, in one
+        transaction. A derived zone the map no longer has is deleted, and its assignment
+        with it (FK cascade). Derived zones keep no members: the map says which lights
+        they hold."""
+        marks = ", ".join("?" for _ in DERIVED_KINDS)
+        rows = await self._db.fetch_all(
+            f"SELECT id FROM zones WHERE kind IN ({marks})", DERIVED_KINDS
+        )
+        wanted = {zone.id for zone in zones}
+        statements: list[Statement] = [
+            ("DELETE FROM zones WHERE id=?", (zone_id,))
+            for (zone_id,) in rows
+            if zone_id not in wanted
+        ]
+        for zone in zones:
+            statements += self._zone_statements(replace(zone, lights=(), all_lights=False))
+        if statements:
+            await self._db.write_many(statements)
 
     async def load_assignments(self) -> list[Assignment]:
         """Every saved assignment, oldest first, so resuming replays take-overs in order."""

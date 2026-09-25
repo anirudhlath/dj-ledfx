@@ -154,7 +154,8 @@ class RunningZone(ContractModel):
     since: datetime
     brightness: float
     lights: list[str]  # the lights it owns after take-overs
-    covers: list[str] = Field(default_factory=list)  # rooms come with the home map (M2)
+    # the rooms it still covers, by name, in map order
+    covers: list[str] = Field(default_factory=list)
     state: Literal[ZoneState, "transition"]  # transitions arrive in M4
     transition: RunningZoneTransition | None = None  # transitions arrive in M4
     fps: RunningZoneFps | None = None
@@ -225,6 +226,7 @@ def _running_fields(info: RunningZoneInfo) -> dict[str, Any]:
         "since": info.since,
         "brightness": info.brightness,
         "lights": list(info.lights),
+        "covers": list(info.covers),
         "state": info.state,
         "fps": fps,
         "error": error,

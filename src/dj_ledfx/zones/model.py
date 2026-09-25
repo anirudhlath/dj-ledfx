@@ -12,6 +12,11 @@ if TYPE_CHECKING:
 ZoneKind = Literal["home", "room", "sub-zone", "group"]
 
 ALL_LIGHTS_ZONE_ID = "all-lights"
+HOME_ZONE_ID = "home"
+HOME_ZONE_NAME = "Whole home"  # web spec §6.3's zone picker
+# Zones the home map derives (Task 11). state.db mirrors them only so their assignments
+# have a row to belong to; the map says which lights they hold.
+DERIVED_KINDS: tuple[ZoneKind, ...] = ("home", "room", "sub-zone")
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +75,7 @@ class RunningZoneInfo:
     fps_target: int | None = None
     error: CrashInfo | None = None
     waiting_for: tuple[str, ...] = ()
+    covers: tuple[str, ...] = ()  # the rooms its lights are in, by name, in map order
     slow_since: datetime | None = None  # for the attention feed; not in the contract
 
 

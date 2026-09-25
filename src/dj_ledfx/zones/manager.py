@@ -22,6 +22,7 @@ from loguru import logger
 
 from dj_ledfx.devices.capabilities import FirmwareRejected, LightReading, try_read
 from dj_ledfx.devices.lights import light_id_of
+from dj_ledfx.effects.ledset import NO_ROOM
 from dj_ledfx.effects.registry import get_strip_effect_classes
 from dj_ledfx.looks.builtin import classic_look_id
 from dj_ledfx.looks.model import (
@@ -32,7 +33,9 @@ from dj_ledfx.looks.model import (
 )
 from dj_ledfx.looks.store import look_body
 from dj_ledfx.timing import utcnow
+from dj_ledfx.zones.home_view import NO_HOME, HomeView
 from dj_ledfx.zones.model import (
+    DERIVED_KINDS,
     Assignment,
     CrashInfo,
     PreviewOnlyChanged,
@@ -111,6 +114,9 @@ class _Running:
     runtime: ZoneRuntime | None  # None while the saved look can't be read (spec §8)
     saved: Assignment | None = None  # the assignment as saved, while runtime is None
     broken: CrashInfo | None = None  # why runtime is None
+    # A derived zone's lights on the map when it last looked (home_changed): only lights
+    # that join these are taken over, so one a newer zone took doesn't come back.
+    members: tuple[str, ...] = ()
 
 
 class ZoneManager:
@@ -129,6 +135,7 @@ class ZoneManager:
         max_lookahead_s: float = 1.0,
         preview_only: bool = False,
         now: Callable[[], datetime] = utcnow,
+        home: HomeView = NO_HOME,
     ) -> None:
         self._store = store
         self._looks = looks
@@ -142,6 +149,7 @@ class ZoneManager:
         self._max_lookahead_s = max_lookahead_s
         self._preview_only = preview_only
         self._now = now
+        self._home = home
         self._zones: dict[str, ZoneRecord] = {}
         self._running: dict[str, _Running] = {}
         self._captured: dict[str, bytes] = {}  # b"": control taken, nothing captured
@@ -153,8 +161,18 @@ class ZoneManager:
         self._lock = asyncio.Lock()
 
     async def load(self) -> None:
-        self._zones = {zone.id: zone for zone in await self._store.load_zones()}
+        await self._load_zones()
         self._captured = await self._db.load_all_device_states()
+
+    async def _load_zones(self) -> None:
+        """Groups from state.db; the whole home, rooms and sub-zones from the map, which
+        state.db mirrors so their assignments have a row to belong to."""
+        derived = self._home.zone_records()
+        await self._store.sync_derived(derived)
+        groups = [
+            zone for zone in await self._store.load_zones() if zone.kind not in DERIVED_KINDS
+        ]
+        self._zones = {zone.id: zone for zone in [*derived, *groups]}
 
     # --- queries ----------------------------------------------------------------------
 
@@ -163,7 +181,14 @@ class ZoneManager:
         return self._preview_only
 
     def zones(self) -> list[ZoneRecord]:
-        return [replace(zone, lights=self._lights_of(zone)) for zone in self._zones.values()]
+        """The whole home, the rooms and sub-zones that hold lights, in map order, then the
+        groups (web spec §6.3's zone picker)."""
+        out: list[ZoneRecord] = []
+        for zone in self._zones.values():
+            lights = self._lights_of(zone)
+            if lights or zone.kind in ("home", "group"):
+                out.append(replace(zone, lights=lights))
+        return out
 
     def get_zone(self, zone_id: str) -> ZoneRecord:
         zone = self._zones.get(zone_id)
@@ -287,7 +312,7 @@ class ZoneManager:
             try:
                 await restore()
             finally:
-                self._zones = {zone.id: zone for zone in await self._store.load_zones()}
+                await self._load_zones()  # the backup's map was loaded by restore() (Task 21)
                 started = await self._resume_saved()
                 await self._sync([*before, *self._known_lights()], power_on=started)
         self._event_bus.emit(ZonesChanged())
@@ -307,7 +332,7 @@ class ZoneManager:
                 await self._store.delete_assignments([saved.zone_id])
                 continue
             await self._take_over(saved.zone_id, lights)
-            running = self._resumed(saved, lights)
+            running = self._resumed(saved, lights, members)
             self._running[saved.zone_id] = running
             if running.runtime is not None:
                 self._host.add_runtime(running.runtime)
@@ -434,6 +459,96 @@ class ZoneManager:
             await self._persist(zone_id)
             await self._sync(running.lights)
         self._event_bus.emit(ZonesChanged())
+
+    async def home_changed(self) -> None:
+        """The home map changed: a light moved, or a room, sub-zone or anchor changed.
+
+        A derived zone that's gone is turned off and its lights put back, as Off would.
+        Running rooms, sub-zones and the whole home follow their lights (_follow_members),
+        and every running zone whose lights moved, or whose space changed, redraws its
+        LED set.
+        """
+        async with self._lock:
+            now_derived = {zone.id for zone in self._home.zone_records()}
+            gone = [
+                zone_id
+                for zone_id in self._running
+                if zone_id not in now_derived
+                and (zone := self._zones.get(zone_id)) is not None
+                and zone.kind in DERIVED_KINDS
+            ]
+            released = await self._stop(*gone)
+            await self._load_zones()
+            joined, touched = await self._follow_members()
+            redrawn = self._redraw()
+            await self._sync([*released, *touched, *redrawn], power_on=joined)
+        self._event_bus.emit(ZonesChanged())
+
+    async def _follow_members(self) -> tuple[list[str], list[str]]:
+        """Running derived zones follow the map. Each first lets go of the lights that
+        left it; then, oldest first, each takes the lights that joined it, from older
+        zones only: a zone started later keeps what it holds. A zone left with no lights
+        stops. Returns the lights that joined a zone, and every light whose zone changed.
+        Only the membership changes here: _redraw then rebuilds each changed zone's LED
+        set once and reports all its lights, which need routes to the new ring.
+        """
+        following = {
+            zone_id: self._members(self._zones[zone_id])
+            for zone_id in self._running
+            if self._zones[zone_id].kind in DERIVED_KINDS
+        }
+        touched: list[str] = []
+        for zone_id, members in following.items():
+            staying = self._running[zone_id]
+            touched += [light for light in staying.lights if light not in members]
+            staying.lights = [light for light in staying.lights if light in members]
+        joined: list[str] = []
+        for zone_id in sorted(following, key=lambda z: self._running[z].since):
+            running = self._running.get(zone_id)
+            if running is None:
+                continue  # it lost its last light to a newer zone just now
+            members = following[zone_id]
+            new = [
+                light
+                for light in members
+                if light not in running.members
+                and light not in running.lights
+                and self._may_take(zone_id, light)
+            ]
+            _, kept = await self._take_over(zone_id, new)
+            running.members = members
+            lights = [light for light in members if light in running.lights or light in new]
+            touched += [*new, *kept]
+            joined += new
+            if not lights:
+                await self._stop(zone_id)
+                continue
+            running.lights = lights  # _redraw rebuilds its LED set and routes its lights
+            await self._persist(zone_id)
+        return joined, touched
+
+    def _may_take(self, zone_id: str, light: str) -> bool:
+        """The newest start wins (spec §4.3): a zone takes a light from older zones only."""
+        owner = self.owner_of(light)
+        return owner is None or self._running[owner].since <= self._running[zone_id].since
+
+    def _redraw(self) -> list[str]:
+        """Rebuild the LED set of every running zone whose lights moved on the map or whose
+        space changed. Returns their lights: they need routes to the new ring."""
+        space = self._home.space()
+        moved: list[str] = []
+        for running in self._running.values():
+            runtime = running.runtime
+            if runtime is None:
+                continue
+            lights = self._zone_lights(running.lights)
+            if list(runtime.lights) != lights or runtime.space is not space:
+                runtime.set_lights(lights, space)
+                moved += running.lights
+        return moved
+
+    def _members(self, zone: ZoneRecord) -> tuple[str, ...]:
+        return tuple(light for light in self._lights_of(zone) if self._adapter(light) is not None)
 
     # --- groups (web spec §11.3) --------------------------------------------------------
 
@@ -577,7 +692,9 @@ class ZoneManager:
             self._host.remove_runtime(zone_id)
         brightness = _brightness_of(previous) if previous is not None else 1.0
         runtime = self._new_runtime(zone_id, look, lights, brightness)
-        running = _Running(since=self._now(), lights=lights, runtime=runtime)
+        running = _Running(
+            since=self._now(), lights=lights, runtime=runtime, members=tuple(lights)
+        )
         self._running[zone_id] = running
         self._host.add_runtime(runtime)
         await self._persist(zone_id)
@@ -597,6 +714,7 @@ class ZoneManager:
             fps=self._fps,
             max_lookahead_s=self._max_lookahead_s,
             brightness=brightness,
+            space=self._home.space(),
             now=self._now,
             on_state_change=self._state_changed,
         )
@@ -621,7 +739,7 @@ class ZoneManager:
         self._host.add_runtime(running.runtime)
         return True
 
-    def _resumed(self, saved: Assignment, lights: list[str]) -> _Running:
+    def _resumed(self, saved: Assignment, lights: list[str], members: tuple[str, ...]) -> _Running:
         """A running zone rebuilt from its saved assignment (spec §8 for bad looks)."""
         try:
             look = replace(look_from_dict(json.loads(saved.look_json)), id=saved.look_id)
@@ -630,9 +748,11 @@ class ZoneManager:
             broken = CrashInfo(
                 layer="", message=f"The saved look can't be read: {exc}", at=self._now()
             )
-            return _Running(saved.started_at, lights, None, saved=saved, broken=broken)
+            return _Running(
+                saved.started_at, lights, None, saved=saved, broken=broken, members=members
+            )
         runtime = self._new_runtime(saved.zone_id, look, lights, saved.brightness)
-        return _Running(saved.started_at, lights, runtime)
+        return _Running(saved.started_at, lights, runtime, members=members)
 
     def _look_name(self, running: _Running) -> str:
         if running.runtime is not None:
@@ -647,7 +767,8 @@ class ZoneManager:
         running = [
             (state.since, zone_id)
             for zone_id, state in self._running.items()
-            if self._zones[zone_id].all_lights
+            if (zone := self._zones.get(zone_id)) is not None
+            and (zone.all_lights or zone.kind == "home")
         ]
         return max(running)[1] if running else None
 
@@ -692,7 +813,7 @@ class ZoneManager:
     def _set_lights(self, running: _Running, lights: list[str]) -> None:
         running.lights = lights
         if running.runtime is not None:
-            running.runtime.set_lights(self._zone_lights(lights))
+            running.runtime.set_lights(self._zone_lights(lights), self._home.space())
 
     def _runtime_of(self, device_id: str) -> ZoneRuntime | None:
         """The runtime of the zone that owns a light; None if none does, or it's broken."""
@@ -729,6 +850,7 @@ class ZoneManager:
                 lights=tuple(running.lights),
                 state="crashed",
                 error=running.broken,
+                covers=self._home.covers(running.lights),
             )
         return RunningZoneInfo(
             zone_id=zone_id,
@@ -743,6 +865,7 @@ class ZoneManager:
             error=runtime.crash,
             waiting_for=runtime.waiting_for,
             slow_since=runtime.slow_since,
+            covers=self._home.covers(running.lights),
         )
 
     # --- lights -----------------------------------------------------------------------
@@ -756,11 +879,14 @@ class ZoneManager:
         if adapter is None:
             return None
         info = adapter.device_info
+        room = self._home.room_of(device_id)
         return ZoneLight(
             device_id,
             adapter.led_count,
             adapter.capabilities,
             adapter.geometry,
+            placed=self._home.placed(device_id),
+            room=self._home.room_index().get(room, NO_ROOM) if room is not None else NO_ROOM,
             light_id=light_id_of(info),
             name=info.name,
         )
@@ -776,6 +902,8 @@ class ZoneManager:
         return managed.tracker.effective_latency_s
 
     def _lights_of(self, zone: ZoneRecord) -> tuple[str, ...]:
+        if zone.kind in DERIVED_KINDS:
+            return self._home.members(zone.id)
         if not zone.all_lights:
             return zone.lights
         infos = (managed.adapter.device_info for managed in self._devices.devices)
