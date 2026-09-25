@@ -2,8 +2,8 @@
 // call fetch (§12). Paths are checked against the backend's schema (ApiPath) or §12.3 (PendingPath).
 import type {
   Anchor, AnchorInput, ApiPath, AttentionItem, CreateGroup, Home, HomeUpdate, Id, Inputs, Light, Look,
-  PendingPath, Placement, PlacementState, PreviewRequest, PreviewResponse, Running, RunningZone, Signal, StartRequest,
-  StartResponse, SubZone, SubZoneInput, UpdateGroup, Zone,
+  PendingPath, Placement, PlacementState, PreviewRequest, PreviewResponse, RecentLook, Running, RunningZone, Signal,
+  StartRequest, StartResponse, SubZone, SubZoneInput, UpdateGroup, Zone,
 } from './contract'
 
 /** A request that failed. `status` 0 means no answer at all: the server is down, or the network. */
@@ -121,6 +121,8 @@ export const api = {
   updatePreview: (id: Id, draft: Look) =>
     request<void>('PUT', apiPath('/api/preview/{preview_id}', { preview_id: id }), { look: draft }),
   stopPreview: (id: Id) => request<void>('DELETE', apiPath('/api/preview/{preview_id}', { preview_id: id })),
+  /** "Start again" (§9.4): the looks that stopped, newest first (engine M2 plan, Spec Ruling 19). */
+  recentLooks: () => request<RecentLook[]>('GET', apiPath('/api/running/recent')),
 
   // Pending: engine M3, M6 and M7 (mocked until they land)
   inputs: () => request<Inputs>('GET', apiPath('/api/inputs')),

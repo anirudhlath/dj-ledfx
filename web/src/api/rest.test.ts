@@ -52,6 +52,7 @@ const CALLS: { name: string; run: () => Promise<unknown>; method: string; path: 
   { name: 'guessPlacements', run: () => api.guessPlacements(), method: 'POST', path: '/api/lights/placement/guess' },
   { name: 'startPreview', run: () => api.startPreview({ zoneId: 'living', lookId: 'embers' }), method: 'POST', path: '/api/preview', body: { zoneId: 'living', lookId: 'embers' } },
   { name: 'stopPreview', run: () => api.stopPreview('preview-1'), method: 'DELETE', path: '/api/preview/preview-1' },
+  { name: 'recentLooks', run: () => api.recentLooks(), method: 'GET', path: '/api/running/recent' },
   { name: 'inputs', run: () => api.inputs(), method: 'GET', path: '/api/inputs' },
   { name: 'signals', run: () => api.signals(), method: 'GET', path: '/api/signals' },
 ]

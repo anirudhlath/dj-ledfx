@@ -94,6 +94,19 @@ export interface PreviewRequest { zoneId: Id; lookId?: Id; look?: Look }
 export interface PreviewResponse { previewId: Id }
 /** The binary frame's stream byte (§12.4): 0x01 live, 0x02 preview. */
 export type FrameStream = 'live' | 'preview'
+/**
+ * A look that stopped, for State-Nothing-Running's "Start again" (§9.4): GET /api/running/recent
+ * answers these, newest stop first. §12.2 has no such type; the engine M2 plan's Spec Ruling 19
+ * shapes it. One tap starts it again with `api.start(zoneId, { lookId })`.
+ */
+export interface RecentLook {
+  zoneId: Id
+  zoneName: string
+  lookId: Id
+  lookName: string
+  startedAt: string
+  stoppedAt: string
+}
 
 // ── Pending: engine M3 (the tempo source chain) ───────────────────────────────────────────
 export type TempoSource = 'prodjlink' | 'music' | 'internal'
@@ -148,7 +161,7 @@ export interface Signal { name: string; value: SignalValue; unit?: string; usedB
 /** The pending types' names, as the backend's schema would name them. */
 export type PendingSchema =
   | 'Home' | 'Room' | 'SubZone' | 'Anchor' | 'Wall' | 'Furniture' | 'LightShape' | 'Placement'
-  | 'PreviewRequest' | 'PreviewResponse' | 'Deck' | 'Inputs' | 'Signal'
+  | 'PreviewRequest' | 'PreviewResponse' | 'RecentLook' | 'Deck' | 'Inputs' | 'Signal'
 /** The pending REST paths (§12.3), with FastAPI's parameter names. */
 export type PendingPath =
   | '/api/home'
@@ -161,5 +174,6 @@ export type PendingPath =
   | '/api/lights/placement/guess'
   | '/api/preview'
   | '/api/preview/{preview_id}'
+  | '/api/running/recent'
   | '/api/inputs'
   | '/api/signals'
