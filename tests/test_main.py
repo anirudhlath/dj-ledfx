@@ -1,5 +1,6 @@
-"""Shutting dj-ledfx down with a browser connected: the web server stops through granian's
-Server.stop(), so the ASGI lifespan shutdown runs and an open /ws closes cleanly."""
+"""The real entry point in a subprocess. Shutting dj-ledfx down with a browser connected:
+the web server stops through granian's Server.stop(), so the ASGI lifespan shutdown runs
+and an open /ws closes cleanly. And the app serves the home map, its zones and previews."""
 
 from __future__ import annotations
 
@@ -12,7 +13,10 @@ import struct
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
+
+from dj_ledfx.home.seed import seed_home
 
 pytest.importorskip("fastapi")  # the web extra
 
@@ -88,9 +92,8 @@ async def _close_code(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         writer.close()
 
 
-async def test_shutdown_with_a_browser_connected_is_clean(tmp_path: Path) -> None:
-    port = _free_port()
-    app = await asyncio.create_subprocess_exec(
+async def _start_app(tmp_path: Path, port: int) -> asyncio.subprocess.Process:
+    return await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
         _DRIVER,
@@ -107,6 +110,11 @@ async def test_shutdown_with_a_browser_connected_is_clean(tmp_path: Path) -> Non
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
+
+
+async def test_shutdown_with_a_browser_connected_is_clean(tmp_path: Path) -> None:
+    port = _free_port()
+    app = await _start_app(tmp_path, port)
     try:
         reader, writer = await _open_websocket_when_up(port, app)
         browser = asyncio.create_task(_close_code(reader, writer))
@@ -122,4 +130,41 @@ async def test_shutdown_with_a_browser_connected_is_clean(tmp_path: Path) -> Non
     assert "Unexpected exit" not in output, output
     assert "dj-ledfx stopped" in output, output
     assert close_code == 1001  # going away
+    assert app.returncode == 0
+
+
+async def _get_when_up(
+    client: httpx.AsyncClient, path: str, app: asyncio.subprocess.Process
+) -> httpx.Response:
+    async with asyncio.timeout(30):
+        while True:
+            try:
+                return await client.get(path)
+            except httpx.TransportError:
+                if app.returncode is not None:
+                    output = await app.stdout.read() if app.stdout else b""
+                    pytest.fail(f"dj-ledfx exited on start:\n{output.decode()}")
+                await asyncio.sleep(0.1)
+
+
+async def test_the_app_serves_the_home_map_its_zones_and_previews(tmp_path: Path) -> None:
+    port = _free_port()
+    app = await _start_app(tmp_path, port)
+    try:
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+            home = (await _get_when_up(client, "/home", app)).json()
+            zones = (await client.get("/zones")).json()
+            preview = await client.post("/preview", json={"zoneId": "home", "lookId": "sunset"})
+        app.send_signal(signal.SIGTERM)
+        output = (await asyncio.wait_for(app.communicate(), 30))[0].decode()
+    finally:
+        if app.returncode is None:
+            app.kill()
+            await app.wait()
+
+    assert [room["id"] for room in home["rooms"]] == [room.id for room in seed_home().rooms]
+    assert (zones[0]["id"], zones[0]["kind"]) == ("home", "home")
+    # The previews are wired: the whole home is refused for having no lights, not a 503.
+    assert preview.status_code == 400 and "has no lights" in preview.json()["detail"]
+    assert "Traceback" not in output, output
     assert app.returncode == 0

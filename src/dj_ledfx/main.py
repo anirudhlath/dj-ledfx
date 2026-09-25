@@ -30,6 +30,8 @@ from dj_ledfx.devices.discovery import DiscoveryOrchestrator
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent, EventBus
+from dj_ledfx.home.map import HomeMap
+from dj_ledfx.home.store import HomeStore
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.store import LookStore
@@ -40,8 +42,11 @@ from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.status import SystemStatus
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.attention import AttentionFeed
+from dj_ledfx.zones.frames import FrameFeed, Watchers
+from dj_ledfx.zones.home_view import MapZones
 from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.manager import ZoneManager
+from dj_ledfx.zones.preview import PreviewManager
 from dj_ledfx.zones.store import ZoneStore
 
 
@@ -229,6 +234,11 @@ async def _run(args: argparse.Namespace) -> None:
     await zone_store.migrate_scenes_once()
     look_store = LookStore(state_db)
     await look_store.load()
+    # The home map (spec §6): seeded from the handoff's home.json. The first start that
+    # knows lights places them once, unconfirmed, before the zones read it.
+    home_map = HomeMap(HomeStore(state_db), device_manager)
+    await home_map.load()
+    watchers = Watchers()  # which WebSocket sessions watch which frame stream
 
     engine = EffectEngine(fps=config.engine.fps)
     scheduler = LookaheadScheduler(
@@ -246,10 +256,17 @@ async def _run(args: argparse.Namespace) -> None:
         fps=config.engine.fps,
         max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
         preview_only=config.engine.preview_only is True,
+        home=MapZones(home_map),
+        frames_watched=watchers.watching_live,
     )
     await zone_manager.load()
     # Before any light connects, so no light is restored and then taken over again.
     await zone_manager.resume()
+    previews = PreviewManager(zone_manager, engine, watchers.watching_preview)
+    # The zones follow the map first; then a preview follows its zone's lights.
+    home_map.on_change(zone_manager.home_changed)
+    home_map.on_change(previews.home_changed)
+    frame_feed = FrameFeed(zone_manager, previews)
 
     light_monitor = LightMonitor(devices=device_manager, zones=zone_manager, event_bus=event_bus)
     attention_feed = AttentionFeed(
@@ -337,6 +354,10 @@ async def _run(args: argparse.Namespace) -> None:
             zone_manager=zone_manager,
             light_monitor=light_monitor,
             attention_feed=attention_feed,
+            home_map=home_map,
+            previews=previews,
+            frame_feed=frame_feed,
+            frame_watchers=watchers,
         )
 
         try:
@@ -410,6 +431,7 @@ async def _run(args: argparse.Namespace) -> None:
     tasks.append(asyncio.create_task(scheduler.run()))
     tasks.append(asyncio.create_task(light_monitor.run()))
     tasks.append(asyncio.create_task(attention_feed.run()))
+    tasks.append(asyncio.create_task(previews.run()))
 
     discovery_orchestrator.start()
 
@@ -448,6 +470,7 @@ async def _run(args: argparse.Namespace) -> None:
     if web_server is not None:
         await web_server.stop()
 
+    previews.close()
     scheduler.stop()
     engine.stop()
     light_monitor.stop()
