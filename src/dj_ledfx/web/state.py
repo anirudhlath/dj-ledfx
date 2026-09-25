@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from dj_ledfx.zones.attention import AttentionFeed
     from dj_ledfx.zones.lights import LightMonitor
     from dj_ledfx.zones.manager import ZoneManager
+    from dj_ledfx.zones.preview import PreviewManager
 
 
 @dataclass
@@ -66,3 +67,7 @@ def light_index(app: Any) -> LightIndex:
 
 def get_home_map(request: Request) -> HomeMap:
     return cast("HomeMap", _required(request, "home_map", "Home map edits"))
+
+
+def get_previews(request: Request) -> PreviewManager:
+    return cast("PreviewManager", _required(request, "previews", "Previews"))

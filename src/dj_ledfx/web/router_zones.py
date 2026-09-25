@@ -6,11 +6,22 @@ from dataclasses import replace
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from dj_ledfx.looks.model import Look
 from dj_ledfx.web import contract as api
 from dj_ledfx.web.errors import answers
 from dj_ledfx.web.state import get_looks, get_zones, light_index
 
 router = APIRouter()
+
+
+def requested_look(request: Request, look_id: str | None, draft: api.Look | None) -> Look:
+    """A saved look by id, or an unsaved draft (id "draft" unless it has one)."""
+    if look_id is not None and draft is None:
+        return get_looks(request).get(look_id)
+    if draft is not None and look_id is None:
+        look = api.look_in(draft)
+        return look if look.id else replace(look, id="draft")
+    raise HTTPException(status_code=400, detail="Send either lookId or look")
 
 
 @router.get("/zones")
@@ -53,14 +64,7 @@ async def list_running(request: Request) -> api.Running:
 async def start_zone(request: Request, zone_id: str, body: api.StartRequest) -> api.StartResponse:
     """Put a look on a zone: a saved look by id, or an unsaved draft."""
     with answers():
-        if body.look_id is not None and body.look is None:
-            look = get_looks(request).get(body.look_id)
-        elif body.look is not None and body.look_id is None:
-            look = api.look_in(body.look)
-            if not look.id:
-                look = replace(look, id="draft")
-        else:
-            raise HTTPException(status_code=400, detail="Send either lookId or look")
+        look = requested_look(request, body.look_id, body.look)
         result = await get_zones(request).start(zone_id, look)
     return api.start_out(result, light_index(request.app))
 

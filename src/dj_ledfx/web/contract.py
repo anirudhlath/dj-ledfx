@@ -264,6 +264,23 @@ def start_out(result: StartResult, index: LightIndex) -> StartResponse:
     return StartResponse.model_validate(fields)
 
 
+# --- preview (web spec §12.3) -----------------------------------------------------------
+
+
+class PreviewRequest(ContractModel):
+    zone_id: str
+    look_id: str | None = None
+    look: Look | None = None  # an unsaved draft
+
+
+class PreviewStarted(ContractModel):
+    preview_id: str
+
+
+class PreviewUpdate(ContractModel):
+    look: Look  # the editor's look as it is now, saved or not
+
+
 # --- the home map (web spec §12.2) ------------------------------------------------------
 
 Vec2 = tuple[float, float]

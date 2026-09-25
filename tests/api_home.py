@@ -21,8 +21,10 @@ from dj_ledfx.home.model import Home as HomeModel
 from dj_ledfx.types import DeviceStats
 from dj_ledfx.web.app import create_app
 from dj_ledfx.zones.attention import AttentionFeed
+from dj_ledfx.zones.frames import Watchers
 from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.model import ZoneRecord
+from dj_ledfx.zones.preview import PreviewManager
 
 
 @dataclass
@@ -33,6 +35,8 @@ class Api:
     monitor: LightMonitor
     feed: AttentionFeed
     stats: list[DeviceStats]  # what the scheduler reports; tests append to it
+    previews: PreviewManager
+    watchers: Watchers  # who watches which frame stream; the previews ask it
 
 
 @asynccontextmanager
@@ -44,6 +48,10 @@ async def api_home(
     plan: HomeModel | None = None,
 ) -> AsyncIterator[Api]:
     home = await build_home(tmp_path, lights, zones, plan=plan)
+    watchers = Watchers()
+    previews = PreviewManager(home.manager, home.host, watchers.watching_preview)
+    if home.home_map is not None:  # after the zone manager's listener, as main does it
+        home.home_map.on_change(previews.home_changed)
     stats: list[DeviceStats] = []
     monitor = LightMonitor(
         devices=home.devices, zones=home.manager, event_bus=home.bus, now=lambda: home.clock[0]
@@ -74,10 +82,12 @@ async def api_home(
         light_monitor=monitor,
         attention_feed=feed,
         home_map=home.home_map,
+        previews=previews,
     )
     transport = httpx.ASGITransport(app=app)
     try:
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            yield Api(home, app, client, monitor, feed, stats)
+            yield Api(home, app, client, monitor, feed, stats, previews, watchers)
     finally:
+        previews.close()
         await home.db.close()
