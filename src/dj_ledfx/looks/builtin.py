@@ -116,7 +116,7 @@ def _classic(kind: str, name: str) -> Look:
         id=look_id,
         name=name,
         category="tempo",
-        description=f"The classic {name.lower()} effect, played along the zone's lights in order.",
+        description=f"The classic {name.lower()} effect, swept across the zone from west to east.",
         thumbnail=look_id,
         uses=("tempo",),
         layers=(Layer(id="strip", name=name, type="field", kind=kind),),

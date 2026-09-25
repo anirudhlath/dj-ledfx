@@ -3,7 +3,9 @@
 Each LED's position is projected onto the strip: linearly along an axis of the home, or
 radially out from a centre, like the old scene mappings. The strip is rendered with one
 sample per LED and each LED takes the sample nearest its place. With `order`, the strip
-runs along the LEDs in zone order, as in M1.
+runs along the LEDs in zone order, as in M1, and so it does when the LEDs span less than
+MIN_SPAN_M along the axis (or out from the centre): a strip running north-south would
+otherwise show one colour on the classics' east default.
 """
 
 from __future__ import annotations
@@ -17,7 +19,6 @@ from dj_ledfx.effects.context import to_beat_context
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.field_tools import anchor_or_centre
 from dj_ledfx.effects.params import EffectParam, check_setting
-from dj_ledfx.spatial.mapping import LinearMapping, RadialMapping
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.ledset import LedSet
     from dj_ledfx.types import FloatRGB
 
+MIN_SPAN_M = 0.05
 AXES: dict[str, tuple[float, float, float]] = {
     "east": (1.0, 0.0, 0.0),
     "south": (0.0, 1.0, 0.0),
@@ -50,9 +52,10 @@ class StripAdapter(FieldEffect, register=False):
     # set_params, and the schema lists them for strip kinds (looks/model.py).
     def __init__(self, inner: StripEffect) -> None:
         self.inner = inner
-        self._mapping = str(PROJECTION_PARAMS["mapping"].default)
-        self._axis = str(PROJECTION_PARAMS["axis"].default)
-        self._centre = str(PROJECTION_PARAMS["centre"].default)
+        self._projection = {key: str(param.default) for key, param in PROJECTION_PARAMS.items()}
+        # Which strip sample each LED takes (None: LED order), for the last LED set seen.
+        # It depends only on the LEDs and the projection settings.
+        self._index: tuple[LedSet, NDArray[np.intp] | None] | None = None
 
     def get_params(self) -> dict[str, Any]:
         return self.inner.get_params()
@@ -64,25 +67,36 @@ class StripAdapter(FieldEffect, register=False):
         for key, value in own.items():
             check_setting(key, PROJECTION_PARAMS[key], value)
         self.inner.set_params(**kwargs)
-        self._mapping = str(own.get("mapping", self._mapping))
-        self._axis = str(own.get("axis", self._axis))
-        self._centre = str(own.get("centre", self._centre))
+        self._projection.update({key: str(value) for key, value in own.items()})
+        self._index = None
 
     def reseed(self, seed: int) -> None:
         self.inner.reseed(seed)
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
-        count = leds.count
-        strip = to_float_rgb(self.inner.render(to_beat_context(ctx), count))
-        if self._mapping == "order" or count < 2:
-            return strip
-        index = np.rint(self._place(leds) * (count - 1)).astype(np.intp)
-        return strip[index]
+        strip = to_float_rgb(self.inner.render(to_beat_context(ctx), leds.count))
+        if self._index is None or self._index[0] is not leds:
+            place = self._place(leds) if leds.count > 1 else None
+            index = None if place is None else np.rint(place * (leds.count - 1)).astype(np.intp)
+            self._index = (leds, index)
+        index = self._index[1]
+        return strip if index is None else strip[index]
 
-    def _place(self, leds: LedSet) -> NDArray[np.float64]:
-        """Each LED's place along the strip, 0..1."""
+    def _place(self, leds: LedSet) -> NDArray[np.float64] | None:
+        """Each LED's place along the strip, 0..1. None: the strip runs in LED order."""
+        mapping = self._projection["mapping"]
+        if mapping == "order":
+            return None
         positions = leds.pos.astype(np.float64)
-        if self._mapping == "radial":
-            x, y, z = (float(value) for value in anchor_or_centre(leds, self._centre))
-            return RadialMapping(center=(x, y, z)).map_positions(positions)
-        return LinearMapping(direction=AXES[self._axis]).map_positions(positions)
+        if mapping == "radial":
+            centre = anchor_or_centre(leds, self._projection["centre"]).astype(np.float64)
+            along = np.linalg.norm(positions - centre, axis=1)
+            low = 0.0
+        else:
+            along = positions @ np.asarray(AXES[self._projection["axis"]], dtype=np.float64)
+            low = float(along.min())
+        span = float(along.max()) - low
+        if span < MIN_SPAN_M:
+            return None
+        place: NDArray[np.float64] = (along - low) / span
+        return place

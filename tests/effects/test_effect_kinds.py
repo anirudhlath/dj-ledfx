@@ -147,6 +147,29 @@ def test_strip_adapter_projects_radially_from_an_anchor_or_the_middle() -> None:
     assert middle[0] == middle[3] and middle[1] == middle[2] and middle[1] > middle[0]
 
 
+# M2 review M11: the classics default to east, so a strip running north-south would
+# otherwise show one colour.
+@pytest.mark.parametrize(
+    ("points", "settings"),
+    [
+        ([[1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [1.0, 2.0, 1.0], [1.0, 3.0, 1.0]], {}),
+        ([[1.02, 0.0, 1.0], [1.0, 1.0, 1.0], [1.03, 2.0, 1.0], [1.01, 3.0, 1.0]], {}),
+        ([[2.0, 2.0, 1.0]] * 4, {"mapping": "radial"}),
+        (
+            [[2.0, 2.0, 1.0], [2.02, 2.0, 1.0], [2.0, 2.04, 1.0], [2.01, 2.0, 1.0]],
+            {"mapping": "radial"},
+        ),
+    ],
+    ids=["north-south", "north-south-jittered", "one-point", "within-5-cm-of-the-middle"],
+)
+def test_leds_spanning_under_5_cm_along_the_projection_play_in_led_order(
+    points: list[list[float]], settings: dict[str, str]
+) -> None:
+    adapter = StripAdapter(_Ramp())
+    adapter.set_params(**settings)
+    assert np.allclose(adapter.render(render_ctx(), _placed(points))[:, 0], RAMP)
+
+
 def test_strip_adapter_forwards_parameters() -> None:
     inner = _Ramp()
     adapter = StripAdapter(inner)
