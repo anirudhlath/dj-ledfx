@@ -263,3 +263,33 @@ async def test_map_edits_that_leave_a_running_room_as_it_was_leave_its_frames_al
         assert runtime.space.anchors["sofa"].tolist() == [6.5, 2.0, 0.5]
     finally:
         await home.db.close()
+
+
+# M2 review E8 = M8: a map edit that changes no zone writes nothing to state.db.
+async def test_a_move_that_changes_no_zone_writes_nothing(
+    make_home: HomeFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    view = FakeHome(rooms={"west": ["a", "b"]}, sub_zones={"desk": ["a"]})
+    home = await make_home(_lights("a", "b"), [], view=view)
+    await home.manager.start("west", home.look("classic-breathe"))
+    await home.manager.start("desk", home.look("classic-strobe"))
+    writes: list[object] = []
+    write, write_many = home.db.write, home.db.write_many
+
+    async def counted(*args: Any) -> None:
+        writes.append(args)
+        await write(*args)
+
+    async def counted_many(statements: Any) -> None:
+        writes.append(statements)
+        await write_many(statements)
+
+    monkeypatch.setattr(home.db, "write", counted)
+    monkeypatch.setattr(home.db, "write_many", counted_many)
+    view.placed_at["b"] = PlacedLeds.from_positions(np.array([[3.0, 2.0, 1.0]] * 4))
+    await home.manager.home_changed()  # b moved within the west room
+
+    assert writes == []
+    view.rooms["west"] = ["a"]
+    await home.manager.home_changed()  # b left: the room's assignment changes
+    assert len(writes) >= 1

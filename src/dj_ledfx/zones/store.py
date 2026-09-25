@@ -94,17 +94,19 @@ class ZoneStore:
 
     async def sync_derived(self, zones: Sequence[ZoneRecord]) -> None:
         """Make state.db's rooms, sub-zones and whole home match the map's, in one
-        transaction. A derived zone the map no longer has is deleted, and its assignment
-        with it (FK cascade). Derived zones keep no members: the map says which lights
-        they hold."""
+        transaction, or write nothing when they match already. A derived zone the map no
+        longer has is deleted, and its assignment with it (FK cascade). Derived zones keep
+        no members: the map says which lights they hold."""
         marks = ", ".join("?" for _ in DERIVED_KINDS)
         rows = await self._db.fetch_all(
-            f"SELECT id FROM zones WHERE kind IN ({marks})", DERIVED_KINDS
+            f"SELECT id, name, kind, all_lights FROM zones WHERE kind IN ({marks})", DERIVED_KINDS
         )
+        if {tuple(row) for row in rows} == {(z.id, z.name, z.kind, 0) for z in zones}:
+            return
         wanted = {zone.id for zone in zones}
         statements: list[Statement] = [
             statement
-            for (zone_id,) in rows
+            for (zone_id, *_) in rows
             if zone_id not in wanted
             for statement in self._delete_statements(zone_id)
         ]

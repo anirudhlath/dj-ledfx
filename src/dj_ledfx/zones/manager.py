@@ -569,6 +569,7 @@ class ZoneManager:
             if (zone := self._zones[zone_id]).kind in DERIVED_KINDS or zone.all_lights
         }
         touched: list[str] = []
+        before = {zone_id: self._running[zone_id].lights for zone_id in following}
         for zone_id, members in following.items():
             staying = self._running[zone_id]
             touched += [light for light in staying.lights if light not in members]
@@ -595,7 +596,8 @@ class ZoneManager:
                 await self._stop(zone_id)
                 continue
             running.lights = lights  # _redraw rebuilds its LED set
-            await self._persist(zone_id)
+            if lights != before[zone_id]:
+                await self._persist(zone_id)
         return joined, touched
 
     def _may_take(self, zone_id: str, light: str) -> bool:
