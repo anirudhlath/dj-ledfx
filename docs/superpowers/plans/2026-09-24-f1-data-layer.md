@@ -89,6 +89,7 @@ These fill gaps in the spec. The owner sees them in the plan's report. Reviewers
    - `PlacementState` is the answer to a placement request, from M2's Spec Ruling 16.
    - `Inputs` and `Signal` are shaped from §12.3–12.4 and the Inputs renders.
    - M2's Spec Ruling 4 gives the PC's parts an `id`. The mock's fixtures give each part `${light}-part-N` now, and the generated `Light` carries the field once M2 serves it.
+   - `RecentLook` and `GET /api/running/recent` are "Start again", the owner's decision of 2026-09-24. M2's Spec Ruling 19 fixes the path, the fields and their order (`zoneId, zoneName, lookId, lookName, startedAt, stoppedAt`), newest stop first, and the cap of 10. Tasks 2 and 3 were under way by then, so Task 8 adds the type and `api.recentLooks()`.
    - The milestone that serves a type owns its final shape. When the backend serves a schema or path with the same name, `contract.test.ts` fails `tsc -b` until the pending type is swapped for the generated one. That swap is Task 15's, or M2's last task's if F1 merges first.
 7. **Attention order is the server's.** §9.5: severity, then newest first, as M1's feed sorts. The State-Problems render lists its items in another order; the mock follows §9.5, and the render's order isn't reproduced.
 8. **Scenarios.**
@@ -96,9 +97,9 @@ These fill gaps in the spec. The owner sees them in the plan's report. Reviewers
    - Times are relative to now, so a clock fixed at 19:14 shows the renders' times.
    - `?still` holds the beat (one beat message, then none) for screenshots and the render counts.
    - The mock serves the handoff's 29 looks, with `needs` taken from each look's `inputs`, as M1 maps its built-ins.
-   - Zone names come from `home.json`. Its room `corridor` is named "Corridor", while §12.5 and the renders say "Entrance". The mock keeps "Corridor", because that is what M2 will seed; a new handoff can rename the room.
+   - Zone names come from `home.json`, with one exception. The owner decided on 2026-09-24 that the room `corridor` is "Entrance", as §6.3, §12.5 and the renders say, where home.json names it otherwise. The byte copy stays as it is. `OWNER_ROOM_NAMES` in `fixtures.ts` renames the room, as engine M2's seed does (its Spec Ruling 18), and it changes nothing once a handoff says "Entrance" itself.
    - Attention titles and details copy M1's `zones/attention.py` for the kinds M1 raises. The two input items, which M1 can't raise yet, use the render's words.
-   - State-Nothing-Running's "Start again" list has no endpoint in §12.3. F3 raises it with the engine track; the mock doesn't invent one.
+   - State-Nothing-Running's "Start again" list (§9.4) has no endpoint in §12.3. The owner decided on 2026-09-24 that engine M2 serves it at `GET /api/running/recent` (its Spec Ruling 19), so the mock serves it too (Task 10). The `nothing-running` scenario offers the render's three looks from last night, and the mock remembers each look that stops, as M2 does. The UI is F3's (Hand-off).
 9. **Today's beat.** M1's v1 beat has no source, bar or server time. It reads as source Pro DJ Link, with no bar (the module hides "bar N"), and its pips stop while `is_playing` is false. With no DJ, M1 sends bpm 0, which shows as "0.0" until M3's internal clock.
 10. **The chrome's other values stay on the fixture** until the milestone that owns them. That is preview only (F3), the server's name in the rail (F6) and today's sunset in the phone's Live line (F6). F1 moves only the connection, the tempo and the attention to the stores, as the owner asked.
 11. **Mocks run in dev only with `?scenario=`, and always in the mock build.** `npm run dev` talks to the real backend through the proxy unless a scenario is asked for. `npm run build:mock` builds `web/dist-mock`, which always mocks (hero by default), and it is what Playwright serves. `npm run build` checks that `web/dist` has no trace of MSW.
@@ -3063,25 +3064,27 @@ git commit -m "feat(web): the live client: one socket, backoff, a silence watchd
 
 ### Task 8: Mock fixtures and the scenarios
 
-Implements spec §12.5's fixtures and scenarios, §9.1–9.5's states, §11.3 (zones and take-over) and §14 Unit ("attention ordering"). Decisions 4, 7 and 8. Renders: `Main.png`, `Inputs.png`, `Live-Doorbell.png`, `State-Transition.png`, `State-Problems.png`, `State-Firmware.png`, `State-Inputs-Down.png`, `State-Nothing-Running.png`, `State-No-Lights-Placed.png`, `State-Reconnecting.png`, `State-Preview-Only.png` and `Phone-Tempo.png`.
+Implements spec §12.5's fixtures and scenarios, §9.1–9.5's states, §11.3 (zones and take-over) and §14 Unit ("attention ordering"). It also carries the owner's two decisions of 2026-09-24 into the data layer: the room named "Entrance", and the "Start again" type and call (Step 3). Decisions 4, 6, 7 and 8. Renders: `Main.png`, `Inputs.png`, `Live-Doorbell.png`, `State-Transition.png`, `State-Problems.png`, `State-Firmware.png`, `State-Inputs-Down.png`, `State-Nothing-Running.png`, `State-No-Lights-Placed.png`, `State-Reconnecting.png`, `State-Preview-Only.png` and `Phone-Tempo.png`.
 
 **Files:**
 - Create: `web/src/api/mocks/home.json`, `web/src/api/mocks/looks.json` (byte copies), `web/src/api/mocks/fixtures.ts`, `web/src/api/mocks/scenarios.ts`
-- Modify: `web/src/design/payload.node.test.ts` (two more copies), `web/tsconfig.app.json` (`resolveJsonModule`)
+- Modify: `web/src/design/payload.node.test.ts` (two more copies), `web/tsconfig.app.json` (`resolveJsonModule`), and for "Start again" `web/src/api/contract.ts`, `web/src/api/rest.ts` and `web/src/api/rest.test.ts` (Step 3)
 - Test: `web/src/api/mocks/fixtures.test.ts`, `web/src/api/mocks/scenarios.test.ts`
 
 **Interfaces:**
-- Consumes: the contract types (Task 2), and `formatTime` and `formatBpm` from `src/lib/format.ts` (F0).
+- Consumes: the contract types and `PendingSchema`/`PendingPath` (Task 2), `rest.ts` and its tests (Task 3), and `formatTime` and `formatBpm` from `src/lib/format.ts` (F0).
+- Produces, in `contract.ts` and `rest.ts`: the pending `interface RecentLook { zoneId; zoneName; lookId; lookName; startedAt; stoppedAt }`, and `api.recentLooks(): Promise<RecentLook[]>`.
 - Produces, from `fixtures.ts`:
-  - `HOME_TOTALS: { lights: number; leds: number }` and `homeFixture: Home`.
+  - `HOME_TOTALS: { lights: number; leds: number }` and `homeFixture: Home`, whose rooms carry the owner's names.
+  - `OWNER_ROOM_NAMES: Partial<Record<Id, string>>` and `withOwnerNames(rooms): Room[]`.
   - `lightShape(raw): LightShape` and `lightFixtures(since: string): Light[]`. Each call builds new objects; every light starts `idle`, powered off, with no frames.
-  - `lookFixtures: Look[]`, `lookName(id): string` and `roomName(id): string`.
+  - `lookFixtures: Look[]`, `lookName(id): string` and `roomName(id): string`, the owner's name where there is one.
   - `HOME_ZONE = 'home'`, `zoneFixtures(home, lights): Zone[]` and `coversOf(home, lights, ids): string[]`.
 - Produces, from `scenarios.ts`:
   - `SCENARIOS`, the eleven names, `type ScenarioName`, and `isScenario(name): name is ScenarioName`.
   - `interface ScenarioBeat { source; bpm; bar; beatInBar; pitchPercent; stale }`.
   - `interface ScenarioLink { dropAfterMs: number | null }`.
-  - `interface ScenarioState { name; home; lights; looks; zones; running; overlays; attention; beat; decks; inputs; signals; previewOnly; link }`.
+  - `interface ScenarioState { name; home; lights; looks; zones; running; overlays; attention; beat; decks; inputs; signals; previewOnly; link; recent }`, where `recent` is "Start again"'s list, newest stop first.
   - `orderAttention(items): AttentionItem[]`, and `buildScenario(name, now?: Date): ScenarioState`. Each call builds a new state, which the mock server (Task 10) then changes as requests arrive.
 
 - [ ] **Step 1: Read the spec and the renders**
@@ -3114,7 +3117,55 @@ In `web/tsconfig.app.json`, under `/* Bundler mode */`, add:
     "resolveJsonModule": true,
 ```
 
-- [ ] **Step 3: Write the failing tests**
+- [ ] **Step 3: Add "Start again" to the contract and the REST client**
+
+The owner decided on 2026-09-24 that engine M2 serves State-Nothing-Running's "Start again" list (decisions 6 and 8, and the M2 plan's Spec Ruling 19). Its type is pending until M2 serves it. Its fields and their order are ruling 19's, and M2's `test_the_schema_names_start_again_as_f1_types_it` pins the same list, so the two can't drift apart unseen.
+
+In `web/src/api/contract.ts`'s pending engine M2 section, after `FrameStream`, add:
+
+```ts
+/**
+ * A look that stopped, for State-Nothing-Running's "Start again" (§9.4): GET /api/running/recent
+ * answers these, newest stop first. §12.2 has no such type; the engine M2 plan's Spec Ruling 19
+ * shapes it. One tap starts it again with `api.start(zoneId, { lookId })`.
+ */
+export interface RecentLook {
+  zoneId: Id
+  zoneName: string
+  lookId: Id
+  lookName: string
+  startedAt: string
+  stoppedAt: string
+}
+```
+
+Add the type and the path to the pending names:
+
+```ts
+export type PendingSchema =
+  | 'Home' | 'Room' | 'SubZone' | 'Anchor' | 'Wall' | 'Furniture' | 'LightShape' | 'Placement'
+  | 'PreviewRequest' | 'PreviewResponse' | 'RecentLook' | 'Deck' | 'Inputs' | 'Signal'
+```
+
+and `| '/api/running/recent'` to `PendingPath`, after `'/api/preview/{preview_id}'`.
+
+In `web/src/api/rest.ts`, add `RecentLook` to the type import (after `PreviewResponse`), and to `api`'s "Pending: engine M2" group, after `stopPreview`:
+
+```ts
+  /** "Start again" (§9.4): the looks that stopped, newest first (engine M2 plan, Spec Ruling 19). */
+  recentLooks: () => request<RecentLook[]>('GET', apiPath('/api/running/recent')),
+```
+
+In `web/src/api/rest.test.ts`, add to `CALLS`, after `stopPreview`:
+
+```ts
+  { name: 'recentLooks', run: () => api.recentLooks(), method: 'GET', path: '/api/running/recent' },
+```
+
+Run: `(cd web && npx vitest run src/api/rest.test.ts && npx tsc -b)`
+Expected: PASS (33 tests), and `tsc -b` is clean. If engine M2 has merged and serves `/api/running/recent`, `tsc -b` fails in `contract.test.ts` on `'RecentLook'` and the path: swap them now, as Task 15, Step 3 says.
+
+- [ ] **Step 4: Write the failing tests**
 
 `web/src/api/mocks/fixtures.test.ts`:
 
@@ -3123,7 +3174,8 @@ import { describe, expect, it } from 'vitest'
 import homeJson from './home.json'
 import looksJson from './looks.json'
 import {
-  HOME_TOTALS, HOME_ZONE, coversOf, homeFixture, lightFixtures, lookFixtures, lookName, roomName, zoneFixtures,
+  HOME_TOTALS, HOME_ZONE, OWNER_ROOM_NAMES, coversOf, homeFixture, lightFixtures, lookFixtures, lookName, roomName,
+  withOwnerNames, zoneFixtures,
 } from './fixtures'
 
 const SINCE = '2026-09-23T17:04:00.000Z'
@@ -3192,6 +3244,20 @@ describe('the fixtures', () => {
     expect(pc?.parts?.length).toBeGreaterThan(1)
     expect(new Set(pc?.parts?.map((part) => (part as { id?: string }).id)).size).toBe(pc?.parts?.length)
   })
+
+  it("names the room corridor Entrance, the owner's decision, and keeps every other name", () => {
+    expect(OWNER_ROOM_NAMES).toEqual({ corridor: 'Entrance' })
+    const raw = new Map(homeJson.rooms.map((room) => [room.id, room.name]))
+    expect(raw.has('corridor')).toBe(true)
+    for (const room of homeFixture.rooms) expect(room.name).toBe(OWNER_ROOM_NAMES[room.id] ?? raw.get(room.id))
+    expect(roomName('corridor')).toBe('Entrance')
+  })
+
+  it("leaves a room alone once home.json has the owner's name", () => {
+    const named = { ...homeFixture.rooms[0], id: 'corridor', name: 'Entrance' }
+    expect(withOwnerNames([named])).toEqual([named])
+    expect(withOwnerNames([{ ...named, name: 'Hall' }])).toEqual([named])
+  })
 })
 ```
 
@@ -3222,6 +3288,14 @@ describe('every scenario', () => {
       expect(state.zones.map((candidate) => candidate.id)).toContain(zone.zoneId)
     }
     expect(state.attention).toEqual(orderAttention(state.attention))
+    // "Start again" offers known looks on known zones, newest stop first (engine M2's order).
+    for (const entry of state.recent) {
+      expect(entry.lookName).toBe(lookName(entry.lookId))
+      expect(entry.zoneName).toBe(state.zones.find((candidate) => candidate.id === entry.zoneId)?.name)
+      expect(Date.parse(entry.startedAt)).toBeLessThanOrEqual(Date.parse(entry.stoppedAt))
+    }
+    const stops = state.recent.map((entry) => Date.parse(entry.stoppedAt))
+    expect(stops).toEqual([...stops].sort((a, b) => b - a))
   })
 
   it('is built afresh each time', () => {
@@ -3375,6 +3449,21 @@ describe('the other scenarios', () => {
     expect(state.attention).toEqual([])
   })
 
+  it("nothing-running offers last night's three looks to start again, newest stop first", () => {
+    const { recent } = buildScenario('nothing-running', NOW)
+    expect(recent.map((entry) => [entry.zoneId, entry.lookId])).toEqual([
+      [HOME_ZONE, 'goodnight'],
+      ['living', 'fireflies'],
+      [HOME_ZONE, 'homesunset'],
+    ])
+    expect(recent.map((entry) => [hhmm(entry.startedAt), hhmm(entry.stoppedAt)])).toEqual([
+      ['23:31', '07:00'],
+      ['21:10', '23:31'],
+      ['18:02', '23:31'],
+    ])
+    expect(buildScenario('hero', NOW).recent).toEqual([])
+  })
+
   it('no-lights has no shapes and no anchors', () => {
     const state = buildScenario('no-lights', NOW)
     expect(state.lights.every((each) => each.shape === null)).toBe(true)
@@ -3406,7 +3495,7 @@ describe('the other scenarios', () => {
 })
 ```
 
-- [ ] **Step 4: Run them to see them fail**
+- [ ] **Step 5: Run them to see them fail**
 
 ```bash
 (cd web && npx vitest run src/api/mocks src/design/payload.node.test.ts)
@@ -3414,12 +3503,12 @@ describe('the other scenarios', () => {
 
 Expected: the two copy tests pass (the files were copied in Step 2). The mock tests fail with `Failed to load url ./fixtures` and `./scenarios`.
 
-- [ ] **Step 5: Write `fixtures.ts`**
+- [ ] **Step 6: Write `fixtures.ts`**
 
 ```ts
 // Fixtures from the handoff's own files (spec §12.5). The home, its lights and the looks come from
 // byte copies of home.json and looks.json, so no name, position or description is typed here
-// (CLAUDE.md, "Web App Design"). What the files don't say, the mock makes up in the API's shape:
+// (CLAUDE.md, "Web App Design"), except the owner's name for one room (decision 8). What the files don't say, the mock makes up in the API's shape:
 // addresses from the documentation range (RFC 5737), no MACs, and M1's latency heuristics.
 import type {
   Anchor, Box2, Furniture, Home, Id, InputKind, Light, LightShape, Location, Look, Outdoor, Room, SubZone, Vec2,
@@ -3495,9 +3584,21 @@ const RAW_LOOKS = (looksJson as unknown as { looks: RawLook[] }).looks
 /** home.json's own totals. */
 export const HOME_TOTALS = RAW.totals
 
+/**
+ * The owner's names for rooms, over home.json's (decision 8): the owner decided on 2026-09-24 that the
+ * room `corridor` is "Entrance", as §6.3, §12.5 and the renders say. home.json is a byte copy and never
+ * edited, so the fixtures rename the room here, as engine M2's seed does (its Spec Ruling 18).
+ */
+export const OWNER_ROOM_NAMES: Partial<Record<Id, string>> = { corridor: 'Entrance' }
+
+/** The rooms with the owner's names. A room home.json already names so is unchanged. */
+export function withOwnerNames(rooms: Room[]): Room[] {
+  return rooms.map((room) => ({ ...room, name: OWNER_ROOM_NAMES[room.id] ?? room.name }))
+}
+
 export const homeFixture: Home = {
   outline: RAW.outline,
-  rooms: RAW.rooms,
+  rooms: withOwnerNames(RAW.rooms),
   subZones: RAW.subZones,
   walls: RAW.walls,
   columns: RAW.columns,
@@ -3622,8 +3723,9 @@ export function lookName(id: Id): string {
   return look.name
 }
 
+/** A room's name as the fixtures serve it: the owner's, where there is one. */
 export function roomName(id: Id): string {
-  const room = RAW.rooms.find((candidate) => candidate.id === id)
+  const room = homeFixture.rooms.find((candidate) => candidate.id === id)
   if (room === undefined) throw new Error(`home.json has no room ${id}`)
   return room.name
 }
@@ -3656,7 +3758,7 @@ export function coversOf(home: Home, lights: Light[], ids: Id[]): string[] {
 }
 ```
 
-- [ ] **Step 6: Write `scenarios.ts`**
+- [ ] **Step 7: Write `scenarios.ts`**
 
 ```ts
 // The §12.5 scenarios, each a whole server state: the hero at 19:14 and the states around it, from
@@ -3664,7 +3766,7 @@ export function coversOf(home: Home, lights: Light[], ids: Id[]): string[] {
 // renders' times (decision 8). Names come from the fixtures; ids pick things out of them.
 import { formatBpm, formatTime } from '@/lib/format'
 import type {
-  AttentionItem, Deck, Home, Id, Inputs, Light, Look, Overlay, RunningZone, Signal, TempoSource, Zone,
+  AttentionItem, Deck, Home, Id, Inputs, Light, Look, Overlay, RecentLook, RunningZone, Signal, TempoSource, Zone,
 } from '../contract'
 import {
   HOME_ZONE, coversOf, homeFixture, lightFixtures, lookFixtures, lookName, roomName, zoneFixtures,
@@ -3721,6 +3823,8 @@ export interface ScenarioState {
   signals: Signal[]
   previewOnly: boolean
   link: ScenarioLink
+  /** "Start again" (§9.4): the looks that stopped, newest stop first, as engine M2 keeps them (decision 8). */
+  recent: RecentLook[]
 }
 
 const SEVERITY: Record<AttentionItem['severity'], number> = { high: 0, normal: 1 }
@@ -3763,6 +3867,11 @@ function runningOf(state: ScenarioState, zoneId: Id): RunningZone {
   const zone = state.running.find((candidate) => candidate.zoneId === zoneId)
   if (zone === undefined) throw new Error(`Zone ${zoneId} is not running`)
   return zone
+}
+
+/** A look that stopped on a zone, as "Start again" lists it. */
+function stoppedLook(state: ScenarioState, zoneId: Id, lookId: Id, startedAt: string, stoppedAt: string): RecentLook {
+  return { zoneId, zoneName: zoneOf(state, zoneId).name, lookId, lookName: lookName(lookId), startedAt, stoppedAt }
 }
 
 /** Starts a look on a zone. Its lights stream from `since`. */
@@ -3942,6 +4051,7 @@ function base(name: ScenarioName, now: Date): ScenarioState {
     signals: heroSignals(),
     previewOnly: false,
     link: { dropAfterMs: null },
+    recent: [],
   }
 }
 
@@ -4044,6 +4154,16 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
     const on = zoneOf(state, 'living').lights.filter((id) => id !== 'rope' && id !== 'tube')
     for (const id of on) setLight(state, id, { power: true })
     setLight(state, 'rope', { status: 'offline', statusSince: after(now, -132 * MINUTE), power: null })
+    // "Start again": the render's three looks from last night. Goodnight replaced Home sunset on the
+    // whole home at 23:31 and took the living room's lights from Fireflies. The render gives Goodnight
+    // no end, so the mock stops it at 07:00. Newest stop first, as engine M2 serves the list, which is
+    // the reverse of the render's order.
+    const lastNight = after(now, -1183 * MINUTE)
+    state.recent = [
+      stoppedLook(state, HOME_ZONE, 'goodnight', lastNight, after(now, -734 * MINUTE)),
+      stoppedLook(state, 'living', 'fireflies', after(now, -1324 * MINUTE), lastNight),
+      stoppedLook(state, HOME_ZONE, 'homesunset', after(now, -1512 * MINUTE), lastNight),
+    ]
   },
   'no-lights'(state, now) {
     hero(state, now)
@@ -4090,19 +4210,19 @@ export function buildScenario(name: ScenarioName, now: Date = new Date()): Scena
 }
 ```
 
-- [ ] **Step 7: Run the tests**
+- [ ] **Step 8: Run the tests**
 
 ```bash
-(cd web && npx vitest run src/api/mocks src/design/payload.node.test.ts)
+(cd web && npx vitest run src/api/mocks src/design/payload.node.test.ts src/api/rest.test.ts)
 ```
 
-Expected: PASS: fixtures 7, scenarios 27, payload 8.
+Expected: PASS: fixtures 9, scenarios 28, payload 8, rest 33.
 
-- [ ] **Step 8: Gate and commit**
+- [ ] **Step 9: Gate and commit**
 
 ```bash
-git add web/src/api/mocks web/src/design/payload.node.test.ts web/tsconfig.app.json
-git commit -m "feat(web): mock fixtures from home.json and looks.json, and the eleven scenarios"
+git add web/src/api/mocks web/src/design/payload.node.test.ts web/tsconfig.app.json web/src/api/contract.ts web/src/api/rest.ts web/src/api/rest.test.ts
+git commit -m "feat(web): mock fixtures and the eleven scenarios, the owner's room name, and Start again's pending type"
 ```
 
 ---
@@ -4352,7 +4472,7 @@ git commit -m "feat(web): a mock frame generator: simple moving motifs for each 
 
 ### Task 10: The mock server, and MSW over it
 
-Implements §12.5's "MSW handlers and a mock WS in `src/api/mocks/`", §12.3's endpoints and §12.4's channels as the mock plays them, and §11.3's take-over. Decisions 1, 5, 8 and 9. Review focus 3. Renders: none new; the scenarios are Task 8's.
+Implements §12.5's "MSW handlers and a mock WS in `src/api/mocks/`", §12.3's endpoints and §12.4's channels as the mock plays them, and §11.3's take-over. It also serves "Start again" as engine M2 will (decision 8, M2's Spec Ruling 19): the mock remembers each look that stops, and `GET /api/running/recent` lists what one tap can start again. Decisions 1, 5, 6, 8 and 9. Review focus 3. Renders: none new; the scenarios are Task 8's.
 
 **Files:**
 - Modify: `web/package.json`, `web/package-lock.json` (msw)
@@ -4361,7 +4481,7 @@ Implements §12.5's "MSW handlers and a mock WS in `src/api/mocks/`", §12.3's e
 
 **Interfaces:**
 - Consumes:
-  - `buildScenario`, `ScenarioState`, `ScenarioName` and `orderAttention` (Task 8), and `coversOf` (Task 8).
+  - `buildScenario`, `ScenarioState` (with `recent`), `ScenarioName` and `orderAttention` (Task 8), `coversOf` (Task 8), and the pending `RecentLook` and `api.recentLooks` (Task 8).
   - `motifFor`, `paint` and `MotifSpec` (Task 9).
   - `encodeFrame`, `decodeFrame`, `FrameStore` and `FrameVersion` (Task 4).
   - The message types (Task 2), `LiveSocket` and `OpenSocket` (Task 7), and in the tests `LiveClient` (Task 7), `createLiveStore` (Task 6), `BeatClock` (Task 5) and `api` (Task 3).
@@ -4375,6 +4495,7 @@ Implements §12.5's "MSW handlers and a mock WS in `src/api/mocks/`", §12.3's e
     - `handle(method, path, body?): MockReply`;
     - `connect(link): MockSession | null`, which is null while it refuses connections;
     - `receive(session, text)`, `disconnect(session)`, `start()` and `stop()`.
+  - `RECENT_LIMIT = 10`, how many looks "Start again" keeps, as engine M2 does. The server answers `GET /api/running/recent`.
   - `snapshotMessages(state, protocol): ServerMessage[]`, what a new connection hears first.
   - `beatMessage(state, elapsedS, serverTime, protocol): BeatV1 | BeatV2`.
   - `statsMessage(state): StatsMessage`.
@@ -4398,15 +4519,18 @@ With context7, check MSW 2's API: `http.all(path, resolver)` with `HttpResponse.
 ```ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BeatClock } from '../beat'
+import type { Look, RecentLook, Zone } from '../contract'
 import { FrameStore, decodeFrame } from '../frames'
 import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
 import type { ClientCommand } from '../ws-messages'
 import { inMemorySockets } from './in-memory-socket'
-import { MockServer, beatMessage, snapshotMessages, type MockServerOptions } from './mock-server'
+import { MockServer, RECENT_LIMIT, beatMessage, snapshotMessages, type MockServerOptions } from './mock-server'
 import { buildScenario } from './scenarios'
 
 const NOW = new Date(2026, 8, 23, 19, 14)
+/** Moves the wall clock on: the mock's times come from Date.now(). */
+const later = (minutes: number) => vi.setSystemTime(NOW.getTime() + minutes * 60_000)
 let servers: MockServer[] = []
 
 beforeEach(() => {
@@ -4618,6 +4742,91 @@ describe('the REST API', () => {
   })
 })
 
+describe('"Start again"', () => {
+  const listed = (server: MockServer) =>
+    (server.handle('GET', '/api/running/recent').body as RecentLook[]).map((entry) => `${entry.zoneId}/${entry.lookId}`)
+  const kept = (server: MockServer) => server.state.recent.map((entry) => `${entry.zoneId}/${entry.lookId}`)
+
+  it("serves nothing-running's list, and leaves out what one tap could not start again", () => {
+    const server = serve({ scenario: 'nothing-running' })
+    expect(server.handle('GET', '/api/running/recent')).toEqual({ status: 200, body: server.state.recent })
+    expect(listed(server)).toEqual(['home/goodnight', 'living/fireflies', 'home/homesunset'])
+
+    server.handle('POST', '/api/zones/living/start', { lookId: 'fireflies' })
+    expect(listed(server)).toEqual(['home/goodnight', 'home/homesunset']) // it runs there now
+
+    const group = server.handle('POST', '/api/zones/groups', { name: 'Pair', lights: ['deskl'] }).body as Zone
+    later(1)
+    server.handle('POST', `/api/zones/${group.id}/start`, { lookId: 'comets' })
+    later(2)
+    server.handle('POST', `/api/zones/${group.id}/off`)
+    expect(listed(server)[0]).toBe(`${group.id}/comets`)
+    server.handle('DELETE', `/api/zones/groups/${group.id}`)
+    expect(listed(server)).toEqual(['home/goodnight', 'home/homesunset']) // the zone is gone
+
+    const fireflies = server.state.looks.find((look) => look.id === 'fireflies')
+    const mine = server.handle('POST', '/api/looks', { ...fireflies, name: 'Mine' }).body as Look
+    later(3)
+    server.handle('POST', '/api/zones/office/start', { lookId: mine.id })
+    later(4)
+    server.handle('POST', '/api/zones/office/off')
+    expect(listed(server)[0]).toBe(`office/${mine.id}`)
+    server.handle('DELETE', `/api/looks/${mine.id}`)
+    expect(listed(server)).toEqual(['home/goodnight', 'home/homesunset']) // the look is gone
+    expect(kept(server)).toHaveLength(5) // left out when read, never forgotten
+  })
+
+  it('remembers each way a look stops, newest first, but not a draft or a deleted group', () => {
+    const server = serve() // the hero: Home sunset, Fireflies and Twin comets run
+    const embers = server.state.looks.find((look) => look.id === 'embers')
+    later(1)
+    server.handle('POST', '/api/zones/bedroom/start', { lookId: 'sunset' }) // takes all of the office's lights
+    later(2)
+    server.handle('POST', '/api/zones/living/start', { lookId: 'embers' }) // replaces Fireflies
+    later(3)
+    server.handle('POST', '/api/zones/living/off')
+    later(4)
+    server.handle('POST', '/api/zones/living/start', { look: { ...embers, id: '', name: 'Draft' } })
+    later(5)
+    server.handle('POST', '/api/running/stop-all')
+    const group = server.handle('POST', '/api/zones/groups', { name: 'Pair', lights: ['deskl'] }).body as Zone
+    server.handle('POST', `/api/zones/${group.id}/start`, { lookId: 'comets' })
+    server.handle('DELETE', `/api/zones/groups/${group.id}`)
+
+    expect(kept(server)).toEqual([
+      'bedroom/sunset', // Stop all stopped these two together: the newer start first
+      'home/homesunset',
+      'living/embers',
+      'living/fireflies',
+      'office/comets',
+    ])
+    expect(server.state.recent[0]).toMatchObject({
+      startedAt: new Date(NOW.getTime() + 60_000).toISOString(),
+      stoppedAt: new Date(NOW.getTime() + 5 * 60_000).toISOString(),
+    })
+  })
+
+  it('keeps one entry per zone and look, with its newest stop, and at most RECENT_LIMIT', () => {
+    const server = serve({ scenario: 'nothing-running' })
+    const looks = server.state.looks.slice(0, RECENT_LIMIT + 2)
+    looks.forEach((look, index) => {
+      later(index + 1)
+      server.handle('POST', '/api/zones/office/start', { lookId: look.id }) // replaces the one before
+    })
+    later(RECENT_LIMIT + 3)
+    server.handle('POST', '/api/zones/office/off')
+    expect(kept(server)).toEqual(looks.slice(2).reverse().map((look) => `office/${look.id}`))
+
+    later(RECENT_LIMIT + 4)
+    server.handle('POST', '/api/zones/office/start', { lookId: looks[2].id })
+    later(RECENT_LIMIT + 5)
+    server.handle('POST', '/api/zones/office/off')
+    expect(server.state.recent).toHaveLength(RECENT_LIMIT)
+    expect(kept(server).filter((pair) => pair === `office/${looks[2].id}`)).toHaveLength(1)
+    expect(server.state.recent[0]).toMatchObject({ lookId: looks[2].id, stoppedAt: new Date().toISOString() })
+  })
+})
+
 describe('the messages', () => {
   it("sends today's beat as M1 does: bpm 0 with no DJ, Player 2's beat with one", () => {
     const hero = buildScenario('hero', NOW)
@@ -4697,6 +4906,7 @@ describe('MSW over the mock server', () => {
     serve(2)
     const running = await api.running()
     expect(running.zones.map((zone) => zone.zoneId)).toEqual(['home', 'living', 'office'])
+    expect(await api.recentLooks()).toEqual([])
     await expect(api.look('nope')).rejects.toMatchObject({ status: 404 })
   })
 
@@ -4738,7 +4948,7 @@ Expected: FAIL, with `Failed to load url ./mock-server` and `./handlers`.
 // no decks or inputs (decision 9).
 import type {
   AnchorInput, CreateGroup, FrameStream, HomeUpdate, Id, Light, LightUpdate, Look, Placement, PlacementState, PreviewRequest,
-  RunningZone, StartRequest, SubZoneInput, TakeOver, UpdateGroup,
+  RecentLook, RunningZone, StartRequest, SubZoneInput, TakeOver, UpdateGroup,
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import type { BeatV1, BeatV2, ServerMessage, StatsMessage } from '../ws-messages'
@@ -4753,6 +4963,12 @@ const STATUS_MS = 10_000
 const SIGNALS_MS = 100
 /** After a stall longer than this (a hidden tab), frames pick up from now rather than catch up. */
 const STALL_MS = 100
+/** How many looks "Start again" keeps, as engine M2 does (its Spec Ruling 19). */
+export const RECENT_LIMIT = 10
+
+/** "Start again"'s order, engine M2's: the newest stop first, and of two that stopped together, the newer start. */
+const newestFirst = (a: RecentLook, b: RecentLook) =>
+  Date.parse(b.stoppedAt) - Date.parse(a.stoppedAt) || Date.parse(b.startedAt) - Date.parse(a.startedAt)
 
 export interface MockLink {
   send(data: string | ArrayBuffer): void
@@ -5255,6 +5471,7 @@ export class MockServer {
     ['POST', /^\/api\/preview$/, (_, body) => this.startPreview(body as PreviewRequest)],
     ['PUT', /^\/api\/preview\/([^/]+)$/, ([id], body) => this.updatePreview(id, body as { look?: Look })],
     ['DELETE', /^\/api\/preview\/([^/]+)$/, ([id]) => this.stopPreview(id)],
+    ['GET', /^\/api\/running\/recent$/, () => ok(this.recentLooks())],
 
     // Pending: engine M3, M6 and M7
     ['GET', /^\/api\/inputs$/, () => ok(this.state.inputs)],
@@ -5346,7 +5563,7 @@ export class MockServer {
 
   private deleteGroup(id: Id): MockReply {
     if (!this.state.zones.some((zone) => zone.id === id && zone.kind === 'group')) return notFound(`No zone '${id}'`)
-    this.off(id)
+    this.off(id, false) // a deleted group can't start again, so engine M2 doesn't remember it
     return this.remove(this.state.zones, id)
   }
 
@@ -5359,6 +5576,7 @@ export class MockServer {
     if (look == null) return notFound(`No look '${body.lookId}'`)
     const taking = new Set(zone.lights)
     const takeOvers: TakeOver[] = []
+    const stopped: RunningZone[] = []
     for (const other of this.state.running) {
       if (other.zoneId === zoneId) continue
       const lost = other.lights.filter((id) => taking.has(id))
@@ -5367,8 +5585,11 @@ export class MockServer {
       other.covers = coversOf(this.state.home, this.state.lights, other.lights)
       const name = this.state.zones.find((candidate) => candidate.id === other.zoneId)?.name ?? other.zoneId
       takeOvers.push({ zoneId: other.zoneId, zoneName: name, lookName: other.lookName, lights: lost, stopped: other.lights.length === 0 })
+      if (other.lights.length === 0) stopped.push(other)
     }
     const previous = this.state.running.find((candidate) => candidate.zoneId === zoneId)
+    if (previous !== undefined && previous.lookId !== look.id) stopped.push(previous) // a new look replaces it
+    this.remember(stopped)
     this.state.running = this.state.running.filter((other) => other.zoneId !== zoneId && other.lights.length > 0)
     const running: RunningZone = {
       zoneId,
@@ -5391,11 +5612,12 @@ export class MockServer {
   }
 
   /** Off (§11.3): the look stops and its lights go back to how they were. Idempotent. */
-  private off(zoneId: Id): MockReply {
+  private off(zoneId: Id, remember = true): MockReply {
     if (!this.state.zones.some((zone) => zone.id === zoneId)) return notFound(`No zone '${zoneId}'`)
     const running = this.state.running.find((zone) => zone.zoneId === zoneId)
     if (running === undefined) return noContent
     this.state.running = this.state.running.filter((zone) => zone !== running)
+    if (remember) this.remember([running])
     this.release(running.lights)
     this.state.attention = this.state.attention.filter((item) => item.subject.id !== zoneId)
     this.changed('running', 'lights', 'attention')
@@ -5403,6 +5625,7 @@ export class MockServer {
   }
 
   private stopAll(): MockReply {
+    this.remember(this.state.running)
     this.release(this.state.running.flatMap((zone) => zone.lights))
     this.state.running = []
     this.state.overlays = []
@@ -5417,6 +5640,44 @@ export class MockServer {
       if (!ids.includes(light.id) || light.status === 'offline' || light.status === 'switched-off') continue
       Object.assign(light, { status: 'idle', statusSince: since, ownEffect: null, sendFps: 0 } satisfies Partial<Light>)
     }
+  }
+
+  /**
+   * Remembers looks that stop, as engine M2 does (its Spec Ruling 19): one entry per zone and look with
+   * its newest stop, newest first, at most RECENT_LIMIT. A look the server doesn't have (a draft) isn't
+   * remembered, because one tap couldn't start it.
+   */
+  private remember(stopped: RunningZone[]): void {
+    const stoppedAt = this.isoNow()
+    const entries = stopped
+      .filter((zone) => this.state.looks.some((look) => look.id === zone.lookId))
+      .map((zone): RecentLook => ({
+        zoneId: zone.zoneId,
+        zoneName: this.state.zones.find((candidate) => candidate.id === zone.zoneId)?.name ?? zone.zoneId,
+        lookId: zone.lookId,
+        lookName: zone.lookName,
+        startedAt: zone.since,
+        stoppedAt,
+      }))
+    // A stable sort keeps a new entry ahead of an old one with the same times, as M2's upsert does.
+    const all = [...entries, ...this.state.recent].sort(newestFirst)
+    this.state.recent = all
+      .filter((entry, index) => all.findIndex((other) => other.zoneId === entry.zoneId && other.lookId === entry.lookId) === index)
+      .slice(0, RECENT_LIMIT)
+  }
+
+  /**
+   * "Start again" (§9.4): what one tap can start again, with today's names. A zone that's gone or holds no
+   * lights, a deleted look and a look running on its zone now are left out, but stay remembered.
+   */
+  private recentLooks(): RecentLook[] {
+    return this.state.recent.flatMap((entry) => {
+      const zone = this.state.zones.find((candidate) => candidate.id === entry.zoneId)
+      const look = this.state.looks.find((candidate) => candidate.id === entry.lookId)
+      const running = this.state.running.some((each) => each.zoneId === entry.zoneId && each.lookId === entry.lookId)
+      if (zone === undefined || zone.lights.length === 0 || look === undefined || running) return []
+      return [{ ...entry, zoneName: zone.name, lookName: look.name }]
+    })
   }
 
   private putConfig(body: unknown): MockReply {
@@ -5575,7 +5836,7 @@ export function mockHandlers(server: MockServer, socketUrl: string) {
 - [ ] **Step 7: Run the tests**
 
 Run: `(cd web && npx vitest run src/api/mocks/mock-server.test.ts src/api/mocks/msw.test.ts)`
-Expected: PASS (mock server 17, MSW 3). If the MSW socket test sees no frames, check that MSW hands the client the `ArrayBuffer` as sent: `LiveClient.receive` decodes `ArrayBuffer` only, and a `Blob` would be dropped without a count.
+Expected: PASS (mock server 20, MSW 3). If the MSW socket test sees no frames, check that MSW hands the client the `ArrayBuffer` as sent: `LiveClient.receive` decodes `ArrayBuffer` only, and a `Blob` would be dropped without a count.
 
 - [ ] **Step 8: Gate and commit**
 
@@ -7251,6 +7512,8 @@ In `## Gotchas`, change the line that begins "Web app: `npm run e2e` builds and 
 - Web app: e2e runs on the mock, so a Playwright test waits for the data (`open()` in e2e/shell.spec.ts), and a screenshot adds `?still` to hold the beat
 - Web app: a test running a `MockServer` through `inMemorySockets()` advances fake timers with `await vi.advanceTimersByTimeAsync()`, because the socket delivers in microtasks; `startDataLayer()` stops the client it started before, so there is one socket at a time
 - Web app: the shared test setup empties the live store after each test; a component test that needs the server's data seeds it with `seedLive()` from src/test/live.ts
+- Web app: the owner named the room `corridor` over home.json, through `OWNER_ROOM_NAMES` in src/api/mocks/fixtures.ts, as engine M2's seed does; the byte copy of home.json stays as it is, and a room name is read through `roomName()` or the fixtures, never from the JSON
+- Web app: "Start again" is `api.recentLooks()` (`GET /api/running/recent`), newest stop first; one tap is `api.start(zoneId, { lookId })`, and the mock remembers stops as engine M2 does
 ```
 
 - [ ] **Step 5: Check that no design values slipped in**
@@ -7320,6 +7583,7 @@ Before Task 1 and Task 2 point here when M2 merged early.
      - `PlacementState`, M2's Spec Ruling 16.
      - The PC's `parts[].id`, Ruling 4.
      - A typed `Light.shape`. Once it's there, `Light` becomes `Schemas['Light']`, and `contract.test.ts` still checks its shape against `LightShape`.
+     - `RecentLook` and `/api/running/recent`, M2's Spec Ruling 19. Both sides name it the same, so step 1 lists both. Its fields and their order are pinned on both sides (Task 8, Step 3, and M2's `test_the_schema_names_start_again_as_f1_types_it`), so the swap changes no field: `api.recentLooks` keeps `request<RecentLook[]>` through the alias, and the mock's entries still fit.
 4. Make the mock follow. `(cd web && npx tsc -b && npm test)` shows where its fixtures or replies disagree with the generated types. Change the mock to match them, never the other way round.
 5. Check the handshake with `grep -n '"protocol"' src/dj_ledfx/web/ws.py`:
    - M2's `subscribe_frames` ack must carry `"protocol": 2` for a v2 session, as decision 1 says.
@@ -7409,7 +7673,7 @@ Milestone F1 (the handoff's M1) of the web app rebuild, per docs/superpowers/pla
 The plan's decisions fill gaps in the spec. The ones to check:
 - 1: the v2 handshake, the same as M2's Spec Ruling 3.
 - 2: the clock offset, and `server_time`'s units for engine M3.
-- 8: the mock keeps home.json's "Corridor" where the renders say "Entrance", and State-Nothing-Running's "Start again" has no endpoint yet.
+- 8, with your decisions of 2026-09-24: the mock names the room `corridor` "Entrance" as engine M2's seed does, and serves State-Nothing-Running's "Start again" at `GET /api/running/recent`, typed as pending until M2 serves it (decision 6).
 - 10: preview only, the server's name and the sunset stay on the fixture until F3 and F6.
 
 ## Test plan
@@ -7449,7 +7713,12 @@ F1 wires the chrome's connection, tempo and attention to the stores (§13.1's M1
   - "Try now" calls `liveClient()?.retryNow()`.
   - The time of the last frame is `frames.lastFrameAt`.
   - The attempt is in `useConnection()`.
-- **"Start again"** (State-Nothing-Running) has no §12.3 endpoint. Raise it with the engine track (decision 8).
+- **"Start again"** (State-Nothing-Running, §9.4). The owner decided that engine M2 serves it (its Spec Ruling 19), and F1 typed, called and mocked it (decisions 6 and 8). The UI is F3's.
+  - Read `api.recentLooks()` through a query in `queries.ts`, and refetch it whenever the `running` channel changes: every stop can change the list.
+  - The list comes newest stop first. The render shows three, oldest start first; `startedAt` gives that order if F3 keeps it.
+  - One tap is `api.start(entry.zoneId, { lookId: entry.lookId })`. Show `zoneName` and `lookName` as sent: they're today's names.
+  - The server already leaves out a gone zone, a deleted look and a look running on its zone now, so the UI filters nothing.
+  - `?scenario=nothing-running` serves the render's three looks.
 - **The Running panel:** `useLive((s) => s.running)`, with `queries.looks()` and `queries.zones()`.
 
 **Sliders (F0 review, for F3's brightness and F4's and F8's controls)**
@@ -7506,6 +7775,8 @@ F1 wires the chrome's connection, tempo and attention to the stores (§13.1's M1
 | §14 Resilience: Reconnecting within 2 s, full resync, no duplicate subscriptions | 7, 13 |
 | §14 Performance: < 400 KB gzipped JS | 11, 13 |
 | Sliders send throttled updates | Hand-off (F3, F4, F8) |
+| The owner's decisions of 2026-09-24: the room named "Entrance" in the fixtures; "Start again" typed as pending, called, and mocked as engine M2 serves it | 8, 10 |
+| "Start again" UI | Hand-off (F3) |
 | CLAUDE.md revised (CLAUDE.md workflow) | 14 |
 | Rebase over master, M2's types, PR | 15 |
 
