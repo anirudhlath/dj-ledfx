@@ -1,6 +1,9 @@
+import { onTestFinished } from 'vitest'
 import type { AttentionItem, Id } from '@/api/contract'
+import { startDataLayer } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
-import { beatMessage, snapshotMessages } from '@/api/mocks/mock-server'
+import { inMemorySockets } from '@/api/mocks/in-memory-socket'
+import { beatMessage, MockServer, snapshotMessages, type MockServerOptions } from '@/api/mocks/mock-server'
 import { buildScenario, type ScenarioName } from '@/api/mocks/scenarios'
 
 /** The hero moment (§12.5): Wednesday 23 September 2026, 19:14. */
@@ -13,6 +16,21 @@ export function seedLive(name: ScenarioName = 'hero', now: Date = HERO_NOW): voi
   for (const message of snapshotMessages(state, 2)) applyMessage(liveStore, message, at)
   applyMessage(liveStore, beatMessage(state, 0, at, 2), at)
   liveStore.setState({ connection: { status: 'live', fps: 60 } })
+}
+
+/** A running mock server on Date.now(), which fake timers move; it stops when the test finishes. */
+export function startMockServer(options: MockServerOptions = {}): MockServer {
+  const server = new MockServer({ clock: () => Date.now(), ...options })
+  server.start()
+  onTestFinished(() => server.stop())
+  return server
+}
+
+/** The app's data layer on a mock server, through the in-memory socket; the setup resets it after the test. */
+export function startMockDataLayer(options: MockServerOptions = {}): MockServer {
+  const server = startMockServer(options)
+  startDataLayer({ openSocket: inMemorySockets(server), url: 'mock' })
+  return server
 }
 
 const KIND = { light: 'light-offline', zone: 'zone-crashed', input: 'input-disconnected' } as const

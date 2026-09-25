@@ -1,9 +1,7 @@
 import { act, screen, within } from '@testing-library/react'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
-import { BeatClock } from '@/api/beat'
-import { decodeFrame, encodeFrame, FrameStore } from '@/api/frames'
-import { frames } from '@/api/live'
-import { LiveClient } from '@/api/live-client'
+import { describe, expect, it, vi } from 'vitest'
+import { decodeFrame, encodeFrame } from '@/api/frames'
+import { frames, startDataLayer } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { beatMessage, statsMessage } from '@/api/mocks/mock-server'
 import { buildScenario } from '@/api/mocks/scenarios'
@@ -15,26 +13,11 @@ import { setViewportWidth } from '@/test/viewport'
 import { countAttention } from './hooks'
 
 // Each chrome part, and the top bar around them, counts its renders.
-vi.mock('./tempo-module', async (importOriginal) => {
-  const { counted } = await import('@/test/count-renders')
-  const real = await importOriginal<typeof import('./tempo-module')>()
-  return { ...real, TempoModule: counted('tempo', real.TempoModule) }
-})
-vi.mock('./attention-button', async (importOriginal) => {
-  const { counted } = await import('@/test/count-renders')
-  const real = await importOriginal<typeof import('./attention-button')>()
-  return { ...real, AttentionButton: counted('attention', real.AttentionButton) }
-})
-vi.mock('./connection-indicator', async (importOriginal) => {
-  const { counted } = await import('@/test/count-renders')
-  const real = await importOriginal<typeof import('./connection-indicator')>()
-  return { ...real, ConnectionIndicator: counted('connection', real.ConnectionIndicator) }
-})
-vi.mock('@/shell/top-bar', async (importOriginal) => {
-  const { counted } = await import('@/test/count-renders')
-  const real = await importOriginal<typeof import('@/shell/top-bar')>()
-  return { ...real, TopBar: counted('topBar', real.TopBar) }
-})
+const { countedExport } = await vi.hoisted(() => import('@/test/count-renders'))
+vi.mock('./tempo-module', countedExport('tempo', 'TempoModule'))
+vi.mock('./attention-button', countedExport('attention', 'AttentionButton'))
+vi.mock('./connection-indicator', countedExport('connection', 'ConnectionIndicator'))
+vi.mock('@/shell/top-bar', countedExport('topBar', 'TopBar'))
 
 const hero = buildScenario('hero', HERO_NOW)
 
@@ -102,15 +85,7 @@ describe('the chrome on the live store', () => {
   // Review focus 2: the server is down when the page loads.
   it('says Reconnecting, not All good, when the server is down from the start', () => {
     const { sockets, open } = fakeSockets()
-    const client = new LiveClient({
-      url: 'ws://test/ws',
-      store: liveStore,
-      frames: new FrameStore(),
-      beatClock: new BeatClock(),
-      openSocket: open,
-    })
-    client.start()
-    onTestFinished(() => client.stop())
+    startDataLayer({ openSocket: open, url: 'ws://test/ws' })
     renderApp('/next/live')
 
     act(() => sockets[0].drop())

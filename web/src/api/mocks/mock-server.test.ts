@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { HERO_NOW, startMockServer } from '@/test/live'
 import { BeatClock } from '../beat'
 import type { Light, Look, Placement, RecentLook, Zone } from '../contract'
 import { FrameStore, decodeFrame } from '../frames'
@@ -6,30 +7,16 @@ import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
 import type { ClientCommand } from '../ws-messages'
 import { inMemorySockets } from './in-memory-socket'
-import { MockServer, RECENT_LIMIT, beatMessage, snapshotMessages, statsMessage, type MockServerOptions } from './mock-server'
+import { RECENT_LIMIT, beatMessage, snapshotMessages, statsMessage, type MockServer } from './mock-server'
 import { buildScenario } from './scenarios'
 
-const NOW = new Date(2026, 8, 23, 19, 14)
 /** Moves the wall clock on: the mock's times come from Date.now(). */
-const later = (minutes: number) => vi.setSystemTime(NOW.getTime() + minutes * 60_000)
-let servers: MockServer[] = []
+const later = (minutes: number) => vi.setSystemTime(HERO_NOW.getTime() + minutes * 60_000)
 
 beforeEach(() => {
   vi.useFakeTimers()
-  vi.setSystemTime(NOW)
+  vi.setSystemTime(HERO_NOW)
 })
-
-afterEach(() => {
-  for (const server of servers) server.stop()
-  servers = []
-})
-
-function serve(options: MockServerOptions = {}) {
-  const server = new MockServer({ scenario: 'hero', clock: () => Date.now(), wallClock: () => Date.now(), ...options })
-  servers.push(server)
-  server.start()
-  return server
-}
 
 /** One socket to the server, recording what it hears. */
 function connect(server: MockServer) {
@@ -59,16 +46,16 @@ function decoded(frames: ArrayBuffer[], version: 1 | 2) {
 
 describe('a connection', () => {
   it('hears the snapshots first, v2 adding decks and inputs', () => {
-    expect(connect(serve()).json().map((message) => message.channel)).toEqual([
+    expect(connect(startMockServer()).json().map((message) => message.channel)).toEqual([
       'running', 'lights', 'attention', 'transport', 'decks', 'inputs',
     ])
-    expect(connect(serve({ protocol: 1 })).json().map((message) => message.channel)).toEqual([
+    expect(connect(startMockServer({ protocol: 1 })).json().map((message) => message.channel)).toEqual([
       'running', 'lights', 'attention', 'transport',
     ])
   })
 
   it('gets v2 frames at 60 fps once it asks with protocol 2, for the streaming lights only', () => {
-    const socket = connect(serve())
+    const socket = connect(startMockServer())
     socket.clear()
     socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live', 'preview'] })
     expect(socket.json()).toEqual([{ channel: 'ack', id: 1, action: 'subscribe_frames', protocol: 2, fps: 60 }])
@@ -85,7 +72,7 @@ describe('a connection', () => {
   })
 
   it('speaks as engine M1 with protocol 1: a bare ack, v1 frames at 30 fps, and errors', () => {
-    const socket = connect(serve({ protocol: 1 }))
+    const socket = connect(startMockServer({ protocol: 1 }))
     socket.clear()
     socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live'] })
     socket.send({ action: 'subscribe_signals' })
@@ -104,7 +91,7 @@ describe('a connection', () => {
   })
 
   it('reads bad JSON as an error, as M1 does', () => {
-    const server = serve()
+    const server = startMockServer()
     const socket = connect(server)
     socket.clear()
     if (socket.session !== null) server.receive(socket.session, '{"action":')
@@ -112,7 +99,7 @@ describe('a connection', () => {
   })
 
   it('sends the beat at the rate asked, moving at the tempo', () => {
-    const socket = connect(serve())
+    const socket = connect(startMockServer())
     socket.clear()
     socket.send({ action: 'subscribe_beat', fps: 30 })
     vi.advanceTimersByTime(1000)
@@ -127,7 +114,7 @@ describe('a connection', () => {
   })
 
   it('holds the beat for ?still: one beat after the ack, then none', () => {
-    const socket = connect(serve({ still: true }))
+    const socket = connect(startMockServer({ still: true }))
     socket.clear()
     socket.send({ action: 'subscribe_beat', fps: 30 })
     vi.advanceTimersByTime(2000)
@@ -135,7 +122,7 @@ describe('a connection', () => {
   })
 
   it('sends stats every second, and signals at 10 Hz once asked', () => {
-    const socket = connect(serve())
+    const socket = connect(startMockServer())
     socket.clear()
     socket.send({ action: 'subscribe_signals', names: ['loudness'] })
     vi.advanceTimersByTime(1010)
@@ -147,7 +134,7 @@ describe('a connection', () => {
   })
 
   it("drops every session after the scenario's dropAfterMs, and refuses new ones", () => {
-    const server = serve({ scenario: 'reconnecting' })
+    const server = startMockServer({ scenario: 'reconnecting' })
     const socket = connect(server)
     vi.advanceTimersByTime(999)
     expect(socket.closed()).toBe(false)
@@ -159,7 +146,7 @@ describe('a connection', () => {
 
 describe('the REST API', () => {
   it('starts a look with take-over, and pushes running and lights', () => {
-    const server = serve()
+    const server = startMockServer()
     const socket = connect(server)
     socket.clear()
     const reply = server.handle('POST', '/api/zones/bedroom/start', { lookId: 'sunset' })
@@ -176,7 +163,7 @@ describe('the REST API', () => {
   })
 
   it('turns a zone off again and again, and says 404 for a zone it does not know', () => {
-    const server = serve()
+    const server = startMockServer()
     expect(server.handle('POST', '/api/zones/living/off').status).toBe(204)
     expect(server.state.running.map((zone) => zone.zoneId)).toEqual(['home', 'office'])
     expect(server.state.lights.find((light) => light.id === 'rcl')?.status).toBe('idle')
@@ -185,7 +172,7 @@ describe('the REST API', () => {
   })
 
   it('refuses to change a built-in look, and saves a new one', () => {
-    const server = serve()
+    const server = startMockServer()
     const fireflies = server.state.looks.find((look) => look.id === 'fireflies')
     expect(server.handle('PUT', '/api/looks/fireflies', fireflies).status).toBe(409)
     const saved = server.handle('POST', '/api/looks', { ...fireflies, name: 'Mine', derivedFrom: 'fireflies' })
@@ -195,7 +182,7 @@ describe('the REST API', () => {
   })
 
   it("streams a preview on the preview stream only, and leaves the lights alone", () => {
-    const server = serve()
+    const server = startMockServer()
     const socket = connect(server)
     socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live', 'preview'] })
     const lights = JSON.stringify(server.state.lights)
@@ -213,7 +200,7 @@ describe('the REST API', () => {
   })
 
   it('puts preview only on through the config, and pushes transport', () => {
-    const server = serve()
+    const server = startMockServer()
     const socket = connect(server)
     socket.clear()
     expect(server.handle('PUT', '/api/config', { engine: { preview_only: true } }).status).toBe(200)
@@ -223,7 +210,7 @@ describe('the REST API', () => {
 
   // I4: engine M2's placement answers (its Spec Ruling 16).
   it('answers a placement with the placement, and a guess with one per light it placed', () => {
-    const server = serve({ scenario: 'no-lights' })
+    const server = startMockServer({ scenario: 'no-lights' })
     expect(server.handle('POST', '/api/lights/rcl/placement/confirm')).toEqual({
       status: 404,
       body: { detail: "Light 'rcl' has no placement" },
@@ -236,13 +223,13 @@ describe('the REST API', () => {
       shape, ledOrder: '', confirmed: false, confirmedAt: null,
     })
     expect(server.handle('POST', '/api/lights/rcl/placement/confirm').body).toEqual({
-      shape, ledOrder: '', confirmed: true, confirmedAt: NOW.toISOString(),
+      shape, ledOrder: '', confirmed: true, confirmedAt: HERO_NOW.toISOString(),
     })
   })
 
   // I5: `?protocol=1` is engine M1 as deployed today.
   it('serves only what engine M1 does with protocol 1, and the PC as a light per part', () => {
-    const server = serve({ protocol: 1 })
+    const server = startMockServer({ protocol: 1 })
     const pending = [
       ['GET', '/api/home'], ['GET', '/api/running/recent'], ['GET', '/api/inputs'], ['GET', '/api/signals'],
       ['POST', '/api/preview'], ['POST', '/api/lights/placement/guess'], ['PUT', '/api/lights/rcl/placement'],
@@ -260,7 +247,7 @@ describe('the REST API', () => {
 
   // M16: engine M2 ends a preview nobody watches (its Spec Ruling 9).
   it('ends a preview nobody has watched for 10 s, and keeps a watched one', () => {
-    const server = serve()
+    const server = startMockServer()
     const look = server.state.looks.find((candidate) => candidate.id === 'embers')
     const start = () => (server.handle('POST', '/api/preview', { zoneId: 'living', lookId: 'embers' }).body as { previewId: string }).previewId
     const update = (id: string) => server.handle('PUT', `/api/preview/${id}`, { look }).status
@@ -277,7 +264,7 @@ describe('the REST API', () => {
   })
 
   it('answers what it does not serve with 404 Not Found', () => {
-    expect(serve().handle('GET', '/api/nope')).toEqual({ status: 404, body: { detail: 'Not Found' } })
+    expect(startMockServer().handle('GET', '/api/nope')).toEqual({ status: 404, body: { detail: 'Not Found' } })
   })
 })
 
@@ -287,7 +274,7 @@ describe('"Start again"', () => {
   const kept = (server: MockServer) => server.state.recent.map((entry) => `${entry.zoneId}/${entry.lookId}`)
 
   it("serves nothing-running's list, and leaves out what one tap could not start again", () => {
-    const server = serve({ scenario: 'nothing-running' })
+    const server = startMockServer({ scenario: 'nothing-running' })
     expect(server.handle('GET', '/api/running/recent')).toEqual({ status: 200, body: server.state.recent })
     expect(listed(server)).toEqual(['home/goodnight', 'living/fireflies', 'home/homesunset'])
 
@@ -316,7 +303,7 @@ describe('"Start again"', () => {
   })
 
   it('remembers each way a look stops, newest first, but not a draft or a deleted group', () => {
-    const server = serve() // the hero: Home sunset, Fireflies and Twin comets run
+    const server = startMockServer() // the hero: Home sunset, Fireflies and Twin comets run
     const embers = server.state.looks.find((look) => look.id === 'embers')
     later(1)
     server.handle('POST', '/api/zones/bedroom/start', { lookId: 'sunset' }) // takes all of the office's lights
@@ -340,13 +327,13 @@ describe('"Start again"', () => {
       'office/comets',
     ])
     expect(server.state.recent[0]).toMatchObject({
-      startedAt: new Date(NOW.getTime() + 60_000).toISOString(),
-      stoppedAt: new Date(NOW.getTime() + 5 * 60_000).toISOString(),
+      startedAt: new Date(HERO_NOW.getTime() + 60_000).toISOString(),
+      stoppedAt: new Date(HERO_NOW.getTime() + 5 * 60_000).toISOString(),
     })
   })
 
   it('keeps one entry per zone and look, with its newest stop, and at most RECENT_LIMIT', () => {
-    const server = serve({ scenario: 'nothing-running' })
+    const server = startMockServer({ scenario: 'nothing-running' })
     const looks = server.state.looks.slice(0, RECENT_LIMIT + 2)
     looks.forEach((look, index) => {
       later(index + 1)
@@ -368,15 +355,15 @@ describe('"Start again"', () => {
 
 describe('the messages', () => {
   it("sends today's beat as M1 does: bpm 0 with no DJ, Player 2's beat with one", () => {
-    const hero = buildScenario('hero', NOW)
+    const hero = buildScenario('hero', HERO_NOW)
     expect(beatMessage(hero, 1, 0, 1)).toMatchObject({ bpm: 0, is_playing: false, deck_number: null })
-    const dj = buildScenario('dj-playing', NOW)
+    const dj = buildScenario('dj-playing', HERO_NOW)
     expect(beatMessage(dj, 0, 0, 1)).toMatchObject({ is_playing: true, beat_pos: 3, deck_number: 2, deck_name: 'Player 2' })
   })
 
   // I2: engine M2 keeps `devices` per device (the PC's parts each one) and adds §12.4's `lights`.
   it('sends stats per device, and per light too in v2', () => {
-    const hero = buildScenario('hero', NOW)
+    const hero = buildScenario('hero', HERO_NOW)
     const v2 = statsMessage(hero, 2)
     expect(v2.lights?.map((stat) => stat.id)).toEqual(hero.lights.map((light) => light.id))
     expect(v2.lights?.find((stat) => stat.id === 'pc')).toEqual({ id: 'pc', send_fps: 60, latency_ms: 5, dropped_pct: 0 })
@@ -388,14 +375,14 @@ describe('the messages', () => {
   })
 
   it('snapshots the transport as simulating while preview only is on', () => {
-    const messages = snapshotMessages(buildScenario('preview-only', NOW), 2)
+    const messages = snapshotMessages(buildScenario('preview-only', HERO_NOW), 2)
     expect(messages).toContainEqual({ channel: 'transport', state: 'simulating' })
   })
 })
 
 describe('the in-memory socket', () => {
   it('runs a LiveClient against the mock, with no MSW', async () => {
-    const server = serve()
+    const server = startMockServer()
     const store = createLiveStore()
     const frames = new FrameStore()
     const client = new LiveClient({

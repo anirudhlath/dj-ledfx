@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeSockets, type FakeSocket } from '@/test/fake-socket'
+import { HERO_NOW } from '@/test/live'
 import { BeatClock } from './beat'
 import { FrameStore, encodeFrame } from './frames'
 import { LiveClient, backoffMs, liveSocketUrl, measuredFps } from './live-client'
@@ -14,7 +15,7 @@ const onResync = vi.fn()
 
 beforeEach(() => {
   vi.useFakeTimers()
-  vi.setSystemTime(new Date(2026, 8, 23, 19, 14))
+  vi.setSystemTime(HERO_NOW)
   onResync.mockClear()
   store = createLiveStore()
   frames = new FrameStore()

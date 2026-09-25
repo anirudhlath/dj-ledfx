@@ -1,27 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeSockets } from '@/test/fake-socket'
+import { HERO_NOW, startMockDataLayer } from '@/test/live'
 import { frames, liveClient, startDataLayer } from './live'
 import { liveStore } from './live-store'
-import { inMemorySockets } from './mocks/in-memory-socket'
-import { MockServer } from './mocks/mock-server'
 import { buildScenario } from './mocks/scenarios'
 import { queries, queryClient } from './queries'
 
 beforeEach(() => {
   vi.useFakeTimers()
-  vi.setSystemTime(new Date(2026, 8, 23, 19, 14))
+  vi.setSystemTime(HERO_NOW)
 })
 
 describe('startDataLayer', () => {
   it("fills the app's stores from the server", async () => {
-    const server = new MockServer({ clock: () => Date.now(), wallClock: () => Date.now() })
-    server.start()
-    startDataLayer({ openSocket: inMemorySockets(server), url: 'mock' })
+    startMockDataLayer()
     await vi.advanceTimersByTimeAsync(1100)
     expect(liveStore.getState().attention).toHaveLength(1)
     expect(liveStore.getState().connection.status).toBe('live')
     expect(frames.live.size).toBeGreaterThan(0)
-    server.stop()
   })
 
   // I6: a zone made on another device reaches this one's zones.

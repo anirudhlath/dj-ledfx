@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { setupServer } from 'msw/node'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { startMockServer } from '@/test/live'
 import { BeatClock } from '../beat'
 import { FrameStore } from '../frames'
 import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
 import { api } from '../rest'
 import { mockHandlers } from './handlers'
-import { MockServer } from './mock-server'
 
 const SOCKET_URL = 'ws://localhost/ws'
 let stop: () => void = () => {}
@@ -20,17 +20,15 @@ afterEach(() => {
 })
 
 function serve(protocol: 1 | 2) {
-  const server = new MockServer({ scenario: 'hero', protocol })
+  const server = startMockServer({ protocol })
   const msw = setupServer(...mockHandlers(server, SOCKET_URL))
   msw.listen({ onUnhandledRequest: 'error' })
-  server.start()
   const store = createLiveStore()
   const frames = new FrameStore()
   const client = new LiveClient({ url: SOCKET_URL, store, frames, beatClock: new BeatClock() })
   client.start()
   stop = () => {
     client.stop()
-    server.stop()
     msw.close()
   }
   return { store, frames, client }

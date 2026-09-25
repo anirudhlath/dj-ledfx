@@ -1,41 +1,29 @@
-import { act, render } from '@testing-library/react'
+import { act } from '@testing-library/react'
 import { Profiler } from 'react'
-import { createMemoryRouter, RouterProvider } from 'react-router'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { frames, startDataLayer } from '@/api/live'
+import { beforeEach, expect, it, vi } from 'vitest'
+import { frames } from '@/api/live'
 import { liveStore } from '@/api/live-store'
-import { inMemorySockets } from '@/api/mocks/in-memory-socket'
-import { MockServer } from '@/api/mocks/mock-server'
-import { HERO_NOW } from '@/test/live'
-import { routerBasename } from './router'
-import { routes } from './routes'
-
-let server: MockServer | null = null
+import { renderApp } from '@/test/app'
+import { HERO_NOW, startMockDataLayer } from '@/test/live'
 
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(HERO_NOW)
 })
 
-afterEach(() => {
-  server?.stop()
-  server = null
-})
-
 // Done when (spec §13.1 M1): "Stores update from the mock at 60 fps without React re-renders (React
 // profiler)". The hero's beat is held (?still), so for this second the only news is the frames and
 // the devices' stats. The app, whole, must commit nothing for either.
 it('fills the stores from the mock at 60 fps, and React commits nothing', async () => {
-  server = new MockServer({ scenario: 'hero', still: true, clock: () => Date.now(), wallClock: () => Date.now() })
-  server.start()
-  startDataLayer({ openSocket: inMemorySockets(server), url: 'mock' })
+  startMockDataLayer({ still: true })
   let commits = 0
-  const router = createMemoryRouter(routes, { basename: routerBasename('/next/'), initialEntries: ['/next/live'] })
-  render(
-    <Profiler id="app" onRender={() => void (commits += 1)}>
-      <RouterProvider router={router} />
-    </Profiler>,
-  )
+  renderApp('/next/live', {
+    wrapper: ({ children }) => (
+      <Profiler id="app" onRender={() => void (commits += 1)}>
+        {children}
+      </Profiler>
+    ),
+  })
 
   // Connect, subscribe, and let the measured frame rate settle (decision 3). Async, because the
   // in-memory socket delivers in microtasks between the timers.

@@ -76,7 +76,8 @@ const DOORBELL = 'binary_sensor.front_door_ding'
 
 /** The ISO time `ms` from now, as the API sends times. */
 const after = (now: Date, ms: number) => new Date(now.getTime() + ms).toISOString()
-const hhmm = (iso: string) => formatTime(new Date(iso))
+/** An ISO time as the copy writes it: "19:14". */
+export const hhmm = (iso: string) => formatTime(new Date(iso))
 const joinNames = (names: string[]) =>
   names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 

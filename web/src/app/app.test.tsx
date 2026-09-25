@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import type { RouteObject } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderApp } from '@/test/app'
-import { seedLive } from '@/test/live'
+import { HERO_NOW, seedLive } from '@/test/live'
 import { setViewportWidth } from '@/test/viewport'
 import { routes } from './routes'
 
@@ -25,7 +25,7 @@ function Broken(): never {
 // and empties the store after each test.
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
-  vi.setSystemTime(new Date(2026, 8, 23, 19, 14))
+  vi.setSystemTime(HERO_NOW)
   seedLive()
 })
 
@@ -59,7 +59,7 @@ describe('routes', () => {
   // rest of the app is still a click away.
   it('shows its own error page inside the shell when a page throws', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    renderApp('/next/broken', withPage({ path: 'broken', element: <Broken /> }))
+    renderApp('/next/broken', { routes: withPage({ path: 'broken', element: <Broken /> }) })
     const heading = await screen.findByRole('heading', { name: 'Something broke' })
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
@@ -73,7 +73,7 @@ describe('routes', () => {
 
   it('shows a whole-page error, with its own landmark, when the shell itself throws', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    renderApp('/next/live', [{ ...routes[0], element: <Broken /> }])
+    renderApp('/next/live', { routes: [{ ...routes[0], element: <Broken /> }] })
     const main = await screen.findByRole('main')
     expect(within(main).getByRole('heading', { level: 1, name: 'Something broke' })).toBeInTheDocument()
     expect(within(main).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
@@ -169,7 +169,7 @@ it('swaps the chrome live across the breakpoint without remounting the page', as
     }, [])
     return <p>probe</p>
   }
-  renderApp('/next/probe', withPage({ path: 'probe', element: <Probe /> }))
+  renderApp('/next/probe', { routes: withPage({ path: 'probe', element: <Probe /> }) })
   expect(await screen.findByText('probe')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'dj-ledfx home' })).toBeInTheDocument()
 

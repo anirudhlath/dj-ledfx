@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AttentionItem, Deck, RunningZone } from './contract'
+import { attentionAbout } from '@/test/live'
+import type { Deck, RunningZone } from './contract'
 import {
   EMPTY_LIVE, applyMessage, createLiveStore, liveStore, resetLiveStore, useLive, type LiveState, type LiveStore,
 } from './live-store'
@@ -16,16 +17,7 @@ const ZONE: RunningZone = {
   covers: ['Room A'],
   state: 'running',
 }
-const ITEM: AttentionItem = {
-  id: 'light-offline:a',
-  kind: 'light-offline',
-  severity: 'normal',
-  subject: { type: 'light', id: 'a' },
-  title: 'A offline',
-  detail: 'A offline since 17:02.',
-  since: '2026-09-23T17:02:00Z',
-  actions: ['details'],
-}
+const ITEM = attentionAbout('light', 'a')
 const STAT: DeviceStat = {
   id: 'a',
   name: 'A',
