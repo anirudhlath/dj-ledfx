@@ -1,10 +1,11 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect } from 'react'
-import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router'
+import type { RouteObject } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderApp } from '@/test/app'
+import { seedLive } from '@/test/live'
 import { setViewportWidth } from '@/test/viewport'
-import { routerBasename } from './router'
 import { routes } from './routes'
 
 /** The real routes, with one test-only page beside the real pages. */
@@ -20,17 +21,12 @@ function Broken(): never {
   throw new Error('boom')
 }
 
-function renderApp(path: string, routeList: RouteObject[] = routes) {
-  // Vite's base, as main.tsx gets it. Vitest reports '/' for import.meta.env.BASE_URL, so it's literal.
-  const router = createMemoryRouter(routeList, { basename: routerBasename('/next/'), initialEntries: [path] })
-  render(<RouterProvider router={router} />)
-  return router
-}
-
-// The hero moment; the shared setup puts the real clock back after each test.
+// The hero moment, with the hero's server already heard; the shared setup puts the real clock back
+// and empties the store after each test.
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(2026, 8, 23, 19, 14))
+  seedLive()
 })
 
 describe('routes', () => {

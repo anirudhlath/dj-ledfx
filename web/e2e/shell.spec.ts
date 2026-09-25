@@ -24,11 +24,28 @@ const ROUTES = [
 // Every product page. /next/system is a specimen, and some of its rows are wider than a phone.
 const PAGES = ROUTES.filter((path) => path !== '/next/system')
 
+/**
+ * Opens a page and waits for the chrome's first data from the mock (the hero, unless the path asks
+ * for another scenario): the attention count, and the tempo wherever the chrome shows it.
+ */
 async function open(page: Page, path: string) {
   await page.goto(path)
-  // The mock build renders once MSW's worker is up (main.tsx), so wait for the chrome, then its fonts.
-  await expect(page.getByRole('banner')).toBeVisible()
+  const banner = page.getByRole('banner')
+  // The mock build renders once MSW's worker is up (main.tsx), so the chrome comes first, then its fonts.
+  await expect(banner.getByRole('button', { name: '1 needs attention' })).toBeVisible()
+  const phone = (page.viewportSize()?.width ?? 0) < 768
+  if (!phone || path.startsWith('/next/live')) {
+    await expect(banner.getByRole('group', { name: 'Tempo' })).toBeVisible()
+  }
   await page.evaluate(() => document.fonts.ready)
+}
+
+/** open(), with the beat held and the frame rate settled, so a screenshot is the same every run. */
+async function openStill(page: Page, path: string) {
+  await open(page, `${path}?still`)
+  if ((page.viewportSize()?.width ?? 0) >= 768) {
+    await expect(page.getByRole('banner').getByText('60 fps')).toBeVisible({ timeout: 10_000 })
+  }
 }
 
 /** axe's findings for the page as it stands, one line per rule. */
@@ -85,8 +102,9 @@ test.beforeEach(async ({ page }) => {
 })
 
 // Done when (spec §13.1 M0): the chrome matches Main.png at 1440 × 900 and Phone-Live.png at 390 × 844.
+// Since F1 the chrome is the mock's hero, beat held; the pixels are F0's.
 test('Live chrome', async ({ page }) => {
-  await open(page, '/next/live')
+  await openStill(page, '/next/live')
   await expect(page).toHaveScreenshot('live.png')
 })
 
@@ -159,7 +177,7 @@ test.describe('desktop', () => {
   // screen; on a phone the page scrolls inside <main>, so a screenshot would show only its top
   // (axe checks the whole phone page above).
   test('System specimen', async ({ page }) => {
-    await open(page, '/next/system')
+    await openStill(page, '/next/system')
     await expect(page.getByText('Always within reach')).toBeVisible()
     await expect(page).toHaveScreenshot('system.png')
   })

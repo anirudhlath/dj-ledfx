@@ -20,7 +20,10 @@ const SOURCE: Record<TempoSource, { label: string; icon: IconName }> = {
   internal: { label: 'Internal', icon: 'tempo' },
 }
 
-/** §6.2 TempoModule. F0 draws a still beat; F3 drives the pips from the beat clock (§5.4). */
+/**
+ * §6.2 TempoModule. F1 draws the beat in the bar that each beat message carries; F3 drives the pips
+ * from the beat clock (§5.4).
+ */
 export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceClick, renderSource, onTap }: TempoModuleProps) {
   const { label, icon } = SOURCE[source]
   const staleNote = stale && <span className="sr-only">, stale</span>
@@ -89,7 +92,7 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
         <span className="text-[10px] font-semibold tracking-[0.08em] text-text-3">BPM</span>
       </span>
       {pips}
-      <span className="num text-[11.5px] whitespace-nowrap text-text-3 tablet:hidden">bar {bar}</span>
+      {bar !== null && <span className="num text-[11.5px] whitespace-nowrap text-text-3 tablet:hidden">bar {bar}</span>}
       <button
         type="button"
         onClick={onTap}

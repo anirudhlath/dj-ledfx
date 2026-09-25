@@ -59,6 +59,13 @@ describe('TempoModule', () => {
     expect(screen.queryByRole('img')).toBeNull()
     expect(screen.getByRole('group', { name: 'Tempo' })).toHaveTextContent('118.0')
   })
+
+  // Engine M1's beat counts no bars (decision 9).
+  it('leaves the bar out when the source counts none', () => {
+    render(<TempoModule variant="bar" {...HERO_CHROME.tempo} bar={null} />)
+    // Not even the label: "bar " with no number is what a null left behind.
+    expect(screen.getByRole('group', { name: 'Tempo' })).not.toHaveTextContent(/bar/)
+  })
 })
 
 describe('PreviewOnlySwitch', () => {
@@ -144,6 +151,19 @@ describe('ConnectionIndicator', () => {
     rerender(<ConnectionIndicator variant={variant} connection={reconnecting} />)
     expect(screen.queryByRole('status')).toBeNull()
   })
+
+  // F0 review: before the server's first word, the link claims nothing.
+  it.each(['bar', 'header'] as const)('shows nothing while it first connects (%s)', (variant) => {
+    const { container } = render(<ConnectionIndicator variant={variant} connection={{ status: 'connecting' }} />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  // Decision 3: no frames yet, so no frame rate.
+  it('shows Live alone until it has measured the frame rate', () => {
+    render(<ConnectionIndicator variant="bar" connection={{ status: 'live', fps: null }} />)
+    expect(screen.getByText('Live')).toBeInTheDocument()
+    expect(screen.queryByText(/fps/)).toBeNull()
+  })
 })
 
 describe('connection news', () => {
@@ -164,5 +184,15 @@ describe('connection news', () => {
     rerender(<Region connection={{ status: 'live', fps: 60 }} />)
     expect(status).toHaveTextContent(/^Live again$/)
     expect(screen.getByRole('status')).toBe(status)
+  })
+
+  it('says nothing on the first connect, and Reconnecting when it fails', () => {
+    const { rerender } = render(<Region connection={{ status: 'connecting' }} />)
+    const status = screen.getByRole('status')
+    expect(status).toBeEmptyDOMElement()
+    rerender(<Region connection={{ status: 'live', fps: null }} />)
+    expect(status).toBeEmptyDOMElement()
+    rerender(<Region connection={{ status: 'reconnecting', attempt: 1 }} />)
+    expect(status).toHaveTextContent(/^Reconnecting$/)
   })
 })
