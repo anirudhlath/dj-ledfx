@@ -106,6 +106,7 @@ class Home:
     ceiling: float
     beams: float
     wall_cut_height: float
+    size: Vec2  # east-west, north-south, in metres
     north_offset_deg: float = 0.0
     location: Location | None = None
     outdoor: Outdoor = Outdoor()
@@ -289,6 +290,18 @@ def _location(value: Any) -> Location | None:
     )
 
 
+def _size(value: Any, outline: tuple[Vec2, ...]) -> Vec2:
+    """home.json's size, or, for a map without one, its outline's extent."""
+    if value is None:
+        xs, ys = [x for x, _ in outline], [y for _, y in outline]
+        return (max(xs) - min(xs), max(ys) - min(ys))
+    data = _object(value, "The size")
+    return (
+        _positive(data.get("eastWest"), "The size east to west"),
+        _positive(data.get("northSouth"), "The size north to south"),
+    )
+
+
 def _outdoor(value: Any) -> Outdoor:
     if value is None:
         return Outdoor()
@@ -317,8 +330,9 @@ def home_from_dict(data: Mapping[str, Any]) -> Home:
             raise HomeError(f"Sub-zone '{sub.id}' is in an unknown room '{sub.room}'")
     anchors = tuple(_anchor(_object(item, "An anchor")) for item in _list(data, "anchors"))
     _unique([anchor.id for anchor in anchors], "anchor")
+    outline = polygon_of(data.get("outline"), "The outline")
     return Home(
-        outline=polygon_of(data.get("outline"), "The outline"),
+        outline=outline,
         rooms=rooms,
         sub_zones=subs,
         walls=tuple(_wall(_object(item, "A wall")) for item in _list(data, "walls")),
@@ -330,6 +344,7 @@ def home_from_dict(data: Mapping[str, Any]) -> Home:
         ceiling=_positive(data.get("ceiling"), "The ceiling"),
         beams=_positive(data.get("beams"), "The beams"),
         wall_cut_height=_positive(data.get("wallCutHeight"), "The wall cut height"),
+        size=_size(data.get("size"), outline),
         north_offset_deg=finite(data.get("northOffsetDeg", 0.0), "The north offset") % 360.0,
         location=_location(data.get("location")),
         outdoor=_outdoor(data.get("outdoor")),
@@ -404,6 +419,7 @@ def home_to_dict(home: Home) -> dict[str, Any]:
         "ceiling": home.ceiling,
         "beams": home.beams,
         "wallCutHeight": home.wall_cut_height,
+        "size": {"eastWest": home.size[0], "northSouth": home.size[1]},
         "northOffsetDeg": home.north_offset_deg,
         "outdoor": {
             "courtyard": _points(home.outdoor.courtyard),

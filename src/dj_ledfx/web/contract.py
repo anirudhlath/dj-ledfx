@@ -6,7 +6,7 @@ the web app generates its types from the OpenAPI schema (spec §9).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -321,6 +321,7 @@ class Room(ContractModel):
     name: str
     polygon: list[Vec2]
     label_at: Vec2
+    has_lights: bool  # whether any light is placed in it now (F1's Room)
 
 
 class SubZone(ContractModel):
@@ -376,6 +377,11 @@ class Outdoor(ContractModel):
     balcony_off_room: str = ""
 
 
+class HomeSize(ContractModel):
+    east_west: float
+    north_south: float
+
+
 class Home(ContractModel):
     outline: list[Vec2]
     rooms: list[Room]
@@ -387,6 +393,7 @@ class Home(ContractModel):
     ceiling: float
     beams: float
     wall_cut_height: float
+    size: HomeSize
     north_offset_deg: float
     location: Location | None = None
     outdoor: Outdoor = Field(default_factory=Outdoor)
@@ -475,8 +482,11 @@ class Placement(ContractModel):
     confirmed_at: datetime | None = None
 
 
-def home_out(home: home_model.Home) -> Home:
-    return Home.model_validate(home_model.home_to_dict(home))
+def home_out(home: home_model.Home, rooms_with_lights: Collection[str]) -> Home:
+    data = home_model.home_to_dict(home)
+    for room in data["rooms"]:
+        room["hasLights"] = room["id"] in rooms_with_lights
+    return Home.model_validate(data)
 
 
 def anchor_out(anchor: home_model.Anchor) -> Anchor:

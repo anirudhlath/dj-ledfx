@@ -169,3 +169,45 @@ async def test_the_openapi_schema_names_the_home_types(api: Api) -> None:
 
     names = {"Home", "Room", "SubZone", "Anchor", "Placement", "PointShape", "GridShape"}
     assert names <= set(schema)
+    # F1's hand-written Home and Room (its contract.ts), field for field
+    assert set(schema["Room"]["properties"]) == {"id", "name", "polygon", "labelAt", "hasLights"}
+    assert set(schema["Home"]["properties"]) == {
+        "outline",
+        "rooms",
+        "subZones",
+        "walls",
+        "columns",
+        "furniture",
+        "anchors",
+        "ceiling",
+        "beams",
+        "northOffsetDeg",
+        "location",
+        "size",
+        "wallCutHeight",
+        "outdoor",
+    }
+    assert set(schema["HomeSize"]["properties"]) == {"eastWest", "northSouth"}
+    assert {"hasLights"} <= set(schema["Room"]["required"])
+    assert {"size"} <= set(schema["Home"]["required"])
+
+
+async def test_the_map_serves_its_size_and_which_rooms_hold_lights(api: Api) -> None:
+    before = (await api.client.get("/api/home")).json()
+    assert before["size"] == {"eastWest": 8.0, "northSouth": 4.0}
+    assert {room["id"]: room["hasLights"] for room in before["rooms"]} == {
+        "west": False,
+        "east": False,
+    }
+
+    await _place(api, "lamp", IN_THE_DESK_CORNER)
+    await _place(api, MOUSE, IN_THE_EAST_ROOM)  # a PC part placed on its own counts
+    after = (await api.client.get("/api/home")).json()
+    changed = (await api.client.put("/api/home", json={"ceiling": 2.7})).json()
+
+    assert {room["id"]: room["hasLights"] for room in after["rooms"]} == {
+        "west": True,
+        "east": True,
+    }
+    assert changed["size"] == {"eastWest": 8.0, "northSouth": 4.0}
+    assert [room["hasLights"] for room in changed["rooms"]] == [True, True]

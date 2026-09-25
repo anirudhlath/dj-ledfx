@@ -199,6 +199,15 @@ class HomeMap:
         x, y, _ = shape_centre(placement.shape)
         return self.sub_zone_at(x, y)
 
+    def rooms_with_lights(self) -> frozenset[str]:
+        """The rooms any light, or PC part, is placed in now."""
+        return frozenset(
+            room
+            for entry in self.lights().entries
+            for device in entry.devices
+            if (room := self.room_of(device)) is not None
+        )
+
     def room_index(self) -> dict[str, int]:
         return {room.id: index for index, room in enumerate(self._home.rooms)}
 

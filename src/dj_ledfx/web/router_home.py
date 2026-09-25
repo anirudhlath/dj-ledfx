@@ -16,16 +16,18 @@ router = APIRouter()
 
 @router.get("/home")
 async def get_home(request: Request) -> api.Home:
-    return api.home_out(get_home_map(request).home)
+    home_map = get_home_map(request)
+    return api.home_out(home_map.home, home_map.rooms_with_lights())
 
 
 @router.put("/home")
 async def update_home(request: Request, body: api.HomeSettings) -> api.Home:
     """North, ceiling, beams and location; only what's sent changes."""
     changes = body.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    home_map = get_home_map(request)
     with answers():
-        home = await get_home_map(request).update(changes)
-    return api.home_out(home)
+        home = await home_map.update(changes)
+    return api.home_out(home, home_map.rooms_with_lights())
 
 
 @router.post("/home/anchors", status_code=201)

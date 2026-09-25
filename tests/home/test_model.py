@@ -21,6 +21,7 @@ MODELLED = (
     "ceiling",
     "beams",
     "wallCutHeight",
+    "size",
     "northOffsetDeg",
     "location",
     "outdoor",
@@ -85,6 +86,8 @@ Change = Callable[[dict[str, Any]], object]
         (lambda d: d["furniture"][0].pop("box"), "box or a polygon"),
         (lambda d: d.update(location={"name": "Home", "lat": 91, "lon": 0}), "latitude"),
         (lambda d: d.update(outline="square"), "at least 3 points"),
+        (lambda d: d.update(size={"eastWest": 0, "northSouth": 4}), "greater than 0"),
+        (lambda d: d.update(size=[8, 4]), "The size must be an object"),
     ],
 )
 def test_bad_maps_are_refused_with_the_reason(change: Change, reason: str) -> None:
@@ -97,3 +100,9 @@ def test_bad_maps_are_refused_with_the_reason(change: Change, reason: str) -> No
 def test_a_map_that_is_not_an_object_is_refused() -> None:
     with pytest.raises(HomeError, match="must be an object"):
         home_from_dict([])  # type: ignore[arg-type]
+
+
+def test_a_map_without_a_size_takes_its_outlines_extent() -> None:
+    data = home_to_dict(tiny_home())
+    del data["size"]
+    assert home_from_dict(data).size == (8.0, 4.0)  # tiny_home's outline, east-west first

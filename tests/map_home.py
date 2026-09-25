@@ -48,6 +48,7 @@ def tiny_home(**changes: Any) -> Home:
         ceiling=3.0,
         beams=2.8,
         wall_cut_height=1.0,
+        size=(8.0, 4.0),
         location=Location("Test", 10.0, 20.0),
     )
     return replace(home, **changes)
