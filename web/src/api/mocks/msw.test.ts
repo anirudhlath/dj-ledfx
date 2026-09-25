@@ -52,7 +52,7 @@ describe('MSW over the mock server', () => {
   // Review focus 3: engine M1's protocol.
   it("speaks today's protocol to a LiveClient over MSW", async () => {
     const { store, frames, client } = serve(1)
-    await expect.poll(() => frames.live.size, { timeout: 3000 }).toBe(17)
+    await expect.poll(() => frames.live.size, { timeout: 3000 }).toBe(21) // the PC as its five parts
     expect(frames.version).toBeGreaterThan(0)
     await expect.poll(() => store.getState().beat?.source, { timeout: 3000 }).toBe('prodjlink')
     expect(store.getState().beat).toMatchObject({ bar: null, bpm: 0, playing: false })

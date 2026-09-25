@@ -1,17 +1,17 @@
 // A pretend server playing one scenario (spec §12.5): §12.3's REST API, §12.4's channels, and frames
 // from the frame generator. MSW puts it behind fetch and WebSocket in dev and in the mock build
-// (handlers.ts); tests reach it through an in-memory socket. With `protocol: 1` it speaks as engine
-// M1 does today: a bare ack, the v1 beat, v1 frames at 30 fps, an error for any other command, and
-// no decks or inputs (decision 9).
+// (handlers.ts); tests reach it through an in-memory socket. With `protocol: 1` it is engine M1 as
+// deployed today: a bare ack, the v1 beat, v1 frames at 30 fps, an error for any other command, no
+// decks or inputs (decision 9), 404 for the routes M1 doesn't serve, and the PC as a light per part.
 import type {
   AnchorIn, CreateGroup, FrameStream, HomeSettings, Id, Light, LightShape, LightUpdate, Look, Placement, PlacementIn,
   PreviewRequest, PreviewUpdate, RecentLook, RunningZone, StartRequest, SubZoneIn, TakeOver, UpdateGroup,
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import type { BeatV1, BeatV2, ServerMessage, StatsMessage } from '../ws-messages'
-import { coversOf } from './fixtures'
+import { coversOf, partId } from './fixtures'
 import { motifFor, paint, type MotifSpec } from './frame-generator'
-import { buildScenario, type ScenarioName, type ScenarioState } from './scenarios'
+import { asEngineM1, buildScenario, type ScenarioName, type ScenarioState } from './scenarios'
 
 const FRAME_MS = 1000 / 60
 const TICK_MS = 16
@@ -22,6 +22,8 @@ const SIGNALS_MS = 100
 const STALL_MS = 100
 /** How many looks "Start again" keeps, as engine M2 does (its Spec Ruling 19). */
 export const RECENT_LIMIT = 10
+/** Engine M2 ends a preview nobody watches this long (its Spec Ruling 9). */
+const PREVIEW_UNWATCHED_MS = 10_000
 
 /** "Start again"'s order, engine M2's: the newest stop first, and of two that stopped together, the newer start. */
 const newestFirst = (a: RecentLook, b: RecentLook) =>
@@ -161,12 +163,12 @@ export function beatMessage(
   }
 }
 
-export function statsMessage(state: ScenarioState): StatsMessage {
-  return {
-    channel: 'stats',
-    devices: state.lights.map((light) => ({
-      id: light.id,
-      name: light.name,
+/** Stats per device, the PC's parts each one; protocol 2 adds §12.4's per light, as engine M2 does. */
+export function statsMessage(state: ScenarioState, protocol: 1 | 2): StatsMessage {
+  const devices = state.lights.flatMap((light) =>
+    (light.parts ?? [light]).map((device, index) => ({
+      id: light.parts == null ? light.id : partId(light.id, index),
+      name: device.name,
       send_fps: light.sendFps,
       latency_ms: light.latency.measuredMs ?? 0,
       frames_dropped: 0,
@@ -174,7 +176,15 @@ export function statsMessage(state: ScenarioState): StatsMessage {
       connected: light.status !== 'offline',
       status: light.status === 'offline' ? 'offline' : 'online',
     })),
-  }
+  )
+  if (protocol === 1) return { channel: 'stats', devices }
+  const lights = state.lights.map((light) => ({
+    id: light.id,
+    send_fps: light.sendFps,
+    latency_ms: light.latency.measuredMs ?? 0,
+    dropped_pct: light.droppedPct,
+  }))
+  return { channel: 'stats', devices, lights }
 }
 
 type Route = [method: string, pattern: RegExp, handler: (params: string[], body: unknown) => MockReply]
@@ -191,7 +201,7 @@ export class MockServer {
   private nextId = 0
   private timer: ReturnType<typeof setInterval> | null = null
   private live: Painted[] = []
-  private preview: { id: Id; lights: Painted[] } | null = null
+  private preview: { id: Id; lights: Painted[]; watchedAt: number } | null = null
   private readonly seqs = new Map<string, number>()
   /** When each light's placement was confirmed; the seed's confirmed lights have no time. */
   private readonly confirmedAt = new Map<Id, string>()
@@ -208,7 +218,8 @@ export class MockServer {
     this.still = options.still ?? false
     this.clock = options.clock ?? (() => performance.now())
     this.wallClock = options.wallClock ?? (() => Date.now())
-    this.state = buildScenario(options.scenario ?? 'hero', new Date(this.wallClock()))
+    const state = buildScenario(options.scenario ?? 'hero', new Date(this.wallClock()))
+    this.state = this.protocol === 1 ? asEngineM1(state) : state
     this.startedAt = this.clock()
     this.nextFrameAt = this.startedAt
     this.nextStatsAt = this.startedAt + STATS_MS
@@ -332,6 +343,13 @@ export class MockServer {
       this.frame(now)
       this.nextFrameAt += FRAME_MS
     }
+    if (this.preview !== null) {
+      if (this.sessions.some((session) => session.version !== null && session.streams.has('preview'))) {
+        this.preview.watchedAt = now
+      } else if (now - this.preview.watchedAt >= PREVIEW_UNWATCHED_MS) {
+        this.preview = null
+      }
+    }
     for (const session of this.sessions) {
       if (session.beatMs === null || this.still || now < session.nextBeatAt) continue
       this.sendJson(session, this.beat(now))
@@ -343,7 +361,7 @@ export class MockServer {
     }
     if (now >= this.nextStatsAt) {
       this.nextStatsAt += STATS_MS
-      this.broadcast(statsMessage(this.state))
+      this.broadcast(statsMessage(this.state, this.protocol))
     }
     if (now >= this.nextStatusAt) {
       this.nextStatusAt += STATUS_MS
@@ -420,7 +438,8 @@ export class MockServer {
   /** One request. `path` may carry a query, which is ignored. */
   handle(method: string, path: string, body?: unknown): MockReply {
     const pathname = path.split('?')[0]
-    for (const [verb, pattern, handler] of this.routes) {
+    const routes = this.protocol === 1 ? this.routes : [...this.routes, ...this.pendingRoutes]
+    for (const [verb, pattern, handler] of routes) {
       if (verb !== method) continue
       const match = pattern.exec(pathname)
       if (match !== null) return handler(match.slice(1).map(decodeURIComponent), body)
@@ -477,7 +496,10 @@ export class MockServer {
     ['GET', /^\/api\/attention$/, () => ok(this.state.attention)],
     ['GET', /^\/api\/config$/, () => ok({ engine: { preview_only: this.state.previewOnly } })],
     ['PUT', /^\/api\/config$/, (_, body) => this.putConfig(body)],
+  ]
 
+  /** What engine M1 doesn't serve: 404 with protocol 1. */
+  private readonly pendingRoutes: Route[] = [
     // Pending: engine M2
     ['GET', /^\/api\/home$/, () => ok(this.state.home)],
     ['PUT', /^\/api\/home$/, (_, body) => ok(Object.assign(this.state.home, body as HomeSettings))],
@@ -771,6 +793,7 @@ export class MockServer {
     this.preview = {
       id: this.newId('preview'),
       lights: zone.lights.map((id) => this.painted(id, lights.get(id)?.leds ?? 0, spec, 1, false)),
+      watchedAt: this.clock(),
     }
     return created({ previewId: this.preview.id })
   }

@@ -128,6 +128,12 @@ function builtInEffects(protocol: Protocol, capabilities: Capability[]): string[
 /** CLAUDE.md's device-type heuristics: LIFX 50 ms, Govee 100 ms, USB 5 ms. Only LIFX can be probed. */
 const LATENCY_MS: Record<Protocol, number> = { LIFX: 50, Govee: 100, OpenRGB: 5 }
 
+/**
+ * A part's device id. Engine M2 gives each part one (its Spec Ruling 4) and engine M1 serves each
+ * as a light; the mock's are made up.
+ */
+export const partId = (lightId: Id, index: number): Id => `${lightId}-part-${index + 1}`
+
 /** Every light in home.json, idle and off since `since`. Each call builds new objects. */
 export function lightFixtures(since: string): Light[] {
   return RAW.lights.map((raw, index): Light => {
@@ -142,8 +148,7 @@ export function lightFixtures(since: string): Light[] {
       leds: raw.leds,
       capabilities,
       builtInEffects: builtInEffects(raw.protocol, capabilities),
-      // Engine M2 gives each part an id (its Spec Ruling 4); the mock's are made up.
-      parts: raw.parts?.map((part, number) => ({ ...part, id: `${raw.id}-part-${number + 1}` })) ?? null,
+      parts: raw.parts?.map((part, index) => ({ ...part, id: partId(raw.id, index) })) ?? null,
       shape: lightShape(raw),
       ledOrder: raw.ledOrder ?? '',
       confirmed: raw.confirmed,

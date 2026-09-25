@@ -6,7 +6,7 @@ import type {
   AttentionItem, Deck, Home, Id, Inputs, Light, Look, Overlay, RecentLook, RunningZone, Signal, TempoSource, Zone,
 } from '../contract'
 import {
-  HOME_ZONE, coversOf, homeFixture, lightFixtures, lookFixtures, lookName, roomName, zoneFixtures,
+  HOME_ZONE, coversOf, homeFixture, lightFixtures, lookFixtures, lookName, partId, roomName, zoneFixtures,
 } from './fixtures'
 
 export const SCENARIOS = [
@@ -437,6 +437,23 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
     hero(state, now)
     state.previewOnly = true
   },
+}
+
+/**
+ * The state as engine M1 serves it (decision 9): M1 has no light with parts, so each of the PC's
+ * parts is a light of its own, in the zones and what runs too.
+ */
+export function asEngineM1(state: ScenarioState): ScenarioState {
+  const partsOf = new Map<Id, Id[]>()
+  state.lights = state.lights.flatMap((light) => {
+    if (light.parts == null) return [light]
+    partsOf.set(light.id, light.parts.map((_, index) => partId(light.id, index)))
+    return light.parts.map((part, index): Light => ({ ...light, id: partId(light.id, index), name: part.name, leds: part.leds, parts: null }))
+  })
+  const split = (ids: Id[]) => ids.flatMap((id) => partsOf.get(id) ?? [id])
+  for (const zone of state.zones) zone.lights = split(zone.lights)
+  for (const zone of state.running) zone.lights = split(zone.lights)
+  return state
 }
 
 /** A new state for the scenario, with its times counted from `now`. */

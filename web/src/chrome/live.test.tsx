@@ -62,7 +62,7 @@ describe('the chrome on the live store', () => {
     // The devices' stats, and a second of frames for every light, redraw nothing.
     resetRenders()
     act(() => {
-      applyMessage(liveStore, statsMessage(hero), 0)
+      applyMessage(liveStore, statsMessage(hero, 2), 0)
       for (let seq = 1; seq <= 60; seq++) {
         for (const light of hero.lights) {
           decodeFrame(encodeFrame(2, light.id, seq, new Uint8Array(light.leds * 3)), 2, frames, seq / 60)

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BeatClock } from '../beat'
-import type { Look, Placement, RecentLook, Zone } from '../contract'
+import type { Light, Look, Placement, RecentLook, Zone } from '../contract'
 import { FrameStore, decodeFrame } from '../frames'
 import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
 import type { ClientCommand } from '../ws-messages'
 import { inMemorySockets } from './in-memory-socket'
-import { MockServer, RECENT_LIMIT, beatMessage, snapshotMessages, type MockServerOptions } from './mock-server'
+import { MockServer, RECENT_LIMIT, beatMessage, snapshotMessages, statsMessage, type MockServerOptions } from './mock-server'
 import { buildScenario } from './scenarios'
 
 const NOW = new Date(2026, 8, 23, 19, 14)
@@ -96,7 +96,10 @@ describe('a connection', () => {
     vi.advanceTimersByTime(1000)
     const frames = decoded(socket.binary(), 1)
     expect(frames.malformed).toBe(0)
-    expect(frames.live.size).toBe(17)
+    // The PC streams as its five parts, as engine M1 has them.
+    expect(frames.live.size).toBe(21)
+    expect(frames.live.has('pc')).toBe(false)
+    expect(frames.live.get('pc-part-1')?.count).toBe(104)
     expect(frames.sampleFps()).toBeLessThanOrEqual(31)
   })
 
@@ -237,6 +240,42 @@ describe('the REST API', () => {
     })
   })
 
+  // I5: `?protocol=1` is engine M1 as deployed today.
+  it('serves only what engine M1 does with protocol 1, and the PC as a light per part', () => {
+    const server = serve({ protocol: 1 })
+    const pending = [
+      ['GET', '/api/home'], ['GET', '/api/running/recent'], ['GET', '/api/inputs'], ['GET', '/api/signals'],
+      ['POST', '/api/preview'], ['POST', '/api/lights/placement/guess'], ['PUT', '/api/lights/rcl/placement'],
+    ]
+    for (const [method, path] of pending) expect(server.handle(method, path)).toEqual({ status: 404, body: { detail: 'Not Found' } })
+    const lights = server.handle('GET', '/api/lights').body as Light[]
+    expect(lights.map((light) => light.id)).not.toContain('pc')
+    const parts = lights.filter((light) => light.id.startsWith('pc-part-'))
+    expect(parts.map((light) => [light.name, light.leds, light.parts])).toEqual([
+      ['Keyboard', 104, null], ['RAM sticks', 16, null], ['GPU', 16, null], ['Motherboard', 12, null], ['Mouse', 2, null],
+    ])
+    expect(server.state.zones.find((zone) => zone.id === 'office')?.lights).toEqual(expect.arrayContaining(['pc-part-5']))
+    expect(server.state.running.flatMap((zone) => zone.lights)).not.toContain('pc')
+  })
+
+  // M16: engine M2 ends a preview nobody watches (its Spec Ruling 9).
+  it('ends a preview nobody has watched for 10 s, and keeps a watched one', () => {
+    const server = serve()
+    const look = server.state.looks.find((candidate) => candidate.id === 'embers')
+    const start = () => (server.handle('POST', '/api/preview', { zoneId: 'living', lookId: 'embers' }).body as { previewId: string }).previewId
+    const update = (id: string) => server.handle('PUT', `/api/preview/${id}`, { look }).status
+    const unwatched = start()
+    vi.advanceTimersByTime(9_900)
+    expect(update(unwatched)).toBe(204)
+    vi.advanceTimersByTime(200)
+    expect(update(unwatched)).toBe(404)
+
+    connect(server).send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live', 'preview'] })
+    const watched = start()
+    vi.advanceTimersByTime(20_000)
+    expect(update(watched)).toBe(204)
+  })
+
   it('answers what it does not serve with 404 Not Found', () => {
     expect(serve().handle('GET', '/api/nope')).toEqual({ status: 404, body: { detail: 'Not Found' } })
   })
@@ -333,6 +372,19 @@ describe('the messages', () => {
     expect(beatMessage(hero, 1, 0, 1)).toMatchObject({ bpm: 0, is_playing: false, deck_number: null })
     const dj = buildScenario('dj-playing', NOW)
     expect(beatMessage(dj, 0, 0, 1)).toMatchObject({ is_playing: true, beat_pos: 3, deck_number: 2, deck_name: 'Player 2' })
+  })
+
+  // I2: engine M2 keeps `devices` per device (the PC's parts each one) and adds §12.4's `lights`.
+  it('sends stats per device, and per light too in v2', () => {
+    const hero = buildScenario('hero', NOW)
+    const v2 = statsMessage(hero, 2)
+    expect(v2.lights?.map((stat) => stat.id)).toEqual(hero.lights.map((light) => light.id))
+    expect(v2.lights?.find((stat) => stat.id === 'pc')).toEqual({ id: 'pc', send_fps: 60, latency_ms: 5, dropped_pct: 0 })
+    const devices = v2.devices.map((device) => device.id)
+    expect(devices).not.toContain('pc')
+    expect(devices).toEqual(expect.arrayContaining(['pc-part-1', 'pc-part-5']))
+    expect(devices).toHaveLength(hero.lights.length + 4)
+    expect(statsMessage(hero, 1)).not.toHaveProperty('lights')
   })
 
   it('snapshots the transport as simulating while preview only is on', () => {
