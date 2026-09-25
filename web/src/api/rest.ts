@@ -37,7 +37,7 @@ type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'
 
 // Absolute: Node's fetch (Vitest, MSW's Node server) rejects a relative URL (decision 13).
 function url(path: string): URL {
-  return new URL(path, globalThis.location?.origin ?? 'http://localhost')
+  return new URL(path, location.origin)
 }
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {

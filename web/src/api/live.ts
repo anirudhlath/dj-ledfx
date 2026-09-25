@@ -4,7 +4,7 @@
 import { BeatClock } from './beat'
 import { FrameStore } from './frames'
 import { LiveClient, liveSocketUrl, type OpenSocket } from './live-client'
-import { liveStore } from './live-store'
+import { liveStore, resetLiveStore } from './live-store'
 import { queryClient, refetchOnNews, resync } from './queries'
 
 export const frames = new FrameStore()
@@ -35,4 +35,16 @@ export function startDataLayer(options: { openSocket?: OpenSocket; url?: string 
 
 export function liveClient(): LiveClient | null {
   return client
+}
+
+/** Back to a page just opened: no client, and the live store, frames, beat clock and REST cache empty. */
+export function resetDataLayer(): void {
+  client?.stop()
+  client = null
+  stopRefetching?.()
+  stopRefetching = null
+  resetLiveStore()
+  frames.clear()
+  beatClock.reset()
+  queryClient.clear()
 }

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { setupServer } from 'msw/node'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BeatClock } from '../beat'
 import { FrameStore } from '../frames'
 import { LiveClient } from '../live-client'
@@ -12,7 +12,12 @@ import { MockServer } from './mock-server'
 const SOCKET_URL = 'ws://localhost/ws'
 let stop: () => void = () => {}
 
-afterEach(() => stop())
+// Node has no page, so no location for rest.ts to resolve its paths against.
+beforeEach(() => void vi.stubGlobal('location', new URL('http://localhost/next/live')))
+afterEach(() => {
+  stop()
+  vi.unstubAllGlobals()
+})
 
 function serve(protocol: 1 | 2) {
   const server = new MockServer({ scenario: 'hero', protocol })

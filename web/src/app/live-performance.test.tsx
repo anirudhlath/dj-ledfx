@@ -2,7 +2,7 @@ import { act, render } from '@testing-library/react'
 import { Profiler } from 'react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { frames, liveClient, startDataLayer } from '@/api/live'
+import { frames, startDataLayer } from '@/api/live'
 import { liveStore } from '@/api/live-store'
 import { inMemorySockets } from '@/api/mocks/in-memory-socket'
 import { MockServer } from '@/api/mocks/mock-server'
@@ -18,7 +18,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  liveClient()?.stop()
   server?.stop()
   server = null
 })

@@ -117,6 +117,15 @@ describe('FrameStore', () => {
     decodeFrame(encodeFrame(2, 'rope', 1, rgb(0, 0, 0)), 2, frames, 0)
     expect(frames.lastFrameAt).toBe(new Date(2026, 8, 23, 19, 14, 32).getTime())
   })
+
+  it('empties, as on a page just opened', () => {
+    decodeFrame(encodeFrame(2, 'rope', 1, rgb(0, 0, 0)), 2, frames, 0)
+    decodeFrame(encodeFrame(2, 'tube', 1, rgb(0, 0, 0), 'preview'), 2, frames, 0)
+    frames.reject()
+    frames.clear()
+    expect(frames).toMatchObject({ version: 0, lastFrameAt: null, malformed: 0 })
+    expect(frames.live.size + frames.preview.size).toBe(0)
+  })
 })
 
 describe('encodeFrame', () => {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeSockets } from '@/test/fake-socket'
 import { frames, liveClient, startDataLayer } from './live'
 import { liveStore } from './live-store'
@@ -10,10 +10,6 @@ import { queries, queryClient } from './queries'
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date(2026, 8, 23, 19, 14))
-})
-
-afterEach(() => {
-  liveClient()?.stop()
 })
 
 describe('startDataLayer', () => {

@@ -100,6 +100,15 @@ export class FrameStore {
     for (const frame of this.preview.values()) frame.seq = -1
   }
 
+  /** Empty, as on a page just opened. */
+  clear(): void {
+    this.live.clear()
+    this.preview.clear()
+    this.version = 0
+    this.lastFrameAt = null
+    this.malformed = 0
+  }
+
   /** The preview ended (F4): its frames go. */
   clearPreview(): void {
     this.preview.clear()
