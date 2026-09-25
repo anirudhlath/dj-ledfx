@@ -90,12 +90,11 @@ def check_setting(key: str, param: EffectParam, value: Any) -> None:
     elif param.type == "choice":
         if value not in (param.choices or []):
             raise ValueError(f"{key}={value} not in {param.choices}")
-    elif param.type == "anchor":
+    elif param.type in ("anchor", "zone"):
         if not isinstance(value, str):
-            raise ValueError(f"{key} must be an anchor id")
-    elif param.type == "zone":
-        if not isinstance(value, str):
-            raise ValueError(f"{key} must be a zone id")
+            raise ValueError(
+                f"{key} must be {'an anchor' if param.type == 'anchor' else 'a zone'} id"
+            )
     elif param.type == "point":
         if not _numbers(value, 3):
             raise ValueError(f"{key} must be 3 numbers: x, y and z")

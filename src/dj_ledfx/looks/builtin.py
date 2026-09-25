@@ -17,7 +17,8 @@ from typing import Any
 from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
 from dj_ledfx.home.model import Anchor
 from dj_ledfx.home.seed import normalise_name, seed_home
-from dj_ledfx.looks.model import LIGHTS_SETTING, Layer, Look
+from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.looks.selectors import parse_selector
 
 FIRMWARE_LOOK_ID = "firmware"
 
@@ -61,8 +62,17 @@ def _field(layer_id: str, name: str, kind: str, **settings: Any) -> Layer:
     return Layer(id=layer_id, name=name, type="field", kind=kind, settings=settings)
 
 
-def _firmware(layer_id: str, name: str, kind: str, **settings: Any) -> Layer:
-    return Layer(id=layer_id, name=name, type="firmware", kind=kind, settings=settings)
+def _firmware(
+    layer_id: str, name: str, kind: str, *, lights: Sequence[str] = (), **settings: Any
+) -> Layer:
+    return Layer(
+        id=layer_id,
+        name=name,
+        type="firmware",
+        kind=kind,
+        settings=settings,
+        lights=tuple(parse_selector(text) for text in lights) or None,
+    )
 
 
 def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
@@ -71,7 +81,7 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
     return {
         "sunset": (
             _field("sky", "Gradient", "sunset_gradient"),
-            _firmware("flame", "Candles", "lifx_flame", **{LIGHTS_SETTING: "type:candle"}),
+            _firmware("flame", "Candles", "lifx_flame", lights=["type:candle"]),
         ),
         "aurora": (
             _field("curtains", "Curtains", "aurora_curtains"),
@@ -79,7 +89,8 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
                 "morph",
                 "Morph",
                 "lifx_morph",
-                **{LIGHTS_SETTING: ["type:candle", "type:tube"], "palette": list(AURORA_PALETTE)},
+                lights=["type:candle", "type:tube"],
+                palette=list(AURORA_PALETTE),
             ),
         ),
         "lava": (_field("plasma", "Plasma", "lava_plasma"),),

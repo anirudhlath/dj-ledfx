@@ -19,9 +19,7 @@ from dj_ledfx.looks.model import (
     LookError,
     LookModifiers,
     Transition,
-    effect_settings,
     firmware_layers,
-    layer_lights,
     look_from_dict,
     look_to_dict,
     make_effect,
@@ -310,10 +308,12 @@ def test_field_layers_stack_and_firmware_layers_pick_their_lights() -> None:
     validate_look(look)
     assert [layer.id for layer in visible_field_layers(look)] == ["a", "b"]
     flame = look.layers[2]
-    assert layer_lights(flame) == (Selector("type", "candle"),)
-    assert effect_settings(flame) == {"period": 3.0}
-    assert layer_lights(look.layers[0]) is None
+    assert flame.lights == (Selector("type", "candle"),)
+    assert flame.settings == {"period": 3.0}  # the effect's own settings
+    assert look.layers[0].lights is None
     assert make_effect(flame).get_params()["period"] == 3.0
+    written = look_to_dict(look)["layers"][2]["settings"]
+    assert written == {"period": {"value": 3.0}, "lights": {"value": ["type:candle"]}}
 
 
 def test_firmware_layers_offer_a_lights_setting() -> None:

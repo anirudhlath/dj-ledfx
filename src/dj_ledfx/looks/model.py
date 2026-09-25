@@ -13,7 +13,7 @@ from typing import Any, Literal, get_args
 from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.firmware import FirmwareEffect
-from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.params import EffectParam, check_setting
 from dj_ledfx.effects.registry import get_effect_class
 from dj_ledfx.effects.strip_adapter import PROJECTION_PARAMS, StripAdapter
 from dj_ledfx.looks.selectors import Selector, parse_selector
@@ -61,7 +61,10 @@ class Layer:
     visible: bool = True
     blend: Blend = "normal"
     opacity: float = 1.0
-    settings: Mapping[str, Any] = field(default_factory=dict)
+    settings: Mapping[str, Any] = field(default_factory=dict)  # the effect's own
+    # The lights a firmware layer picks (None: all of them). The contract carries it as
+    # the layer's `lights` setting (ruling 13).
+    lights: tuple[Selector, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,16 +125,32 @@ def _layer_from_dict(data: Mapping[str, Any], index: int) -> Layer:
     if not 0.0 <= opacity <= 1.0:
         raise LookError("Layer opacity must be between 0 and 1")
     kind = str(data.get("kind") or "")
+    name = str(data.get("name") or kind)
+    lights = _lights(name, settings.pop(LIGHTS_SETTING, None))
     return Layer(
         id=str(data.get("id") or f"layer-{index + 1}"),
-        name=str(data.get("name") or kind),
+        name=name,
         type=layer_type,
         kind=kind,
         visible=bool(data.get("visible", True)),
         blend=_choice(data.get("blend", "normal"), get_args(Blend), "blend mode"),
         opacity=opacity,
         settings=settings,
+        lights=lights,
     )
+
+
+def _lights(layer: str, value: Any) -> tuple[Selector, ...] | None:
+    """A layer's `lights` setting as selectors; None (all lights) when it's empty."""
+    if value is None or value == "" or value == []:
+        return None
+    try:
+        check_setting(LIGHTS_SETTING, LIGHTS_PARAM, value)
+        return tuple(
+            parse_selector(item) for item in ([value] if isinstance(value, str) else value)
+        )
+    except ValueError as exc:
+        raise LookError(f"Layer '{layer}': {exc}") from exc
 
 
 def look_from_dict(data: Mapping[str, Any]) -> Look:
@@ -210,7 +229,7 @@ def _schema_entry(key: str, param: EffectParam) -> dict[str, Any]:
 
 
 LIGHTS_SETTING = "lights"  # a firmware layer's light ids or type:<word> selectors
-_LIGHTS_ENTRY = {"key": LIGHTS_SETTING, "label": "Lights", "bindable": False, "type": "lights"}
+LIGHTS_PARAM = EffectParam(type="device_set", default=None, label="Lights")
 
 
 def setting_schema(kind: str) -> list[dict[str, Any]]:
@@ -220,7 +239,7 @@ def setting_schema(kind: str) -> list[dict[str, Any]]:
         return []
     entries = [_schema_entry(key, param) for key, param in cls.parameters().items()]
     if issubclass(cls, FirmwareEffect):
-        entries.append(dict(_LIGHTS_ENTRY))
+        entries.append(_schema_entry(LIGHTS_SETTING, LIGHTS_PARAM))
     if issubclass(cls, StripEffect):
         entries += [_schema_entry(key, param) for key, param in PROJECTION_PARAMS.items()]
     return entries
@@ -240,6 +259,8 @@ def _layer_to_dict(layer: Layer, *, for_storage: bool) -> dict[str, Any]:
         "mirror": None,
         "transform": None,
     }
+    if layer.lights is not None:
+        data["settings"][LIGHTS_SETTING] = {"value": [s.text for s in layer.lights]}
     if not for_storage:
         data["schema"] = setting_schema(layer.kind)
     return data
@@ -295,49 +316,24 @@ def make_effect(layer: Layer) -> FieldEffect | FirmwareEffect:
     else:
         raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a field effect")
     try:
-        effect.set_params(**effect_settings(layer))
+        effect.set_params(**layer.settings)
     except (TypeError, ValueError) as exc:
         raise LookError(f"Layer '{layer.name}': {exc}") from exc
     return effect
 
 
-def _visible_fields(look: Look) -> list[Layer]:
+def visible_field_layers(look: Look) -> list[Layer]:
+    """The streamed layers the runtime blends, bottom to top."""
     return [layer for layer in look.layers if layer.type == "field" and layer.visible]
 
 
 def visible_field_layer(look: Look) -> Layer | None:
-    fields = _visible_fields(look)
+    fields = visible_field_layers(look)
     return fields[0] if fields else None
 
 
 def firmware_layers(look: Look) -> list[Layer]:
     return [layer for layer in look.layers if layer.type == "firmware" and layer.visible]
-
-
-def effect_settings(layer: Layer) -> dict[str, Any]:
-    """The layer's settings for its effect: all but the layer's own `lights`."""
-    return {key: value for key, value in layer.settings.items() if key != LIGHTS_SETTING}
-
-
-def layer_lights(layer: Layer) -> tuple[Selector, ...] | None:
-    """The lights a layer picks, or None for all of them."""
-    value = layer.settings.get(LIGHTS_SETTING)
-    if value is None or value == "" or value == []:
-        return None
-    items = [value] if isinstance(value, str) else value
-    if not isinstance(items, list | tuple) or not all(isinstance(item, str) for item in items):
-        raise LookError(
-            f"Layer '{layer.name}': lights must be light ids or a selector such as type:candle"
-        )
-    try:
-        return tuple(parse_selector(item) for item in items)
-    except ValueError as exc:
-        raise LookError(f"Layer '{layer.name}': {exc}") from exc
-
-
-def visible_field_layers(look: Look) -> list[Layer]:
-    """The streamed layers the runtime blends, bottom to top."""
-    return _visible_fields(look)
 
 
 def validate_look(look: Look) -> None:
@@ -350,9 +346,8 @@ def validate_look(look: Look) -> None:
         raise LookError("Look modifiers arrive in M4")
     for layer in look.layers:
         make_effect(layer)
-        if layer.type != "firmware" and LIGHTS_SETTING in layer.settings:
+        if layer.type != "firmware" and layer.lights is not None:
             raise LookError(
                 f"Layer '{layer.name}': only a firmware layer picks its lights; "
                 "masks for streamed layers arrive in M4"
             )
-        layer_lights(layer)

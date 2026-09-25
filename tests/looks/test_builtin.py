@@ -22,13 +22,13 @@ from dj_ledfx.looks.builtin import (
     handoff_looks,
 )
 from dj_ledfx.looks.model import (
-    LIGHTS_SETTING,
     Look,
     firmware_layers,
     make_effect,
     validate_look,
     visible_field_layers,
 )
+from dj_ledfx.looks.selectors import Selector
 from dj_ledfx.types import FloatRGB
 
 DESIGN = Path(__file__).parents[2] / "docs" / "design" / "web-app"
@@ -84,11 +84,10 @@ def test_each_showcase_look_has_its_fields_and_firmware() -> None:
     assert layers["carousel"] == [("field", "color_carousel")]
     assert layers["ripples"] == [("field", "ripples")]
     assert layers["focus"] == [("field", "focus_field")]
-    assert _look("sunset").layers[1].settings == {LIGHTS_SETTING: "type:candle"}
-    assert _look("aurora").layers[1].settings == {
-        LIGHTS_SETTING: ["type:candle", "type:tube"],
-        "palette": list(AURORA_PALETTE),  # the curtains' palette
-    }
+    sunset_flame, aurora_morph = _look("sunset").layers[1], _look("aurora").layers[1]
+    assert (sunset_flame.lights, sunset_flame.settings) == ((Selector("type", "candle"),), {})
+    assert aurora_morph.lights == (Selector("type", "candle"), Selector("type", "tube"))
+    assert aurora_morph.settings == {"palette": list(AURORA_PALETTE)}  # the curtains' palette
 
 
 def test_focus_is_calm_around_the_anchor_its_description_names() -> None:

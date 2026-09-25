@@ -28,13 +28,10 @@ from dj_ledfx.effects.ledset import (
 )
 from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.looks.model import (
-    LIGHTS_SETTING,
     Layer,
     Look,
     LookError,
-    effect_settings,
     firmware_layers,
-    layer_lights,
     make_effect,
     visible_field_layers,
 )
@@ -77,8 +74,7 @@ def _finite(colors: FloatRGB) -> FloatRGB:
 def _layout(look: Look) -> list[tuple[str, str, str, bool, object]]:
     """What can't change in place: the layers, and which lights each one picks."""
     return [
-        (layer.id, layer.type, layer.kind, layer.visible, layer.settings.get(LIGHTS_SETTING))
-        for layer in look.layers
+        (layer.id, layer.type, layer.kind, layer.visible, layer.lights) for layer in look.layers
     ]
 
 
@@ -263,13 +259,13 @@ class ZoneRuntime:
         for index, layer in enumerate(visible_field_layers(look)):
             old_layer, field_effect = self._fields[index]
             if old_layer.settings != layer.settings:
-                field_effect.set_params(**effect_settings(layer))
+                field_effect.set_params(**layer.settings)
             self._fields[index] = (layer, field_effect)
         resend = False
         for index, layer in enumerate(reversed(firmware_layers(look))):
             old_layer, firmware = self._firmware[index]
             if old_layer.settings != layer.settings:
-                firmware.set_params(**effect_settings(layer))
+                firmware.set_params(**layer.settings)
                 resend = True
             self._firmware[index] = (layer, firmware)
         if resend:
@@ -347,7 +343,6 @@ class ZoneRuntime:
         for position, layer in enumerate(layers):
             try:
                 effect = make_effect(layer)
-                lights = layer_lights(layer)
             except LookError as exc:
                 self._fields, self._firmware, self._selectors = [], [], []
                 self._fail(layer.name, str(exc))
@@ -355,7 +350,7 @@ class ZoneRuntime:
             effect.reseed(self._seed + position)
             if isinstance(effect, FirmwareEffect):
                 self._firmware.append((layer, effect))
-                self._selectors.append(lights)
+                self._selectors.append(layer.lights)
             else:
                 self._fields.append((layer, effect))
         self._plan_claims()

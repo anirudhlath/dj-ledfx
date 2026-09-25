@@ -3,18 +3,22 @@ picks every light with that whole word in its name or model (type:candle)."""
 
 from __future__ import annotations
 
-import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-_WORD = re.compile(r"[a-z0-9]+")
+from dj_ledfx.home.seed import normalise_name
 
 
 @dataclass(frozen=True, slots=True)
 class Selector:
     kind: Literal["id", "type"]
     value: str
+
+    @property
+    def text(self) -> str:
+        """The selector as a look writes it."""
+        return f"type:{self.value}" if self.kind == "type" else self.value
 
 
 def parse_selector(text: str) -> Selector:
@@ -23,7 +27,7 @@ def parse_selector(text: str) -> Selector:
         raise ValueError("A light selector can't be empty")
     if stripped.lower().startswith("type:"):
         word = stripped[len("type:") :].strip().lower()
-        if not _WORD.fullmatch(word):
+        if not word or normalise_name(word) != word or " " in word:
             raise ValueError(
                 f"Selector {stripped!r}: type: takes one word of letters and digits, "
                 "such as type:candle"
@@ -42,7 +46,7 @@ def selects(selectors: Sequence[Selector], ids: Collection[str], text: str) -> b
                 return True
             continue
         if words is None:
-            words = set(_WORD.findall(text.lower()))
+            words = set(normalise_name(text).split())
         if selector.value in words:
             return True
     return False

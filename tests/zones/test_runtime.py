@@ -20,6 +20,7 @@ from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet, PlacedLeds, Space
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.looks.selectors import parse_selector
 from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.types import FloatRGB, RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
@@ -400,9 +401,10 @@ CANDLES = (
 )
 
 
-def _flame(lights: Any = None) -> Layer:
-    settings = {} if lights is None else {"lights": lights}
-    return Layer(id="flame", name="Flame", type="firmware", kind="lifx_flame", settings=settings)
+def _flame(lights: str | list[str] | None = None) -> Layer:
+    texts = [lights] if isinstance(lights, str) else lights
+    picked = tuple(parse_selector(text) for text in texts) if texts is not None else None
+    return Layer(id="flame", name="Flame", type="firmware", kind="lifx_flame", lights=picked)
 
 
 def test_field_layers_blend_bottom_to_top() -> None:
@@ -430,7 +432,7 @@ def test_a_firmware_layer_claims_only_the_lights_it_picks() -> None:
 
 
 def test_without_a_field_a_light_no_layer_picks_stays_dark() -> None:
-    glow = replace(_glow(level=0.4), settings={"level": 0.4, "lights": "type:candle"})
+    glow = replace(_glow(level=0.4), lights=(parse_selector("type:candle"),))
     runtime = _runtime(_look(glow), CANDLES)
     runtime.tick(100.0)
     frame = _latest(runtime)
