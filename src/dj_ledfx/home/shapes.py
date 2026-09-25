@@ -14,13 +14,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.ledset import LED_PITCH_M, PlacedLeds, steps_along
-from dj_ledfx.home.model import HomeError, Vec3, finite, vec3
+from dj_ledfx.home.model import HomeError, Vec3, finite, non_negative, vec3
 from dj_ledfx.spatial.geometry import DeviceGeometry, MatrixGeometry
 from dj_ledfx.timing import as_utc
 
@@ -45,17 +45,17 @@ class ShapeError(HomeError):
     """A light shape or LED order that can't be used, with the reason."""
 
 
+# A shape checks itself when it's made, however it's made: read from the contract's form
+# or built in code (the old scene placements). vec3 and non_negative are the map's checks.
+
+
 def _check_point(point: Vec3, what: str) -> None:
-    if len(point) != 3 or not all(math.isfinite(value) for value in point):
-        raise ShapeError(f"{what} must be 3 finite numbers")
-    if any(abs(value) > MAX_METRES for value in point):
+    if any(abs(value) > MAX_METRES for value in vec3(point, what)):
         raise ShapeError(f"{what} must be within {MAX_METRES:g} m of the plan's origin")
 
 
 def _check_size(value: float, what: str) -> None:
-    if not math.isfinite(value) or value < 0.0:
-        raise ShapeError(f"{what} must be a finite number, 0 or more")
-    if value > MAX_METRES:
+    if non_negative(value, what) > MAX_METRES:
         raise ShapeError(f"{what} must be {MAX_METRES:g} m or less")
 
 
@@ -117,8 +117,7 @@ class GridShape:
         _check_point(self.center, "A grid's centre")
         _check_size(self.width, "A grid's width")
         _check_size(self.depth, "A grid's depth")
-        if len(self.rotation) != 3 or not all(math.isfinite(angle) for angle in self.rotation):
-            raise ShapeError("A grid's rotation must be 3 finite numbers")
+        vec3(self.rotation, "A grid's rotation")
 
 
 LightShape = PointShape | LineShape | BentLineShape | CylinderShape | GridShape
@@ -162,10 +161,7 @@ def shape_from_dict(data: Mapping[str, Any]) -> LightShape:
     if kind == "point":
         return PointShape(vec3(data.get("position"), "A point's position"))
     if kind == "line":
-        path = _path(data.get("path"), "A line's path")
-        if len(path) != 2:
-            raise ShapeError("A line's path must be 2 points")
-        return LineShape((path[0], path[1]))
+        return LineShape(cast(tuple[Vec3, Vec3], _path(data.get("path"), "A line's path")))
     if kind == "bent-line":
         return BentLineShape(_path(data.get("path"), "A bent line's path"))
     if kind == "cylinder":

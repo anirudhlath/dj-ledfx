@@ -8,10 +8,11 @@ so the stored map and the file read the same way.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, cast, get_args
+
+from dj_ledfx.types import is_finite_number
 
 Vec2 = tuple[float, float]
 Vec3 = tuple[float, float, float]
@@ -125,7 +126,7 @@ class Home:
 
 
 def finite(value: Any, what: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+    if not is_finite_number(value):
         raise HomeError(f"{what} must be a finite number")
     return float(value)
 
@@ -134,6 +135,13 @@ def _positive(value: Any, what: str) -> float:
     number = finite(value, what)
     if number <= 0.0:
         raise HomeError(f"{what} must be greater than 0")
+    return number
+
+
+def non_negative(value: Any, what: str) -> float:
+    number = finite(value, what)
+    if number < 0.0:
+        raise HomeError(f"{what} must be 0 or more")
     return number
 
 
@@ -229,9 +237,7 @@ def _wall(data: Mapping[str, Any]) -> Wall:
         raise HomeError(
             f"Unknown wall kind {kind!r}; expected one of {', '.join(get_args(WallKind))}"
         )
-    thickness = finite(data.get("thickness"), "A wall's thickness")
-    if thickness < 0.0:
-        raise HomeError("A wall's thickness can't be negative")
+    thickness = non_negative(data.get("thickness"), "A wall's thickness")
     return Wall(
         a=vec2(data.get("a"), "A wall's end"),
         b=vec2(data.get("b"), "A wall's end"),
@@ -255,9 +261,7 @@ def _furniture(data: Mapping[str, Any]) -> Furniture:
     shape = data.get("polygon")
     if box is None and shape is None:
         raise HomeError(f"Furniture '{item_id}' needs a box or a polygon")
-    height = finite(data.get("height"), f"Furniture '{item_id}'s height")
-    if height < 0.0:
-        raise HomeError(f"Furniture '{item_id}'s height can't be negative")
+    height = non_negative(data.get("height"), f"Furniture '{item_id}'s height")
     x0, y0, x1, y1 = (
         _numbers(box, 4, f"Furniture '{item_id}'s box") if box is not None else (0, 0, 0, 0)
     )

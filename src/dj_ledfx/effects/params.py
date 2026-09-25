@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
+
+from dj_ledfx.types import is_finite_number
 
 ParamType = Literal[
     "float",
@@ -51,16 +52,12 @@ def level_param(default: float) -> EffectParam:
     )
 
 
-def _is_number(value: Any) -> bool:
-    return not isinstance(value, bool) and isinstance(value, int | float) and math.isfinite(value)
-
-
 def _numbers(value: Any, count: int) -> bool:
     return (
         isinstance(value, Sequence)
         and not isinstance(value, str)
         and len(value) == count
-        and all(_is_number(item) for item in value)
+        and all(is_finite_number(item) for item in value)
     )
 
 
