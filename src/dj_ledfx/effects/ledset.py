@@ -156,6 +156,21 @@ class LedSet:
         return self.space.anchors
 
     @cached_property
+    def bounds(self) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+        """The LEDs' lowest and highest corner; the origin for no LEDs."""
+        if self.count == 0:
+            origin = np.zeros(3, dtype=np.float32)
+            return origin, origin
+        return self.pos.min(axis=0), self.pos.max(axis=0)
+
+    @cached_property
+    def centre(self) -> NDArray[np.float32]:
+        """The middle of the LEDs' bounds."""
+        low, high = self.bounds
+        middle: NDArray[np.float32] = ((low + high) / 2.0).astype(np.float32)
+        return middle
+
+    @cached_property
     def _by_device(self) -> Mapping[str, DeviceSlice]:
         return {piece.device_id: piece for piece in self.slices}
 

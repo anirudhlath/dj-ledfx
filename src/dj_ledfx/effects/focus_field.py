@@ -11,17 +11,13 @@ import math
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.typing import NDArray
 
+from dj_ledfx.effects.color import palette_at, palette_float
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import (
-    anchor_or_centre,
-    distances,
-    palette_at,
-    palette_float,
-    smoothstep,
-)
+from dj_ledfx.effects.field_tools import anchor_or_centre, distances, smoothstep
 from dj_ledfx.effects.noise import fbm3
-from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.params import EffectParam, level_param
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -56,50 +52,28 @@ class FocusField(ParamField):
                 description="Metres of calm; the busy colours take over by twice this",
                 bindable=True,
             ),
-            "level": EffectParam(
-                type="float",
-                default=0.9,
-                min=0.0,
-                max=1.0,
-                step=0.01,
-                label="Level",
-                bindable=True,
-            ),
+            "level": level_param(0.9),
         }
 
-    def __init__(
-        self,
-        anchor: str = "",
-        calm: str = CALM_COLOUR,
-        palette: list[str] | None = None,
-        calm_m: float = 2.0,
-        level: float = 0.9,
-    ) -> None:
-        self._seed = 0
-        self._apply_params(
-            anchor=anchor,
-            calm=calm,
-            palette=list(palette or FOCUS_PALETTE),
-            calm_m=calm_m,
-            level=level,
-        )
-
-    def reseed(self, seed: int) -> None:
-        self._seed = seed
-
     def _prepare(self) -> None:
+        super()._prepare()
         self._calm = palette_float([self._values["calm"]])[0]
-        self._palette = palette_float(self._values["palette"])
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
-        calm_m = float(values["calm_m"])
-        away = distances(leds, anchor_or_centre(leds, values["anchor"]))
-        busy = smoothstep(calm_m, 2.0 * calm_m, away)[:, None]
-        moving = leds.pos.astype(np.float64) * 0.8 + np.array([ctx.t * 0.3, 0.0, ctx.t * 0.2])
+        busy, stretched = self._per_leds(leds, self._busy)
+        moving = stretched + np.array([ctx.t * 0.3, 0.0, ctx.t * 0.2])
         swirl = fbm3(moving, self._seed, octaves=2)
         lively = palette_at(self._palette, (swirl * 1.5 + ctx.t * 0.05) % 1.0)
         pulse = 0.55 + 0.45 * np.sin(2.0 * math.pi * (ctx.t * 0.8 + swirl * 3.0))
         out = self._calm * (1.0 - busy) + lively * pulse[:, None] * busy
         frame: FloatRGB = (out * np.float32(values["level"])).astype(np.float32)
         return frame
+
+    def _busy(self, leds: LedSet) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
+        """How busy each LED is, from calm (0) to busy (1), as a column; and where it sits
+        in the swirl's noise."""
+        calm_m = float(self._values["calm_m"])
+        away = distances(leds, anchor_or_centre(leds, self._values["anchor"]))
+        busy = smoothstep(calm_m, 2.0 * calm_m, away)[:, None]
+        return busy, leds.pos.astype(np.float64) * 0.8

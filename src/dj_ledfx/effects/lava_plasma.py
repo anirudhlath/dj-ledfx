@@ -9,11 +9,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.typing import NDArray
 
+from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import palette_at, palette_float, smoothstep
+from dj_ledfx.effects.field_tools import smoothstep
 from dj_ledfx.effects.noise import fbm3
-from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.params import EffectParam, level_param
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -43,38 +45,17 @@ class LavaPlasma(ParamField):
             "scale_m": EffectParam(
                 type="float", default=1.2, min=0.3, max=5.0, step=0.1, label="Blob size"
             ),
-            "level": EffectParam(
-                type="float",
-                default=1.0,
-                min=0.0,
-                max=1.0,
-                step=0.01,
-                label="Level",
-                bindable=True,
-            ),
+            "level": level_param(1.0),
         }
-
-    def __init__(
-        self,
-        palette: list[str] | None = None,
-        speed: float = 0.3,
-        scale_m: float = 1.2,
-        level: float = 1.0,
-    ) -> None:
-        self._seed = 0
-        self._apply_params(
-            palette=list(palette or LAVA_PALETTE), speed=speed, scale_m=scale_m, level=level
-        )
-
-    def reseed(self, seed: int) -> None:
-        self._seed = seed
-
-    def _prepare(self) -> None:
-        self._palette = palette_float(self._values["palette"])
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
-        points = leds.pos.astype(np.float64) / float(values["scale_m"])
+        points = self._per_leds(leds, self._points)
         flow = ctx.t * float(values["speed"]) * _FLOW
         heat = smoothstep(0.3, 0.72, fbm3(points + _SLANT * flow, self._seed, octaves=3))
         return (palette_at(self._palette, heat) * np.float32(values["level"])).astype(np.float32)
+
+    def _points(self, leds: LedSet) -> NDArray[np.float64]:
+        """Each LED's place in the noise: its position in blob sizes."""
+        points: NDArray[np.float64] = leds.pos.astype(np.float64) / float(self._values["scale_m"])
+        return points

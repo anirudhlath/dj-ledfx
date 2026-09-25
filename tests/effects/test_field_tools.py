@@ -4,14 +4,8 @@ from types import MappingProxyType
 
 import numpy as np
 
-from dj_ledfx.effects.field_tools import (
-    anchor_or_centre,
-    distances,
-    height01,
-    palette_at,
-    palette_float,
-    smoothstep,
-)
+from dj_ledfx.effects.color import palette_at, palette_float
+from dj_ledfx.effects.field_tools import anchor_or_centre, distances, height01, smoothstep
 from dj_ledfx.effects.ledset import LedSource, PlacedLeds, Space, build_ledset
 
 POINTS = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 1.5], [4.0, 2.0, 3.0]])

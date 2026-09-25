@@ -4,7 +4,7 @@ import numpy as np
 from conftest import render_ctx
 from map_home import leds_at
 
-from dj_ledfx.effects.field_tools import palette_float
+from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.focus_field import FocusField
 
 NEAR, MIDDLE, FAR = 0, 1, 2

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from conftest import render_ctx
 from map_home import leds_at
 
-from dj_ledfx.effects.field_tools import palette_float
+from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.sunset_gradient import SUNSET_PALETTE, SunsetGradient
 
 FLOOR_TO_CEILING = [(1.0, 1.0, 0.0), (1.0, 1.0, 1.5), (1.0, 1.0, 3.0)]
@@ -61,3 +62,31 @@ def test_the_horizon_drifts_slowly() -> None:
     assert np.abs(next_frame - now).max() < 0.01
     assert np.abs(later - now).max() > 0.02
     assert effect.render(render_ctx(t=0.0), leds_at([])).shape == (0, 3)
+
+
+def test_what_sunset_works_out_per_led_is_kept_until_the_leds_or_a_setting_change() -> None:
+    effect, ctx = SunsetGradient(), render_ctx(t=0.0)
+    leds = leds_at(FLOOR_TO_CEILING, anchors={"window": (1.0, 1.0, 0.0)})
+    first = effect.render(ctx, leds)
+    assert np.array_equal(effect.render(ctx, leds), first)
+
+    effect.set_params(anchor="window")  # a setting changed: worked out again
+    assert np.array_equal(
+        effect.render(ctx, leds), SunsetGradient(anchor="window").render(ctx, leds)
+    )
+    moved = leds_at(FLOOR_TO_CEILING[::-1], anchors={"window": (1.0, 1.0, 0.0)})  # new LEDs
+    fresh = SunsetGradient(anchor="window").render(ctx, moved)
+    assert np.array_equal(effect.render(ctx, moved), fresh)
+
+
+def test_a_field_effect_fills_in_its_defaults_and_refuses_unknown_settings() -> None:
+    effect = SunsetGradient(level=0.4, palette=None)
+    assert effect.get_params() == {
+        "palette": list(SUNSET_PALETTE),
+        "level": 0.4,
+        "warmth": 0.5,
+        "anchor": "",
+        "drift_s": 90.0,
+    }
+    with pytest.raises(TypeError, match="no setting glow"):
+        SunsetGradient(glow=1.0)

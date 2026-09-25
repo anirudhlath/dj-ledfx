@@ -9,24 +9,28 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from dj_ledfx.effects.easing import ease_in_out
+
 _MIX = (np.uint64(0x9E3779B1), np.uint64(0x85EBCA77), np.uint64(0xC2B2AE3D))
-_CORNERS = [(dx, dy, dz) for dx in (0, 1) for dy in (0, 1) for dz in (0, 1)]
 
 
-def _lattice(
-    ix: NDArray[np.int64], iy: NDArray[np.int64], iz: NDArray[np.int64], seed: int
-) -> NDArray[np.float64]:
-    # uint64 arithmetic wraps, which is what a hash wants (numpy doesn't warn for arrays).
-    h = ix.astype(np.uint64) * _MIX[0]
-    h ^= iy.astype(np.uint64) * _MIX[1]
-    h ^= iz.astype(np.uint64) * _MIX[2]
+def _lattice(base: NDArray[np.int64], seed: int) -> NDArray[np.float64]:
+    """The value 0..1 at each (N, 3) cell's eight corners, as (2, 2, 2, N): x, y and z
+    each hashed once for the cell's low and high side, the sides XORed together, then
+    one finaliser. (XOR is order-free, so this is the per-corner hash exactly.)"""
+    sides = np.stack([base, base + 1]).astype(np.uint64)  # (2, N, 3); uint64 wraps
+    hx = sides[:, :, 0] * _MIX[0]
+    hy = sides[:, :, 1] * _MIX[1]
+    hz = sides[:, :, 2] * _MIX[2]
+    h = hx[:, None, None, :] ^ hy[None, :, None, :] ^ hz[None, None, :, :]
     h ^= np.uint64(seed & 0xFFFFFFFF) * np.uint64(0x27D4EB2F)
     h ^= h >> np.uint64(15)
     h *= np.uint64(0x2C1B3C6D)
     h ^= h >> np.uint64(12)
     h *= np.uint64(0x297A2D39)
     h ^= h >> np.uint64(15)
-    return (h & np.uint64(0xFFFFFF)).astype(np.float64) / float(0xFFFFFF)
+    values: NDArray[np.float64] = (h & np.uint64(0xFFFFFF)).astype(np.float64) / float(0xFFFFFF)
+    return values
 
 
 def value_noise3(points: NDArray[np.floating], seed: int) -> NDArray[np.float64]:
@@ -34,15 +38,15 @@ def value_noise3(points: NDArray[np.floating], seed: int) -> NDArray[np.float64]
     p = np.asarray(points, dtype=np.float64).reshape(-1, 3)
     cell = np.floor(p)
     frac = p - cell
-    base = cell.astype(np.int64)
-    weight = frac * frac * (3.0 - 2.0 * frac)
+    weight = ease_in_out(frac)
+    sides = np.stack([1.0 - weight, weight])  # (2, N, 3): the low side's weight, the high's
+    wx = sides[:, None, None, :, 0]
+    wy = sides[None, :, None, :, 1]
+    wz = sides[None, None, :, :, 2]
+    terms = (_lattice(cell.astype(np.int64), seed) * wx * wy * wz).reshape(8, len(p))
     total = np.zeros(len(p))
-    for dx, dy, dz in _CORNERS:
-        value = _lattice(base[:, 0] + dx, base[:, 1] + dy, base[:, 2] + dz, seed)
-        wx = weight[:, 0] if dx else 1.0 - weight[:, 0]
-        wy = weight[:, 1] if dy else 1.0 - weight[:, 1]
-        wz = weight[:, 2] if dz else 1.0 - weight[:, 2]
-        total += value * wx * wy * wz
+    for term in terms:  # corner by corner, x then y then z, as the sum always ran
+        total += term
     return total
 
 

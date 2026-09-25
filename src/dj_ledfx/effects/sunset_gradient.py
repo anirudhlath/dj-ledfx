@@ -10,10 +10,13 @@ import math
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.typing import NDArray
 
+from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import distances, height01, palette_at, palette_float
-from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.field_tools import height01
+from dj_ledfx.effects.params import EffectParam, level_param
+from dj_ledfx.spatial.mapping import RadialMapping
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -36,15 +39,7 @@ class SunsetGradient(ParamField):
                 label="Palette",
                 description="Floor to ceiling",
             ),
-            "level": EffectParam(
-                type="float",
-                default=0.85,
-                min=0.0,
-                max=1.0,
-                step=0.01,
-                label="Level",
-                bindable=True,
-            ),
+            "level": level_param(0.85),
             "warmth": EffectParam(
                 type="float",
                 default=0.5,
@@ -72,35 +67,22 @@ class SunsetGradient(ParamField):
             ),
         }
 
-    def __init__(
-        self,
-        palette: list[str] | None = None,
-        level: float = 0.85,
-        warmth: float = 0.5,
-        anchor: str = "",
-        drift_s: float = 90.0,
-    ) -> None:
-        self._apply_params(
-            palette=list(palette or SUNSET_PALETTE),
-            level=level,
-            warmth=warmth,
-            anchor=anchor,
-            drift_s=drift_s,
-        )
-
-    def _prepare(self) -> None:
-        self._palette = palette_float(self._values["palette"])
-
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
-        # warmth 0.5 is a straight gradient; more bends it so the warm stops climb higher
+        sway = HORIZON_SWAY * math.sin(2.0 * math.pi * ctx.t / float(values["drift_s"]))
+        colours = palette_at(self._palette, self._per_leds(leds, self._along) - np.float32(sway))
+        return (colours * np.float32(values["level"])).astype(np.float32)
+
+    def _along(self, leds: LedSet) -> NDArray[np.float32]:
+        """Each LED's place on the gradient before the horizon sways: its height, bent by
+        warmth (0.5 is straight; more bends it so the warm stops climb higher), and with
+        a sun, partly its distance from the sun."""
+        values = self._values
         along = height01(leds) ** np.float32(2.0 ** (2.0 * float(values["warmth"]) - 1.0))
         sun = leds.anchors.get(values["anchor"]) if values["anchor"] else None
         if sun is not None:
-            reach = distances(leds, sun)
-            far = float(reach.max())
-            if far > 0.0:
-                along = (1.0 - ANCHOR_SHARE) * along + ANCHOR_SHARE * reach / np.float32(far)
-        sway = HORIZON_SWAY * math.sin(2.0 * math.pi * ctx.t / float(values["drift_s"]))
-        colours = palette_at(self._palette, along - np.float32(sway))
-        return (colours * np.float32(values["level"])).astype(np.float32)
+            centre = (float(sun[0]), float(sun[1]), float(sun[2]))
+            reach = RadialMapping(center=centre).map_positions(leds.pos.astype(np.float64))
+            if reach.any():  # every LED at the sun: nothing to cool
+                along = ((1.0 - ANCHOR_SHARE) * along + ANCHOR_SHARE * reach).astype(np.float32)
+        return along

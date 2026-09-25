@@ -15,9 +15,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
+from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import distances, palette_at, palette_float
-from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.field_tools import distances
+from dj_ledfx.effects.params import EffectParam, level_param
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -59,43 +60,16 @@ class Ripples(ParamField):
             "fade_s": EffectParam(
                 type="float", default=3.0, min=1.0, max=10.0, step=0.5, label="Fade"
             ),
-            "level": EffectParam(
-                type="float",
-                default=0.9,
-                min=0.0,
-                max=1.0,
-                step=0.01,
-                label="Level",
-                bindable=True,
-            ),
+            "level": level_param(0.9),
         }
 
-    def __init__(
-        self,
-        palette: list[str] | None = None,
-        drops_per_min: float = 10.0,
-        speed: float = 0.9,
-        fade_s: float = 3.0,
-        level: float = 0.9,
-    ) -> None:
-        self._seed = 0
-        self._apply_params(
-            palette=list(palette or RIPPLE_PALETTE),
-            drops_per_min=drops_per_min,
-            speed=speed,
-            fade_s=fade_s,
-            level=level,
-        )
-
     def reseed(self, seed: int) -> None:
-        self._seed = seed
+        super().reseed(seed)
         self._draws.clear()
 
     def _prepare(self) -> None:
-        self._palette = palette_float(self._values["palette"])
+        super()._prepare()
         self._draws: dict[int, NDArray[np.float64]] = getattr(self, "_draws", {})
-        self._footprint: tuple[LedSet, NDArray[np.float32], NDArray[np.float32], float] | None
-        self._footprint = getattr(self, "_footprint", None)
 
     def _draw(self, k: int) -> NDArray[np.float64]:
         """Drop k's three random numbers: when in its interval, and where."""
@@ -103,13 +77,6 @@ class Ripples(ParamField):
         if u is None:
             u = self._draws[k] = np.random.default_rng([self._seed % 2**32, k % 2**63]).random(3)
         return u
-
-    def _bounds(self, leds: LedSet) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
-        """The zone's footprint, and its floor: the map's, or with no map the lowest LED."""
-        if self._footprint is None or self._footprint[0] is not leds:
-            low, high = leds.pos.min(axis=0), leds.pos.max(axis=0)
-            self._footprint = (leds, low, high, 0.0 if leds.space.ceiling else float(low[2]))
-        return self._footprint[1:]
 
     def _interval(self) -> float:
         return 60.0 / float(self._values["drops_per_min"])
@@ -119,7 +86,8 @@ class Ripples(ParamField):
         zone's footprint. leds must hold at least one LED."""
         u = self._draw(k)
         when = (k + LANDING_SPREAD * float(u[0])) * self._interval()
-        low, high, floor = self._bounds(leds)
+        low, high = leds.bounds  # the zone's footprint
+        floor = 0.0 if leds.space.ceiling else float(low[2])  # the map's, or the lowest LED
         where = np.array(
             [low[0] + u[1] * (high[0] - low[0]), low[1] + u[2] * (high[1] - low[1]), floor],
             dtype=np.float32,

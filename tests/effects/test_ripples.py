@@ -8,7 +8,7 @@ import pytest
 from conftest import render_ctx
 from map_home import leds_at, seeded_ledset
 
-from dj_ledfx.effects.field_tools import palette_float
+from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.ripples import LIFE_FADES, RIPPLE_PALETTE, Ripples
 
 ACROSS_THE_ROOM = [(x, 2.0, 0.5) for x in np.linspace(0.0, 6.0, 13)]

@@ -44,6 +44,13 @@ class EffectParam:
     bindable: bool = False  # can be bound to a signal (spec §7.5); bindings arrive in M7
 
 
+def level_param(default: float) -> EffectParam:
+    """A field effect's brightness, 0..1, bindable."""
+    return EffectParam(
+        type="float", default=default, min=0.0, max=1.0, step=0.01, label="Level", bindable=True
+    )
+
+
 def _is_number(value: Any) -> bool:
     return not isinstance(value, bool) and isinstance(value, int | float) and math.isfinite(value)
 

@@ -34,8 +34,9 @@ class Effect(ABC):  # noqa: B024
         if inspect.isabstract(cls):
             return
         params = cls.parameters()
-        if params:
-            sig = inspect.signature(cls.__init__)
+        sig = inspect.signature(cls.__init__)
+        takes_any = any(p.kind is p.VAR_KEYWORD for p in sig.parameters.values())
+        if params and not takes_any:
             init_params = {p for p in sig.parameters if p != "self"}
             missing = set(params.keys()) - init_params
             if missing:
