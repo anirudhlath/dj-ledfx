@@ -77,38 +77,45 @@ cd web && npm run e2e            # Playwright: screenshots, axe on every route, 
 src/dj_ledfx/ layout:
 - `prodjlink/` — Pro DJ Link UDP protocol (passive listener on port 50001)
 - `beat/` — BeatClock phase interpolation + BeatSimulator for demo mode
-- `effects/` — Effect ABC (`base.py`, with today's 1D `StripEffect`) + the 60fps engine, which hosts each running zone's runtime and renders it ahead into that zone's ring buffer
+- `effects/` — Effect ABC (`base.py`, with today's 1D `StripEffect`) + the 60fps engine, which hosts each running zone's runtime (and the preview's) and renders it ahead into that runtime's ring buffer
 - `effects/context.py` — `RenderContext` (beat, time, signals) that field effects render from
-- `effects/ledset.py` — `LedSet`: a zone's LEDs from each device's own geometry, in order; `subset()` gives some devices' LEDs with the zone's positions and device indices (a firmware layer's copy is drawn on its own lights)
+- `effects/ledset.py` — `LedSet`: a zone's LEDs where their placements put them on the home map, in order, carrying the zone's `Space` (rooms, anchors, ceiling); `subset()` gives some devices' LEDs with the zone's positions and device indices (a firmware layer's copy is drawn on its own lights)
 - `effects/ring_buffer.py` — `RingBuffer`: a running zone's frames, rendered ahead; `find_nearest` hands out the frame itself
-- `effects/field.py`, `effects/strip_adapter.py` — `FieldEffect`; `StripAdapter` runs a 1D `StripEffect` in LED order along a zone's lights
+- `effects/field.py`, `effects/strip_adapter.py` — `FieldEffect`, and `ParamField` (its settings in one dict, derived state rebuilt in `_prepare()`); `StripAdapter` plays a 1D `StripEffect` by projecting each LED's position onto an axis, linear or radial (`spatial/mapping.py`), or along the LEDs in zone order
+- `effects/blend.py` (`blend_into()`: the five blend modes), `effects/field_tools.py` (anchors, distances, height, float palettes, smoothstep), `effects/noise.py` (seeded 3D value noise, `fbm3`)
+- `effects/{sunset_gradient,aurora_curtains,lava_plasma,color_carousel,ripples,focus_field}.py` — the six showcase looks' field effects
 - `effects/firmware.py`, `firmware_lifx.py`, `firmware_openrgb.py` — effects the light runs itself: LIFX Flame and Morph (matrix), Move (multizone), waveforms (bulbs), OpenRGB hardware modes; lights that can't run one get its streamed `emulate()`; `require_adapter()` turns the wrong kind of light into `FirmwareRejected`
 - `effects/color.py` — Color math: hex/RGB conversion, HSV→RGB vectorized, palette interpolation
 - `effects/easing.py` — Easing functions: lerp, ease_in/out, sine_ease
 - `effects/energy.py` — BPM→energy mapping (0-1 linear between 100-150 BPM)
-- `scheduling/` — LookaheadScheduler: per-device send loops with FrameSlot depth-1 slots, FPS cap, RTT measurement
+- `scheduling/` — LookaheadScheduler: per-device send loops with FrameSlot depth-1 slots, FPS cap, RTT measurement; it makes no frame snapshots for the web app and never reads a route that doesn't stream
 - `scheduling/route.py` — `DeviceRoute`: a light's slice of its zone's frames, converted to 8 bits once, at send
 - `metrics.py` — Contextmanager-based timing metrics for performance measurement
+- `devices/lights.py` — `LightIndex`: the PC's OpenRGB devices as one light with parts (`light_id_of`, `expand`/`collapse` between light ids and device ids)
 - `devices/` — DeviceAdapter ABC (read/set power and colour, capture/restore) + OpenRGB adapter (asyncio.to_thread wrapped) + device-type heuristics
 - `devices/capabilities.py` — `DeviceCapabilities`: what a light can do (colour, matrix, multizone, effects); `LightReading` (`UNKNOWN`: it answered but can't say) and `try_read()` (None: no answer)
 - `devices/backend.py` — DeviceBackend ABC for protocol-level adapters
 - `devices/govee/` — Govee WiFi LED protocol (UDP segment control, SKU registry, transport)
 - `devices/lifx/` — LIFX LAN protocol (bulb/strip/tile discovery, packet encoding, transport); `base.py` shared adapter, `transport.py` `ask`/`query` (retries, the reply type checked and parsed, None on silence), `products.py` `lifx_capabilities()` from the vendored `data/products.json`
-- `looks/` — the look model, the built-ins (the handoff's Firmware showcase and six classic looks, from the vendored `data/looks.json`), and the store (saved looks, stars)
-- `zones/` — `model` (every light, rooms, groups), `store`, `runtime` (a running look's layers and ring buffer), `manager` (take-over, capture/restore, brightness, Stop all, resume, preview-only, the sharing policy), `lights` (LightMonitor: status and the 5 s/30 s polls), `attention` (the feed)
+- `looks/` — the look model, the built-ins (the handoff's six M2 looks and the Firmware showcase, in looks.json's order from the vendored `data/looks.json`, then the six classics), and the store (saved looks, stars)
+- `looks/selectors.py` — which lights a layer picks: light ids, or `type:<word>`
+- `zones/` — `model` (every light, rooms, groups), `store`, `runtime` (a running look's layer stack and ring buffer), `manager` (take-over, capture/restore, brightness, Stop all, resume, preview-only, the sharing policy, "Start again"), `lights` (LightMonitor: status and the 5 s/30 s polls), `attention` (the feed)
+- `zones/home_view.py` (`HomeView`, what the zone manager asks of the map; `MapZones`: the whole home, rooms and sub-zones as zones), `zones/preview.py` (`PreviewManager`: one preview at a time), `zones/frames.py` (`Watchers`: who watches which stream; `FrameFeed`: the web app's frames, read from the rings)
+- `home/` — the home map: `model` (`Home`, rooms, sub-zones, anchors, walls; home.json's shape), `geometry`, `shapes` (the five light shapes, `Placement`, `led_positions()`), `seed` (the vendored `data/home.json`, a byte copy with a test, and the owner's room names over it), `store` (`state.db`), `guess` (placement guessing, the old scene placements moved on), `map` (`HomeMap`: queries, edits, `Space`, change listeners)
 - `latency/` — ProbeStrategy protocol + StaticLatency/EMA/WindowedMean strategies
 - `config.py` — Nested dataclass config (EngineConfig, EffectConfig, NetworkConfig, WebConfig, DevicesConfig) with load/save via tomllib/tomli_w
 - `effects/params.py` — EffectParam descriptor for runtime introspection
 - `effects/registry.py` — Effect auto-registry via __init_subclass__, get_effect_classes/schemas
 - `effects/presets.py` — PresetStore with TOML persistence
 - `devices/manager.py` — DeviceManager: the managed devices (online and ghosts), indexed by stable id (`get_by_stable_id` is a dict lookup, rebuilt on every change), promote/demote, groups
-- `web/` — FastAPI app factory, REST routers (effects, devices, config, scene, looks, zones, lights, attention), WebSocket hub, Pydantic schemas
+- `web/` — FastAPI app factory, REST routers (effects, devices, config, scene, looks, zones, lights, attention, home, preview), WebSocket hub, Pydantic schemas
+- `web/frames.py` — frame encoders v1 and v2; `light_frames()` assembles each light's bytes (the PC's parts in part order, black where a part has nothing)
 - `web/contract.py` — the web spec's API models (camelCase) and the converters from engine types; `web/errors.py` — `answers()` maps engine errors to HTTP
-- `web/ws.py` — WebSocket hub: binary LED frame broadcast (2-byte name + 4-byte seq + RGB); beat, stats and status channels; pushed `running`, `lights` and `attention` snapshots; `transport` carries preview-only (`simulating` while on, `playing` otherwise); `close_all()` ends sessions with 1001 at shutdown
+- `web/ws.py` — WebSocket hub: binary LED frames from `FrameFeed`, v1 by default and v2 after `subscribe_frames` with `"protocol": 2` (streams `live`/`preview`, optional `lights`); beat, stats and status channels; pushed `running`, `lights` and `attention` snapshots; `transport` carries preview-only (`simulating` while on, `playing` otherwise); `close_all()` ends sessions with 1001 at shutdown
 - `web/state.py` — WS subscription state and the `app.state` getters (`get_zones`, `get_looks`, ...)
 - `web/router_scene.py` — Scene REST endpoints for the old scene page until F11 (placement CRUD, mapping config)
 - `spatial/mapping.py` — mapping_from_config() shared factory for LinearMapping/RadialMapping
-- `spatial/compositor.py` — Spatial compositor for multi-device LED frame distribution
+- `spatial/compositor.py` — Spatial compositor for multi-device LED frame distribution (the old scene page's, until F11)
 - `spatial/geometry.py` — 3D geometry utilities for spatial calculations
 - `spatial/scene.py` — SceneModel: device placements, spatial configuration
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats), and `clamp01`
@@ -162,7 +169,8 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - EffectEngine hosts the zones' runtimes (`add_runtime`/`remove_runtime`, called by the zone manager); there is no effect deck
 - `frontend/` uses shadcn/ui components (based on @base-ui/react, NOT Radix — different APIs); `web/` uses @base-ui/react directly behind its own primitives in `src/design/`
 - `frontend/` hooks in `src/hooks/`, one per domain (use-beat, use-devices, use-effects, use-scene, use-zones, use-ws-connection)
-- WebSocket binary frame protocol: 2-byte name length, UTF-8 name, 4-byte sequence, then RGB bytes
+- WebSocket binary frame protocol v1: 2-byte name length, UTF-8 name, 4-byte sequence, then RGB bytes. v2: 1-byte stream (0x01 live, 0x02 preview), 2-byte id length LE, UTF-8 light id, 4-byte sequence LE, then RGB bytes. v1 stays until F11
+- A field effect keeps its settings in one dict through `ParamField`; it's a pure function of the frame's time and the LEDs' positions, and any randomness goes through `reseed()`
 
 ## Key Design Decisions
 
@@ -189,6 +197,14 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Light status: a light whose read fails three 5 s polls in a row (no answer, or any error) is `offline` (a wall switch), whatever its protocol; `switched-off` is a power reading, not an attention item
 - Preview-only (`engine.preview_only`, `PUT /api/config`) applies at once: looks run and stream to the web preview, the lights are left alone. It's kept across restarts in state.db's config table
 - Scenes became device-group zones once (migration 004), not running; the old UI's effect endpoints take `?zone=`
+- Rooms, sub-zones and the whole home are zones derived from the map, and they follow it: a light moved into a running room joins it unless a newer zone holds it; a light moved out is put back; a running sub-zone that's deleted turns off
+- A preview runtime is keyed `preview:<id>`, never gets a route, and ends after 10 s unwatched
+- A light that runs its own effect is drawn only while the live stream is watched
+- The PC is one light in the API; each part stays its own device underneath, with its own adapter, latency and LED order
+- Placements are confirmed only explicitly: guessing and moving leave them unconfirmed
+- A look that stops is remembered for "Start again" (`GET /api/running/recent`, M2 plan ruling 19): one entry per zone and look, the 10 newest stops in `state.db`. Gone zones, deleted looks and what runs now are left out when the list is read. Deleting a zone and restoring a backup remember nothing
+- The seed gives the room `corridor` the owner's name over home.json's (`OWNER_ROOM_NAMES` in `home/seed.py`, ruling 18); home.json is left as it is
+- The map, the placements and the recent looks join backup and restore
 
 ## Logging Discipline
 
@@ -209,6 +225,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Integration tests run BeatSimulator → full pipeline → mock DeviceAdapter
 - Shared fakes: `tests/conftest.py` (`FakeLight`, a controllable light; `GlowFirmware`, a firmware effect; `device_stats()`, `render_ctx()`), `tests/zone_home.py` (a zone manager over fake lights; `zone_record()`), `tests/api_home.py` (the same behind the web app), `tests/lifx_fakes.py` (`FakeLifxTransport`, a LifxTransport with a faked socket; `lifx_bulb/strip/candle()`; `read_hex()` for hex fixtures); `pythonpath = ["tests"]` makes them importable
 - Every test starts from the app's effect registry (an autouse fixture in conftest); a test effect defined with `register=False` never leaks
+- `tests/map_home.py`: `tiny_home()` (a two-room plan), `leds_at()`, and `seeded_zone_lights()`/`seeded_space()`/`seeded_ledset()` (this home's seeded LEDs, for perf); `build_home(plan=...)` and `api_home(plan=...)` wire a real `HomeMap`; `FakeHome` stands in for the map's zones (a test edits it, then calls `manager.home_changed()`)
 - Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern; `tests/web/conftest.py` shares `mock_deps()`, `write_dist()` and `static_client()` for `create_app`
 - `tests/web/` covers all REST routers and WebSocket hub; `tests/test_main.py` runs the app in a subprocess and checks a SIGTERM shutdown logs no traceback
 - Gates compare with a baseline: no new mypy errors (compare `uv run mypy src/` output with the branch's starting point) and no format findings; perf benchmarks are deselected (`-m perf` runs them)
@@ -235,7 +252,14 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Scheduler hot path: don't `list()` wrap `dict.values()` iteration — unnecessary allocation at 60fps on single event loop
 - TOML serialization: use `json.dumps(v)` not `str(v)` for config values — `str(True)` produces `"True"` which fails `json.loads()` round-trip
 - `close()` on StateDB must acquire the lock to prevent races with in-flight `to_thread` operations
-- numpy `np.clip(...).astype()` returns `Any` per mypy — use `# type: ignore[no-any-return]` (not `[return-value]`)
+- numpy `np.clip(...).astype()` returns `Any` per mypy — bind it to an annotated `NDArray` local before returning (M2's way), or `# type: ignore[no-any-return]` (not `[return-value]`)
+- Migration SQL is split on `;` (`state_db.py`), so a migration's comments must not contain one
+- `HomeMap.load()` calls no listeners, so restore can run it under the zone manager's lock
+- The map's listeners run in order: the zone manager first, then the previews
+- `type:<word>` selectors match whole words of a light's name and model
+- Focus's anchor comes from its looks.json description, not from typed text
+- The deployed app's first M2 start runs migrations 005 and 006 and places every known light, unconfirmed; a light discovered later gets no placement until `POST /api/lights/placement/guess` or the next start
+- `recent_looks` compares its times as text, so they're written in UTC (`ZoneStore._utc`)
 - MockDeviceAdapter: never patch `type(adapter).device_info` (class-level property) — leaks to all instances across tests. Use a subclass instead.
 - Web tests: `uv sync --extra web` required in worktrees — web tests skip silently without it
 - Granian's embedded `Server.stop()` abandons open websockets, and a close sent from another task hangs while a receive is pending: each `/ws` session cancels its own receive, then closes (`ws.close_all`)
