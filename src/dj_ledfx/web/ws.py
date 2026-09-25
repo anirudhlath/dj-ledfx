@@ -331,16 +331,14 @@ def frame_messages(app: Any, sub: ClientSubscription, seq: int) -> list[bytes]:
     if sub.frame_protocol == 1:
         return [
             encode_frame_v1(device_id, seq, colors)
-            for device_id, colors in feed.frames("live").items()
-            if not sub.frame_devices or device_id in sub.frame_devices
+            for device_id, colors in feed.frames("live", set(sub.frame_devices) or None).items()
         ]
     index = LightIndex.from_manager(app.state.device_manager)
-    wanted = set(sub.frame_lights)
+    wanted = set(index.expand(sub.frame_lights)) or None  # a light's devices: the PC's parts
     return [
         encode_frame_v2(stream, light_id, seq, colors)
         for stream in sub.frame_streams
-        for light_id, colors in light_frames(index, feed.frames(stream)).items()
-        if not wanted or light_id in wanted
+        for light_id, colors in light_frames(index, feed.frames(stream, wanted)).items()
     ]
 
 

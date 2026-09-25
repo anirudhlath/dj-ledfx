@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from conftest import FakeLight, MockDeviceAdapter
+from conftest import FakeLight, MockDeviceAdapter, ring_route
 
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
@@ -42,7 +42,7 @@ def _fill_buffer(buf: RingBuffer, base_time: float, count: int = 60) -> None:
 def _route(
     ring: RingBuffer, *, start: int = 0, stop: int = 10, streaming: bool = True
 ) -> DeviceRoute:
-    return DeviceRoute(ring=ring, start=start, stop=stop, streaming=streaming)
+    return ring_route(ring, start=start, stop=stop, streaming=streaming)
 
 
 def _scheduler(

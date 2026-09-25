@@ -19,8 +19,10 @@ from dj_ledfx.devices.capabilities import (
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import NO_SIGNALS, RenderContext
 from dj_ledfx.effects.firmware import FirmwareEffect, Params
-from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.ring_buffer import RingBuffer
+from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.spatial.geometry import DeviceGeometry
 from dj_ledfx.types import DeviceInfo, DeviceStats, FloatRGB
 
@@ -268,6 +270,29 @@ class GlowFirmware(FirmwareEffect):
 
     def emulate(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         return np.full((leds.count, 3), self.level, dtype=np.float32)
+
+
+@dataclass(frozen=True)
+class RingSource:
+    """What a route reads, as a zone runtime holds it: a ring and an LED set."""
+
+    ring: RingBuffer
+    leds: LedSet
+
+
+def ring_route(
+    ring: RingBuffer, *, start: int = 0, stop: int = 10, streaming: bool = True
+) -> DeviceRoute:
+    """A route to LEDs start..stop of ring's frames."""
+    leds = build_ledset([LedSource("before", start), LedSource("light", stop - start)])
+    return DeviceRoute(RingSource(ring, leds), "light", streaming)
+
+
+def span(route: DeviceRoute) -> tuple[int, int]:
+    """Where a route's LEDs sit in its zone's frame now."""
+    piece = route.source.leds.slice_for(route.device_id)
+    assert piece is not None
+    return piece.start, piece.stop
 
 
 def device_stats(

@@ -234,18 +234,15 @@ class ZoneRuntime:
         piece = self.leds.slice_for(device_id)
         if piece is None or piece.count == 0:
             return None
-        return DeviceRoute(
-            ring=self.ring,
-            start=piece.start,
-            stop=piece.stop,
-            streaming=device_id not in self._claims,
-        )
+        return DeviceRoute(self, device_id, streaming=device_id not in self._claims)
 
     # --- changes --------------------------------------------------------------------
 
     def set_lights(self, lights: Sequence[ZoneLight], space: Space | None = None) -> None:
-        """Rebuild the LED set, in a new space if one is given, and start a fresh ring,
-        so no route outlives its frames."""
+        """Rebuild the LED set, in a new space if one is given. Routes read the ring and
+        the LED set at each send, so they need nothing. A new ring starts only when the
+        frame's layout changed (which device's LEDs sit where): a light moved or a new
+        space keeps the frames coming, with no warm-up."""
         if space is not None:
             self._space = space
         self._place(lights)
@@ -369,6 +366,7 @@ class ZoneRuntime:
 
     def _place(self, lights: Sequence[ZoneLight]) -> None:
         self._lights = tuple(lights)
+        before = getattr(self, "leds", None)
         self.leds = build_ledset(
             [
                 LedSource(
@@ -378,7 +376,8 @@ class ZoneRuntime:
             ],
             self._space,
         )
-        self.ring = RingBuffer(self._capacity)
+        if before is None or before.slices != self.leds.slices:
+            self.ring = RingBuffer(self._capacity)
         self._emulated &= {light.device_id for light in self._lights}
 
     def _picks(self, index: int, light: ZoneLight) -> bool:

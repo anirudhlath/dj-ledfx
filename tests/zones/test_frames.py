@@ -45,6 +45,8 @@ async def test_the_live_stream_has_every_zone_light_and_the_preview_stream_its_o
     assert np.array_equal(live["lamp"], to_device_colors(frame.colors[:4], 4))
     assert home.routes.routes["tile"].streaming is False  # never sent to the tile...
     assert np.array_equal(live["tile"], to_device_colors(frame.colors[4:], 4))  # ...but shown
+    assert set(feed.frames("live", {"tile"})) == {"tile"}  # a session asks for some lights
+    assert feed.frames("live", {"elsewhere"}) == {}
 
     previews.start("z", home.look("classic-strobe"))
     [preview] = previews.runtimes()

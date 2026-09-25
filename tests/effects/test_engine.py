@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from conftest import ring_route
 
 import dj_ledfx.metrics as metrics_mod
 from dj_ledfx.beat.clock import BeatClock
@@ -11,7 +12,6 @@ from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.looks.builtin import builtin_looks
-from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
@@ -64,7 +64,7 @@ def test_ring_buffer_hands_out_its_frame_and_routes_copy_their_slice() -> None:
     assert buf.find_nearest(100.0) is frame
 
     for led_count in (3, 4):  # the slice's size, and a device with more LEDs
-        sent = DeviceRoute(ring=buf, start=1, stop=4, streaming=True).colors_at(100.0, led_count)
+        sent = ring_route(buf, start=1, stop=4).colors_at(100.0, led_count)
         assert sent is not None and not np.shares_memory(sent, colors)
         sent[:] = 0
     assert np.all(colors == 0.5)

@@ -11,13 +11,13 @@ run their own effect only for the web app, so only while the live stream is watc
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from typing import TYPE_CHECKING, Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.scheduling.route import to_device_colors
+from dj_ledfx.scheduling.route import slice_colors
 
 if TYPE_CHECKING:
     from dj_ledfx.zones.runtime import ZoneRuntime
@@ -73,8 +73,11 @@ class FrameFeed:
         self._previews = previews
         self._clock = clock  # the engine's clock: rings are keyed by time.monotonic()
 
-    def frames(self, stream: Stream) -> dict[str, NDArray[np.uint8]]:
-        """Each device's colours now, in 8 bits, by device id."""
+    def frames(
+        self, stream: Stream, wanted: Collection[str] | None = None
+    ) -> dict[str, NDArray[np.uint8]]:
+        """Each device's colours now, in 8 bits, by device id: every device's, or the wanted
+        ones'. A runtime's frame is converted once, and only when a device in it is wanted."""
         if stream == "live":
             runtimes = self._zones.live_runtimes()
         else:
@@ -82,13 +85,19 @@ class FrameFeed:
         now = self._clock()
         out: dict[str, NDArray[np.uint8]] = {}
         for runtime in runtimes:
-            frame = runtime.ring.find_nearest(now)
+            pieces = [
+                piece
+                for light in runtime.lights
+                if wanted is None or light.device_id in wanted
+                if (piece := runtime.leds.slice_for(light.device_id)) is not None and piece.count
+            ]
+            frame = runtime.ring.find_nearest(now) if pieces else None
             if frame is None:
                 continue
-            for light in runtime.lights:
-                piece = runtime.leds.slice_for(light.device_id)
-                if piece is None or piece.count == 0 or frame.colors.shape[0] < piece.stop:
-                    continue
-                colors = frame.colors[piece.start : piece.stop]
-                out[light.device_id] = to_device_colors(colors, piece.count)
+            count = runtime.leds.count
+            whole = slice_colors(frame.colors, 0, count, count)
+            if whole is None:
+                continue
+            for piece in pieces:
+                out[piece.device_id] = whole[piece.start : piece.stop]
         return out

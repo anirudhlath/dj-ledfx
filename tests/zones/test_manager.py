@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import FakeLight
+from conftest import FakeLight, span
 from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
@@ -40,7 +40,7 @@ async def test_start_captures_switches_on_and_streams(make_home: HomeFactory) ->
     assert (info.zone_id, info.look_id, info.look_name) == ("desk", "classic-breathe", "Breathe")
     assert (info.lights, info.brightness, info.state) == (("lamp", "bulb"), 1.0, "running")
     runtime = home.host.runtimes["desk"]
-    assert home.routes.routes["lamp"].ring is runtime.ring
+    assert home.routes.routes["lamp"].source is runtime
     assert home.routes.routes["bulb"].streaming
     [saved] = await home.store.load_assignments()
     assert (saved.zone_id, saved.look_id, saved.lights) == (
@@ -78,8 +78,8 @@ async def test_takeover_keeps_first_capture_and_off_restores_it(make_home: HomeF
     left = home.manager.running_info("left")
     assert left is not None and left.lights == ("a",)
     assert home.host.runtimes["left"].leds.count == a.led_count
-    assert home.routes.routes["a"].ring is home.host.runtimes["left"].ring
-    assert home.routes.routes["b"].ring is home.host.runtimes["right"].ring
+    assert home.routes.routes["a"].source is home.host.runtimes["left"]
+    assert home.routes.routes["b"].source is home.host.runtimes["right"]
     assert b.names().count("capture") == 1
     saved = {x.zone_id: x.lights for x in await home.store.load_assignments()}
     assert saved == {"left": ("a",), "right": ("b", "c")}
@@ -226,7 +226,7 @@ async def test_a_look_switches_on_a_light_switched_off_while_it_was_idle(
 
     assert lamp.names()[-2:] == ["power", "prepare_stream"]
     assert lamp.power is True
-    assert home.routes.routes["lamp"].ring is home.host.runtimes["z"].ring
+    assert home.routes.routes["lamp"].source is home.host.runtimes["z"]
 
 
 # B1: Off restores a light switched off meanwhile, and leaves it off.
@@ -377,7 +377,7 @@ async def test_starting_a_running_zone_again_replaces_its_look(make_home: HomeFa
     assert (result.running.look_id, result.running.brightness) == ("classic-strobe", 0.3)
     assert lamp.names().count("capture") == 1 and "restore" not in lamp.names()
     assert list(home.host.runtimes) == ["z"]
-    assert home.routes.routes["lamp"].ring is home.host.runtimes["z"].ring
+    assert home.routes.routes["lamp"].source is home.host.runtimes["z"]
 
 
 async def test_a_look_starts_its_firmware_even_when_layer_ids_repeat(
@@ -410,3 +410,19 @@ async def test_a_zone_with_no_lights_or_a_look_m1_cannot_run_is_refused(
     with pytest.raises(LookError, match="M6"):
         await home.manager.start("z", home_look)
     assert lamp.calls == []
+
+
+# M2 review A1: the lights that stay in a zone keep their routes when it loses others.
+async def test_lights_that_stay_in_a_zone_keep_their_routes_when_it_loses_one(
+    make_home: HomeFactory,
+) -> None:
+    pair, solo = zone_record("pair", "a", "b"), zone_record("solo", "a")
+    home = await make_home([FakeLight("a"), FakeLight("b")], [pair, solo])
+    await home.manager.start("pair", home.look("classic-breathe"))
+    route = home.routes.routes["b"]
+    assert span(route) == (4, 8)
+
+    await home.manager.start("solo", home.look("classic-strobe"))  # takes a from the pair
+
+    assert home.routes.routes["b"] is route and span(route) == (0, 4)
+    assert route.source is home.host.runtimes["pair"] and route.source.leds.count == 4

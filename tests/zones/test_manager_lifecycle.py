@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from conftest import FakeLight
+from conftest import FakeLight, span
 from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
@@ -33,8 +33,7 @@ async def test_resume_never_powers_on_and_switched_off_lights_rejoin(
     assert a.calls == []  # not captured again, not switched on
     assert b.names() == ["prepare_stream"]
     assert (
-        "a" not in home.routes.routes
-        and home.routes.routes["b"].ring is home.host.runtimes["z"].ring
+        "a" not in home.routes.routes and home.routes.routes["b"].source is home.host.runtimes["z"]
     )
     assert home.manager.power_of("a") is False
 
@@ -42,7 +41,7 @@ async def test_resume_never_powers_on_and_switched_off_lights_rejoin(
     await home.manager.on_power_reading("a", True)  # the light monitor sees it back on
 
     assert a.names() == ["prepare_stream"]
-    assert home.routes.routes["a"].ring is home.host.runtimes["z"].ring
+    assert home.routes.routes["a"].source is home.host.runtimes["z"]
     assert home.host.runtimes["z"].leds.count == 8  # it kept its LEDs while it was off
 
 
@@ -97,7 +96,7 @@ async def test_resume_replays_take_overs_oldest_first(make_home: HomeFactory) ->
         ("left", ("a",)),
         ("right", ("b", "c")),
     ]
-    assert home.routes.routes["b"].ring is home.host.runtimes["right"].ring
+    assert home.routes.routes["b"].source is home.host.runtimes["right"]
     assert all("capture" not in light.names() for light in (a, b, c))
 
 
@@ -115,7 +114,7 @@ async def test_preview_only_defers_power_on_and_restore_until_turned_off(
 
     assert lamp.calls == []
     route = home.routes.routes["lamp"]
-    assert route.ring is home.host.runtimes["z"].ring  # the preview still gets frames
+    assert route.source is home.host.runtimes["z"]  # the preview still gets frames
     assert not route.streaming
 
     await home.manager.set_preview_only(False)
@@ -154,9 +153,8 @@ async def test_rejoin_with_new_led_count_rebuilds_routes(make_home: HomeFactory)
     assert home.host.runtimes["z"] is runtime
     assert runtime.leds.count == 8
     candle_route, lamp_route = home.routes.routes["candle"], home.routes.routes["lamp"]
-    assert (candle_route.start, candle_route.stop) == (0, 5)
-    assert (lamp_route.start, lamp_route.stop) == (5, 8)
-    assert candle_route.ring is runtime.ring and lamp_route.ring is runtime.ring
+    assert span(candle_route) == (0, 5) and span(lamp_route) == (5, 8)
+    assert candle_route.source is runtime and lamp_route.source is runtime
     assert not candle_route.streaming  # the Candle runs Glow itself now
     assert candle.names() == ["capture", "firmware"]  # captured, never switched on
     assert lamp.names() == ["capture", "prepare_stream"]  # from the start; now just a new slice

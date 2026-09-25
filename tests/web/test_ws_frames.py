@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import struct
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -29,8 +29,11 @@ class StubFeed:
     def __init__(self, frames: Frames) -> None:
         self._frames = frames
 
-    def frames(self, stream: str) -> dict[str, NDArray[np.uint8]]:
-        return dict(self._frames.get(stream, {}))
+    def frames(
+        self, stream: str, wanted: Collection[str] | None = None
+    ) -> dict[str, NDArray[np.uint8]]:
+        frames = self._frames.get(stream, {})
+        return {d: c for d, c in frames.items() if wanted is None or d in wanted}
 
 
 def colours(count: int, value: int) -> NDArray[np.uint8]:

@@ -386,6 +386,7 @@ class ZoneManager:
             if running.runtime is not None:
                 self._host.add_runtime(running.runtime)
             await self._persist(saved.zone_id)
+        self._redraw()  # zones that lost lights to a later one
         return [light for running in self._running.values() for light in running.lights]
 
     async def set_preview_only(self, on: bool) -> None:
@@ -481,32 +482,25 @@ class ZoneManager:
         """A known light came back, or was found at start-up. It isn't switched on.
 
         If it came back with another LED count or other capabilities, its zone rebuilds
-        its LED set and every light in the zone gets its slice of the new ring. A captured
-        light that no zone owns any more is restored now.
+        its LED set; the other lights' routes read the new one. A captured light that no
+        zone owns any more is restored now.
         """
         async with self._lock:
             self._applied.pop(device_id, None)
             self._forget_power(device_id)
-            zone_id = self.owner_of(device_id)
-            runtime = self._runtime_of(device_id)
-            if zone_id is not None and runtime is not None:
-                lights = self._zone_lights(self._running[zone_id].lights)
-                if list(runtime.lights) != lights:
-                    runtime.set_lights(lights)
-                    await self._sync(self._running[zone_id].lights)
-                    return
+            self._redraw()
             await self._sync([device_id])
 
     async def on_device_discovered(self, device_id: str) -> None:
-        """A light seen for the first time joins the newest running all-lights zone."""
+        """A light seen for the first time is a change of membership: it joins the running
+        zones that now hold it (its room, the whole home, an all-lights group), the newest
+        start winning, as a light moved on the map does. It's captured, not switched on."""
         async with self._lock:
-            zone_id = self._newest_all_lights_zone()
-            if zone_id is None or self.owner_of(device_id) is not None:
+            _, changed = await self._follow_members()
+            if not changed:
                 return
-            running = self._running[zone_id]
-            self._set_lights(running, [*running.lights, device_id])
-            await self._persist(zone_id)
-            await self._sync(running.lights)
+            self._redraw()
+            await self._sync(changed)
         self._event_bus.emit(ZonesChanged())
 
     def preview_runtime(self, key: str, zone_id: str, look: Look) -> ZoneRuntime:
@@ -548,23 +542,24 @@ class ZoneManager:
             await self._load_zones()
             gone = [zone_id for zone_id in self._running if zone_id not in self._zones]
             released = await self._stop(*gone, remember=False)  # gone from the map
-            joined, touched = await self._follow_members()
-            redrawn = self._redraw()
-            await self._sync([*released, *touched, *redrawn], power_on=joined)
+            joined, changed = await self._follow_members()
+            self._redraw()
+            await self._sync([*released, *changed], power_on=joined)
         self._event_bus.emit(ZonesChanged())
 
     async def _follow_members(self) -> tuple[list[str], list[str]]:
-        """Running derived zones follow the map. Each first lets go of the lights that
+        """Running zones that follow their members (the map's, or every light for an
+        all-lights group) take the lights that joined. Each first lets go of the lights that
         left it; then, oldest first, each takes the lights that joined it, from older
         zones only: a zone started later keeps what it holds. A zone left with no lights
         stops. Returns the lights that joined a zone, and every light whose zone changed.
         Only the membership changes here: _redraw then rebuilds each changed zone's LED
-        set once and reports all its lights, which need routes to the new ring.
+        set once, and the routes of the lights that stayed read the new one.
         """
         following = {
-            zone_id: self._members(self._zones[zone_id])
+            zone_id: self._members(zone)
             for zone_id in self._running
-            if self._zones[zone_id].kind in DERIVED_KINDS
+            if (zone := self._zones[zone_id]).kind in DERIVED_KINDS or zone.all_lights
         }
         touched: list[str] = []
         for zone_id, members in following.items():
@@ -584,15 +579,15 @@ class ZoneManager:
                 and light not in running.lights
                 and self._may_take(zone_id, light)
             ]
-            _, kept = await self._take_over(zone_id, new)
+            await self._take_over(zone_id, new)
             running.members = members
             lights = [light for light in members if light in running.lights or light in new]
-            touched += [*new, *kept]
+            touched += new
             joined += new
             if not lights:
                 await self._stop(zone_id)
                 continue
-            running.lights = lights  # _redraw rebuilds its LED set and routes its lights
+            running.lights = lights  # _redraw rebuilds its LED set
             await self._persist(zone_id)
         return joined, touched
 
@@ -601,11 +596,11 @@ class ZoneManager:
         owner = self.owner_of(light)
         return owner is None or self._running[owner].since <= self._running[zone_id].since
 
-    def _redraw(self) -> list[str]:
-        """Rebuild the LED set of every running zone whose lights moved on the map or whose
-        space changed. Returns their lights: they need routes to the new ring."""
+    def _redraw(self) -> None:
+        """Rebuild the LED set of every running zone whose lights changed (they joined or
+        left it, moved on the map, or came back different) or whose space changed. Every
+        change to a running zone's lights ends here."""
         space = self._home.space()
-        moved: list[str] = []
         for running in self._running.values():
             runtime = running.runtime
             if runtime is None:
@@ -613,8 +608,6 @@ class ZoneManager:
             lights = self._zone_lights(running.lights)
             if list(runtime.lights) != lights or runtime.space is not space:
                 runtime.set_lights(lights, space)
-                moved += running.lights
-        return moved
 
     def _members(self, zone: ZoneRecord) -> tuple[str, ...]:
         return tuple(light for light in self._lights_of(zone) if self._adapter(light) is not None)
@@ -686,10 +679,11 @@ class ZoneManager:
         running = self._running[zone_id]
         added = [light for light in members if light not in running.lights]
         removed = [light for light in running.lights if light not in members]
-        _, touched = await self._take_over(zone_id, added)
-        self._set_lights(running, members)
+        await self._take_over(zone_id, added)
+        running.lights = members
+        self._redraw()
         await self._persist(zone_id)
-        await self._sync([*members, *touched, *removed], power_on=added)
+        await self._sync([*added, *removed], power_on=added)
 
     # --- the old UI's effect deck, until F11 ---------------------------------------------
 
@@ -755,7 +749,7 @@ class ZoneManager:
         lights = [light for light in zone.lights if self._adapter(light) is not None]
         if not lights:
             raise ZoneError(f"{zone.name} has no lights")
-        take_overs, touched = await self._take_over(zone_id, lights)
+        take_overs = await self._take_over(zone_id, lights)
         previous: _Running | None = None
         stopped: list[StoppedLook] = []
         if zone_id in self._running:  # the new start ends the run before it
@@ -767,9 +761,10 @@ class ZoneManager:
         )
         self._running[zone_id] = running
         self._host.add_runtime(runtime)
+        self._redraw()  # the zones it took lights from
         await self._persist(zone_id, stopped=stopped)
         released = [x for x in previous.lights if x not in lights] if previous else []
-        await self._sync([*lights, *touched, *released], power_on=lights)
+        await self._sync([*lights, *released], power_on=lights)
         return StartResult(self._info(zone_id, running), tuple(take_overs))
 
     def _new_runtime(
@@ -834,26 +829,12 @@ class ZoneManager:
         except LookNotFoundError:
             return look_id
 
-    def _newest_all_lights_zone(self) -> str | None:
-        running = [
-            (state.since, zone_id)
-            for zone_id, state in self._running.items()
-            if (zone := self._zones.get(zone_id)) is not None
-            and (zone.all_lights or zone.kind == "home")
-        ]
-        return max(running)[1] if running else None
-
-    async def _take_over(
-        self, zone_id: str, wanted: Iterable[str]
-    ) -> tuple[list[TakeOver], list[str]]:
+    async def _take_over(self, zone_id: str, wanted: Iterable[str]) -> list[TakeOver]:
         """Take lights from other running zones: the newest assignment wins (spec §4.3).
-
-        Returns the take-overs and the lights left in zones that lost some: their zone
-        rebuilt its LED set, so they need new routes.
-        """
+        A zone left with none stops; the others keep the rest, and the caller's _redraw
+        rebuilds their LED sets."""
         wanted_set = set(wanted)
         take_overs: list[TakeOver] = []
-        touched: list[str] = []
         for other_id, other in list(self._running.items()):
             lost = [x for x in other.lights if x in wanted_set] if other_id != zone_id else []
             if not lost:
@@ -866,10 +847,9 @@ class ZoneManager:
             if not kept:
                 await self._stop(other_id)
                 continue
-            self._set_lights(other, kept)
+            other.lights = kept
             await self._persist(other_id)
-            touched += kept
-        return take_overs, touched
+        return take_overs
 
     async def _stop(self, *zone_ids: str, remember: bool = True) -> list[str]:
         """Forget running zones. Returns their lights, which the caller syncs (releases).
@@ -906,11 +886,6 @@ class ZoneManager:
         except LookNotFoundError:
             return []
         return [StoppedLook(zone_id, look_id, running.since, self._now())]
-
-    def _set_lights(self, running: _Running, lights: list[str]) -> None:
-        running.lights = lights
-        if running.runtime is not None:
-            running.runtime.set_lights(self._zone_lights(lights), self._home.space())
 
     def _runtime_of(self, device_id: str) -> ZoneRuntime | None:
         """The runtime of the zone that owns a light; None if none does, or it's broken."""

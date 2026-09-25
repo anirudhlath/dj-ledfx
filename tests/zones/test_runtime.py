@@ -8,6 +8,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
+from conftest import span
 from loguru import logger
 
 from dj_ledfx.beat.clock import BeatClock
@@ -19,6 +20,7 @@ from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet, PlacedLeds, Space
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.types import FloatRGB, RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
@@ -113,7 +115,7 @@ def test_firmware_runs_where_supported_and_the_field_plays_elsewhere() -> None:
     assert runtime.mode_of("bulb") == runtime.mode_of("lamp") == "streaming"
     tile, bulb = runtime.route_for("tile"), runtime.route_for("bulb")
     assert tile is not None and not tile.streaming
-    assert bulb is not None and bulb.streaming and (bulb.start, bulb.stop) == (4, 5)
+    assert bulb is not None and bulb.streaming and span(bulb) == (4, 5)
 
 
 def test_a_firmware_only_look_streams_its_copy_to_lights_that_cannot_run_it() -> None:
@@ -292,7 +294,23 @@ def test_new_lights_rebuild_the_led_set_and_start_a_fresh_ring() -> None:
     assert runtime.leds.count == 67
     assert runtime.route_for("bulb") is None
     route = runtime.route_for("lamp")
-    assert route is not None and (route.start, route.stop) == (64, 67)
+    assert route is not None and span(route) == (64, 67)
+
+
+# M2 review A1: a route reads its zone's ring and its slice at each send, so a zone that
+# rebuilds its LED set needs no new routes.
+def test_a_route_follows_its_zone_when_the_zone_rebuilds_its_leds() -> None:
+    runtime = _runtime(_look(_field()))
+    lamp = runtime.route_for("lamp")
+    assert lamp is not None and span(lamp) == (5, 8)
+
+    runtime.set_lights([ZoneLight("lamp", 3, LAMP), ZoneLight("tile", 4, TILE)])
+    runtime.tick(100.0)
+
+    frame = runtime.ring.find_nearest(1e9)
+    assert frame is not None and span(lamp) == (0, 3)
+    colours = lamp.colors_at(frame.target_time, 3)
+    assert colours is not None and np.array_equal(colours, to_device_colors(frame.colors[:3], 3))
 
 
 def test_update_look_keeps_the_effect_when_the_layers_match() -> None:

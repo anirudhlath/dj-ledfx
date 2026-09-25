@@ -91,7 +91,7 @@ async def test_moving_a_light_into_a_running_room_takes_it_over_but_keeps_newer_
     assert owned == {HOME_ZONE_ID: ("e",), "west": ("a", "b", "c"), "shelf": ("d",)}
     west = home.host.runtimes["west"]
     assert west.leds.count == 12
-    assert all(home.routes.routes[light].ring is west.ring for light in ("a", "b", "c"))
+    assert all(home.routes.routes[light].source is west for light in ("a", "b", "c"))
     assert home.lights["c"].names().count("capture") == 1  # it changed zones, never released
     assert "restore" not in home.lights["c"].names()
 
@@ -180,7 +180,7 @@ async def test_a_running_room_redraws_its_leds_when_a_light_moves_inside_it(
     assert home.host.runtimes["west"] is runtime  # the same look, redrawn
     assert np.allclose(runtime.leds.pos[:4], there.pos) and runtime.space.ceiling == 2.5
     assert runtime.leds.room.tolist() == [0] * 8
-    assert all(home.routes.routes[light].ring is runtime.ring for light in ("a", "b"))
+    assert all(home.routes.routes[light].source is runtime for light in ("a", "b"))
 
 
 async def test_a_room_resumes_but_one_gone_from_the_map_meanwhile_does_not(
@@ -211,3 +211,25 @@ async def test_a_light_found_later_joins_a_running_whole_home(make_home: HomeFac
 
     info = home.manager.running_info(HOME_ZONE_ID)
     assert info is not None and info.lights == ("a", "new")
+
+
+# M2 review A5: discovery is a change of membership, so a device found in a running room
+# joins it, as a new PC part does when the PC's room runs.
+async def test_a_device_found_in_a_running_room_joins_it(make_home: HomeFactory) -> None:
+    view = FakeHome(rooms={"west": ["a"], "east": ["b"]})
+    home = await make_home(_lights("a", "b"), [], view=view)
+    await home.manager.start(HOME_ZONE_ID, home.look("classic-strobe"))
+    home.clock[0] = home.clock[0].replace(minute=5)
+    await home.manager.start("west", home.look("classic-breathe"))
+
+    part = FakeLight("part", captured=b"p0")
+    home.lights["part"] = part
+    home.devices.add_device(part, LatencyTracker(strategy=StaticLatency(20.0)))
+    view.rooms["west"].append("part")  # the map puts it where its light is
+    await home.manager.on_device_discovered("part")
+
+    owned = {info.zone_id: info.lights for info in home.manager.running()}
+    assert owned == {HOME_ZONE_ID: ("b",), "west": ("a", "part")}  # the newer zone wins
+    west = home.host.runtimes["west"]
+    assert west.leds.count == 8 and home.routes.routes["part"].source is west
+    assert part.names() == ["capture", "prepare_stream"]  # it streams; never switched on
