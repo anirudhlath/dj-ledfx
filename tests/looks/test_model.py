@@ -13,19 +13,24 @@ from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.strip_adapter import StripAdapter
 from dj_ledfx.looks.model import (
+    LIGHTS_SETTING,
     Layer,
     Look,
     LookError,
     LookModifiers,
     Transition,
+    effect_settings,
     firmware_layers,
+    layer_lights,
     look_from_dict,
     look_to_dict,
     make_effect,
     setting_schema,
     validate_look,
     visible_field_layer,
+    visible_field_layers,
 )
+from dj_ledfx.looks.selectors import Selector
 from dj_ledfx.types import FloatRGB
 
 
@@ -166,7 +171,11 @@ def test_looks_m1_cannot_run_are_refused_with_the_reason(
         ([_layer(type="firmware", kind="breathe")], "firmware"),
         ([_layer(kind="lifx_flame", settings={})], "field"),
         ([_layer(settings={"beats_per_cycle": {"value": 99.0}})], "above max"),
-        ([_layer(id="a"), _layer(id="b")], "one streamed layer"),
+        (
+            [_layer(type="firmware", kind="lifx_flame", settings={"lights": {"value": "type:"}})],
+            "one word",
+        ),
+        ([_layer(settings={"lights": {"value": ["lamp"]}})], "M4"),
     ],
 )
 def test_layer_problems_are_refused(layers: list[dict[str, Any]], reason: str) -> None:
@@ -281,3 +290,37 @@ def test_the_new_setting_types_reach_the_schema_in_the_contracts_names() -> None
     }
     assert (schema["band"]["min"], schema["band"]["max"]) == (0.0, 3.0)
     assert schema["level"]["bindable"] is True
+
+
+def test_field_layers_stack_and_firmware_layers_pick_their_lights() -> None:
+    look = look_from_dict(
+        _look(
+            layers=[
+                _layer(id="a"),
+                _layer(id="b", blend="screen", opacity=0.5),
+                _layer(
+                    id="c",
+                    type="firmware",
+                    kind="lifx_flame",
+                    settings={LIGHTS_SETTING: {"value": "type:candle"}, "period": {"value": 3.0}},
+                ),
+            ]
+        )
+    )
+    validate_look(look)
+    assert [layer.id for layer in visible_field_layers(look)] == ["a", "b"]
+    flame = look.layers[2]
+    assert layer_lights(flame) == (Selector("type", "candle"),)
+    assert effect_settings(flame) == {"period": 3.0}
+    assert layer_lights(look.layers[0]) is None
+    assert make_effect(flame).get_params()["period"] == 3.0
+
+
+def test_firmware_layers_offer_a_lights_setting() -> None:
+    assert setting_schema("lifx_flame")[-1] == {
+        "key": "lights",
+        "label": "Lights",
+        "bindable": False,
+        "type": "lights",
+    }
+    assert "lights" not in {entry["key"] for entry in setting_schema("breathe")}

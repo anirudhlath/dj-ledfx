@@ -1,0 +1,48 @@
+"""Which lights a layer picks (spec §5.1's device_set): light ids, or type:<word>, which
+picks every light with that whole word in its name or model (type:candle)."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass
+from typing import Literal
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+@dataclass(frozen=True, slots=True)
+class Selector:
+    kind: Literal["id", "type"]
+    value: str
+
+
+def parse_selector(text: str) -> Selector:
+    stripped = text.strip()
+    if not stripped:
+        raise ValueError("A light selector can't be empty")
+    if stripped.lower().startswith("type:"):
+        word = stripped[len("type:") :].strip().lower()
+        if not _WORD.fullmatch(word):
+            raise ValueError(
+                f"Selector {stripped!r}: type: takes one word of letters and digits, "
+                "such as type:candle"
+            )
+        return Selector("type", word)
+    return Selector("id", stripped)
+
+
+def selects(selectors: Sequence[Selector], ids: Collection[str], text: str) -> bool:
+    """Whether any selector picks a light with these ids (its device id and light id) and
+    this name and model text."""
+    words: set[str] | None = None
+    for selector in selectors:
+        if selector.kind == "id":
+            if selector.value in ids:
+                return True
+            continue
+        if words is None:
+            words = set(_WORD.findall(text.lower()))
+        if selector.value in words:
+            return True
+    return False

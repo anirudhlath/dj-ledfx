@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Iterator, Sequence
+from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, ClassVar
 
@@ -372,3 +373,93 @@ def test_zone_lights_with_the_same_placement_are_equal() -> None:
     other = ZoneLight("lamp", 2, LAMP, placed=PlacedLeds.from_positions(points.copy()))
     assert one == other
     assert one != ZoneLight("lamp", 2, LAMP, placed=PlacedLeds.from_positions(points + 1.0))
+
+
+CANDLES = (
+    ZoneLight("c1", 4, TILE, light_id="c1", name="Candle 1"),
+    ZoneLight("tile", 4, TILE, light_id="tile", name="Tile"),
+    ZoneLight("lamp", 3, LAMP, light_id="lamp", name="Lamp"),
+)
+
+
+def _flame(lights: Any = None) -> Layer:
+    settings = {} if lights is None else {"lights": lights}
+    return Layer(id="flame", name="Flame", type="firmware", kind="lifx_flame", settings=settings)
+
+
+def test_field_layers_blend_bottom_to_top() -> None:
+    glaze = Layer(
+        id="glaze",
+        name="Glaze",
+        type="field",
+        kind="flat_field",
+        blend="add",
+        opacity=0.5,
+        settings={"level": 0.3},
+    )
+    runtime = _runtime(_look(_field(level=0.2), glaze))
+    runtime.tick(100.0)
+    assert np.allclose(_latest(runtime), 0.35)
+
+
+def test_a_firmware_layer_claims_only_the_lights_it_picks() -> None:
+    by_type = _runtime(_look(_field(), _flame("type:candle")), CANDLES)
+    assert by_type.mode_of("c1") == "own-effect"
+    assert by_type.mode_of("tile") == by_type.mode_of("lamp") == "streaming"
+
+    by_id = _runtime(_look(_field(), _flame(["tile"])), CANDLES)
+    assert by_id.mode_of("tile") == "own-effect" and by_id.mode_of("c1") == "streaming"
+
+
+def test_without_a_field_a_light_no_layer_picks_stays_dark() -> None:
+    glow = replace(_glow(level=0.4), settings={"level": 0.4, "lights": "type:candle"})
+    runtime = _runtime(_look(glow), CANDLES)
+    runtime.tick(100.0)
+    frame = _latest(runtime)
+    assert np.allclose(frame[:4], 0.4)  # the candle's own effect, drawn for the preview
+    assert not frame[4:].any()
+    assert runtime.effect_name("lamp") is None
+
+
+# M1 review: drawing a light that runs its own effect only feeds the web app's preview,
+# so it happens only while someone watches. A streamed copy reaches the light: always.
+def test_lights_running_their_own_effect_are_drawn_only_while_watched() -> None:
+    watching = [False]
+    runtime = _runtime(_look(_field(0.5), _glow(level=0.9)), watched=lambda: watching[0])
+    assert runtime.mode_of("tile") == "own-effect"
+
+    runtime.tick(100.0)
+    assert np.allclose(_latest(runtime)[:4], 0.5)  # not emulated: the field lies under it
+
+    watching[0] = True
+    runtime.tick(100.1)
+    assert np.allclose(_latest(runtime)[:4], 0.9)
+
+    runtime.mark_emulated("tile")
+    watching[0] = False
+    runtime.tick(100.2)
+    assert np.allclose(_latest(runtime)[:4], 0.9)  # now a streamed copy, watched or not
+
+
+def test_update_look_tunes_every_field_layer_in_place() -> None:
+    top = Layer(
+        id="top", name="Top", type="field", kind="flat_field", blend="max", settings={"level": 0.1}
+    )
+    runtime = _runtime(_look(_field(0.2), top))
+    bottom = runtime.field_effect
+
+    runtime.update_look(_look(_field(0.2), replace(top, settings={"level": 0.6})))
+    runtime.tick(100.0)
+
+    assert runtime.field_effect is bottom
+    assert np.allclose(_latest(runtime), 0.6)
+
+
+def test_changing_the_lights_a_layer_picks_plans_the_claims_again() -> None:
+    runtime = _runtime(_look(_field(), _flame()))
+    assert runtime.mode_of("tile") == "own-effect"
+    generation = runtime.generation
+
+    runtime.update_look(_look(_field(), _flame("type:candle")))  # LIGHTS has no candle
+
+    assert runtime.mode_of("tile") == "streaming" and runtime.generation > generation

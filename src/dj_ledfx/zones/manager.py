@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 from loguru import logger
 
 from dj_ledfx.devices.capabilities import FirmwareRejected, LightReading, try_read
+from dj_ledfx.devices.lights import light_id_of
 from dj_ledfx.effects.registry import get_strip_effect_classes
 from dj_ledfx.looks.builtin import classic_look_id
 from dj_ledfx.looks.model import (
@@ -754,7 +755,15 @@ class ZoneManager:
         adapter = self._adapter(device_id)
         if adapter is None:
             return None
-        return ZoneLight(device_id, adapter.led_count, adapter.capabilities, adapter.geometry)
+        info = adapter.device_info
+        return ZoneLight(
+            device_id,
+            adapter.led_count,
+            adapter.capabilities,
+            adapter.geometry,
+            light_id=light_id_of(info),
+            name=info.name,
+        )
 
     def _zone_lights(self, device_ids: Iterable[str]) -> list[ZoneLight]:
         return [light for d in device_ids if (light := self._zone_light(d)) is not None]
