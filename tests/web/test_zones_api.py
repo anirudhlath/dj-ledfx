@@ -8,6 +8,7 @@ import pytest_asyncio
 from api_home import Api, api_home
 from conftest import FakeLight
 
+from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.web.contract import running_zone_out
 from dj_ledfx.zones.model import RunningZoneInfo, ZoneRecord
 
@@ -170,4 +171,4 @@ def test_a_running_zone_says_which_rooms_it_covers() -> None:
         state="running",
         covers=("Kitchen", "Bedroom"),
     )
-    assert running_zone_out(info).covers == ["Kitchen", "Bedroom"]
+    assert running_zone_out(info, LightIndex(())).covers == ["Kitchen", "Bedroom"]

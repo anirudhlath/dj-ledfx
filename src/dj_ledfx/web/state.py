@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from dj_ledfx.devices.lights import LightIndex
+
 if TYPE_CHECKING:
     from fastapi import Request
 
@@ -54,3 +56,8 @@ def get_light_monitor(request: Request) -> LightMonitor:
 
 def get_attention(request: Request) -> AttentionFeed:
     return cast("AttentionFeed", _required(request, "attention_feed", "Attention items"))
+
+
+def light_index(app: Any) -> LightIndex:
+    """Which devices make which light, as of now: rebuilt on every call (it's cheap)."""
+    return LightIndex.from_manager(app.state.device_manager)

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
+from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.timing import utcnow
 from dj_ledfx.zones.model import AttentionChanged
 
@@ -109,8 +110,14 @@ class AttentionFeed:
         self._running = False
 
     def _name(self, device_id: str) -> str:
+        """A light's name; a PC part's is the PC's and the part's ("PC RAM")."""
         managed = self._devices.get_by_stable_id(device_id)
-        return managed.adapter.device_info.name if managed is not None else device_id
+        if managed is None:
+            return device_id
+        name = managed.adapter.device_info.name
+        index = LightIndex.from_manager(self._devices)
+        entry = index.get(index.light_of(device_id))
+        return f"{entry.name} {name}" if entry is not None and entry.is_pc else name
 
     def _offline_lights(self, now: datetime) -> list[AttentionItem]:
         items: list[AttentionItem] = []

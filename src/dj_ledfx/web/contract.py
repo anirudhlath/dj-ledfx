@@ -6,7 +6,7 @@ the web app generates its types from the OpenAPI schema (spec §9).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Literal
 
@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities, LightProtocol
+from dj_ledfx.devices.lights import LightEntry, LightIndex
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.color import rgb_to_hex
 from dj_ledfx.effects.firmware import FirmwareEffect
@@ -208,11 +209,13 @@ class UpdateGroup(ContractModel):
     lights: list[str] | None = None
 
 
-def zone_out(zone: ZoneRecord) -> Zone:
-    return Zone(id=zone.id, name=zone.name, kind=zone.kind, lights=list(zone.lights))
+def zone_out(zone: ZoneRecord, index: LightIndex) -> Zone:
+    return Zone(
+        id=zone.id, name=zone.name, kind=zone.kind, lights=list(index.collapse(zone.lights))
+    )
 
 
-def _running_fields(info: RunningZoneInfo) -> dict[str, Any]:
+def _running_fields(info: RunningZoneInfo, index: LightIndex) -> dict[str, Any]:
     fps = None
     if info.fps_actual is not None and info.fps_target is not None:
         fps = {"actual": round(info.fps_actual, 1), "target": info.fps_target}
@@ -225,7 +228,7 @@ def _running_fields(info: RunningZoneInfo) -> dict[str, Any]:
         "look_name": info.look_name,
         "since": info.since,
         "brightness": info.brightness,
-        "lights": list(info.lights),
+        "lights": list(index.collapse(info.lights)),
         "covers": list(info.covers),
         "state": info.state,
         "fps": fps,
@@ -234,26 +237,26 @@ def _running_fields(info: RunningZoneInfo) -> dict[str, Any]:
     }
 
 
-def running_zone_out(info: RunningZoneInfo) -> RunningZone:
-    return RunningZone.model_validate(_running_fields(info))
+def running_zone_out(info: RunningZoneInfo, index: LightIndex) -> RunningZone:
+    return RunningZone.model_validate(_running_fields(info, index))
 
 
-def running_out(infos: Iterable[RunningZoneInfo]) -> Running:
-    return Running(zones=[running_zone_out(info) for info in infos])
+def running_out(infos: Iterable[RunningZoneInfo], index: LightIndex) -> Running:
+    return Running(zones=[running_zone_out(info, index) for info in infos])
 
 
-def start_out(result: StartResult) -> StartResponse:
+def start_out(result: StartResult, index: LightIndex) -> StartResponse:
     take_overs = [
         {
             "zone_id": take_over.zone_id,
             "zone_name": take_over.zone_name,
             "look_name": take_over.look_name,
-            "lights": list(take_over.lights),
+            "lights": list(index.collapse(take_over.lights)),
             "stopped": take_over.stopped,
         }
         for take_over in result.take_overs
     ]
-    fields = {**_running_fields(result.running), "take_overs": take_overs}
+    fields = {**_running_fields(result.running, index), "take_overs": take_overs}
     return StartResponse.model_validate(fields)
 
 
@@ -267,6 +270,7 @@ class LightLatency(ContractModel):
 
 
 class LightPart(ContractModel):
+    id: str  # the part's device id, which places it on its own (ruling 4; not in the contract)
     name: str
     leds: int
 
@@ -375,6 +379,77 @@ def light_out(managed: ManagedDevice, state: LightState, stats: DeviceStats | No
     )
 
 
+def pc_out(
+    entry: LightEntry,
+    parts: Sequence[ManagedDevice],
+    state: LightState,
+    stats: Mapping[str, DeviceStats],
+) -> Light:
+    """The PC as one light (spec §6.3): its parts' LEDs, capabilities and effects together,
+    the largest latency, the slowest streaming part's send rate and the worst drop rate.
+    state is its combined state (zones.lights.combine_states)."""
+    effects: list[str] = []
+    flags = dict.fromkeys(("colour", "multizone", "matrix", "effects"), False)
+    for managed in parts:
+        caps = managed.adapter.capabilities
+        effects += [name for name in built_in_effects(caps) if name not in effects]
+        flags["colour"] = flags["colour"] or caps.colour
+        flags["multizone"] = flags["multizone"] or caps.multizone
+        flags["matrix"] = flags["matrix"] or caps.matrix
+    flags["effects"] = bool(effects)
+    numbers = [stats[d] for d in entry.devices if d in stats]
+    sending = [entry_stats.send_fps for entry_stats in numbers if entry_stats.send_fps > 0]
+    first = parts[0].adapter
+    return Light.model_validate(
+        {
+            "id": entry.id,
+            "name": entry.name,
+            "model": first.capabilities.protocol,
+            "protocol": first.capabilities.protocol,
+            "leds": entry.leds,
+            "capabilities": [name for name, on in flags.items() if on],
+            "built_in_effects": effects,
+            "parts": [{"id": p.id, "name": p.name, "leds": p.leds} for p in entry.parts],
+            "status": state.status,
+            "status_since": state.since,
+            "own_effect": state.own_effect,
+            "latency": {
+                "measured_ms": max(
+                    round(m.tracker.effective_latency_ms - m.tracker.manual_offset_ms, 1)
+                    for m in parts
+                ),
+                "estimated": any(not m.adapter.supports_latency_probing for m in parts),
+            },
+            "send_fps": round(min(sending), 1) if sending else 0.0,
+            "dropped_pct": round(max((s.dropped_pct for s in numbers), default=0.0), 2),
+            "address": first.device_info.address,
+            "power": state.power,
+            "colour": _hex(state.colour),
+        }
+    )
+
+
+def light_stats(index: LightIndex, stats: Iterable[DeviceStats]) -> list[dict[str, Any]]:
+    """The stats channel's per-light entries (web spec §12.4), numbers combined as pc_out
+    combines them."""
+    by_device = {entry.device_id: entry for entry in stats if entry.device_id}
+    out: list[dict[str, Any]] = []
+    for light in index.entries:
+        parts = [by_device[d] for d in light.devices if d in by_device]
+        if not parts:
+            continue
+        sending = [part.send_fps for part in parts if part.send_fps > 0]
+        out.append(
+            {
+                "id": light.id,
+                "send_fps": min(sending, default=0.0),
+                "latency_ms": max(part.effective_latency_ms for part in parts),
+                "dropped_pct": max(part.dropped_pct for part in parts),
+            }
+        )
+    return out
+
+
 def light_update_out(state: LightState) -> LightUpdate:
     return LightUpdate(
         id=state.device_id,
@@ -386,13 +461,16 @@ def light_update_out(state: LightState) -> LightUpdate:
     )
 
 
-def attention_out(item: attention.AttentionItem) -> AttentionItem:
+def attention_out(item: attention.AttentionItem, index: LightIndex) -> AttentionItem:
+    """A light item is about the light: a PC part's is about the PC (ruling 8). Its id
+    stays the part's, so two parts offline are two items."""
+    subject = index.light_of(item.subject_id) if item.subject_type == "light" else item.subject_id
     return AttentionItem.model_validate(
         {
             "id": item.id,
             "severity": item.severity,
             "kind": item.kind,
-            "subject": {"type": item.subject_type, "id": item.subject_id},
+            "subject": {"type": item.subject_type, "id": subject},
             "title": item.title,
             "detail": item.detail,
             "since": item.since,

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from conftest import FakeLight
 from zone_home import BREATHE_AND_GLOW, GLOW, TILE, Home, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.events import DeviceOfflineEvent
-from dj_ledfx.zones.lights import LightMonitor
+from dj_ledfx.zones.lights import LightMonitor, LightState, combine_states
 from dj_ledfx.zones.model import LightsChanged
 
 LAMP = DeviceCapabilities(protocol="Govee")
@@ -225,3 +225,28 @@ async def test_run_polls_zone_lights_often_and_idle_lights_rarely(
     assert home.manager.power_of("a") is False  # read again within 50 ms
     idle = monitor.state("spare")
     assert idle is not None and idle.colour == (1, 1, 1)  # not read again for 60 s
+
+
+def test_a_light_of_several_devices_shows_its_most_active_one() -> None:
+    at = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    parts = [
+        LightState("k", "offline", at),
+        LightState("r", "idle", at, power=True, colour=(1, 2, 3)),
+        LightState("m", "own-effect", at, own_effect="Rainbow", power=False),
+    ]
+
+    pc = combine_states("pc", parts)
+
+    assert pc is not None
+    assert (pc.device_id, pc.status, pc.own_effect, pc.power, pc.colour) == (
+        "pc",
+        "own-effect",
+        "Rainbow",
+        True,  # any part on
+        None,  # the parts' colours differ
+    )
+    assert combine_states("pc", []) is None
+    alone = combine_states("lamp", [parts[1]])
+    assert alone is not None and (alone.device_id, alone.colour) == ("lamp", (1, 2, 3))
+    dark = combine_states("pc", [LightState("k", "switched-off", at, power=False)] * 2)
+    assert dark is not None and dark.power is False

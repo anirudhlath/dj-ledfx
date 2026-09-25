@@ -13,7 +13,7 @@ from loguru import logger
 from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.web import contract
 from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
-from dj_ledfx.web.state import ClientSubscription
+from dj_ledfx.web.state import ClientSubscription, light_index
 from dj_ledfx.zones.frames import STREAMS
 from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
 
@@ -134,7 +134,7 @@ def _running_message(app: Any) -> dict[str, Any] | None:
     zones = getattr(app.state, "zone_manager", None)
     if zones is None:
         return None
-    running = contract.running_out(zones.running())
+    running = contract.running_out(zones.running(), light_index(app))
     return {"channel": "running", **running.model_dump(mode="json", by_alias=True)}
 
 
@@ -142,7 +142,7 @@ def _lights_message(app: Any) -> dict[str, Any] | None:
     monitor = getattr(app.state, "light_monitor", None)
     if monitor is None:
         return None
-    lights = [contract.light_update_out(state) for state in monitor.states()]
+    lights = [contract.light_update_out(s) for s in monitor.light_states(light_index(app))]
     return {
         "channel": "lights",
         "lights": [light.model_dump(mode="json", by_alias=True) for light in lights],
@@ -153,7 +153,8 @@ def _attention_message(app: Any) -> dict[str, Any] | None:
     feed = getattr(app.state, "attention_feed", None)
     if feed is None:
         return None
-    items = [contract.attention_out(item) for item in feed.items()]
+    index = light_index(app)
+    items = [contract.attention_out(item, index) for item in feed.items()]
     return {
         "channel": "attention",
         "items": [item.model_dump(mode="json", by_alias=True) for item in items],
@@ -251,36 +252,40 @@ async def _stats_poll(ws: WebSocket, app: Any) -> None:
 
 
 def stats_message(app: Any) -> dict[str, Any]:
-    """The stats channel's message: each device's send statistics."""
+    """The stats channel's message: each device's send statistics (the old UI), and each
+    light's (web spec §12.4)."""
     scheduler = app.state.scheduler
     try:
         stats = scheduler.get_device_stats()
-        # Each device's status by stable id: lights may share a name (the RAM sticks)
-        manager = app.state.device_manager
-        status_by_id: dict[str, str] = {}
-        try:
-            for d in manager.devices:
-                status_by_id[d.adapter.device_info.effective_id] = d.status
-        except Exception:
-            pass
-        return {
-            "channel": "stats",
-            "devices": [
-                {
-                    "id": s.device_id,
-                    "name": s.device_name,
-                    "send_fps": s.send_fps,
-                    "latency_ms": s.effective_latency_ms,
-                    "frames_dropped": s.frames_dropped,
-                    "dropped_pct": s.dropped_pct,
-                    "connected": s.connected,
-                    "status": status_by_id.get(s.device_id, "online"),
-                }
-                for s in stats
-            ],
-        }
     except Exception:
-        return {"channel": "stats", "devices": []}
+        return {"channel": "stats", "devices": [], "lights": []}
+    status_by_id: dict[str, str] = {}
+    try:  # each device's status by stable id: lights may share a name (the RAM sticks)
+        for d in app.state.device_manager.devices:
+            status_by_id[d.adapter.device_info.effective_id] = d.status
+    except Exception:
+        pass
+    try:
+        lights = contract.light_stats(light_index(app), stats)
+    except Exception:
+        lights = []
+    return {
+        "channel": "stats",
+        "devices": [
+            {
+                "id": s.device_id,
+                "name": s.device_name,
+                "send_fps": s.send_fps,
+                "latency_ms": s.effective_latency_ms,
+                "frames_dropped": s.frames_dropped,
+                "dropped_pct": s.dropped_pct,
+                "connected": s.connected,
+                "status": status_by_id.get(s.device_id, "online"),
+            }
+            for s in stats
+        ],
+        "lights": lights,
+    }
 
 
 async def _status_poll(ws: WebSocket, app: Any) -> None:

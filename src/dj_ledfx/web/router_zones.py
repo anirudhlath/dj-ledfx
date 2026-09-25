@@ -8,28 +8,32 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from dj_ledfx.web import contract as api
 from dj_ledfx.web.errors import answers
-from dj_ledfx.web.state import get_looks, get_zones
+from dj_ledfx.web.state import get_looks, get_zones, light_index
 
 router = APIRouter()
 
 
 @router.get("/zones")
 async def list_zones(request: Request) -> list[api.Zone]:
-    return [api.zone_out(zone) for zone in get_zones(request).zones()]
+    index = light_index(request.app)
+    return [api.zone_out(zone, index) for zone in get_zones(request).zones()]
 
 
 @router.post("/zones/groups", status_code=201)
 async def create_group(request: Request, body: api.CreateGroup) -> api.Zone:
+    index = light_index(request.app)
     with answers():
-        zone = await get_zones(request).create_group(body.name, body.lights)
-    return api.zone_out(zone)
+        zone = await get_zones(request).create_group(body.name, index.expand(body.lights))
+    return api.zone_out(zone, index)
 
 
 @router.put("/zones/groups/{zone_id}")
 async def update_group(request: Request, zone_id: str, body: api.UpdateGroup) -> api.Zone:
+    index = light_index(request.app)
+    lights = index.expand(body.lights) if body.lights is not None else None
     with answers():
-        zone = await get_zones(request).update_group(zone_id, name=body.name, lights=body.lights)
-    return api.zone_out(zone)
+        zone = await get_zones(request).update_group(zone_id, name=body.name, lights=lights)
+    return api.zone_out(zone, index)
 
 
 @router.delete("/zones/groups/{zone_id}", status_code=204)
@@ -42,7 +46,7 @@ async def delete_group(request: Request, zone_id: str) -> Response:
 
 @router.get("/running")
 async def list_running(request: Request) -> api.Running:
-    return api.running_out(get_zones(request).running())
+    return api.running_out(get_zones(request).running(), light_index(request.app))
 
 
 @router.post("/zones/{zone_id}/start")
@@ -58,14 +62,14 @@ async def start_zone(request: Request, zone_id: str, body: api.StartRequest) -> 
         else:
             raise HTTPException(status_code=400, detail="Send either lookId or look")
         result = await get_zones(request).start(zone_id, look)
-    return api.start_out(result)
+    return api.start_out(result, light_index(request.app))
 
 
 @router.put("/zones/{zone_id}/brightness")
 async def set_brightness(request: Request, zone_id: str, body: api.Brightness) -> api.RunningZone:
     with answers():
         info = await get_zones(request).set_brightness(zone_id, body.value)
-    return api.running_zone_out(info)
+    return api.running_zone_out(info, light_index(request.app))
 
 
 @router.post("/zones/{zone_id}/off", status_code=204)
@@ -80,7 +84,7 @@ async def turn_off(request: Request, zone_id: str) -> Response:
 async def restart_zone(request: Request, zone_id: str) -> api.RunningZone:
     with answers():
         info = await get_zones(request).restart(zone_id)
-    return api.running_zone_out(info)
+    return api.running_zone_out(info, light_index(request.app))
 
 
 @router.post("/running/stop-all", status_code=204)
