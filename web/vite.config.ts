@@ -22,7 +22,9 @@ export default defineConfig(({ mode }) => ({
       '/ws': { target: 'ws://localhost:8080', ws: true },
     },
   },
-  preview: { port: 4174, strictPort: true },
+  // No proxy for preview (it would default to server.proxy): e2e runs with no backend, and never
+  // reaches a server on :8080, the deployed app included.
+  preview: { port: 4174, strictPort: true, proxy: {} },
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
