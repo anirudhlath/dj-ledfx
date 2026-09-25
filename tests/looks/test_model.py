@@ -324,3 +324,24 @@ def test_firmware_layers_offer_a_lights_setting() -> None:
         "type": "lights",
     }
     assert "lights" not in {entry["key"] for entry in setting_schema("breathe")}
+
+
+def test_strip_effects_offer_the_projection_settings() -> None:
+    schema = {entry["key"]: entry for entry in setting_schema("breathe")}
+    assert list(schema)[-3:] == ["mapping", "axis", "centre"]
+    assert schema["mapping"]["options"] == ["linear", "radial", "order"]
+    assert schema["centre"]["type"] == "anchor"
+    assert "mapping" not in {entry["key"] for entry in setting_schema("lifx_flame")}
+
+
+def test_a_strip_layer_takes_its_projection_from_its_settings() -> None:
+    effect = make_effect(
+        Layer(
+            id="l",
+            name="Breathe",
+            type="field",
+            kind="breathe",
+            settings={"beats_per_cycle": 2.0, "mapping": "radial", "centre": "sofa"},
+        )
+    )
+    assert isinstance(effect, StripAdapter) and effect.get_params()["beats_per_cycle"] == 2.0

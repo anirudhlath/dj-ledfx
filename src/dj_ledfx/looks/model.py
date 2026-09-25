@@ -15,7 +15,7 @@ from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.registry import get_effect_class
-from dj_ledfx.effects.strip_adapter import StripAdapter
+from dj_ledfx.effects.strip_adapter import PROJECTION_PARAMS, StripAdapter
 from dj_ledfx.looks.selectors import Selector, parse_selector
 
 LayerType = Literal["field", "particles", "firmware"]
@@ -221,6 +221,8 @@ def setting_schema(kind: str) -> list[dict[str, Any]]:
     entries = [_schema_entry(key, param) for key, param in cls.parameters().items()]
     if issubclass(cls, FirmwareEffect):
         entries.append(dict(_LIGHTS_ENTRY))
+    if issubclass(cls, StripEffect):
+        entries += [_schema_entry(key, param) for key, param in PROJECTION_PARAMS.items()]
     return entries
 
 
@@ -274,25 +276,29 @@ def look_to_dict(
 
 
 def make_effect(layer: Layer) -> FieldEffect | FirmwareEffect:
-    """A fresh effect for the layer with its settings applied. Strip effects come wrapped."""
+    """A fresh effect for the layer with its settings applied. Strip effects come wrapped,
+    so the adapter takes its projection settings and passes the rest on."""
     try:
         cls = get_effect_class(layer.kind)
     except KeyError:
         raise LookError(f"Layer '{layer.name}' uses an unknown effect '{layer.kind}'") from None
-    effect = cls()
+    raw = cls()
+    effect: FieldEffect | FirmwareEffect
+    if layer.type == "firmware":
+        if not isinstance(raw, FirmwareEffect):
+            raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a firmware effect")
+        effect = raw
+    elif isinstance(raw, StripEffect):
+        effect = StripAdapter(raw)
+    elif isinstance(raw, FieldEffect):
+        effect = raw
+    else:
+        raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a field effect")
     try:
         effect.set_params(**effect_settings(layer))
     except (TypeError, ValueError) as exc:
         raise LookError(f"Layer '{layer.name}': {exc}") from exc
-    if layer.type == "firmware":
-        if not isinstance(effect, FirmwareEffect):
-            raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a firmware effect")
-        return effect
-    if isinstance(effect, StripEffect):
-        return StripAdapter(effect)
-    if isinstance(effect, FieldEffect):
-        return effect
-    raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a field effect")
+    return effect
 
 
 def _visible_fields(look: Look) -> list[Layer]:

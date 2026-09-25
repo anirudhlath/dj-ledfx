@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Any
 
 import numpy as np
@@ -14,7 +15,7 @@ from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.fire_storm import FireStorm
 from dj_ledfx.effects.firmware import FirmwareEffect, Params
-from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
+from dj_ledfx.effects.ledset import LedSet, LedSource, PlacedLeds, Space, build_ledset
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.registry import (
     get_effect_class,
@@ -107,21 +108,60 @@ def test_unknown_kinds_raise_key_error() -> None:
 
 def test_strip_adapter_plays_the_strip_along_the_leds_in_order() -> None:
     leds = build_ledset([LedSource("a", 3), LedSource("b", 2)])
-    colors = StripAdapter(_Ramp()).render(render_ctx(), leds)
+    adapter = StripAdapter(_Ramp())
+    adapter.set_params(mapping="order")
+    colors = adapter.render(render_ctx(), leds)
     assert colors.shape == (5, 3)
     assert colors.dtype == np.float32
     assert np.allclose(colors[:, 0], np.linspace(0, 255, 5).astype(np.uint8) / 255.0)
     assert np.all(colors[:, 1:] == 0.0)
 
 
+RAMP = np.linspace(0, 255, 4).astype(np.uint8) / 255.0  # the strip's 4 reds, in order
+
+
+def _placed(points: list[list[float]], space: Space | None = None) -> LedSet:
+    placed = PlacedLeds.from_positions(np.array(points, dtype=np.float64))
+    return build_ledset([LedSource("a", len(points), placed=placed)], space or Space())
+
+
+def test_strip_adapter_projects_each_led_onto_an_axis() -> None:
+    leds = _placed([[3.0, 0.0, 0.0], [0.0, 0.0, 2.0], [2.0, 0.0, 1.0], [1.0, 0.0, 3.0]])
+    adapter = StripAdapter(_Ramp())  # linear along east by default
+    assert np.allclose(adapter.render(render_ctx(), leds)[:, 0], RAMP[[3, 0, 2, 1]])
+    adapter.set_params(axis="up")
+    assert np.allclose(adapter.render(render_ctx(), leds)[:, 0], RAMP[[0, 2, 1, 3]])
+
+
+def test_strip_adapter_projects_radially_from_an_anchor_or_the_middle() -> None:
+    sofa = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    leds = _placed(
+        [[0.0, 2.0, 0.0], [0.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 1.0, 0.0]],
+        Space(anchors=MappingProxyType({"sofa": sofa})),
+    )
+    adapter = StripAdapter(_Ramp())
+    adapter.set_params(mapping="radial", centre="sofa")
+    assert np.allclose(adapter.render(render_ctx(), leds)[:, 0], RAMP[[2, 0, 3, 1]])
+    adapter.set_params(centre="")  # the middle of the zone: y = 1.5
+    middle = adapter.render(render_ctx(), leds)[:, 0]
+    assert middle[0] == middle[3] and middle[1] == middle[2] and middle[1] > middle[0]
+
+
 def test_strip_adapter_forwards_parameters() -> None:
     inner = _Ramp()
     adapter = StripAdapter(inner)
-    adapter.set_params(level=0.5)
+    adapter.set_params(level=0.5, mapping="radial")
     assert inner.level == 0.5
-    assert adapter.get_params() == {"level": 0.5}
-    with pytest.raises(ValueError):
-        adapter.set_params(level=2.0)
+    assert adapter.get_params() == {"level": 0.5}  # the strip effect's own settings
+    with pytest.raises(ValueError, match="above max"):
+        adapter.set_params(level=2.0, mapping="order")
+    with pytest.raises(ValueError, match="not in"):
+        adapter.set_params(mapping="spiral")
+    leds = _placed([[3.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
+    # A refused change changes nothing: still radial from the middle (x = 1.5), so the
+    # two outer LEDs match and so do the two inner ones; in LED order all four differ.
+    radial = adapter.render(render_ctx(), leds)[:, 0]
+    assert radial[0] == radial[1] and radial[2] == radial[3] and radial[0] > radial[2]
 
 
 def test_fire_storm_repeats_after_reseed() -> None:

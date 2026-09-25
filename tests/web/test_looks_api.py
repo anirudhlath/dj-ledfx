@@ -57,6 +57,9 @@ async def test_looks_come_built_in_first_in_the_contract_shape(api: Api) -> None
         "palette",
         "beats_per_cycle",
         "min_brightness",
+        "mapping",
+        "axis",
+        "centre",
     ]
     assert layer["schema"][1] == {
         "key": "beats_per_cycle",
