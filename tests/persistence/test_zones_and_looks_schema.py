@@ -18,8 +18,8 @@ async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
     await state_db.close()
 
 
-async def test_schema_version_is_4(db: StateDB) -> None:
-    assert await db.get_schema_version() == 4
+async def test_schema_version_is_5(db: StateDB) -> None:
+    assert await db.get_schema_version() == 5
 
 
 async def test_new_tables_exist(db: StateDB) -> None:
@@ -80,7 +80,7 @@ async def test_upgrade_clears_what_the_old_transport_left(tmp_path: Path) -> Non
     db = StateDB(path)
     await db.open()
     try:
-        assert await db.get_schema_version() == 4
+        assert await db.get_schema_version() == 5
         assert await db.load_all_device_states() == {}
         assert await db.load_config("engine") == {"fps": "60"}
     finally:

@@ -30,9 +30,9 @@ async def test_creates_db_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_schema_version_is_4(db):
+async def test_schema_version_is_5(db):
     version = await db.get_schema_version()
-    assert version == 4
+    assert version == 5
 
 
 @pytest.mark.asyncio
@@ -59,8 +59,10 @@ async def test_tables_created(db):
         "device_saved_state",
         "devices",
         "groups",
+        "home_map",
         "look_stars",
         "looks",
+        "placements",
         "presets",
         "scene_effect_state",
         "scene_placements",
@@ -81,7 +83,7 @@ async def test_idempotent_open(tmp_path):
     db2 = StateDB(db_path)
     await db2.open()
     version = await db2.get_schema_version()
-    assert version == 4
+    assert version == 5
     await db2.close()
 
 
