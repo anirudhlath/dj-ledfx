@@ -120,7 +120,7 @@ def test_first_placements_put_the_scene_over_the_seed_and_spread_the_rest() -> N
 
 def test_a_bad_scene_placement_is_skipped_and_its_light_is_guessed_instead() -> None:
     home = tiny_home()
-    lights = [_light("lamp"), _light("far"), _light("lost"), _light("tile")]
+    lights = [_light("lamp"), _light("far"), _light("lost"), _light("tile"), _light("huge")]
     scene = [
         ScenePlacement("s1", "lamp", (1.0, 2.0, 1.0), "point", None, None, None, None, None),
         ScenePlacement("s1", "far", (math.inf, 0.0, 0.0), "point", None, None, None, None, None),
@@ -128,6 +128,7 @@ def test_a_bad_scene_placement_is_skipped_and_its_light_is_guessed_instead() -> 
             "s1", "lost", (1.0, 2.0, 1.0), "strip", (1.0, 0.0, 0.0), math.nan, None, None, None
         ),
         ScenePlacement("s2", "tile", (0.0, 1.0, 0.0), "matrix", None, None, None, 0, 0),
+        ScenePlacement("s3", "huge", (0.0, 1.0, 0.0), "matrix", None, None, None, 1, 10**6),
     ]
 
     first = first_placements(home, lights, [], scene)
@@ -136,7 +137,7 @@ def test_a_bad_scene_placement_is_skipped_and_its_light_is_guessed_instead() -> 
     assert first["lamp"].shape == PointShape(
         (cx, cy, GUESS_HEIGHT_M)
     )  # the bad one isn't in its centre
-    for light_id in ("far", "lost"):  # skipped: spread round the largest room instead
+    for light_id in ("far", "lost", "huge"):  # skipped: spread round the largest room instead
         shape = first[light_id].shape
         assert isinstance(shape, PointShape)
         assert math.hypot(shape.position[0] - cx, shape.position[1] - cy) == pytest.approx(

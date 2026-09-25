@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -20,6 +21,12 @@ ParamType = Literal[
     "device_set",  # light ids or a selector such as type:candle
     "range",  # a low-high pair, e.g. a height band
 ]
+
+
+# A palette holds 1 to this many colours: what a LIFX matrix's own effects take (the tile
+# effect packet's palette), so every palette setting fits every light.
+MAX_PALETTE_COLOURS = 16
+_HEX_COLOUR = re.compile(r"#[0-9a-fA-F]{6}")
 
 
 @dataclass(frozen=True)
@@ -50,6 +57,10 @@ def _numbers(value: Any, count: int) -> bool:
     )
 
 
+def _is_colour(value: Any) -> bool:
+    return isinstance(value, str) and _HEX_COLOUR.fullmatch(value) is not None
+
+
 def _within(key: str, param: EffectParam, value: Any, number: float) -> None:
     if param.min is not None and number < param.min:
         raise ValueError(f"{key}={value} below min {param.min}")
@@ -63,6 +74,19 @@ def check_setting(key: str, param: EffectParam, value: Any) -> None:
         if isinstance(value, bool) or not isinstance(value, int | float):
             raise ValueError(f"{key} must be a number")
         _within(key, param, value, value)
+    elif param.type == "color":
+        if not _is_colour(value):
+            raise ValueError(f"{key} must be a hex colour such as #ff6a00")
+    elif param.type == "color_list":
+        if (
+            isinstance(value, str)
+            or not isinstance(value, Sequence)
+            or not 1 <= len(value) <= MAX_PALETTE_COLOURS
+            or not all(_is_colour(item) for item in value)
+        ):
+            raise ValueError(
+                f"{key} must be 1 to {MAX_PALETTE_COLOURS} hex colours such as #ff6a00"
+            )
     elif param.type == "choice":
         if value not in (param.choices or []):
             raise ValueError(f"{key}={value} not in {param.choices}")

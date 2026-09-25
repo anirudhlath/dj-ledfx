@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from dj_ledfx.effects.params import EffectParam, check_setting
+from dj_ledfx.effects.params import MAX_PALETTE_COLOURS, EffectParam, check_setting
 
 
 def test_effect_param_float():
@@ -28,6 +28,9 @@ def test_effect_param_frozen():
         (EffectParam(type="device_set", default=[]), ["lamp-1", "type:candle"]),
         (EffectParam(type="device_set", default=""), "type:candle"),
         (EffectParam(type="float", default=0.5, min=0.0, max=1.0), 1),
+        (EffectParam(type="color", default="#000000"), "#FF6a00"),
+        (EffectParam(type="color_list", default=["#000000"]), ["#ff6a00"]),
+        (EffectParam(type="color_list", default=["#000000"]), ["#ffffff"] * MAX_PALETTE_COLOURS),
     ],
 )
 def test_settings_of_each_type_are_accepted(param: EffectParam, value: Any) -> None:
@@ -50,6 +53,17 @@ def test_settings_of_each_type_are_accepted(param: EffectParam, value: Any) -> N
         (EffectParam(type="float", default=0.5, min=0.0, max=1.0), True, "a number"),
         (EffectParam(type="float", default=0.5, min=0.0, max=1.0), 2.0, "above max"),
         (EffectParam(type="choice", default="a", choices=["a"]), "b", "not in"),
+        (EffectParam(type="color", default="#000000"), "red", "hex colour"),
+        (EffectParam(type="color", default="#000000"), "#fff", "hex colour"),
+        (EffectParam(type="color", default="#000000"), 0xFF0000, "hex colour"),
+        (EffectParam(type="color_list", default=["#000000"]), [], "1 to 16 hex colours"),
+        (EffectParam(type="color_list", default=["#000000"]), "#ff0000", "1 to 16 hex colours"),
+        (EffectParam(type="color_list", default=["#000000"]), ["#ff0000", "blue"], "hex colours"),
+        (
+            EffectParam(type="color_list", default=["#000000"]),
+            ["#ffffff"] * (MAX_PALETTE_COLOURS + 1),
+            "1 to 16 hex colours",
+        ),
     ],
 )
 def test_bad_settings_are_refused_with_the_reason(

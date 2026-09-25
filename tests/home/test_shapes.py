@@ -58,6 +58,10 @@ def test_a_grid_without_a_rotation_lies_flat() -> None:
         ({"kind": "point", "position": [0, float("nan"), 0]}, "finite"),
         ({"kind": "grid", "center": [0, 0, 0], "width": 1}, "finite number"),
         ([1, 2, 3], "must be an object"),
+        ({"kind": "point", "position": [1e308, 0, 0]}, "within 1000 m"),
+        ({"kind": "line", "path": [[0, 0, 0], [0, -1001, 0]]}, "within 1000 m"),
+        ({"kind": "cylinder", "base": [0, 0, 0], "height": 1e308, "radius": 0.1}, "1000 m"),
+        ({"kind": "grid", "center": [0, 0, 0], "width": 5000, "depth": 1}, "1000 m"),
     ],
 )
 def test_bad_shapes_are_refused_with_the_reason(data: Any, reason: str) -> None:
@@ -158,6 +162,8 @@ def test_shape_centres() -> None:
         (GridShape((0.0, 0.0, 0.0), 0.0, 0.0), 7, None),  # zero size
         (GridShape((0.0, 0.0, 0.0), 0.9, 0.3), 1, None),
         (LineShape(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))), 1, None),
+        (LineShape(((-1000.0, -1000.0, 0.0), (1000.0, 1000.0, 1000.0))), 9, None),  # the bound
+        (GridShape((1000.0, 0.0, 0.0), 1000.0, 1000.0, (1e6, 0.0, 0.0)), 16, None),
     ],
 )
 def test_every_shape_gives_one_finite_position_per_led(

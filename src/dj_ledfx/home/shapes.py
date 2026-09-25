@@ -35,6 +35,11 @@ LED_ORDERS: Mapping[str, tuple[str, ...]] = MappingProxyType(
 )
 
 
+# No coordinate or size goes past this, in metres: far beyond any home, and small enough
+# that the LED sets' sums and norms never overflow (a 1e308 m point made a zone's frames NaN).
+MAX_METRES = 1000.0
+
+
 class ShapeError(HomeError):
     """A light shape or LED order that can't be used, with the reason."""
 
@@ -42,11 +47,15 @@ class ShapeError(HomeError):
 def _check_point(point: Vec3, what: str) -> None:
     if len(point) != 3 or not all(math.isfinite(value) for value in point):
         raise ShapeError(f"{what} must be 3 finite numbers")
+    if any(abs(value) > MAX_METRES for value in point):
+        raise ShapeError(f"{what} must be within {MAX_METRES:g} m of the plan's origin")
 
 
 def _check_size(value: float, what: str) -> None:
     if not math.isfinite(value) or value < 0.0:
         raise ShapeError(f"{what} must be a finite number, 0 or more")
+    if value > MAX_METRES:
+        raise ShapeError(f"{what} must be {MAX_METRES:g} m or less")
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +116,8 @@ class GridShape:
         _check_point(self.center, "A grid's centre")
         _check_size(self.width, "A grid's width")
         _check_size(self.depth, "A grid's depth")
-        _check_point(self.rotation, "A grid's rotation")
+        if len(self.rotation) != 3 or not all(math.isfinite(angle) for angle in self.rotation):
+            raise ShapeError("A grid's rotation must be 3 finite numbers")
 
 
 LightShape = PointShape | LineShape | BentLineShape | CylinderShape | GridShape

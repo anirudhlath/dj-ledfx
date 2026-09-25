@@ -110,3 +110,18 @@ async def test_a_room_preview_ends_when_its_last_light_leaves_the_room(tmp_path:
         assert api.previews.runtimes() == [] and api.home.host.runtimes == {}
         gone = await api.client.delete(f"/api/preview/{preview_id}")
         assert gone.status_code == 404
+
+
+async def test_a_preview_change_with_an_empty_palette_is_refused(api: Api) -> None:
+    started = await api.client.post(
+        "/api/preview", json={"zoneId": "desk", "look": await _draft(api, "Breathe")}
+    )
+    preview_id = started.json()["previewId"]
+    empty = await _draft(api, "Breathe")
+    empty["layers"][0]["settings"] = {"palette": {"value": []}}
+
+    changed = await api.client.put(f"/api/preview/{preview_id}", json={"look": empty})
+
+    assert changed.status_code == 400 and "1 to 16 hex colours" in changed.json()["detail"]
+    [runtime] = api.previews.runtimes()
+    assert runtime.look.name == "Breathe"  # the preview plays on as it was

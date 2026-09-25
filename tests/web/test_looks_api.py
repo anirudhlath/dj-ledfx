@@ -143,3 +143,16 @@ async def test_the_openapi_schema_uses_the_contract_names(api: Api) -> None:
     assert names <= set(schema)
     assert {"schema", "settings"} <= set(schema["Layer"]["properties"])
     assert {"builtIn", "derivedFrom", "starred"} <= set(schema["Look"]["properties"])
+
+
+async def test_a_look_with_a_colour_it_cannot_use_is_refused(api: Api) -> None:
+    breathe = (await api.client.get("/api/looks/classic-breathe")).json()
+    breathe["layers"][0]["settings"] = {"palette": {"value": []}}
+    focus = (await api.client.get("/api/looks/focus")).json()
+    focus["layers"][0]["settings"]["calm"] = {"value": "red"}
+
+    no_colours = await api.client.post("/api/looks", json={**breathe, "name": "Empty"})
+    not_hex = await api.client.post("/api/looks", json={**focus, "name": "Red"})
+
+    assert no_colours.status_code == 400 and "1 to 16 hex colours" in no_colours.json()["detail"]
+    assert not_hex.status_code == 400 and "hex colour" in not_hex.json()["detail"]
