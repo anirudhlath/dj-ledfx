@@ -179,13 +179,16 @@ async def build_home(
     *,
     preview_only: bool = False,
     view: HomeView | None = None,
+    frames_watched: Callable[[], bool] | None = None,
 ) -> Home:
     db = StateDB(tmp_path / "state.db")
     await db.open()
     store = ZoneStore(db)
     for zone in zones:
         await store.save_zone(zone)
-    return await assemble(db, lights, [START], preview_only, view=view)
+    return await assemble(
+        db, lights, [START], preview_only, view=view, frames_watched=frames_watched
+    )
 
 
 async def assemble(
@@ -196,6 +199,7 @@ async def assemble(
     *,
     ghosts: bool = False,
     view: HomeView | None = None,
+    frames_watched: Callable[[], bool] | None = None,
 ) -> Home:
     """The app's objects around an open state.db and a set of lights."""
     bus = EventBus()
@@ -233,6 +237,7 @@ async def assemble(
         preview_only=preview_only,
         now=lambda: clock[0],
         home=view or NO_HOME,
+        frames_watched=frames_watched or (lambda: True),
     )
     home = Home(
         db=db,

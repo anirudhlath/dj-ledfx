@@ -8,9 +8,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import numpy as np
 from loguru import logger
-from numpy.typing import NDArray
 
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
@@ -71,10 +69,10 @@ class DeviceSendState:
 class LookaheadScheduler:
     """Sends each device the slice its route points at, for now plus the device's latency.
 
-    The zone manager sets the routes: this is its RouteTable. A device with no route gets
-    nothing. A route that doesn't stream (the light runs its own effect, isn't ready yet,
-    or preview-only is on) sends nothing either, but its slice still reaches the web
-    preview.
+    The zone manager sets the routes: this is its RouteTable. A device with no route, or a
+    route that doesn't stream (the light runs its own effect, isn't ready yet, or
+    preview-only is on), gets nothing, and nothing is read for it. The web app's frames
+    come from the rings (zones/frames.py), not from here.
     """
 
     def __init__(
@@ -90,8 +88,6 @@ class LookaheadScheduler:
         self._running = False
         self._event_bus = event_bus
         self._routes: dict[str, DeviceRoute] = {}
-        self._frame_snapshots: dict[str, tuple[NDArray[np.uint8], int]] = {}
-        self._frame_seq: dict[str, int] = {}
         self._device_state: dict[str, DeviceSendState] = {}
         for device in devices:
             key = self._device_key(device)
@@ -100,10 +96,6 @@ class LookaheadScheduler:
     @staticmethod
     def _device_key(managed: ManagedDevice) -> str:
         return managed.adapter.device_info.effective_id
-
-    @property
-    def frame_snapshots(self) -> dict[str, tuple[NDArray[np.uint8], int]]:
-        return self._frame_snapshots
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None:
         """Where a device's frames come from; None stops them."""
@@ -159,9 +151,10 @@ class LookaheadScheduler:
         logger.info("LookaheadScheduler stopped")
 
     def _distribute(self, now: float) -> None:
-        """Tell each routed device which moment its next frame is for: now + its latency."""
+        """Tell each streaming device which moment its next frame is for: now + its latency."""
         for key, state in self._device_state.items():
-            if key not in self._routes:
+            route = self._routes.get(key)
+            if route is None or not route.streaming:
                 continue
             if state.slot.has_pending:
                 logger.trace("Frame overwritten for '{}': it drains slower than the engine", key)
@@ -200,40 +193,33 @@ class LookaheadScheduler:
                 continue
 
             route = self._routes.get(key)
-            if route is None:
-                continue
+            if route is None or not route.streaming:
+                continue  # it stopped streaming after the slot was filled
             colors = route.colors_at(target_time, device.adapter.led_count)
             device_name = device.adapter.device_info.name
             if colors is None:
                 logger.trace("No frame yet for '{}' (target {:.3f})", device_name, target_time)
                 continue
 
-            if route.streaming:
-                async with device.adapter.send_lock:
-                    current = self._routes.get(key)  # a restore may have run meanwhile
-                    if current is None or not current.streaming:
-                        continue
-                    send_start = time.monotonic()
-                    try:
-                        await device.adapter.send_frame(colors)
-                    except Exception:
-                        logger.warning("Send failed for '{}'", device_name)
-                        continue
-                sent = time.monotonic()
-                metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
-                if device.adapter.supports_latency_probing:
-                    device.tracker.update((sent - send_start) * 1000.0)
-                state.send_count += 1
-                state.sent_at.append(sent)
-                trim_window(state.sent_at, sent)
-                metrics.DEVICE_LATENCY.labels(device=key).set(device.tracker.effective_latency_s)
-                metrics.DEVICE_FPS.labels(device=key).set(device.max_fps)
-
-            # The web preview shows every routed device's slice, sent or not, by stable id:
-            # lights may share a name (the four RAM sticks).
-            seq = self._frame_seq.get(key, 0) + 1
-            self._frame_seq[key] = seq
-            self._frame_snapshots[key] = (colors, seq)
+            async with device.adapter.send_lock:
+                current = self._routes.get(key)  # a restore may have run meanwhile
+                if current is None or not current.streaming:
+                    continue
+                send_start = time.monotonic()
+                try:
+                    await device.adapter.send_frame(colors)
+                except Exception:
+                    logger.warning("Send failed for '{}'", device_name)
+                    continue
+            sent = time.monotonic()
+            metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
+            if device.adapter.supports_latency_probing:
+                device.tracker.update((sent - send_start) * 1000.0)
+            state.send_count += 1
+            state.sent_at.append(sent)
+            trim_window(state.sent_at, sent)
+            metrics.DEVICE_LATENCY.labels(device=key).set(device.tracker.effective_latency_s)
+            metrics.DEVICE_FPS.labels(device=key).set(device.max_fps)
 
             last_send_time += 1.0 / device.max_fps
             remaining = last_send_time - time.monotonic()

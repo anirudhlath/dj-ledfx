@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 
 import pytest_asyncio
@@ -21,8 +21,16 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
         *,
         preview_only: bool = False,
         view: HomeView | None = None,
+        frames_watched: Callable[[], bool] | None = None,
     ) -> Home:
-        home = await build_home(tmp_path, lights, zones, preview_only=preview_only, view=view)
+        home = await build_home(
+            tmp_path,
+            lights,
+            zones,
+            preview_only=preview_only,
+            view=view,
+            frames_watched=frames_watched,
+        )
         homes.append(home)
         return home
 

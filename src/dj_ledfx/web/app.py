@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
     from dj_ledfx.zones.attention import AttentionFeed
+    from dj_ledfx.zones.frames import FrameFeed, Watchers
     from dj_ledfx.zones.lights import LightMonitor
     from dj_ledfx.zones.manager import ZoneManager
 
@@ -101,6 +102,8 @@ def create_app(
     zone_manager: ZoneManager | None = None,
     light_monitor: LightMonitor | None = None,
     attention_feed: AttentionFeed | None = None,
+    frame_feed: FrameFeed | None = None,
+    frame_watchers: Watchers | None = None,
 ) -> FastAPI:
     # One schema per type, under the contract's name (not Look-Input / Look-Output).
     app = FastAPI(title="dj-ledfx", separate_input_output_schemas=False)
@@ -127,6 +130,8 @@ def create_app(
     app.state.zone_manager = zone_manager
     app.state.light_monitor = light_monitor
     app.state.attention_feed = attention_feed
+    app.state.frame_feed = frame_feed
+    app.state.frame_watchers = frame_watchers
     app.state.ws_sessions = set()  # open /ws sessions: pushes go to them, ws.close_all ends them
     app.state.ws_closing = False
 

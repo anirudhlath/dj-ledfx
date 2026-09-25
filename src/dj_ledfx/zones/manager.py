@@ -137,6 +137,7 @@ class ZoneManager:
         preview_only: bool = False,
         now: Callable[[], datetime] = utcnow,
         home: HomeView = NO_HOME,
+        frames_watched: Callable[[], bool] = lambda: True,
     ) -> None:
         self._store = store
         self._looks = looks
@@ -151,6 +152,9 @@ class ZoneManager:
         self._preview_only = preview_only
         self._now = now
         self._home = home
+        # Whether anyone watches the live stream: zones draw lights that run their own
+        # effect only then (M1 review, constraint 3). main passes Watchers.watching_live.
+        self._frames_watched = frames_watched
         self._zones: dict[str, ZoneRecord] = {}
         self._running: dict[str, _Running] = {}
         self._captured: dict[str, bytes] = {}  # b"": control taken, nothing captured
@@ -200,6 +204,14 @@ class ZoneManager:
     def running(self) -> list[RunningZoneInfo]:
         infos = [self._info(zone_id, running) for zone_id, running in self._running.items()]
         return sorted(infos, key=lambda info: info.since)
+
+    def live_runtimes(self) -> list[ZoneRuntime]:
+        """The running zones' runtimes, for the web app's live stream."""
+        return [
+            runtime
+            for running in self._running.values()
+            if (runtime := running.runtime) is not None
+        ]
 
     def running_info(self, zone_id: str) -> RunningZoneInfo | None:
         running = self._running.get(zone_id)
@@ -743,6 +755,7 @@ class ZoneManager:
             space=self._home.space(),
             now=self._now,
             on_state_change=self._state_changed,
+            watched=self._frames_watched,
         )
 
     def _state_changed(self, runtime: ZoneRuntime) -> None:

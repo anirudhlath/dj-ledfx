@@ -102,6 +102,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         logger.debug("WebSocket error: {}", e)
     finally:
         sessions.discard(session)
+        _watch(app, sub, [])  # a closed tab watches nothing: its preview can end
         session.ended.set_result(None)
         for t in tasks:
             t.cancel()
@@ -299,25 +300,31 @@ async def _status_poll(ws: WebSocket, app: Any) -> None:
 
 
 async def _frame_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
-    """Poll frame snapshots at client-requested rate, sending binary frames."""
+    """Send frames at the client's rate: protocol v1, by device id, from the live stream."""
+    seq = 0
     while True:
-        if sub.frame_fps <= 0:
+        feed = getattr(app.state, "frame_feed", None)
+        if sub.frame_fps <= 0 or feed is None:
             await asyncio.sleep(0.5)
             continue
-        interval = 1.0 / sub.frame_fps
-        await asyncio.sleep(interval)
-        scheduler = app.state.scheduler
-        snapshots = dict(scheduler.frame_snapshots)
-        for name, (colors, seq) in snapshots.items():
-            if sub.frame_devices and name not in sub.frame_devices:
+        await asyncio.sleep(1.0 / sub.frame_fps)
+        seq += 1
+        for device_id, colors in feed.frames("live").items():
+            if sub.frame_devices and device_id not in sub.frame_devices:
                 continue
-            # Binary format: [2B name_len LE][N name UTF-8][4B seq LE][RGB data]
-            name_bytes = name.encode("utf-8")
-            header = struct.pack("<H", len(name_bytes)) + name_bytes + struct.pack("<I", seq)
+            # [2B name_len LE][name UTF-8][4B seq LE][RGB]
+            name = device_id.encode("utf-8")
+            header = struct.pack("<H", len(name)) + name + struct.pack("<I", seq & 0xFFFFFFFF)
             try:
                 await ws.send_bytes(header + colors.tobytes())
             except Exception:
                 return
+
+
+def _watch(app: Any, sub: ClientSubscription, streams: list[str]) -> None:
+    watchers = getattr(app.state, "frame_watchers", None)
+    if watchers is not None:
+        watchers.set(sub, streams)
 
 
 async def _handle_command(
@@ -339,13 +346,14 @@ async def _handle_command(
     elif action == "subscribe_frames":
         sub.frame_fps = min(float(msg.get("fps", 10)), 30.0)
         sub.frame_devices = msg.get("devices", [])
+        _watch(app, sub, ["live"] if sub.frame_fps > 0 else [])
         # Start frame polling if not already running
         has_frame_task = any(not t.done() and t.get_name() == "frame_poll" for t in tasks)
         if not has_frame_task and sub.frame_fps > 0:
             task = asyncio.create_task(_frame_poll(ws, app, sub))
             task.set_name("frame_poll")
             tasks.append(task)
-        await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
+        await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action, "protocol": 1})
 
     else:
         await _send_json(

@@ -628,18 +628,33 @@ async def test_each_device_gets_its_slice_of_the_frame_for_its_own_latency() -> 
     assert far_sent == {bytes([255] * 15)}
 
 
-async def test_a_route_that_does_not_stream_sends_nothing_but_keeps_the_preview() -> None:
+class _CountingRing(RingBuffer):
+    """Counts the frames asked of it."""
+
+    def __init__(self, capacity: int) -> None:
+        super().__init__(capacity)
+        self.asked = 0
+
+    def find_nearest(self, target_time: float) -> RenderedFrame | None:
+        self.asked += 1
+        return super().find_nearest(target_time)
+
+
+# M1 review, constraint 3: a route that doesn't stream costs the send loop nothing. The web
+# app's frames come from the rings (zones/frames.py).
+async def test_a_route_that_does_not_stream_is_never_read_or_sent() -> None:
     device = _make_device()  # it runs its own effect, or preview-only is on
-    buf = RingBuffer(capacity=60)
+    buf = _CountingRing(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
     scheduler = LookaheadScheduler(devices=[device], fps=60)
     scheduler.set_route("TestDevice", _route(buf, streaming=False))
 
     await _run_for(scheduler, 0.15)
 
-    assert device.adapter.send_frame_calls == []
-    assert "TestDevice" in scheduler.frame_snapshots  # the preview shows its slice
-    assert scheduler.get_device_stats()[0].dropped_pct == 0.0
+    assert device.adapter.send_frame_calls == [] and buf.asked == 0
+    [stats] = scheduler.get_device_stats()
+    assert (stats.dropped_pct, stats.frames_dropped) == (0.0, 0)
+    assert not hasattr(scheduler, "frame_snapshots")
 
 
 class _Labels(metrics._NoOpMetric):
@@ -669,7 +684,6 @@ async def test_lights_that_share_a_name_keep_their_own_frames_and_metrics(
 
     await _run_for(scheduler, 0.15)
 
-    assert set(scheduler.frame_snapshots) == {"openrgb:ram:0", "openrgb:ram:1"}
     assert latency.devices == {"openrgb:ram:0", "openrgb:ram:1"}
     assert all(len(stick.frames) > 0 for stick in sticks)
 
@@ -742,7 +756,6 @@ async def test_a_device_without_a_route_gets_nothing() -> None:
 
     assert routed.adapter.send_frame_calls
     assert idle.adapter.send_frame_calls == []
-    assert "idle" not in scheduler.frame_snapshots
 
 
 async def test_stats_report_the_share_of_frames_a_streaming_light_misses() -> None:
