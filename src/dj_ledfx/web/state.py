@@ -21,7 +21,10 @@ class ClientSubscription:
 
     beat_fps: float = 10.0
     frame_fps: float = 0.0  # 0 = not subscribed
-    frame_devices: list[str] = field(default_factory=list)  # empty = all
+    frame_protocol: int = 1  # 2 once the client asks for it (web spec §12.4, ruling 3)
+    frame_devices: list[str] = field(default_factory=list)  # v1: device ids; empty = all
+    frame_lights: list[str] = field(default_factory=list)  # v2: light ids; empty = all
+    frame_streams: list[str] = field(default_factory=lambda: ["live"])  # v1: live only
 
 
 def get_db(request: Request) -> StateDB:

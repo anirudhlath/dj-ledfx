@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import struct
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.web import contract
+from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
 from dj_ledfx.web.state import ClientSubscription
+from dj_ledfx.zones.frames import STREAMS
 from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
 
 _GOING_AWAY = 1001  # RFC 6455 close code: the server is going down
@@ -300,25 +302,61 @@ async def _status_poll(ws: WebSocket, app: Any) -> None:
 
 
 async def _frame_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
-    """Send frames at the client's rate: protocol v1, by device id, from the live stream."""
+    """Send frames at the client's rate, in the protocol it subscribed with."""
     seq = 0
     while True:
-        feed = getattr(app.state, "frame_feed", None)
-        if sub.frame_fps <= 0 or feed is None:
+        if sub.frame_fps <= 0:
             await asyncio.sleep(0.5)
             continue
         await asyncio.sleep(1.0 / sub.frame_fps)
         seq += 1
-        for device_id, colors in feed.frames("live").items():
-            if sub.frame_devices and device_id not in sub.frame_devices:
-                continue
-            # [2B name_len LE][name UTF-8][4B seq LE][RGB]
-            name = device_id.encode("utf-8")
-            header = struct.pack("<H", len(name)) + name + struct.pack("<I", seq & 0xFFFFFFFF)
+        for message in frame_messages(app, sub, seq):
             try:
-                await ws.send_bytes(header + colors.tobytes())
+                await ws.send_bytes(message)
             except Exception:
                 return
+
+
+def frame_messages(app: Any, sub: ClientSubscription, seq: int) -> list[bytes]:
+    """One tick's frames for a session: v1 by device from the live stream, or v2 by light
+    for each stream it watches."""
+    feed = getattr(app.state, "frame_feed", None)
+    if feed is None:
+        return []
+    if sub.frame_protocol == 1:
+        return [
+            encode_frame_v1(device_id, seq, colors)
+            for device_id, colors in feed.frames("live").items()
+            if not sub.frame_devices or device_id in sub.frame_devices
+        ]
+    index = LightIndex.from_manager(app.state.device_manager)
+    wanted = set(sub.frame_lights)
+    return [
+        encode_frame_v2(stream, light_id, seq, colors)
+        for stream in sub.frame_streams
+        for light_id, colors in light_frames(index, feed.frames(stream)).items()
+        if not wanted or light_id in wanted
+    ]
+
+
+def _subscribe_frames(sub: ClientSubscription, msg: dict[str, Any]) -> None:
+    """subscribe_frames: v2 with "protocol": 2 (ruling 3), else v1 as the old UI sends it.
+    Everything is checked before the subscription changes."""
+    protocol = msg.get("protocol", 1)
+    if protocol not in (1, 2):
+        raise ValueError(f"Unknown frame protocol {protocol!r}; expected 1 or 2")
+    if protocol == 1:
+        fps = min(float(msg.get("fps", 10)), 30.0)
+        sub.frame_devices = [str(device) for device in msg.get("devices") or []]
+        sub.frame_protocol, sub.frame_fps, sub.frame_streams = 1, fps, ["live"]
+        return
+    streams = [str(stream) for stream in msg.get("streams") or ["live"]]
+    unknown = [stream for stream in streams if stream not in STREAMS]
+    if unknown:
+        raise ValueError(f"Unknown frame stream {unknown[0]!r}; expected live or preview")
+    fps = min(float(msg.get("fps", 30)), 60.0)
+    sub.frame_lights = [str(light) for light in msg.get("lights") or []]
+    sub.frame_protocol, sub.frame_fps, sub.frame_streams = 2, fps, streams
 
 
 def _watch(app: Any, sub: ClientSubscription, streams: list[str]) -> None:
@@ -344,16 +382,22 @@ async def _handle_command(
         await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
 
     elif action == "subscribe_frames":
-        sub.frame_fps = min(float(msg.get("fps", 10)), 30.0)
-        sub.frame_devices = msg.get("devices", [])
-        _watch(app, sub, ["live"] if sub.frame_fps > 0 else [])
+        try:
+            _subscribe_frames(sub, msg)
+        except (TypeError, ValueError) as exc:
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(exc)})
+            return
+        _watch(app, sub, sub.frame_streams if sub.frame_fps > 0 else [])
         # Start frame polling if not already running
         has_frame_task = any(not t.done() and t.get_name() == "frame_poll" for t in tasks)
         if not has_frame_task and sub.frame_fps > 0:
             task = asyncio.create_task(_frame_poll(ws, app, sub))
             task.set_name("frame_poll")
             tasks.append(task)
-        await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action, "protocol": 1})
+        await _send_json(
+            ws,
+            {"channel": "ack", "id": cmd_id, "action": action, "protocol": sub.frame_protocol},
+        )
 
     else:
         await _send_json(
