@@ -13,6 +13,9 @@ Export format:
   [stars]                     — looks = ids of starred looks, built in or saved
   [running."<zone id>"]       — what a zone runs: look_id, look (JSON), brightness,
                                 lights, started_at
+  [home]                      — the home map: body (home.json-shaped JSON), updated_at
+  [placements."<target id>"]  — where a light or PC part sits: shape (a table), led_order,
+                                confirmed, confirmed_at
 
 Import merges into what is there. Zones and looks in the file replace those with the
 same id, and each running entry becomes that zone's assignment.
@@ -30,6 +33,9 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 import tomli_w
 from loguru import logger
 
+from dj_ledfx.home.model import home_from_dict
+from dj_ledfx.home.shapes import Placement, check_led_order, shape_from_dict, shape_to_dict
+from dj_ledfx.home.store import HomeStore
 from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.looks.store import STAR_LOOK, UPSERT_LOOK
 from dj_ledfx.persistence.state_db import StateDB
@@ -177,6 +183,7 @@ async def export_toml(db: StateDB) -> str:
             }
         doc["presets"] = presets_doc
 
+    doc.update(await _export_home(db))
     doc.update(await _export_zones_and_looks(db))
     return tomli_w.dumps(doc)
 
@@ -326,6 +333,7 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
         await db.save_preset(preset_name, effect_class, params_str)
         logger.debug("import_toml: saved preset '{}'", preset_name)
 
+    await _import_home(db, data)
     await _import_zones_and_looks(db, data)
 
 
@@ -445,6 +453,65 @@ async def _import_zones_and_looks(db: StateDB, data: dict[str, Any]) -> None:
             logger.warning("import_toml: skipped what zone '{}' was running", zone_id)
             continue
         await store.save_assignment(assignment)
+
+
+async def _export_home(db: StateDB) -> dict[str, Any]:
+    """The home map and the placements (M2). The map's body is kept as saved, so a map
+    that needs repair still travels; import checks it."""
+    doc: dict[str, Any] = {}
+    rows = await db.fetch_all("SELECT body, updated_at FROM home_map WHERE id=1")
+    if rows:
+        doc["home"] = {"body": rows[0][0], "updated_at": rows[0][1]}
+    placements = await HomeStore(db).load_placements()
+    if placements:
+        doc["placements"] = {
+            target_id: _placement_doc(placement) for target_id, placement in placements.items()
+        }
+    return doc
+
+
+def _placement_doc(placement: Placement) -> dict[str, Any]:
+    doc: dict[str, Any] = {
+        "shape": shape_to_dict(placement.shape),
+        "led_order": placement.led_order,
+        "confirmed": placement.confirmed,
+    }
+    if placement.confirmed_at is not None:
+        doc["confirmed_at"] = placement.confirmed_at
+    return doc
+
+
+def _placement(info: dict[str, Any]) -> Placement:
+    """A placement from the backup, checked as a saved one is. Raises ValueError."""
+    raw = info.get("shape")
+    if not isinstance(raw, dict):
+        raise ValueError("it has no shape")
+    shape = shape_from_dict(raw)
+    order = info.get("led_order")
+    confirmed_at = info.get("confirmed_at")
+    return Placement(
+        shape,
+        check_led_order(shape.kind, order if isinstance(order, str) and order else None),
+        info.get("confirmed") is True,
+        as_utc(confirmed_at) if isinstance(confirmed_at, datetime) else None,
+    )
+
+
+async def _import_home(db: StateDB, data: dict[str, Any]) -> None:
+    store = HomeStore(db)
+    home = data.get("home")
+    if isinstance(home, dict) and isinstance(home.get("body"), str):
+        try:
+            await store.save_home(home_from_dict(json.loads(home["body"])))
+        except ValueError as exc:  # bad JSON, or a HomeError
+            logger.warning("import_toml: skipped the home map ({})", exc)
+    for target_id, info in _tables(data, "placements").items():
+        try:
+            placement = _placement(info)
+        except ValueError as exc:  # ShapeError is a ValueError too
+            logger.warning("import_toml: skipped the placement of '{}' ({})", target_id, exc)
+            continue
+        await store.save_placement(target_id, placement)
 
 
 # --- First-Launch Migration ---
