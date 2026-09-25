@@ -14,8 +14,13 @@ from typing import Any
 
 import numpy as np
 
-from dj_ledfx.effects.ledset import LedSet, LedSource, PlacedLeds, Space, build_ledset
+from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.effects.ledset import NO_ROOM, LedSet, LedSource, PlacedLeds, Space, build_ledset
+from dj_ledfx.home.map import space_of
 from dj_ledfx.home.model import Anchor, Box2, Furniture, Home, Location, Room, SubZone, Wall
+from dj_ledfx.home.seed import handoff_home_json, seed_home, seed_lights
+from dj_ledfx.home.shapes import led_positions
+from dj_ledfx.zones.runtime import ZoneLight
 
 WEST = ((0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0))
 EAST = ((4.0, 0.0), (8.0, 0.0), (8.0, 4.0), (4.0, 4.0))
@@ -63,3 +68,44 @@ def leds_at(
     )
     placed = PlacedLeds.from_positions(np.asarray(points, dtype=np.float64).reshape(-1, 3))
     return build_ledset([LedSource("light", len(points), placed=placed)], space)
+
+
+def seeded_zone_lights() -> list[ZoneLight]:
+    """This home's lights where home.json places them. Capabilities follow each light's
+    protocol and shape: a LIFX cylinder is a matrix, a LIFX line a multizone strip."""
+    rooms = {room.id: index for index, room in enumerate(seed_home().rooms)}
+    lights = []
+    for seed, entry in zip(seed_lights(), handoff_home_json()["lights"], strict=True):
+        kind, protocol = seed.placement.shape.kind, entry["protocol"]
+        caps = DeviceCapabilities(
+            protocol=protocol,
+            model=entry["model"],
+            matrix=protocol == "LIFX" and kind == "cylinder",
+            multizone=protocol == "LIFX" and kind in ("line", "bent-line"),
+        )
+        placed = led_positions(seed.placement.shape, seed.leds, seed.placement.led_order)
+        room = rooms.get(seed.room, NO_ROOM)
+        lights.append(
+            ZoneLight(
+                seed.id,
+                seed.leds,
+                caps,
+                placed=placed,
+                room=room,
+                light_id=seed.id,
+                name=seed.name,
+            )
+        )
+    return lights
+
+
+def seeded_space() -> Space:
+    return space_of(seed_home())
+
+
+def seeded_ledset() -> LedSet:
+    sources = [
+        LedSource(light.device_id, light.led_count, placed=light.placed, room=light.room)
+        for light in seeded_zone_lights()
+    ]
+    return build_ledset(sources, seeded_space())

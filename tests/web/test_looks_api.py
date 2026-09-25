@@ -8,6 +8,12 @@ from api_home import Api, api_home
 from conftest import FakeLight
 
 BUILT_INS = [
+    "sunset",
+    "aurora",
+    "lava",
+    "carousel",
+    "ripples",
+    "focus",
     "firmware",
     "classic-beat-pulse",
     "classic-breathe",
@@ -30,7 +36,7 @@ async def test_looks_come_built_in_first_in_the_contract_shape(api: Api) -> None
     assert resp.status_code == 200
     looks = resp.json()
     assert [look["id"] for look in looks] == BUILT_INS
-    breathe = looks[2]
+    breathe = looks[BUILT_INS.index("classic-breathe")]
     assert {key: breathe[key] for key in ("name", "category", "builtIn", "derivedFrom")} == {
         "name": "Breathe",
         "category": "tempo",
