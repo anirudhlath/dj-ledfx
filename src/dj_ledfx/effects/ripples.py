@@ -3,7 +3,8 @@
 Stateless: drop k's landing time and place come from the seed and k alone (drop()), and
 a frame draws the rings of the drops still alive. A ring reaches each LED when it has
 travelled the LED's 3D distance from the drop (engine spec §9: "a ripple reaches LEDs in
-order of distance").
+order of distance"). Each drop's random draws are kept while it may be alive, and the
+zone's footprint while the LED set is the same.
 """
 
 from __future__ import annotations
@@ -88,9 +89,27 @@ class Ripples(ParamField):
 
     def reseed(self, seed: int) -> None:
         self._seed = seed
+        self._draws.clear()
 
     def _prepare(self) -> None:
         self._palette = palette_float(self._values["palette"])
+        self._draws: dict[int, NDArray[np.float64]] = getattr(self, "_draws", {})
+        self._footprint: tuple[LedSet, NDArray[np.float32], NDArray[np.float32], float] | None
+        self._footprint = getattr(self, "_footprint", None)
+
+    def _draw(self, k: int) -> NDArray[np.float64]:
+        """Drop k's three random numbers: when in its interval, and where."""
+        u = self._draws.get(k)
+        if u is None:
+            u = self._draws[k] = np.random.default_rng([self._seed % 2**32, k % 2**63]).random(3)
+        return u
+
+    def _bounds(self, leds: LedSet) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
+        """The zone's footprint, and its floor: the map's, or with no map the lowest LED."""
+        if self._footprint is None or self._footprint[0] is not leds:
+            low, high = leds.pos.min(axis=0), leds.pos.max(axis=0)
+            self._footprint = (leds, low, high, 0.0 if leds.space.ceiling else float(low[2]))
+        return self._footprint[1:]
 
     def _interval(self) -> float:
         return 60.0 / float(self._values["drops_per_min"])
@@ -98,11 +117,9 @@ class Ripples(ParamField):
     def drop(self, k: int, leds: LedSet) -> tuple[float, NDArray[np.float32]]:
         """Drop k: when it lands (s, on the render clock) and where, on the floor of the
         zone's footprint. leds must hold at least one LED."""
-        rng = np.random.default_rng([self._seed % 2**32, k % 2**63])
-        u = rng.random(3)
+        u = self._draw(k)
         when = (k + LANDING_SPREAD * float(u[0])) * self._interval()
-        low, high = leds.pos.min(axis=0), leds.pos.max(axis=0)
-        floor = 0.0 if leds.space.ceiling else float(low[2])  # no map: the lowest LED
+        low, high, floor = self._bounds(leds)
         where = np.array(
             [low[0] + u[1] * (high[0] - low[0]), low[1] + u[2] * (high[1] - low[1]), floor],
             dtype=np.float32,
@@ -111,12 +128,12 @@ class Ripples(ParamField):
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
-        if leds.count == 0:
-            return np.zeros((0, 3), dtype=np.float32)
         interval, fade = self._interval(), float(values["fade_s"])
         speed, life = float(values["speed"]), LIFE_FADES * fade
         first = math.floor((ctx.t - life) / interval) - 1  # the oldest drop that may be alive
         last = math.floor(ctx.t / interval)  # no later drop has landed yet
+        for gone in [k for k in self._draws if k < first]:
+            del self._draws[gone]
         wave = np.zeros(leds.count, dtype=np.float32)
         for k in range(first, last + 1):
             when, where = self.drop(k, leds)

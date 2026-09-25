@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import statistics
+import time
+
 import numpy as np
+import pytest
 from conftest import render_ctx
-from map_home import leds_at
+from map_home import leds_at, seeded_ledset
 
 from dj_ledfx.effects.field_tools import palette_float
 from dj_ledfx.effects.ripples import LIFE_FADES, RIPPLE_PALETTE, Ripples
@@ -53,3 +57,18 @@ def test_ripples_repeat_with_their_seed() -> None:
     assert first.drop(7, leds)[0] != other.drop(7, leds)[0]
     t = first.drop(7, leds)[0] + 2.0
     assert np.array_equal(first.render(render_ctx(t=t), leds), again.render(render_ctx(t=t), leds))
+
+
+# M2 review M12: the most drops alive at once (60 a minute, each fading over 30 s), on this
+# home's LEDs, within the frame budget (engine spec §9).
+@pytest.mark.perf
+def test_ripples_at_their_densest_render_in_under_5_ms() -> None:
+    leds = seeded_ledset()
+    effect = Ripples(drops_per_min=60.0, speed=0.2, fade_s=10.0)
+    effect.reseed(3)
+    durations = []
+    for step in range(240):
+        started = time.perf_counter()
+        effect.render(render_ctx(t=1000.0 + step / 60), leds)
+        durations.append(time.perf_counter() - started)
+    assert statistics.median(durations) < 0.005
