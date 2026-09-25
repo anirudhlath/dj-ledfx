@@ -28,7 +28,16 @@ def points_in_polygon(points: NDArray[np.float64], polygon: Polygon) -> NDArray[
 
 
 def point_in_polygon(point: tuple[float, float], polygon: Polygon) -> bool:
-    return bool(points_in_polygon(np.array([point], dtype=np.float64), polygon)[0])
+    """points_in_polygon for one point, in plain Python: numpy costs more than it saves
+    on a single point, and the map asks this for every light."""
+    x, y = point
+    inside = False
+    x1, y1 = polygon[-1]
+    for x2, y2 in polygon:
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            inside = not inside
+        x1, y1 = x2, y2
+    return inside
 
 
 def polygon_area(polygon: Polygon) -> float:

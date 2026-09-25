@@ -9,11 +9,11 @@ edit. Placements are keyed by target id: a light's id, or a PC part's device id.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 from loguru import logger
@@ -27,6 +27,7 @@ from dj_ledfx.home.model import (
     Home,
     HomeError,
     HomeNotFoundError,
+    Room,
     SubZone,
     home_from_dict,
     home_to_dict,
@@ -48,7 +49,18 @@ if TYPE_CHECKING:
     from dj_ledfx.home.store import HomeStore
 
 Listener = Callable[[], Awaitable[None]]
-T = TypeVar("T")
+
+
+class _Spot(NamedTuple):
+    """Where a target is on the plan, worked out from this placement."""
+
+    placement: Placement | None
+    centre: tuple[float, float] | None
+    room: str | None
+    sub_zone: str | None
+
+
+_NOWHERE = _Spot(None, None, None, None)
 
 SETTINGS = ("northOffsetDeg", "ceiling", "beams", "location")
 # Zone ids a sub-zone can't take: the whole home's and M1's all-lights zone (zones/ checks
@@ -106,6 +118,8 @@ class HomeMap:
         self._home = seed_home()  # until load()
         self._placements: dict[str, Placement] = {}
         self._space: Space | None = None
+        self._spots: dict[str, _Spot] = {}
+        self._placed: dict[str, tuple[tuple[object, ...], PlacedLeds]] = {}
         self._listeners: list[Listener] = []
         self._lock = asyncio.Lock()
 
@@ -115,6 +129,8 @@ class HomeMap:
         self._home = await self._store.load_home()
         self._placements = await self._store.load_placements()
         self._space = None
+        self._spots.clear()
+        self._placed.clear()
         lights = self.lights().entries
         if not lights or await self._store.placements_seeded():
             return
@@ -150,50 +166,59 @@ class HomeMap:
         return self._placements.get(light_id) if light_id != target_id else None
 
     def placed(self, device_id: str) -> PlacedLeds | None:
-        """Where the device's LEDs sit, or None while it isn't placed."""
+        """Where the device's LEDs sit, or None while it isn't placed. Kept until the
+        placement, or the light's LED count or geometry, changes."""
         managed = self._devices.get_by_stable_id(device_id)
         if managed is None:
             return None
         adapter = managed.adapter
         own = self._placements.get(device_id)
         if own is not None:
-            return led_positions(own.shape, adapter.led_count, own.led_order, adapter.geometry)
+            key = (own, adapter.led_count, adapter.geometry)
+            return self._kept(
+                device_id,
+                key,
+                lambda: led_positions(
+                    own.shape, adapter.led_count, own.led_order, adapter.geometry
+                ),
+            )
         index = self.lights()
         entry = index.get(index.light_of(device_id))
         shared = self._placements.get(entry.id) if entry is not None else None
         if entry is None or shared is None:
             return None
-        for part, start, stop in entry.part_slices():  # a PC part takes the PC's placement
-            if part.id == device_id:
-                whole = led_positions(shared.shape, entry.leds, shared.led_order)
-                return PlacedLeds.from_positions(whole.pos[start:stop])
-        return None  # a device with no LEDs
+        # A PC part takes the PC's placement; a device with no LEDs has no slice.
+        part = next((s for s in entry.part_slices() if s[0].id == device_id), None)
+        if part is None:
+            return None
+        _, start, stop = part
+        whole = self._kept(  # one computation for all the PC's parts
+            entry.id,
+            (shared, entry.leds),
+            lambda: led_positions(shared.shape, entry.leds, shared.led_order),
+        )
+        return self._kept(
+            device_id,
+            (whole, start, stop),
+            lambda: PlacedLeds.from_positions(whole.pos[start:stop]),
+        )
+
+    def centre_xy(self, target_id: str) -> tuple[float, float] | None:
+        """Where the target's placement (or, for a PC part, the PC's) is centred on the
+        plan, or None while it isn't placed."""
+        return self._spot(target_id).centre
 
     def room_at(self, x: float, y: float) -> str | None:
-        return next(
-            (room.id for room in self._home.rooms if point_in_polygon((x, y), room.polygon)),
-            None,
-        )
+        return self._region_at(self._home.rooms, x, y)
 
     def sub_zone_at(self, x: float, y: float) -> str | None:
-        return next(
-            (sub.id for sub in self._home.sub_zones if point_in_polygon((x, y), sub.polygon)),
-            None,
-        )
+        return self._region_at(self._home.sub_zones, x, y)
 
     def room_of(self, target_id: str) -> str | None:
-        placement = self.placement_for(target_id)
-        if placement is None:
-            return None
-        x, y, _ = shape_centre(placement.shape)
-        return self.room_at(x, y)
+        return self._spot(target_id).room
 
     def sub_zone_of(self, target_id: str) -> str | None:
-        placement = self.placement_for(target_id)
-        if placement is None:
-            return None
-        x, y, _ = shape_centre(placement.shape)
-        return self.sub_zone_at(x, y)
+        return self._spot(target_id).sub_zone
 
     def rooms_with_lights(self) -> frozenset[str]:
         """The rooms any light, or PC part, is placed in now."""
@@ -203,9 +228,6 @@ class HomeMap:
             for device in entry.devices
             if (room := self.room_of(device)) is not None
         )
-
-    def room_index(self) -> dict[str, int]:
-        return {room.id: index for index, room in enumerate(self._home.rooms)}
 
     def space(self) -> Space:
         if self._space is None:
@@ -225,29 +247,21 @@ class HomeMap:
             raise HomeError(
                 f"{', '.join(unknown)} can't be changed here; only {', '.join(SETTINGS)}"
             )
-        async with self._lock:
-            data = home_to_dict(self._home)
-            data.update(changes)
-            home = home_from_dict(data)
-            await self._save(home)
-        await self._changed()
-        return home
+        return await self._edit(lambda home: home_from_dict({**home_to_dict(home), **changes}))
 
     async def add_anchor(
         self, name: str, position: Sequence[float], points: Sequence[Sequence[float]] = ()
     ) -> Anchor:
-        async with self._lock:
-            anchor_id = _unique(_slug(name), {anchor.id for anchor in self._home.anchors})
+        def change(home: Home) -> Home:
             anchor = Anchor(
-                id=anchor_id,
+                id=_unique(_slug(name), {anchor.id for anchor in home.anchors}),
                 name=name,
                 position=vec3(position, "The anchor's position"),
                 points=tuple(vec3(point, "The anchor's points") for point in points),
             )
-            home = _checked(replace(self._home, anchors=(*self._home.anchors, anchor)))
-            await self._save(home)
-        await self._changed()
-        return self._found(home.anchor(anchor_id), f"No anchor '{anchor_id}'")
+            return replace(home, anchors=(*home.anchors, anchor))
+
+        return (await self._edit(change)).anchors[-1]
 
     async def update_anchor(
         self,
@@ -258,8 +272,8 @@ class HomeMap:
         points: Sequence[Sequence[float]] | None = None,
         confirmed: bool | None = None,
     ) -> Anchor:
-        async with self._lock:
-            old = self._found(self._home.anchor(anchor_id), f"No anchor '{anchor_id}'")
+        def change(home: Home) -> Home:
+            old = self._anchor(home, anchor_id)
             new = replace(
                 old,
                 name=old.name if name is None else name,
@@ -271,35 +285,31 @@ class HomeMap:
                 else tuple(vec3(point, "The anchor's points") for point in points),
                 confirmed=old.confirmed if confirmed is None else confirmed,
             )
-            anchors = tuple(
-                new if anchor.id == anchor_id else anchor for anchor in self._home.anchors
-            )
-            home = _checked(replace(self._home, anchors=anchors))
-            await self._save(home)
-        await self._changed()
-        return self._found(home.anchor(anchor_id), f"No anchor '{anchor_id}'")
+            anchors = tuple(new if anchor.id == anchor_id else anchor for anchor in home.anchors)
+            return replace(home, anchors=anchors)
+
+        return self._anchor(await self._edit(change), anchor_id)
 
     async def delete_anchor(self, anchor_id: str) -> None:
-        async with self._lock:
-            self._found(self._home.anchor(anchor_id), f"No anchor '{anchor_id}'")
-            anchors = tuple(anchor for anchor in self._home.anchors if anchor.id != anchor_id)
-            await self._save(replace(self._home, anchors=anchors))
-        await self._changed()
+        def change(home: Home) -> Home:
+            self._anchor(home, anchor_id)
+            return replace(home, anchors=tuple(a for a in home.anchors if a.id != anchor_id))
+
+        await self._edit(change)
 
     async def add_sub_zone(
         self, name: str, room: str, polygon: Sequence[Sequence[float]]
     ) -> SubZone:
-        async with self._lock:
-            taken = {r.id for r in self._home.rooms} | {s.id for s in self._home.sub_zones}
+        def change(home: Home) -> Home:
             base = _slug(name)
             if base.startswith("group-"):
                 base = f"sub-{base}"
+            taken = {r.id for r in home.rooms} | {s.id for s in home.sub_zones}
             sub_id = _unique(base, taken | RESERVED_ZONE_IDS)
             sub = SubZone(sub_id, name, room, polygon_of(polygon, "The sub-zone"))
-            home = _checked(replace(self._home, sub_zones=(*self._home.sub_zones, sub)))
-            await self._save(home)
-        await self._changed()
-        return self._found(home.sub_zone(sub_id), f"No sub-zone '{sub_id}'")
+            return replace(home, sub_zones=(*home.sub_zones, sub))
+
+        return (await self._edit(change)).sub_zones[-1]
 
     async def update_sub_zone(
         self,
@@ -309,26 +319,25 @@ class HomeMap:
         room: str | None = None,
         polygon: Sequence[Sequence[float]] | None = None,
     ) -> SubZone:
-        async with self._lock:
-            old = self._found(self._home.sub_zone(sub_zone_id), f"No sub-zone '{sub_zone_id}'")
+        def change(home: Home) -> Home:
+            old = self._sub_zone(home, sub_zone_id)
             new = replace(
                 old,
                 name=old.name if name is None else name,
                 room=old.room if room is None else room,
                 polygon=old.polygon if polygon is None else polygon_of(polygon, "The sub-zone"),
             )
-            subs = tuple(new if sub.id == sub_zone_id else sub for sub in self._home.sub_zones)
-            home = _checked(replace(self._home, sub_zones=subs))
-            await self._save(home)
-        await self._changed()
-        return self._found(home.sub_zone(sub_zone_id), f"No sub-zone '{sub_zone_id}'")
+            subs = tuple(new if sub.id == sub_zone_id else sub for sub in home.sub_zones)
+            return replace(home, sub_zones=subs)
+
+        return self._sub_zone(await self._edit(change), sub_zone_id)
 
     async def delete_sub_zone(self, sub_zone_id: str) -> None:
-        async with self._lock:
-            self._found(self._home.sub_zone(sub_zone_id), f"No sub-zone '{sub_zone_id}'")
-            subs = tuple(sub for sub in self._home.sub_zones if sub.id != sub_zone_id)
-            await self._save(replace(self._home, sub_zones=subs))
-        await self._changed()
+        def change(home: Home) -> Home:
+            self._sub_zone(home, sub_zone_id)
+            return replace(home, sub_zones=tuple(s for s in home.sub_zones if s.id != sub_zone_id))
+
+        await self._edit(change)
 
     async def set_placement(
         self, target_id: str, shape: LightShape, led_order: str | None = None
@@ -370,6 +379,7 @@ class HomeMap:
                 return
             await self._store.delete_placement(target_id)
             del self._placements[target_id]
+            self._placed.pop(target_id, None)
         await self._changed()
 
     async def guess(self) -> dict[str, Placement]:
@@ -388,10 +398,58 @@ class HomeMap:
     # --- internals -------------------------------------------------------------------
 
     @staticmethod
-    def _found(item: T | None, message: str) -> T:
-        if item is None:
-            raise HomeNotFoundError(message)
-        return item
+    def _anchor(home: Home, anchor_id: str) -> Anchor:
+        anchor = home.anchor(anchor_id)
+        if anchor is None:
+            raise HomeNotFoundError(f"No anchor '{anchor_id}'")
+        return anchor
+
+    @staticmethod
+    def _sub_zone(home: Home, sub_zone_id: str) -> SubZone:
+        sub = home.sub_zone(sub_zone_id)
+        if sub is None:
+            raise HomeNotFoundError(f"No sub-zone '{sub_zone_id}'")
+        return sub
+
+    @staticmethod
+    def _region_at(regions: Iterable[Room | SubZone], x: float, y: float) -> str | None:
+        """The first region, in map order, whose polygon holds the point."""
+        return next(
+            (region.id for region in regions if point_in_polygon((x, y), region.polygon)), None
+        )
+
+    def _spot(self, target_id: str) -> _Spot:
+        """Where the target is on the plan. Kept until the map changes (_save) or the
+        placement the target takes does."""
+        placement = self.placement_for(target_id)
+        if placement is None:
+            return _NOWHERE
+        spot = self._spots.get(target_id)
+        if spot is None or spot.placement is not placement:
+            x, y, _ = shape_centre(placement.shape)
+            spot = _Spot(placement, (x, y), self.room_at(x, y), self.sub_zone_at(x, y))
+            self._spots[target_id] = spot
+        return spot
+
+    def _kept(
+        self, target_id: str, key: tuple[object, ...], build: Callable[[], PlacedLeds]
+    ) -> PlacedLeds:
+        """The target's LED positions, rebuilt only when what they're built from (key)
+        changes."""
+        kept = self._placed.get(target_id)
+        if kept is None or kept[0] != key:
+            kept = (key, build())
+            self._placed[target_id] = kept
+        return kept[1]
+
+    async def _edit(self, change: Callable[[Home], Home]) -> Home:
+        """One edit of the map: under the lock, change it, check it and save it; then tell
+        the listeners. A change that raises leaves the map as it was."""
+        async with self._lock:
+            home = _checked(change(self._home))
+            await self._save(home)
+        await self._changed()
+        return home
 
     def _check_target(self, target_id: str) -> None:
         index = self.lights()
@@ -406,6 +464,7 @@ class HomeMap:
         await self._store.save_home(home)
         self._home = home
         self._space = None
+        self._spots.clear()
 
     async def _changed(self) -> None:
         for listener in list(self._listeners):

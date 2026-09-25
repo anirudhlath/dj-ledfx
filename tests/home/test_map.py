@@ -81,9 +81,27 @@ async def test_rooms_and_sub_zones_come_from_where_a_light_sits(db: StateDB) -> 
     assert (home_map.room_of("lamp"), home_map.sub_zone_of("lamp")) == ("west", "desk")
     assert (home_map.room_of("rope"), home_map.sub_zone_of("rope")) == ("east", None)
     assert home_map.room_at(20.0, 20.0) is None and home_map.room_of("unknown") is None
-    assert home_map.room_index() == {"west": 0, "east": 1}
+    assert home_map.space().rooms == ("west", "east")
     placed = home_map.placed("rope")
     assert placed is not None and placed.count == 4 and np.allclose(placed.pos[:, 2], 2.0)
+
+
+async def test_what_the_map_works_out_is_kept_until_the_placement_or_the_map_changes(
+    db: StateDB,
+) -> None:
+    home_map = await _map(db, [FakeLight("lamp")], placements={"lamp": DESK_LAMP})
+    placed = home_map.placed("lamp")
+    assert placed is not None and home_map.placed("lamp") is placed
+    assert home_map.centre_xy("lamp") == (1.0, 3.5) and home_map.sub_zone_of("lamp") == "desk"
+
+    await home_map.update_sub_zone("desk", polygon=((0.0, 0.0), (1.5, 0.0), (1.5, 1.0)))
+    assert home_map.sub_zone_of("lamp") is None  # the map changed under the lamp
+    assert home_map.placed("lamp") is placed  # but the lamp didn't move
+
+    await home_map.set_placement("lamp", PointShape((1.0, 0.25, 1.0)))
+    moved = home_map.placed("lamp")
+    assert moved is not None and np.allclose(moved.pos[:, :2], [1.0, 0.25])
+    assert (home_map.room_of("lamp"), home_map.sub_zone_of("lamp")) == ("west", "desk")
 
 
 async def test_a_light_is_placed_moved_confirmed_and_removed(db: StateDB) -> None:

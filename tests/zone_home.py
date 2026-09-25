@@ -129,9 +129,6 @@ class FakeHome:
     def room_of(self, device_id: str) -> str | None:
         return next((room for room, lights in self.rooms.items() if device_id in lights), None)
 
-    def room_index(self) -> dict[str, int]:
-        return {room: index for index, room in enumerate(self.rooms)}
-
     def space(self) -> Space:
         return self.space_now
 

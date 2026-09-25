@@ -979,7 +979,7 @@ class ZoneManager:
         managed = self._devices.get_by_stable_id(device_id)
         return None if managed is None else managed.adapter
 
-    def _zone_light(self, device_id: str) -> ZoneLight | None:
+    def _zone_light(self, device_id: str, rooms: Mapping[str, int]) -> ZoneLight | None:
         adapter = self._adapter(device_id)
         if adapter is None:
             return None
@@ -991,13 +991,14 @@ class ZoneManager:
             adapter.capabilities,
             adapter.geometry,
             placed=self._home.placed(device_id),
-            room=self._home.room_index().get(room, NO_ROOM) if room is not None else NO_ROOM,
+            room=rooms.get(room, NO_ROOM) if room is not None else NO_ROOM,
             light_id=light_id_of(info),
             name=info.name,
         )
 
     def _zone_lights(self, device_ids: Iterable[str]) -> list[ZoneLight]:
-        return [light for d in device_ids if (light := self._zone_light(d)) is not None]
+        rooms = {room: index for index, room in enumerate(self._home.space().rooms)}
+        return [light for d in device_ids if (light := self._zone_light(d, rooms)) is not None]
 
     def _latency_s(self, device_id: str) -> float | None:
         """A light's latency, or None while it isn't connected. Asked on every tick."""

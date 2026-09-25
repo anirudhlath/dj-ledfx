@@ -10,12 +10,11 @@ room.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Protocol
 
 from dj_ledfx.effects.ledset import NO_SPACE, PlacedLeds, Space
 from dj_ledfx.home.geometry import point_in_polygon
-from dj_ledfx.home.shapes import shape_centre
 from dj_ledfx.zones.model import HOME_ZONE_ID, HOME_ZONE_NAME, ZoneRecord
 
 if TYPE_CHECKING:
@@ -41,9 +40,9 @@ class HomeView(Protocol):
 
     def room_of(self, device_id: str) -> str | None: ...
 
-    def room_index(self) -> Mapping[str, int]: ...
-
-    def space(self) -> Space: ...
+    def space(self) -> Space:
+        """The map's Space; its rooms, in map order, number the LEDs' rooms."""
+        ...
 
 
 class _NoHome:
@@ -63,9 +62,6 @@ class _NoHome:
 
     def room_of(self, device_id: str) -> str | None:
         return None
-
-    def room_index(self) -> Mapping[str, int]:
-        return {}
 
     def space(self) -> Space:
         return NO_SPACE
@@ -91,17 +87,15 @@ class MapZones:
     def members(self, zone_id: str) -> tuple[str, ...]:
         home = self._map.home
         devices = [device for entry in self._map.lights().entries for device in entry.devices]
-        where = self._where(devices)
+        where = {
+            device: xy for device in devices if (xy := self._map.centre_xy(device)) is not None
+        }
         if zone_id == HOME_ZONE_ID:
             chosen = devices
         elif home.room(zone_id) is not None:
-            chosen = [device for device in devices if self._map.room_of(device) == zone_id]
+            chosen = [device for device in where if self._map.room_of(device) == zone_id]
         elif (sub := home.sub_zone(zone_id)) is not None:
-            chosen = [
-                device
-                for device in devices
-                if device in where and point_in_polygon(where[device], sub.polygon)
-            ]
+            chosen = [device for device, xy in where.items() if point_in_polygon(xy, sub.polygon)]
         else:
             return ()
         return tuple(sorted(chosen, key=lambda device: where.get(device, _NOWHERE)))
@@ -116,18 +110,5 @@ class MapZones:
     def room_of(self, device_id: str) -> str | None:
         return self._map.room_of(device_id)
 
-    def room_index(self) -> Mapping[str, int]:
-        return self._map.room_index()
-
     def space(self) -> Space:
         return self._map.space()
-
-    def _where(self, devices: Iterable[str]) -> dict[str, tuple[float, float]]:
-        """Each placed device's centre on the plan."""
-        where: dict[str, tuple[float, float]] = {}
-        for device in devices:
-            placement = self._map.placement_for(device)
-            if placement is not None:
-                x, y, _ = shape_centre(placement.shape)
-                where[device] = (x, y)
-        return where

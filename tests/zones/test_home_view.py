@@ -75,7 +75,7 @@ async def test_a_zone_holds_the_lights_placed_in_it_from_west_to_east(db: StateD
     assert zones.members("home") == ("lamp", "spot", "bulb", "rope", "loose")  # unplaced last
     assert zones.members("nope") == ()
     assert zones.covers(["rope", "lamp", "loose"]) == ("West room", "East room")
-    assert zones.room_of("rope") == "east" and zones.room_index() == {"west": 0, "east": 1}
+    assert zones.room_of("rope") == "east" and zones.space().rooms == ("west", "east")
 
 
 async def test_a_pc_part_is_where_the_pc_is_until_it_is_placed_on_its_own(db: StateDB) -> None:
