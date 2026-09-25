@@ -1,6 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { components, paths } from './generated/schema'
-import type { ApiPath, InputKind, Light, LightShape, LightStatus, PendingPath, PendingSchema, RunningZone } from './contract'
+import type {
+  ApiPath, Furniture, Home, InputKind, Light, LightShape, LightStatus, Location, PendingPath, PendingSchema, RunningZone,
+} from './contract'
 
 describe('the contract', () => {
   // When the backend starts serving one of these, this fails tsc -b: swap the hand-written type
@@ -17,6 +19,21 @@ describe('the contract', () => {
     >()
     expectTypeOf<InputKind>().toEqualTypeOf<'tempo' | 'music' | 'home-assistant' | 'sun'>()
     expectTypeOf<ApiPath>().toExtend<string>()
+  })
+
+  // I4: each pending type carries engine M2's name, so the swap fails on the name, not later.
+  it("names the pending types and paths as engine M2's schema does", () => {
+    expectTypeOf<
+      | 'Placement' | 'PlacementIn' | 'PreviewStarted' | 'PreviewUpdate' | 'HomeSettings' | 'AnchorIn' | 'AnchorUpdate'
+      | 'SubZoneIn' | 'SubZoneUpdate' | 'Box2' | 'Location' | 'Outdoor' | 'PointShape'
+    >().toExtend<PendingSchema>()
+    expectTypeOf<'/api/home/subzones/{sub_zone_id}'>().toExtend<PendingPath>()
+  })
+
+  // I3: engine M2 serves a home with no location and furniture drawn by polygon.
+  it('leaves out what engine M2 may leave out of the home', () => {
+    expectTypeOf<Home['location']>().toEqualTypeOf<Location | null | undefined>()
+    expectTypeOf<Furniture['box']>().toEqualTypeOf<[number, number, number, number] | null | undefined>()
   })
 
   it("types a light's shape as §12.2 does", () => {

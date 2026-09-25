@@ -34,12 +34,13 @@ export type LightUpdate = Pick<Light, 'id' | 'status' | 'statusSince' | 'ownEffe
 
 // ── Pending: engine M2 (home map, preview runtimes, frame protocol v2) ────────────────────
 // §12.2's Home, Room, SubZone, Anchor and LightShape; home.json's names for what §12.2 leaves out
-// (decision 4).
+// (decision 4). Each type has engine M2's name and shape (its web/contract.py), but for Home.size
+// and Room.hasLights, which F1 keeps from home.json and M2 is asked to serve.
 export type Vec2 = [number, number]
 export type Vec3 = [number, number, number]
 export interface Room { id: Id; name: string; polygon: Vec2[]; labelAt: Vec2; hasLights: boolean }
 export interface SubZone { id: Id; name: string; room: Id; polygon: Vec2[] }
-export interface Anchor { id: Id; name: string; position: Vec3; points?: Vec3[]; confirmed: boolean }
+export interface Anchor { id: Id; name: string; position: Vec3; points?: Vec3[] | null; confirmed: boolean }
 export interface Wall {
   a: Vec2
   b: Vec2
@@ -55,8 +56,9 @@ export interface Furniture {
   height: number
   z0: number
   confirmed: boolean
-  /** [x0, y0, x1, y1] on the plan. */
-  box: [number, number, number, number]
+  /** [x0, y0, x1, y1] on the plan, for a box; a piece of another shape has a polygon. */
+  box?: [number, number, number, number] | null
+  polygon?: Vec2[] | null
 }
 export interface Outdoor { courtyard: Vec2[]; balcony: Vec2[]; courtyardOpensTo: string; balconyOffRoom: Id }
 export interface Location { name: string; lat: number; lon: number; confirmed: boolean }
@@ -71,27 +73,34 @@ export interface Home {
   ceiling: number
   beams: number
   northOffsetDeg: number
-  location: Location
+  location?: Location | null
   size: { eastWest: number; northSouth: number }
   wallCutHeight: number
   outdoor: Outdoor
 }
-/** PUT /home: "north, ceiling, beams, location" (§12.3). */
-export type HomeUpdate = Partial<Pick<Home, 'northOffsetDeg' | 'ceiling' | 'beams' | 'location'>>
-export type AnchorInput = Omit<Anchor, 'id' | 'confirmed'>
-export type SubZoneInput = Omit<SubZone, 'id'>
+/** PUT /home: "north, ceiling, beams, location" (§12.3). Only what's sent changes. */
+export interface HomeSettings { northOffsetDeg?: number; ceiling?: number; beams?: number; location?: Location }
+export interface AnchorIn { name: string; position: Vec3; points?: Vec3[] }
+export interface AnchorUpdate { name?: string; position?: Vec3; points?: Vec3[]; confirmed?: boolean }
+export type SubZoneIn = Omit<SubZone, 'id'>
+export type SubZoneUpdate = Partial<SubZoneIn>
 export type LightShape =
   | { kind: 'point'; position: Vec3 }
   | { kind: 'line'; path: [Vec3, Vec3] }
   | { kind: 'bent-line'; path: Vec3[] }
   | { kind: 'cylinder'; base: Vec3; height: number; radius: number }
   | { kind: 'grid'; center: Vec3; width: number; depth: number; rotation: Vec3 }
-/** PUT /lights/{id}/placement: "shape, position, rotation, size, ledOrder" (§12.3). */
-export interface Placement { shape: LightShape; ledOrder?: string }
-/** What a placement request answers: the placement (engine M2 plan, Spec Ruling 16). */
-export interface PlacementState { shape: LightShape | null; ledOrder: string | null; confirmed: boolean; confirmedAt: string | null }
+/**
+ * PUT /lights/{id}/placement: "shape, position, rotation, size, ledOrder" (§12.3). Without a
+ * ledOrder, a shape of the same kind keeps its order (engine M2 plan, Spec Ruling 16).
+ */
+export interface PlacementIn { shape: LightShape; ledOrder?: string }
+/** A light's placement: what the placement requests answer, and the guess per light it placed. */
+export interface Placement { shape: LightShape; ledOrder: string; confirmed: boolean; confirmedAt?: string | null }
 export interface PreviewRequest { zoneId: Id; lookId?: Id; look?: Look }
-export interface PreviewResponse { previewId: Id }
+export interface PreviewStarted { previewId: Id }
+/** PUT /preview/{id}: the editor's look as it is now, saved or not. */
+export interface PreviewUpdate { look: Look }
 /** The binary frame's stream byte (§12.4): 0x01 live, 0x02 preview. */
 export type FrameStream = 'live' | 'preview'
 /**
@@ -158,17 +167,22 @@ export interface Inputs {
 export type SignalValue = number | string | boolean
 export interface Signal { name: string; value: SignalValue; unit?: string; usedBy: Id[] }
 
-/** The pending types' names, as the backend's schema would name them. */
+/**
+ * The pending types' names, as the backend's schema names them. LightShape is a union there, so
+ * its five shapes (PointShape, …) are the names that arrive.
+ */
 export type PendingSchema =
-  | 'Home' | 'Room' | 'SubZone' | 'Anchor' | 'Wall' | 'Furniture' | 'LightShape' | 'Placement'
-  | 'PreviewRequest' | 'PreviewResponse' | 'RecentLook' | 'Deck' | 'Inputs' | 'Signal'
+  | 'Home' | 'Room' | 'SubZone' | 'Anchor' | 'Wall' | 'Box2' | 'Furniture' | 'Location' | 'Outdoor'
+  | 'HomeSettings' | 'AnchorIn' | 'AnchorUpdate' | 'SubZoneIn' | 'SubZoneUpdate'
+  | 'PointShape' | 'LineShape' | 'BentLineShape' | 'CylinderShape' | 'GridShape' | 'PlacementIn' | 'Placement'
+  | 'PreviewRequest' | 'PreviewStarted' | 'PreviewUpdate' | 'RecentLook' | 'Deck' | 'Inputs' | 'Signal'
 /** The pending REST paths (§12.3), with FastAPI's parameter names. */
 export type PendingPath =
   | '/api/home'
   | '/api/home/anchors'
   | '/api/home/anchors/{anchor_id}'
   | '/api/home/subzones'
-  | '/api/home/subzones/{subzone_id}'
+  | '/api/home/subzones/{sub_zone_id}'
   | '/api/lights/{light_id}/placement'
   | '/api/lights/{light_id}/placement/confirm'
   | '/api/lights/placement/guess'

@@ -2,10 +2,7 @@
 // byte copies of home.json and looks.json, so no name, position or description is typed here
 // (CLAUDE.md, "Web App Design"), except the owner's name for one room (decision 8). What the files don't say, the mock makes up in the API's shape:
 // addresses from the documentation range (RFC 5737), no MACs, and M1's latency heuristics.
-import type {
-  Anchor, Box2, Furniture, Home, Id, InputKind, Light, LightShape, Location, Look, Outdoor, Room, SubZone, Vec2,
-  Vec3, Wall, Zone,
-} from '../contract'
+import type { Home, Id, InputKind, Light, LightShape, Location, Look, Room, Vec3, Zone } from '../contract'
 import homeJson from './home.json'
 import looksJson from './looks.json'
 
@@ -40,21 +37,9 @@ interface RawLight {
   parts?: { name: string; leds: number }[]
 }
 
-interface RawHome {
-  northOffsetDeg: number
-  size: Home['size']
-  ceiling: number
-  beams: number
-  wallCutHeight: number
+/** home.json: the home, with its lights and their totals beside it. */
+interface RawHome extends Home {
   location: Location
-  outline: Vec2[]
-  rooms: Room[]
-  subZones: SubZone[]
-  outdoor: Outdoor
-  walls: Wall[]
-  columns: Box2[]
-  furniture: Furniture[]
-  anchors: Anchor[]
   lights: RawLight[]
   totals: { lights: number; leds: number }
 }
@@ -88,22 +73,8 @@ export function withOwnerNames(rooms: Room[]): Room[] {
   return rooms.map((room) => ({ ...room, name: OWNER_ROOM_NAMES[room.id] ?? room.name }))
 }
 
-export const homeFixture: Home = {
-  outline: RAW.outline,
-  rooms: withOwnerNames(RAW.rooms),
-  subZones: RAW.subZones,
-  walls: RAW.walls,
-  columns: RAW.columns,
-  furniture: RAW.furniture,
-  anchors: RAW.anchors,
-  ceiling: RAW.ceiling,
-  beams: RAW.beams,
-  northOffsetDeg: RAW.northOffsetDeg,
-  location: RAW.location,
-  size: RAW.size,
-  wallCutHeight: RAW.wallCutHeight,
-  outdoor: RAW.outdoor,
-}
+const { lights: _lights, totals: _totals, ...rawHome } = RAW
+export const homeFixture: Home = { ...rawHome, rooms: withOwnerNames(RAW.rooms) }
 
 function need<T>(value: T | undefined, light: RawLight, field: string): T {
   if (value === undefined) throw new Error(`home.json: ${light.id} is a ${light.shape} with no ${field}`)

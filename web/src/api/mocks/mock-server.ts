@@ -4,8 +4,8 @@
 // M1 does today: a bare ack, the v1 beat, v1 frames at 30 fps, an error for any other command, and
 // no decks or inputs (decision 9).
 import type {
-  AnchorInput, CreateGroup, FrameStream, HomeUpdate, Id, Light, LightUpdate, Look, Placement, PlacementState, PreviewRequest,
-  RecentLook, RunningZone, StartRequest, SubZoneInput, TakeOver, UpdateGroup,
+  AnchorIn, CreateGroup, FrameStream, HomeSettings, Id, Light, LightShape, LightUpdate, Look, Placement, PlacementIn,
+  PreviewRequest, PreviewUpdate, RecentLook, RunningZone, StartRequest, SubZoneIn, TakeOver, UpdateGroup,
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import type { BeatV1, BeatV2, ServerMessage, StatsMessage } from '../ws-messages'
@@ -480,12 +480,12 @@ export class MockServer {
 
     // Pending: engine M2
     ['GET', /^\/api\/home$/, () => ok(this.state.home)],
-    ['PUT', /^\/api\/home$/, (_, body) => ok(Object.assign(this.state.home, body as HomeUpdate))],
+    ['PUT', /^\/api\/home$/, (_, body) => ok(Object.assign(this.state.home, body as HomeSettings))],
     [
       'POST',
       /^\/api\/home\/anchors$/,
       (_, body) => {
-        const anchor = { ...(body as AnchorInput), id: this.newId('anchor'), confirmed: false }
+        const anchor = { ...(body as AnchorIn), id: this.newId('anchor'), confirmed: false }
         this.state.home.anchors.push(anchor)
         return created(anchor)
       },
@@ -496,7 +496,7 @@ export class MockServer {
       'POST',
       /^\/api\/home\/subzones$/,
       (_, body) => {
-        const subZone = { ...(body as SubZoneInput), id: this.newId('subzone') }
+        const subZone = { ...(body as SubZoneIn), id: this.newId('subzone') }
         this.state.home.subZones.push(subZone)
         return created(subZone)
       },
@@ -509,10 +509,10 @@ export class MockServer {
       /^\/api\/lights\/([^/]+)\/placement$/,
       ([id], body) =>
         this.withLight(id, (light) => {
-          const placement = body as Placement
+          const placement = body as PlacementIn
           Object.assign(light, { shape: placement.shape, ledOrder: placement.ledOrder ?? light.ledOrder, confirmed: false })
           this.confirmedAt.delete(id)
-          return ok(this.placementOf(light))
+          return this.placementReply(light)
         }),
     ],
     [
@@ -520,13 +520,14 @@ export class MockServer {
       /^\/api\/lights\/([^/]+)\/placement\/confirm$/,
       ([id]) =>
         this.withLight(id, (light) => {
+          if (light.shape == null) return this.placementReply(light)
           light.confirmed = true
-          this.confirmedAt.set(id, new Date(this.wallClock()).toISOString())
-          return ok(this.placementOf(light))
+          this.confirmedAt.set(id, this.isoNow())
+          return this.placementReply(light)
         }),
     ],
     ['POST', /^\/api\/preview$/, (_, body) => this.startPreview(body as PreviewRequest)],
-    ['PUT', /^\/api\/preview\/([^/]+)$/, ([id], body) => this.updatePreview(id, body as { look?: Look })],
+    ['PUT', /^\/api\/preview\/([^/]+)$/, ([id], body) => this.updatePreview(id, body as Partial<PreviewUpdate>)],
     ['DELETE', /^\/api\/preview\/([^/]+)$/, ([id]) => this.stopPreview(id)],
     ['GET', /^\/api\/running\/recent$/, () => ok(this.recentLooks())],
 
@@ -558,13 +559,12 @@ export class MockServer {
   }
 
   /** A light's placement, as engine M2 answers a placement request (its Spec Ruling 16). */
-  private placementOf(light: Light): PlacementState {
-    return {
-      shape: light.shape ?? null,
-      ledOrder: light.ledOrder ?? null,
-      confirmed: light.confirmed ?? false,
-      confirmedAt: this.confirmedAt.get(light.id) ?? null,
-    }
+  private placement(light: Light, shape: LightShape): Placement {
+    return { shape, ledOrder: light.ledOrder, confirmed: light.confirmed, confirmedAt: this.confirmedAt.get(light.id) ?? null }
+  }
+
+  private placementReply(light: Light): MockReply {
+    return light.shape == null ? notFound(`Light '${light.id}' has no placement`) : ok(this.placement(light, light.shape))
   }
 
   private withRunning(zoneId: Id, then: (zone: RunningZone) => MockReply): MockReply {
@@ -749,13 +749,13 @@ export class MockServer {
 
   /** Spreads unplaced lights around their rooms, unconfirmed (§12.3): here, at the room's label. */
   private guess(): MockReply {
-    const guessed: Light[] = []
+    const guessed: Record<Id, Placement> = {}
     for (const light of this.state.lights) {
       const room = this.state.home.rooms.find((candidate) => candidate.id === light.room)
       if (light.shape != null || room === undefined) continue
-      light.shape = { kind: 'point', position: [room.labelAt[0], room.labelAt[1], 1] }
-      light.confirmed = false
-      guessed.push(light)
+      const shape: LightShape = { kind: 'point', position: [room.labelAt[0], room.labelAt[1], 1] }
+      Object.assign(light, { shape, confirmed: false })
+      guessed[light.id] = this.placement(light, shape)
     }
     return ok(guessed)
   }
@@ -772,10 +772,10 @@ export class MockServer {
       id: this.newId('preview'),
       lights: zone.lights.map((id) => this.painted(id, lights.get(id)?.leds ?? 0, spec, 1, false)),
     }
-    return ok({ previewId: this.preview.id })
+    return created({ previewId: this.preview.id })
   }
 
-  private updatePreview(id: Id, body: { look?: Look }): MockReply {
+  private updatePreview(id: Id, body: Partial<PreviewUpdate>): MockReply {
     if (this.preview?.id !== id) return notFound(`No preview '${id}'`)
     if (body.look !== undefined) {
       const spec = motifFor(body.look)

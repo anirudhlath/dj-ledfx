@@ -1,9 +1,9 @@
 // The REST client (spec §12.3). Every request the app makes goes through here; components never
 // call fetch (§12). Paths are checked against the backend's schema (ApiPath) or §12.3 (PendingPath).
 import type {
-  Anchor, AnchorInput, ApiPath, AttentionItem, CreateGroup, Home, HomeUpdate, Id, Inputs, Light, Look,
-  PendingPath, Placement, PlacementState, PreviewRequest, PreviewResponse, RecentLook, Running, RunningZone, Signal,
-  StartRequest, StartResponse, SubZone, SubZoneInput, UpdateGroup, Zone,
+  Anchor, AnchorIn, AnchorUpdate, ApiPath, AttentionItem, CreateGroup, Home, HomeSettings, Id, Inputs, Light, Look,
+  PendingPath, Placement, PlacementIn, PreviewRequest, PreviewStarted, PreviewUpdate, RecentLook, Running, RunningZone,
+  Signal, StartRequest, StartResponse, SubZone, SubZoneIn, SubZoneUpdate, UpdateGroup, Zone,
 } from './contract'
 
 /** A request that failed. `status` 0 means no answer at all: the server is down, or the network. */
@@ -103,23 +103,25 @@ export const api = {
 
   // Pending: engine M2 (mocked until it lands)
   home: () => request<Home>('GET', apiPath('/api/home')),
-  updateHome: (body: HomeUpdate) => request<Home>('PUT', apiPath('/api/home'), body),
-  addAnchor: (body: AnchorInput) => request<Anchor>('POST', apiPath('/api/home/anchors'), body),
-  updateAnchor: (id: Id, body: Partial<AnchorInput>) =>
+  updateHome: (body: HomeSettings) => request<Home>('PUT', apiPath('/api/home'), body),
+  addAnchor: (body: AnchorIn) => request<Anchor>('POST', apiPath('/api/home/anchors'), body),
+  updateAnchor: (id: Id, body: AnchorUpdate) =>
     request<Anchor>('PUT', apiPath('/api/home/anchors/{anchor_id}', { anchor_id: id }), body),
   deleteAnchor: (id: Id) => request<void>('DELETE', apiPath('/api/home/anchors/{anchor_id}', { anchor_id: id })),
-  addSubZone: (body: SubZoneInput) => request<SubZone>('POST', apiPath('/api/home/subzones'), body),
-  updateSubZone: (id: Id, body: Partial<SubZoneInput>) =>
-    request<SubZone>('PUT', apiPath('/api/home/subzones/{subzone_id}', { subzone_id: id }), body),
-  deleteSubZone: (id: Id) => request<void>('DELETE', apiPath('/api/home/subzones/{subzone_id}', { subzone_id: id })),
-  setPlacement: (lightId: Id, body: Placement) =>
-    request<PlacementState>('PUT', apiPath('/api/lights/{light_id}/placement', light(lightId)), body),
+  addSubZone: (body: SubZoneIn) => request<SubZone>('POST', apiPath('/api/home/subzones'), body),
+  updateSubZone: (id: Id, body: SubZoneUpdate) =>
+    request<SubZone>('PUT', apiPath('/api/home/subzones/{sub_zone_id}', { sub_zone_id: id }), body),
+  deleteSubZone: (id: Id) =>
+    request<void>('DELETE', apiPath('/api/home/subzones/{sub_zone_id}', { sub_zone_id: id })),
+  setPlacement: (lightId: Id, body: PlacementIn) =>
+    request<Placement>('PUT', apiPath('/api/lights/{light_id}/placement', light(lightId)), body),
   confirmPlacement: (lightId: Id) =>
-    request<PlacementState>('POST', apiPath('/api/lights/{light_id}/placement/confirm', light(lightId))),
-  guessPlacements: () => request<Light[]>('POST', apiPath('/api/lights/placement/guess')),
-  startPreview: (body: PreviewRequest) => request<PreviewResponse>('POST', apiPath('/api/preview'), body),
+    request<Placement>('POST', apiPath('/api/lights/{light_id}/placement/confirm', light(lightId))),
+  /** Places the lights that have no placement, unconfirmed: the placements it made, by light. */
+  guessPlacements: () => request<Record<Id, Placement>>('POST', apiPath('/api/lights/placement/guess')),
+  startPreview: (body: PreviewRequest) => request<PreviewStarted>('POST', apiPath('/api/preview'), body),
   updatePreview: (id: Id, draft: Look) =>
-    request<void>('PUT', apiPath('/api/preview/{preview_id}', { preview_id: id }), { look: draft }),
+    request<void>('PUT', apiPath('/api/preview/{preview_id}', { preview_id: id }), { look: draft } satisfies PreviewUpdate),
   stopPreview: (id: Id) => request<void>('DELETE', apiPath('/api/preview/{preview_id}', { preview_id: id })),
   /** "Start again" (§9.4): the looks that stopped, newest first (engine M2 plan, Spec Ruling 19). */
   recentLooks: () => request<RecentLook[]>('GET', apiPath('/api/running/recent')),

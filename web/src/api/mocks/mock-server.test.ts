@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BeatClock } from '../beat'
-import type { Look, RecentLook, Zone } from '../contract'
+import type { Look, Placement, RecentLook, Zone } from '../contract'
 import { FrameStore, decodeFrame } from '../frames'
 import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
@@ -197,7 +197,7 @@ describe('the REST API', () => {
     socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live', 'preview'] })
     const lights = JSON.stringify(server.state.lights)
     const reply = server.handle('POST', '/api/preview', { zoneId: 'living', lookId: 'embers' })
-    expect(reply.body).toEqual({ previewId: expect.any(String) })
+    expect(reply).toEqual({ status: 201, body: { previewId: expect.any(String) } })
     vi.advanceTimersByTime(500)
     const frames = decoded(socket.binary(), 2)
     expect(frames.preview.size).toBe(server.state.zones.find((zone) => zone.id === 'living')?.lights.length)
@@ -216,6 +216,25 @@ describe('the REST API', () => {
     expect(server.handle('PUT', '/api/config', { engine: { preview_only: true } }).status).toBe(200)
     expect(socket.json()).toEqual([{ channel: 'transport', state: 'simulating' }])
     expect(server.handle('PUT', '/api/config', { engine: { preview_only: 'yes' } }).status).toBe(400)
+  })
+
+  // I4: engine M2's placement answers (its Spec Ruling 16).
+  it('answers a placement with the placement, and a guess with one per light it placed', () => {
+    const server = serve({ scenario: 'no-lights' })
+    expect(server.handle('POST', '/api/lights/rcl/placement/confirm')).toEqual({
+      status: 404,
+      body: { detail: "Light 'rcl' has no placement" },
+    })
+    const guessed = server.handle('POST', '/api/lights/placement/guess').body as Record<string, Placement>
+    expect(Object.keys(guessed)).toHaveLength(server.state.lights.length)
+    expect(guessed.rcl).toEqual({ shape: expect.objectContaining({ kind: 'point' }), ledOrder: '', confirmed: false, confirmedAt: null })
+    const shape = { kind: 'point', position: [1, 2, 1] }
+    expect(server.handle('PUT', '/api/lights/rcl/placement', { shape }).body).toEqual({
+      shape, ledOrder: '', confirmed: false, confirmedAt: null,
+    })
+    expect(server.handle('POST', '/api/lights/rcl/placement/confirm').body).toEqual({
+      shape, ledOrder: '', confirmed: true, confirmedAt: NOW.toISOString(),
+    })
   })
 
   it('answers what it does not serve with 404 Not Found', () => {
