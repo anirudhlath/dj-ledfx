@@ -1,7 +1,8 @@
 // The beat on the client (spec §12.4, §5.4). The server sends it at up to 30 Hz, and the UI
 // samples it on every animation frame. Between messages the clock runs on at the tempo, and each
 // message pulls it back: softly under 5 ms, with a snap at 5 ms or more, as the engine's BeatClock
-// corrects its drift.
+// corrects its drift. Engine M1's beat carries no server time, so its arrival times it, and its
+// band is 50 ms: delivery jitter eases in rather than stepping the beat back and forth.
 import type { TempoSource } from './contract'
 import type { BeatMessage } from './ws-messages'
 
@@ -35,34 +36,33 @@ export interface Beat {
 }
 
 export function normaliseBeat(message: BeatMessage, receivedAt: number): Beat {
+  const shared = {
+    bpm: message.bpm,
+    beatPhase: message.beat_phase,
+    barPhase: message.bar_phase,
+    pitchPercent: message.pitch_percent,
+    receivedAt,
+  }
   if ('source' in message) {
     return {
-      bpm: message.bpm,
-      beatPhase: message.beat_phase,
-      barPhase: message.bar_phase,
+      ...shared,
       beatInBar: message.beat_in_bar,
       bar: message.bar,
-      pitchPercent: message.pitch_percent,
       source: message.source,
       stale: message.stale,
       playing: !message.stale && message.bpm > 0,
       serverTime: message.server_time,
-      receivedAt,
     }
   }
   // Engine M1: Pro DJ Link is its only source, and it counts no bars (decision 9).
   return {
-    bpm: message.bpm,
-    beatPhase: message.beat_phase,
-    barPhase: message.bar_phase,
+    ...shared,
     beatInBar: message.beat_pos,
     bar: null,
-    pitchPercent: message.pitch_percent,
     source: 'prodjlink',
     stale: false,
     playing: message.is_playing && message.bpm > 0,
     serverTime: null,
-    receivedAt,
   }
 }
 
@@ -75,6 +75,7 @@ export class ClockOffset {
   private next = 0
 
   add(serverTime: number, receivedAt: number): void {
+    if (!Number.isFinite(serverTime) || !Number.isFinite(receivedAt)) return
     this.gaps[this.next] = receivedAt - serverTime
     this.next = (this.next + 1) % WINDOW
     this.count = Math.min(this.count + 1, WINDOW)
@@ -95,11 +96,13 @@ export class ClockOffset {
 }
 
 /** The engine's BeatClock threshold: under it a correction eases in, at or over it the clock snaps. */
-export const SNAP_S = 0.005
+const SNAP_S = 0.005
+/** The threshold for a beat timed by its arrival: wide enough for delivery jitter. */
+const JITTER_SNAP_S = 0.05
 /** How much of a small error each message corrects. */
-export const SOFT_GAIN = 0.1
+const SOFT_GAIN = 0.1
 
-export interface BeatSample {
+interface BeatSample {
   beatPhase: number
   barPhase: number
   /** 1–4. */
@@ -125,34 +128,39 @@ export class BeatClock {
   private running = false
   private counted = false
 
+  /** A beat with a number that isn't finite is ignored, so a malformed message can't stop the clock. */
   receive(beat: Beat, offset: number | null): void {
-    const counted = beat.bar !== null
-    // When the message's beat was true, on this client's clock.
-    const measuredAt = beat.serverTime !== null && offset !== null ? beat.serverTime + offset : beat.receivedAt
-    let target = (beat.bar !== null ? (beat.bar - 1) * 4 : 0) + beat.barPhase * 4
-    if (beat.playing) target += ((beat.receivedAt - measuredAt) * beat.bpm) / 60
+    const { bpm, barPhase, bar, serverTime, receivedAt } = beat
+    if (![bpm, barPhase, bar ?? 0, serverTime ?? 0, receivedAt, offset ?? 0].every(Number.isFinite)) return
+    const counted = bar !== null
+    // When the message's beat was true, on this client's clock. Untimed, its arrival stands in.
+    const timed = serverTime !== null && offset !== null
+    const measuredAt = timed ? serverTime + offset : receivedAt
+    let target = (counted ? (bar - 1) * 4 : 0) + barPhase * 4
+    if (beat.playing) target += ((receivedAt - measuredAt) * bpm) / 60
     if (!beat.playing || !this.running || counted !== this.counted) {
-      this.anchor(target, beat.receivedAt, beat.bpm, beat.playing, counted)
+      this.anchor(target, receivedAt, bpm, beat.playing, counted)
       return
     }
-    const predicted = this.positionAt(beat.receivedAt)
+    const predicted = this.positionAt(receivedAt)
     const error = counted ? target - predicted : nearWay(target - predicted)
-    const errorS = (Math.abs(error) * 60) / beat.bpm
-    const corrected = predicted + (errorS < SNAP_S ? error * SOFT_GAIN : error)
-    this.anchor(corrected, beat.receivedAt, beat.bpm, true, counted)
+    const errorS = (Math.abs(error) * 60) / bpm
+    const soft = errorS < (timed ? SNAP_S : JITTER_SNAP_S)
+    this.anchor(predicted + (soft ? error * SOFT_GAIN : error), receivedAt, bpm, true, counted)
   }
 
-  sample(now: number): BeatSample {
+  /** The beat at `now`. Pass the last sample back as `out` to fill it instead of allocating. */
+  sample(now: number, out?: BeatSample): BeatSample {
     const position = this.positionAt(now)
     const beats = withinBar(position)
-    return {
-      beatPhase: beats % 1,
-      barPhase: beats / 4,
-      beatInBar: Math.floor(beats) + 1,
-      bar: this.counted ? Math.floor(position / 4) + 1 : null,
-      bpm: this.bpm,
-      running: this.running,
-    }
+    const sample: BeatSample = out ?? { beatPhase: 0, barPhase: 0, beatInBar: 1, bar: null, bpm: 0, running: false }
+    sample.beatPhase = beats % 1
+    sample.barPhase = beats / 4
+    sample.beatInBar = Math.floor(beats) + 1
+    sample.bar = this.counted ? Math.floor(position / 4) + 1 : null
+    sample.bpm = this.bpm
+    sample.running = this.running
+    return sample
   }
 
   /** Forget the beat: after a reconnect, the next message anchors afresh. */
