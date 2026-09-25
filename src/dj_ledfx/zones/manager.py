@@ -70,11 +70,12 @@ T = TypeVar("T")
 
 
 class RuntimeHost(Protocol):
-    """Renders the running zones: the effect engine."""
+    """Renders the running zones and the preview: the effect engine. Runtimes are keyed by
+    ZoneRuntime.key, the zone id for a zone."""
 
     def add_runtime(self, runtime: ZoneRuntime) -> None: ...
 
-    def remove_runtime(self, zone_id: str) -> None: ...
+    def remove_runtime(self, key: str) -> None: ...
 
 
 class RouteTable(Protocol):
@@ -459,6 +460,31 @@ class ZoneManager:
             await self._persist(zone_id)
             await self._sync(running.lights)
         self._event_bus.emit(ZonesChanged())
+
+    def preview_runtime(self, key: str, zone_id: str, look: Look) -> ZoneRuntime:
+        """A runtime that shows a look on a zone in the web app only (spec §4.1): all the
+        zone's lights where the map puts them, at the zone's brightness if it runs. It
+        gets no route, so nothing reaches a light, and no light is read or captured.
+        Nothing is sent, so it renders one frame ahead and asks no light its latency."""
+        validate_look(look)
+        zone = self.get_zone(zone_id)
+        lights = self._members(zone)
+        if not lights:
+            raise ZoneError(f"{zone.name} has no lights")
+        running = self._running.get(zone_id)
+        return ZoneRuntime(
+            zone_id,
+            look,
+            self._zone_lights(lights),
+            key=key,
+            clock=self._clock,
+            latency_s=lambda _device_id: None,
+            fps=self._fps,
+            max_lookahead_s=self._max_lookahead_s,
+            brightness=_brightness_of(running) if running is not None else 1.0,
+            now=self._now,
+            space=self._home.space(),
+        )
 
     async def home_changed(self) -> None:
         """The home map changed: a light moved, or a room, sub-zone or anchor changed.

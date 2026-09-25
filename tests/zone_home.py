@@ -53,10 +53,10 @@ class FakeHost:
         self.runtimes: dict[str, ZoneRuntime] = {}
 
     def add_runtime(self, runtime: ZoneRuntime) -> None:
-        self.runtimes[runtime.zone_id] = runtime
+        self.runtimes[runtime.key] = runtime
 
-    def remove_runtime(self, zone_id: str) -> None:
-        self.runtimes.pop(zone_id, None)
+    def remove_runtime(self, key: str) -> None:
+        self.runtimes.pop(key, None)
 
 
 class FakeRoutes:

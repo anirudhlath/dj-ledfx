@@ -39,10 +39,10 @@ class EffectEngine:
         return min((runtime.ring.fill_level for runtime in self._runtimes.values()), default=1.0)
 
     def add_runtime(self, runtime: ZoneRuntime) -> None:
-        self._runtimes[runtime.zone_id] = runtime
+        self._runtimes[runtime.key] = runtime
 
-    def remove_runtime(self, zone_id: str) -> None:
-        self._runtimes.pop(zone_id, None)
+    def remove_runtime(self, key: str) -> None:
+        self._runtimes.pop(key, None)
 
     def tick(self, now: float) -> None:
         started = time.monotonic()

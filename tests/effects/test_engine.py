@@ -75,10 +75,10 @@ def test_ring_buffer_empty_returns_none() -> None:
     assert buf.find_nearest(100.0) is None
 
 
-def _runtime(zone_id: str, clock: BeatClock) -> ZoneRuntime:
+def _runtime(zone_id: str, clock: BeatClock, key: str | None = None) -> ZoneRuntime:
     look = next(look for look in builtin_looks() if look.id == "classic-breathe")
     light = ZoneLight(f"{zone_id}-light", 4, DeviceCapabilities(protocol="LIFX"))
-    return ZoneRuntime(zone_id, look, [light], clock=clock, latency_s=lambda _: 0.05)
+    return ZoneRuntime(zone_id, look, [light], clock=clock, latency_s=lambda _: 0.05, key=key)
 
 
 def test_the_engine_renders_each_zone_it_hosts(clock: BeatClock) -> None:
@@ -127,3 +127,18 @@ async def test_the_engine_renders_until_stopped(clock: BeatClock) -> None:
     await asyncio.wait_for(task, timeout=1.0)
 
     assert desk.ring.count >= 3
+
+
+def test_a_preview_renders_beside_its_zone(clock: BeatClock) -> None:
+    engine = EffectEngine(fps=60)
+    desk, preview = _runtime("desk", clock), _runtime("desk", clock, key="preview:p1")
+    engine.add_runtime(desk)
+    engine.add_runtime(preview)
+    now = time.monotonic()
+
+    engine.tick(now)
+    engine.remove_runtime("preview:p1")
+    engine.tick(now + 1 / 60)
+
+    assert (desk.key, preview.key) == ("desk", "preview:p1")
+    assert (desk.ring.count, preview.ring.count) == (2, 1)
