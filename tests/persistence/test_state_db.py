@@ -396,6 +396,38 @@ async def test_save_and_load_placement(db):
     assert placements[0]["geometry_type"] == "strip"
 
 
+async def test_every_scenes_placements_load_by_scene_then_device(db):
+    for device in ("lamp-b", "lamp-a"):
+        await db.upsert_device({"id": device, "name": device, "backend": "govee"})
+    for scene in ("s2", "s1"):
+        await db.save_scene({"id": scene, "name": scene.upper()})
+        for device in ("lamp-b", "lamp-a"):
+            await db.save_placement(
+                {
+                    "scene_id": scene,
+                    "device_id": device,
+                    "position_x": 0.0,
+                    "position_y": 0.0,
+                    "position_z": 0.0,
+                    "geometry_type": "point",
+                }
+            )
+    every = await db.load_scene_placements()
+    assert [(p["scene_id"], p["device_id"]) for p in every] == [
+        ("s1", "lamp-a"),
+        ("s1", "lamp-b"),
+        ("s2", "lamp-a"),
+        ("s2", "lamp-b"),
+    ]
+
+
+async def test_a_run_once_mark_is_written_with_its_step(db):
+    assert not await db.has_mark("step")
+    await db.write_many([db.mark_statement("step"), db.mark_statement("step")])
+    assert await db.has_mark("step") and not await db.has_mark("other")
+    assert await db.load_all_config() == {}  # marks aren't config
+
+
 # --- Task 10: Presets CRUD ---
 
 

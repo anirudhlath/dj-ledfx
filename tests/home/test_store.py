@@ -132,7 +132,5 @@ async def test_the_old_scene_placements_are_read_in_the_scene_editors_axes(db: S
     )
 
     assert await HomeStore(db).load_scene_placements() == [
-        ScenePlacement(
-            "s1", "strip-1", (1.0, 2.0, 3.0), "strip", (1.0, 0.0, 0.0), 1.5, None, None, None
-        )
+        ScenePlacement("s1", "strip-1", (1.0, 2.0, 3.0), "strip", (1.0, 0.0, 0.0), 1.5, None, None)
     ]

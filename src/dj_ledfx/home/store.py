@@ -6,20 +6,17 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from dj_ledfx.home.model import Home, Vec3, home_from_dict, home_to_dict
 from dj_ledfx.home.seed import seed_home
-from dj_ledfx.home.shapes import Placement, check_led_order, shape_from_dict, shape_to_dict
-from dj_ledfx.timing import as_utc, utcnow
+from dj_ledfx.home.shapes import Placement, placement_from_dict, shape_to_dict
+from dj_ledfx.timing import utcnow
 
 if TYPE_CHECKING:
-    from dj_ledfx.persistence.state_db import StateDB
-
-Statement = tuple[str, tuple[Any, ...]]
+    from dj_ledfx.persistence.state_db import StateDB, Statement
 
 _SEEDED_KEY = "home_placements_seeded"
 
@@ -34,7 +31,6 @@ class ScenePlacement:
     geometry: str  # point, strip or matrix
     direction: Vec3 | None
     length: float | None
-    width: float | None
     rows: int | None
     cols: int | None
 
@@ -119,13 +115,16 @@ class HomeStore:
         placements: dict[str, Placement] = {}
         for target_id, shape_json, led_order, confirmed, confirmed_at in rows:
             try:
-                shape = shape_from_dict(json.loads(shape_json))
-                order = check_led_order(shape.kind, led_order)
-                at = as_utc(datetime.fromisoformat(confirmed_at)) if confirmed_at else None
+                placements[target_id] = placement_from_dict(
+                    {
+                        "shape": json.loads(shape_json),
+                        "led_order": led_order,
+                        "confirmed": bool(confirmed),
+                        "confirmed_at": confirmed_at,
+                    }
+                )
             except (ValueError, TypeError) as exc:
                 logger.warning("Light {}: its saved placement is unreadable ({})", target_id, exc)
-                continue
-            placements[target_id] = Placement(shape, order, bool(confirmed), at)
         return placements
 
     async def save_placement(self, target_id: str, placement: Placement) -> None:
@@ -136,10 +135,7 @@ class HomeStore:
         await self._db.write("DELETE FROM placements WHERE target_id=?", (target_id,))
 
     async def placements_seeded(self) -> bool:
-        rows = await self._db.fetch_all(
-            "SELECT 1 FROM config WHERE section='_meta' AND key=?", (_SEEDED_KEY,)
-        )
-        return bool(rows)
+        return await self._db.has_mark(_SEEDED_KEY)
 
     async def mark_placements_seeded(self, placements: Mapping[str, Placement]) -> None:
         """Save the first placements and the mark that they were made, as one transaction,
@@ -147,48 +143,26 @@ class HomeStore:
         statements = [
             _placement_statement(target, placement) for target, placement in placements.items()
         ]
-        statements.append(
-            (
-                "INSERT INTO config (section, key, value) VALUES ('_meta', ?, '1') "
-                "ON CONFLICT(section, key) DO UPDATE SET value=excluded.value",
-                (_SEEDED_KEY,),
-            )
-        )
+        statements.append(self._db.mark_statement(_SEEDED_KEY))
         await self._db.write_many(statements)
 
     # --- the old scenes --------------------------------------------------------------
 
     async def load_scene_placements(self) -> list[ScenePlacement]:
-        rows = await self._db.fetch_all(
-            "SELECT scene_id, device_id, position_x, position_y, position_z, geometry_type, "
-            "direction_x, direction_y, direction_z, length, width, rows, cols "
-            "FROM scene_placements ORDER BY scene_id, device_id"
-        )
         return [
             ScenePlacement(
-                scene_id=scene_id,
-                device_id=device_id,
-                position=(float(x), float(y), float(z)),
-                geometry=str(geometry),
-                direction=_vec(dx, dy, dz),
-                length=None if length is None else float(length),
-                width=None if width is None else float(width),
-                rows=None if rows is None else int(rows),
-                cols=None if cols is None else int(cols),
+                scene_id=row["scene_id"],
+                device_id=row["device_id"],
+                position=(
+                    float(row["position_x"]),
+                    float(row["position_y"]),
+                    float(row["position_z"]),
+                ),
+                geometry=str(row["geometry_type"]),
+                direction=_vec(row["direction_x"], row["direction_y"], row["direction_z"]),
+                length=None if row["length"] is None else float(row["length"]),
+                rows=None if row["rows"] is None else int(row["rows"]),
+                cols=None if row["cols"] is None else int(row["cols"]),
             )
-            for (
-                scene_id,
-                device_id,
-                x,
-                y,
-                z,
-                geometry,
-                dx,
-                dy,
-                dz,
-                length,
-                width,
-                rows,
-                cols,
-            ) in rows
+            for row in await self._db.load_scene_placements()
         ]

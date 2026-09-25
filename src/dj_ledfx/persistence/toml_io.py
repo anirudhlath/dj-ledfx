@@ -39,7 +39,7 @@ import tomli_w
 from loguru import logger
 
 from dj_ledfx.home.model import home_from_dict
-from dj_ledfx.home.shapes import Placement, check_led_order, shape_from_dict, shape_to_dict
+from dj_ledfx.home.shapes import Placement, placement_from_dict, placement_to_dict
 from dj_ledfx.home.store import HomeStore
 from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.looks.store import STAR_LOOK, UPSERT_LOOK
@@ -481,30 +481,10 @@ async def _export_home(db: StateDB) -> dict[str, Any]:
 
 
 def _placement_doc(placement: Placement) -> dict[str, Any]:
-    doc: dict[str, Any] = {
-        "shape": shape_to_dict(placement.shape),
-        "led_order": placement.led_order,
-        "confirmed": placement.confirmed,
-    }
-    if placement.confirmed_at is not None:
-        doc["confirmed_at"] = placement.confirmed_at
+    doc = placement_to_dict(placement)
+    if doc["confirmed_at"] is None:
+        del doc["confirmed_at"]  # TOML has no null
     return doc
-
-
-def _placement(info: dict[str, Any]) -> Placement:
-    """A placement from the backup, checked as a saved one is. Raises ValueError."""
-    raw = info.get("shape")
-    if not isinstance(raw, dict):
-        raise ValueError("it has no shape")
-    shape = shape_from_dict(raw)
-    order = info.get("led_order")
-    confirmed_at = info.get("confirmed_at")
-    return Placement(
-        shape,
-        check_led_order(shape.kind, order if isinstance(order, str) and order else None),
-        info.get("confirmed") is True,
-        as_utc(confirmed_at) if isinstance(confirmed_at, datetime) else None,
-    )
 
 
 async def _import_home(db: StateDB, data: dict[str, Any]) -> None:
@@ -521,7 +501,7 @@ async def _import_home(db: StateDB, data: dict[str, Any]) -> None:
         await store.set_aside_unreadable(aside["body"], at if isinstance(at, str) else None)
     for target_id, info in _tables(data, "placements").items():
         try:
-            placement = _placement(info)
+            placement = placement_from_dict(info)
         except ValueError as exc:  # ShapeError is a ValueError too
             logger.warning("import_toml: skipped the placement of '{}' ({})", target_id, exc)
             continue

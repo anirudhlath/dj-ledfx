@@ -72,7 +72,7 @@ class PlacedLeds:
         if len(points) == 0:
             return cls(points, np.zeros((0, 3)), np.zeros(0))
         local = _normalise(points, points.min(axis=0), points.max(axis=0))
-        return cls(points, local, _along(len(points)))
+        return cls(points, local, steps_along(len(points)))
 
     # By value, so ZoneLights compare as the zone manager expects (numpy's == doesn't).
     def __eq__(self, other: object) -> bool:
@@ -218,7 +218,7 @@ def build_ledset(
                 loose.append(len(positions))
                 positions.append(laid)
                 locals_.append(_normalise(local, low, high))
-                along.append(_along(count))
+                along.append(steps_along(count))
             owners.append(np.full(count, index, dtype=np.int32))
             rooms.append(np.full(count, source.room, dtype=np.int32))
         slices.append(DeviceSlice(source.device_id, start, start + count))
@@ -260,7 +260,8 @@ def _gather(
         positions[index] = positions[index] + shift
 
 
-def _along(count: int) -> NDArray[np.float64]:
+def steps_along(count: int) -> NDArray[np.float64]:
+    """0..1 along `count` steps; a single step is 0 (local_u's convention)."""
     return np.arange(count) / (count - 1) if count > 1 else np.zeros(1)
 
 

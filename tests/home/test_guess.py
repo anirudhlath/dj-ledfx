@@ -72,11 +72,9 @@ def test_a_spread_point_outside_the_room_falls_back_to_its_label() -> None:
 def test_scene_placements_move_onto_the_map_round_their_rooms_centre() -> None:
     home = tiny_home()
     scene = [
-        ScenePlacement("s1", "lamp", (1.0, 2.0, 1.0), "point", None, None, None, None, None),
-        ScenePlacement(
-            "s1", "strip", (3.0, 1.0, -1.0), "strip", (1.0, 0.0, 0.0), 0.5, None, None, None
-        ),
-        ScenePlacement("s2", "lamp", (9.0, 9.0, 9.0), "point", None, None, None, None, None),
+        ScenePlacement("s1", "lamp", (1.0, 2.0, 1.0), "point", None, None, None, None),
+        ScenePlacement("s1", "strip", (3.0, 1.0, -1.0), "strip", (1.0, 0.0, 0.0), 0.5, None, None),
+        ScenePlacement("s2", "lamp", (9.0, 9.0, 9.0), "point", None, None, None, None),
     ]
 
     moved = moved_scene_placements(home, scene, lambda device_id: "east")
@@ -92,7 +90,7 @@ def test_scene_placements_move_onto_the_map_round_their_rooms_centre() -> None:
 
 def test_a_scene_matrix_becomes_a_standing_grid_and_the_room_defaults_to_the_largest() -> None:
     home = tiny_home()
-    scene = [ScenePlacement("s1", "tile", (0.0, 1.0, 0.0), "matrix", None, None, None, 3, 4)]
+    scene = [ScenePlacement("s1", "tile", (0.0, 1.0, 0.0), "matrix", None, None, 3, 4)]
 
     moved = moved_scene_placements(home, scene, lambda device_id: None)
 
@@ -107,8 +105,8 @@ def test_first_placements_put_the_scene_over_the_seed_and_spread_the_rest() -> N
     home = tiny_home()
     lights = [_light("candle-1", "Candle"), _light("lamp"), _light("new")]
     scene = [
-        ScenePlacement("s1", "candle-1", (0.0, 0.0, 0.0), "point", None, None, None, None, None),
-        ScenePlacement("s1", "gone", (4.0, 0.0, 0.0), "point", None, None, None, None, None),
+        ScenePlacement("s1", "candle-1", (0.0, 0.0, 0.0), "point", None, None, None, None),
+        ScenePlacement("s1", "gone", (4.0, 0.0, 0.0), "point", None, None, None, None),
     ]
 
     first = first_placements(home, lights, [_seed("Candle", "west")], scene)
@@ -123,13 +121,13 @@ def test_a_bad_scene_placement_is_skipped_and_its_light_is_guessed_instead() -> 
     home = tiny_home()
     lights = [_light("lamp"), _light("far"), _light("lost"), _light("tile"), _light("huge")]
     scene = [
-        ScenePlacement("s1", "lamp", (1.0, 2.0, 1.0), "point", None, None, None, None, None),
-        ScenePlacement("s1", "far", (math.inf, 0.0, 0.0), "point", None, None, None, None, None),
+        ScenePlacement("s1", "lamp", (1.0, 2.0, 1.0), "point", None, None, None, None),
+        ScenePlacement("s1", "far", (math.inf, 0.0, 0.0), "point", None, None, None, None),
         ScenePlacement(
-            "s1", "lost", (1.0, 2.0, 1.0), "strip", (1.0, 0.0, 0.0), math.nan, None, None, None
+            "s1", "lost", (1.0, 2.0, 1.0), "strip", (1.0, 0.0, 0.0), math.nan, None, None
         ),
-        ScenePlacement("s2", "tile", (0.0, 1.0, 0.0), "matrix", None, None, None, 0, 0),
-        ScenePlacement("s3", "huge", (0.0, 1.0, 0.0), "matrix", None, None, None, 1, 10**6),
+        ScenePlacement("s2", "tile", (0.0, 1.0, 0.0), "matrix", None, None, 0, 0),
+        ScenePlacement("s3", "huge", (0.0, 1.0, 0.0), "matrix", None, None, 1, 10**6),
     ]
 
     first = first_placements(home, lights, [], scene)

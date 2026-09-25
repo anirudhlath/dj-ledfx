@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -12,10 +13,13 @@ from dj_ledfx.home.shapes import (
     GridShape,
     LightShape,
     LineShape,
+    Placement,
     PointShape,
     ShapeError,
     check_led_order,
     led_positions,
+    placement_from_dict,
+    placement_to_dict,
     shape_centre,
     shape_from_dict,
     shape_to_dict,
@@ -176,3 +180,15 @@ def test_every_shape_gives_one_finite_position_per_led(
     assert placed.local.min() >= 0.0 and placed.local.max() <= 1.0
     assert placed.local_u[0] == 0.0 and np.all(np.diff(placed.local_u) > 0)
     assert led_positions(shape, 0).count == 0
+
+
+def test_a_placement_goes_to_a_dict_and_back() -> None:
+    at = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    placement = Placement(LineShape(((0.0, 0.0, 1.0), (1.0, 0.0, 1.0))), "reverse-path", True, at)
+    data = placement_to_dict(placement)
+    assert placement_from_dict(data) == placement
+    assert placement_from_dict({**data, "confirmed_at": at.isoformat()}) == placement
+    loose = placement_from_dict({"shape": data["shape"], "led_order": 3, "confirmed": "yes"})
+    assert (loose.led_order, loose.confirmed, loose.confirmed_at) == ("along-path", False, None)
+    with pytest.raises(ShapeError, match="needs a shape"):
+        placement_from_dict({"led_order": "reverse-path"})

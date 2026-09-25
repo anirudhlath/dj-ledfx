@@ -19,9 +19,10 @@ from typing import Any, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.effects.ledset import LED_PITCH_M, PlacedLeds
+from dj_ledfx.effects.ledset import LED_PITCH_M, PlacedLeds, steps_along
 from dj_ledfx.home.model import HomeError, Vec3, finite, vec3
 from dj_ledfx.spatial.geometry import DeviceGeometry, MatrixGeometry
+from dj_ledfx.timing import as_utc
 
 KINDS = ("point", "line", "bent-line", "cylinder", "grid")
 LED_ORDERS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -205,6 +206,37 @@ def shape_to_dict(shape: LightShape) -> dict[str, Any]:
     }
 
 
+def placement_to_dict(placement: Placement) -> dict[str, Any]:
+    """A placement in the contract's fields (snake_case): the shape as shape_to_dict
+    gives it, and confirmed_at as a datetime or None."""
+    return {
+        "shape": shape_to_dict(placement.shape),
+        "led_order": placement.led_order,
+        "confirmed": placement.confirmed,
+        "confirmed_at": placement.confirmed_at,
+    }
+
+
+def placement_from_dict(data: Mapping[str, Any]) -> Placement:
+    """A stored placement, checked as a new one is: the kind's default LED order when it
+    has none, confirmed only when confirmed is true, and confirmed_at a datetime or ISO
+    text. Raises ValueError (a ShapeError, when it's the shape)."""
+    raw = data.get("shape")
+    if not isinstance(raw, Mapping):
+        raise ShapeError("A placement needs a shape")
+    shape = shape_from_dict(raw)
+    order = data.get("led_order")
+    at = data.get("confirmed_at")
+    if isinstance(at, str) and at:
+        at = datetime.fromisoformat(at)
+    return Placement(
+        shape,
+        check_led_order(shape.kind, order if isinstance(order, str) else None),
+        data.get("confirmed") is True,
+        as_utc(at) if isinstance(at, datetime) else None,
+    )
+
+
 def shape_centre(shape: LightShape) -> Vec3:
     """The middle of the shape: what decides its room, and where a PC part's slice sits."""
     if isinstance(shape, PointShape):
@@ -236,11 +268,6 @@ def led_positions(
     if isinstance(shape, CylinderShape):
         return _cylinder(shape, count, order == "top-to-bottom", geometry)
     return _grid(shape, count, order == "columns")
-
-
-def _fractions(count: int) -> NDArray[np.float64]:
-    """0..1 along `count` steps; a single step is 0 (LedSet.local_u's convention)."""
-    return np.arange(count) / (count - 1) if count > 1 else np.zeros(1)
 
 
 def _spread(count: int) -> NDArray[np.float64]:
@@ -288,14 +315,14 @@ def _cylinder(
     tile = _single_tile(geometry, count)
     if tile is None:  # a strip up the axis
         up = (np.arange(count) + 0.5) / count
-        local_z = _fractions(count)
+        local_z = steps_along(count)
         if top_down:
             up, local_z = up[::-1], local_z[::-1]
         pos = np.column_stack([np.full(count, x), np.full(count, y), z + up * shape.height])
         local = np.column_stack([np.full(count, 0.5), np.full(count, 0.5), local_z])
         if count == 1:
             local[:, 2] = 0.5
-        return PlacedLeds(pos, local, _fractions(count))
+        return PlacedLeds(pos, local, steps_along(count))
     columns, rows = tile
     index = np.arange(count)
     row, column = index // columns, index % columns
@@ -312,7 +339,7 @@ def _cylinder(
         ]
     )
     local = np.column_stack([_spread(columns)[column], np.full(count, 0.5), local_z])
-    return PlacedLeds(pos, local, _fractions(count))
+    return PlacedLeds(pos, local, steps_along(count))
 
 
 def _columns(count: int, width: float, depth: float) -> int:
@@ -360,4 +387,4 @@ def _grid(shape: GridShape, count: int, by_columns: bool) -> PlacedLeds:
     local = np.column_stack(
         [_spread(columns)[column], np.full(count, 0.5), 1.0 - _spread(rows)[row]]
     )
-    return PlacedLeds(pos, local, _fractions(count))
+    return PlacedLeds(pos, local, steps_along(count))

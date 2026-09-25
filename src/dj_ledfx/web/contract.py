@@ -509,14 +509,7 @@ def shape_in(shape: AnyShape) -> shapes.LightShape:
 
 
 def placement_out(placement: shapes.Placement) -> Placement:
-    return Placement.model_validate(
-        {
-            "shape": shapes.shape_to_dict(placement.shape),
-            "led_order": placement.led_order,
-            "confirmed": placement.confirmed,
-            "confirmed_at": placement.confirmed_at,
-        }
-    )
+    return Placement.model_validate(shapes.placement_to_dict(placement))
 
 
 def _placed(home_map: HomeMap | None, target_id: str) -> dict[str, Any]:
@@ -529,12 +522,7 @@ def _placed(home_map: HomeMap | None, target_id: str) -> dict[str, Any]:
     }
     placement = home_map.placement(target_id)
     if placement is not None:
-        fields |= {
-            "shape": shapes.shape_to_dict(placement.shape),
-            "led_order": placement.led_order,
-            "confirmed": placement.confirmed,
-            "confirmed_at": placement.confirmed_at,
-        }
+        fields |= shapes.placement_to_dict(placement)
     return fields
 
 

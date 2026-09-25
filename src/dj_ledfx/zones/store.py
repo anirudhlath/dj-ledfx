@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
@@ -23,9 +23,7 @@ from dj_ledfx.zones.model import (
 )
 
 if TYPE_CHECKING:
-    from dj_ledfx.persistence.state_db import StateDB
-
-Statement = tuple[str, tuple[Any, ...]]
+    from dj_ledfx.persistence.state_db import StateDB, Statement
 
 _MIGRATED_KEY = "scenes_migrated"
 
@@ -179,18 +177,13 @@ class ZoneStore:
 
     async def migrate_scenes_once(self) -> None:
         """Turn each scene into a device-group zone, once (spec §6.5). Nothing runs after."""
-        done = await self._db.fetch_all(
-            "SELECT 1 FROM config WHERE section='_meta' AND key=?", (_MIGRATED_KEY,)
-        )
-        if done:
+        if await self._db.has_mark(_MIGRATED_KEY):
             return
         scenes = await self._db.fetch_all("SELECT id, name FROM scenes ORDER BY rowid")
-        placements = await self._db.fetch_all(
-            "SELECT scene_id, device_id, position_x, position_y, position_z FROM scene_placements"
-        )
         by_scene: dict[str, list[tuple[float, float, float, str]]] = {}
-        for scene_id, device_id, x, y, z in placements:
-            by_scene.setdefault(scene_id, []).append((x, y, z, device_id))
+        for row in await self._db.load_scene_placements():
+            where = (row["position_x"], row["position_y"], row["position_z"], row["device_id"])
+            by_scene.setdefault(row["scene_id"], []).append(where)
         zones = [
             ZoneRecord(
                 id=new_group_id(),
@@ -203,13 +196,7 @@ class ZoneStore:
         if not zones:
             zones = [ZoneRecord(id=ALL_LIGHTS_ZONE_ID, name="All lights", all_lights=True)]
         statements = [statement for zone in zones for statement in self._zone_statements(zone)]
-        statements.append(
-            (
-                "INSERT INTO config (section, key, value) VALUES ('_meta', ?, '1') "
-                "ON CONFLICT(section, key) DO UPDATE SET value=excluded.value",
-                (_MIGRATED_KEY,),
-            )
-        )
+        statements.append(self._db.mark_statement(_MIGRATED_KEY))
         await self._db.write_many(statements)
         logger.info("Migrated {} scene(s) to {} zone(s)", len(scenes), len(zones))
 
