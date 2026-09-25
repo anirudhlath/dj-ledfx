@@ -14,6 +14,8 @@ Export format:
   [running."<zone id>"]       — what a zone runs: look_id, look (JSON), brightness,
                                 lights, started_at
   [home]                      — the home map: body (home.json-shaped JSON), updated_at
+  [home_unreadable]           — a stored map that couldn't be read, set aside for repair:
+                                body, set_aside_at
   [placements."<target id>"]  — where a light or PC part sits: shape (a table), led_order,
                                 confirmed, confirmed_at
   [[recent]]                  — the looks "Start again" offers, newest first: zone_id,
@@ -467,6 +469,9 @@ async def _export_home(db: StateDB) -> dict[str, Any]:
     rows = await db.fetch_all("SELECT body, updated_at FROM home_map WHERE id=1")
     if rows:
         doc["home"] = {"body": rows[0][0], "updated_at": rows[0][1]}
+    aside = await db.fetch_all("SELECT body, set_aside_at FROM home_map_unreadable WHERE id=1")
+    if aside:
+        doc["home_unreadable"] = {"body": aside[0][0], "set_aside_at": aside[0][1]}
     placements = await HomeStore(db).load_placements()
     if placements:
         doc["placements"] = {
@@ -510,6 +515,10 @@ async def _import_home(db: StateDB, data: dict[str, Any]) -> None:
             await store.save_home(home_from_dict(json.loads(home["body"])))
         except ValueError as exc:  # bad JSON, or a HomeError
             logger.warning("import_toml: skipped the home map ({})", exc)
+    aside = data.get("home_unreadable")
+    if isinstance(aside, dict) and isinstance(aside.get("body"), str):
+        at = aside.get("set_aside_at")
+        await store.set_aside_unreadable(aside["body"], at if isinstance(at, str) else None)
     for target_id, info in _tables(data, "placements").items():
         try:
             placement = _placement(info)

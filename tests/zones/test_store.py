@@ -128,7 +128,7 @@ async def test_derived_zones_follow_the_map_and_take_their_assignments_with_them
 
 
 async def test_migration_006_adds_the_recent_looks(db: StateDB) -> None:
-    assert await db.get_schema_version() == 6
+    assert await db.get_schema_version() >= 6
     columns = [row[1] for row in await db.fetch_all("PRAGMA table_info(recent_looks)")]
     assert columns == ["zone_id", "look_id", "started_at", "stopped_at"]
 
@@ -164,3 +164,19 @@ async def test_only_the_newest_stops_are_kept(db: StateDB) -> None:
         "late",  # it stopped with zone-11 but started later
         *(f"zone-{n}" for n in range(11, 2, -1)),
     ]
+
+
+async def test_a_deleted_zone_forgets_its_recent_looks(db: StateDB) -> None:
+    store = ZoneStore(db)
+    await store.save_zone(ZoneRecord(id="shelf", name="Shelf", lights=("b",)))
+    derived = [ZoneRecord("west", "West", "room"), ZoneRecord("desk", "Desk", "sub-zone")]
+    await store.sync_derived(derived)
+    at = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+    await store.remember(
+        [StoppedLook(zone, "classic-breathe", at, at) for zone in ("west", "desk", "shelf")]
+    )
+
+    await store.sync_derived(derived[:1])  # the desk is gone from the map
+    await store.delete_zone("shelf")
+
+    assert [entry.zone_id for entry in await store.load_recent()] == ["west"]

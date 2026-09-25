@@ -75,7 +75,7 @@ async def test_save_device_state_upsert(db: StateDB) -> None:
 
 
 @pytest.mark.asyncio
-async def test_schema_version_is_6_after_migration(db: StateDB) -> None:
-    """Migrations up to 006 should have been applied, bumping schema to version 6."""
+async def test_schema_version_is_7_after_migration(db: StateDB) -> None:
+    """Migrations up to 007 should have been applied, bumping schema to version 7."""
     version = await db.get_schema_version()
-    assert version == 6
+    assert version == 7

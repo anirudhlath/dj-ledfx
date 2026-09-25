@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest_asyncio
+from loguru import logger
 
 from dj_ledfx.home.seed import seed_home
 from dj_ledfx.home.shapes import LineShape, Placement, PointShape
@@ -59,10 +60,21 @@ async def test_an_unreadable_map_falls_back_to_the_seed_and_is_kept_for_repair(
     store = HomeStore(db)
     await store.load_home()
     await db.write("UPDATE home_map SET body='{\"rooms\": []}' WHERE id=1")
-
-    assert await store.load_home() == seed_home()
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        assert await store.load_home() == seed_home()
+    finally:
+        logger.remove(sink)
 
     assert await db.fetch_all("SELECT body FROM home_map") == [('{"rooms": []}',)]
+    assert await db.fetch_all("SELECT body FROM home_map_unreadable") == [('{"rooms": []}',)]
+    assert any("home_map_unreadable" in warning for warning in warnings)
+
+    await store.save_home(replace(seed_home(), ceiling=3.1))  # the first edit
+
+    kept = await db.fetch_all("SELECT body FROM home_map_unreadable")
+    assert kept == [('{"rooms": []}',)]  # the edit replaced the map, not the copy
 
 
 async def test_placements_are_saved_changed_and_removed(db: StateDB) -> None:

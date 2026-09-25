@@ -71,19 +71,34 @@ class HomeStore:
     # --- the map ---------------------------------------------------------------------
 
     async def load_home(self) -> Home:
-        """The saved map, seeded on first use. An unreadable one is logged and left as it
-        is for repair, and the seed map stands in (spec §8: never crash on a bad map)."""
+        """The saved map, seeded on first use. An unreadable one is copied aside into
+        home_map_unreadable, which backups carry, so the first edit can't lose it, and the
+        seed map stands in (spec §8: never crash on a bad map)."""
         rows = await self._db.fetch_all("SELECT body FROM home_map WHERE id=1")
         if not rows:
             home = seed_home()
             await self.save_home(home)
             logger.info("Home map seeded from the handoff's home.json")
             return home
+        body = rows[0][0]
         try:
-            return home_from_dict(json.loads(rows[0][0]))
+            return home_from_dict(json.loads(body))
         except ValueError as exc:  # bad JSON or a HomeError
-            logger.error("The saved home map is unreadable ({}); using the seed map", exc)
+            await self.set_aside_unreadable(body)
+            logger.warning(
+                "The saved home map is unreadable ({}); using the seed map. The saved one is "
+                "kept in state.db's home_map_unreadable for repair",
+                exc,
+            )
             return seed_home()
+
+    async def set_aside_unreadable(self, body: str, at: str | None = None) -> None:
+        await self._db.write(
+            "INSERT INTO home_map_unreadable (id, body, set_aside_at) VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET body=excluded.body, "
+            "set_aside_at=excluded.set_aside_at",
+            (body, at or utcnow().isoformat()),
+        )
 
     async def save_home(self, home: Home) -> None:
         await self._db.write(

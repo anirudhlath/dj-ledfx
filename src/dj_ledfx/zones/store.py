@@ -88,8 +88,9 @@ class ZoneStore:
         await self._db.write_many(self._zone_statements(zone))
 
     async def delete_zone(self, zone_id: str) -> None:
-        """Delete a zone; its members and assignment go with it (FK cascade)."""
-        await self._db.write("DELETE FROM zones WHERE id=?", (zone_id,))
+        """Delete a zone; its members and assignment go with it (FK cascade), and its
+        recent looks, so a zone made again under its id starts with none."""
+        await self._db.write_many(self._delete_statements(zone_id))
 
     async def sync_derived(self, zones: Sequence[ZoneRecord]) -> None:
         """Make state.db's rooms, sub-zones and whole home match the map's, in one
@@ -102,9 +103,10 @@ class ZoneStore:
         )
         wanted = {zone.id for zone in zones}
         statements: list[Statement] = [
-            ("DELETE FROM zones WHERE id=?", (zone_id,))
+            statement
             for (zone_id,) in rows
             if zone_id not in wanted
+            for statement in self._delete_statements(zone_id)
         ]
         for zone in zones:
             statements += self._zone_statements(replace(zone, lights=(), all_lights=False))
@@ -228,6 +230,14 @@ class ZoneStore:
         )
         await self._db.write_many(statements)
         logger.info("Migrated {} scene(s) to {} zone(s)", len(scenes), len(zones))
+
+    @staticmethod
+    def _delete_statements(zone_id: str) -> list[Statement]:
+        """recent_looks has no foreign key (migration 006), so its rows go by hand."""
+        return [
+            ("DELETE FROM zones WHERE id=?", (zone_id,)),
+            ("DELETE FROM recent_looks WHERE zone_id=?", (zone_id,)),
+        ]
 
     @staticmethod
     def _zone_statements(zone: ZoneRecord) -> list[Statement]:

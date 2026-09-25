@@ -126,4 +126,25 @@ async def test_the_list_leaves_out_what_one_tap_could_not_start_again(
     await manager.start("home", strobe)
 
     assert _pairs(await manager.recent()) == [("west", "classic-breathe")]
-    assert len(await home.store.load_recent()) == 5  # left out when read, never deleted
+    # A deleted look's entry is left out when read, never deleted; a deleted zone's goes
+    assert _pairs(await home.store.load_recent()) == [
+        ("west", "classic-breathe"),
+        ("home", "classic-strobe"),
+        ("west", mine.id),
+    ]
+
+
+async def test_a_sub_zone_made_again_under_the_same_id_starts_with_no_looks(
+    make_home: HomeFactory,
+) -> None:
+    view = FakeHome(rooms={"west": ["a"]}, sub_zones={"desk": ["a"]})
+    home = await make_home([FakeLight("a")], [], view=view)
+    await home.manager.start("desk", home.look("classic-breathe"))
+    await home.manager.off("desk")
+
+    del view.sub_zones["desk"]
+    await home.manager.home_changed()
+    view.sub_zones["desk"] = ["a"]  # a new sub-zone that happens to take the same id
+    await home.manager.home_changed()
+
+    assert await home.manager.recent() == []

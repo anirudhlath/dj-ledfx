@@ -463,6 +463,26 @@ async def test_the_map_and_the_placements_round_trip(db, tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_an_unreadable_map_set_aside_travels_in_the_backup(db, tmp_path: Path) -> None:
+    store = HomeStore(db)
+    await store.load_home()
+    await db.write("UPDATE home_map SET body='{\"rooms\": []}' WHERE id=1")
+    await store.load_home()  # sets the unreadable map aside
+    text = await export_toml(db)
+    assert "[home_unreadable]" in text
+
+    fresh = StateDB(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        await import_toml(fresh, text)
+
+        kept = await fresh.fetch_all("SELECT body FROM home_map_unreadable")
+        assert kept == [('{"rooms": []}',)]
+    finally:
+        await fresh.close()
+
+
+@pytest.mark.asyncio
 async def test_import_skips_a_bad_map_and_bad_placements(db) -> None:
     text = """
 [home]
