@@ -35,7 +35,7 @@ from dj_ledfx.looks.model import (
     make_effect,
     visible_field_layers,
 )
-from dj_ledfx.looks.selectors import Selector, selects
+from dj_ledfx.looks.selectors import selects
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.timing import trim_window, utcnow
 from dj_ledfx.types import RenderedFrame
@@ -135,7 +135,6 @@ class ZoneRuntime:
         self._watched = watched
         self._fields: list[tuple[Layer, FieldEffect]] = []  # bottom to top
         self._firmware: list[tuple[Layer, FirmwareEffect]] = []  # top layer first
-        self._selectors: list[tuple[Selector, ...] | None] = []  # each firmware layer's lights
         self._claims: dict[str, int] = {}  # light -> firmware layer it runs itself
         self._copies: dict[str, int] = {}  # light -> firmware layer streamed as a copy
         self._emulated: set[str] = set()  # lights that rejected their firmware effect
@@ -282,8 +281,7 @@ class ZoneRuntime:
         if index is not None:
             self._emulated.add(device_id)
             self._copies[device_id] = index
-            self._copy_targets = self._targets(self._copies)
-            self._claim_targets = self._targets(self._claims)
+            self._retarget()
 
     # --- rendering ------------------------------------------------------------------
 
@@ -316,13 +314,21 @@ class ZoneRuntime:
     def _render(self, ctx: RenderContext) -> FloatRGB:
         """A new frame every tick: the ring keeps it. The field layers blend bottom to top;
         then each firmware layer's emulation is drawn on its lights. Waiting, it's dark."""
-        frame = np.zeros((self.leds.count, 3), dtype=np.float32)
-        if self.waiting_for or self.leds.count == 0:
-            return frame
+        count = self.leds.count
+        if self.waiting_for or count == 0:
+            return np.zeros((count, 3), dtype=np.float32)
+        frame: FloatRGB | None = None
         for layer, field_effect in self._fields:
             self._rendering = layer.name
             colors = _finite(field_effect.render(ctx, self.leds))
+            if frame is None and layer.blend == "normal" and layer.opacity == 1.0:
+                frame = np.array(colors, dtype=np.float32)  # over black: its own colours
+                continue
+            if frame is None:
+                frame = np.zeros((count, 3), dtype=np.float32)
             blend_into(frame, colors, layer.blend, layer.opacity)
+        if frame is None:
+            frame = np.zeros((count, 3), dtype=np.float32)
         targets = self._copy_targets
         if self._claim_targets and self._watched():
             targets = [*targets, *self._claim_targets]
@@ -338,19 +344,17 @@ class ZoneRuntime:
         self.crash = None
         self._fields = []
         self._firmware = []
-        self._selectors = []
         layers = visible_field_layers(self.look) + list(reversed(firmware_layers(self.look)))
         for position, layer in enumerate(layers):
             try:
                 effect = make_effect(layer)
             except LookError as exc:
-                self._fields, self._firmware, self._selectors = [], [], []
+                self._fields, self._firmware = [], []
                 self._fail(layer.name, str(exc))
                 break
             effect.reseed(self._seed + position)
             if isinstance(effect, FirmwareEffect):
                 self._firmware.append((layer, effect))
-                self._selectors.append(layer.lights)
             else:
                 self._fields.append((layer, effect))
         self._plan_claims()
@@ -372,7 +376,7 @@ class ZoneRuntime:
         self._emulated &= {light.device_id for light in self._lights}
 
     def _picks(self, index: int, light: ZoneLight) -> bool:
-        selectors = self._selectors[index]
+        selectors = self._firmware[index][0].lights
         if selectors is None:
             return True
         ids = {light.device_id, light.light_id}
@@ -399,6 +403,10 @@ class ZoneRuntime:
                 self._copies[light.device_id] = index
             else:
                 self._claims[light.device_id] = index
+        self._retarget()
+
+    def _retarget(self) -> None:
+        """Where each firmware layer's copies and claims sit, after either changed."""
         self._copy_targets = self._targets(self._copies)
         self._claim_targets = self._targets(self._claims)
 
