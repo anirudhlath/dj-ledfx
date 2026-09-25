@@ -6,7 +6,7 @@ from pathlib import Path
 
 from api_home import Api, api_home
 from conftest import FakeLight
-from map_home import tiny_home
+from map_home import IN_THE_DESK_CORNER, tiny_home
 
 from dj_ledfx.looks.model import Look
 from dj_ledfx.zones.model import ZoneRecord
@@ -86,10 +86,9 @@ async def test_a_file_that_is_not_toml_changes_nothing(tmp_path: Path) -> None:
 async def test_restore_brings_back_the_map_before_the_rooms_resume(tmp_path: Path) -> None:
     (tmp_path / "old").mkdir()
     (tmp_path / "new").mkdir()
-    corner = {"kind": "point", "position": [1.0, 3.5, 1.0]}
     nook = {"name": "Reading nook", "room": "east", "polygon": [[5, 0], [6, 0], [6, 1], [5, 1]]}
     async with api_home(tmp_path / "old", [FakeLight("a")], [], plan=tiny_home()) as old:
-        await old.client.put("/api/lights/a/placement", json={"shape": corner})
+        await old.client.put("/api/lights/a/placement", json={"shape": IN_THE_DESK_CORNER})
         await old.client.post("/api/home/subzones", json=nook)
         await old.client.post("/api/zones/west/start", json={"lookId": "classic-breathe"})
         backup = (await old.client.get("/api/state/export")).text
@@ -101,7 +100,9 @@ async def test_restore_brings_back_the_map_before_the_rooms_resume(tmp_path: Pat
         home = (await new.client.get("/api/home")).json()
         assert [sub["id"] for sub in home["subZones"]] == ["desk", "reading-nook"]
         lights = (await new.client.get("/api/lights")).json()
-        assert [(light["room"], light["shape"]) for light in lights] == [("west", corner)]
+        assert [(light["room"], light["shape"]) for light in lights] == [
+            ("west", IN_THE_DESK_CORNER)
+        ]
         running = [(r.zone_id, r.look_id) for r in new.home.manager.running()]
         assert running == [("west", "classic-breathe")]  # on the backup's map
 

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import hashlib
 from importlib.resources import files
-from pathlib import Path
 
 import numpy as np
 import pytest
-from map_home import seeded_ledset, tiny_home
+from map_home import DESIGN, handoff_pins, seeded_ledset, tiny_home
 
 from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
 from dj_ledfx.effects.context import NO_SIGNALS, RenderContext
@@ -31,7 +30,6 @@ from dj_ledfx.looks.model import (
 from dj_ledfx.looks.selectors import Selector
 from dj_ledfx.types import FloatRGB
 
-DESIGN = Path(__file__).parents[2] / "docs" / "design" / "web-app"
 VENDORED = files("dj_ledfx.looks") / "data" / "looks.json"
 SHOWCASE = ["sunset", "aurora", "lava", "carousel", "ripples", "focus", FIRMWARE_LOOK_ID]
 
@@ -43,12 +41,7 @@ def _look(look_id: str) -> Look:
 def test_vendored_looks_json_is_a_byte_copy_of_the_handoff() -> None:
     vendored = VENDORED.read_bytes()
     assert vendored == (DESIGN / "looks.json").read_bytes()
-    pinned = {
-        name: digest
-        for digest, name in (
-            line.split() for line in (DESIGN / "HANDOFF.sha256").read_text().splitlines() if line
-        )
-    }
+    pinned = handoff_pins()
     assert hashlib.sha256(vendored).hexdigest() == pinned["looks.json"]
 
 

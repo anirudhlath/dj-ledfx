@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta, timezone
-from pathlib import Path
-
-import pytest_asyncio
 
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.zones.model import (
@@ -15,14 +11,6 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
 )
 from dj_ledfx.zones.store import ZoneStore, new_group_id
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
-    state_db = StateDB(tmp_path / "state.db")
-    await state_db.open()
-    yield state_db
-    await state_db.close()
 
 
 async def test_zones_keep_their_light_order(db: StateDB) -> None:

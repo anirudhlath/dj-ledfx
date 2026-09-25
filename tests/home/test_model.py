@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import pytest
-from map_home import tiny_home
+from map_home import design_home_json, tiny_home
 
 from dj_ledfx.home.model import HomeError, home_from_dict, home_to_dict
 
-HANDOFF = Path(__file__).parents[2] / "docs" / "design" / "web-app" / "home.json"
 MODELLED = (
     "outline",
     "subZones",
@@ -28,13 +25,8 @@ MODELLED = (
 )
 
 
-def _handoff() -> dict[str, Any]:
-    data: dict[str, Any] = json.loads(HANDOFF.read_bytes())
-    return data
-
-
 def test_the_handoff_map_reads_and_writes_back_in_its_own_shape() -> None:
-    raw = _handoff()
+    raw = design_home_json()
     out = home_to_dict(home_from_dict(raw))
     for key in MODELLED:
         assert out[key] == raw[key], key

@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
 import pytest
-import pytest_asyncio
 from loguru import logger
 
 from dj_ledfx.looks.builtin import builtin_looks
@@ -22,14 +19,6 @@ from dj_ledfx.looks.store import INSERT_LOOK, LookStore
 from dj_ledfx.persistence.state_db import StateDB
 
 BUILT_INS = len(builtin_looks())
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
-    state_db = StateDB(tmp_path / "state.db")
-    await state_db.open()
-    yield state_db
-    await state_db.close()
 
 
 def _mine(name: str = "My breathe", **settings: Any) -> Look:

@@ -1,64 +1,26 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
-from pathlib import Path
+from functools import partial
 
 import numpy as np
 import pytest
-import pytest_asyncio
-from conftest import FakeLight
-from map_home import tiny_home
+from conftest import KEYBOARD_AND_MOUSE, SERVER, FakeLight, pc_lights
+from map_home import DESK_CORNER, open_map, tiny_home
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.home.map import HomeMap
-from dj_ledfx.home.model import Home, HomeError, HomeNotFoundError
+from dj_ledfx.home.model import HomeError, HomeNotFoundError
 from dj_ledfx.home.shapes import GridShape, LineShape, Placement, PointShape, ShapeError
 from dj_ledfx.home.store import HomeStore
-from dj_ledfx.latency.strategies import StaticLatency
-from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.persistence.state_db import StateDB
 
 NOW = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
-SERVER = "openrgb:localhost:6742"
-OPENRGB = DeviceCapabilities(protocol="OpenRGB")
-DESK_LAMP = Placement(PointShape((1.0, 3.5, 1.0)), "")  # in tiny_home's desk corner
+DESK_LAMP = Placement(PointShape(DESK_CORNER), "")
 ROPE = Placement(LineShape(((5.0, 1.0, 2.0), (7.0, 1.0, 2.0))), "along-path")
 
 
-@pytest_asyncio.fixture
-async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
-    state_db = StateDB(tmp_path / "state.db")
-    await state_db.open()
-    yield state_db
-    await state_db.close()
-
-
-async def _map(
-    db: StateDB,
-    lights: Sequence[FakeLight],
-    *,
-    home: Home | None = None,
-    placements: dict[str, Placement] | None = None,
-) -> HomeMap:
-    store = HomeStore(db)
-    await store.save_home(home or tiny_home())
-    for target, placement in (placements or {}).items():
-        await store.save_placement(target, placement)
-    devices = DeviceManager()
-    for light in lights:
-        devices.add_device(light, LatencyTracker(strategy=StaticLatency(20.0)))
-    home_map = HomeMap(store, devices, seeds=lambda: (), now=lambda: NOW)
-    await home_map.load()
-    return home_map
-
-
-def _pc() -> list[FakeLight]:
-    return [
-        FakeLight(f"{SERVER}:0", name="Keyboard", led_count=4, caps=OPENRGB),
-        FakeLight(f"{SERVER}:1", name="Mouse", led_count=2, caps=OPENRGB),
-    ]
+_map = partial(open_map, home=tiny_home(), now=lambda: NOW)
 
 
 async def test_the_first_start_with_lights_places_each_of_them_once(db: StateDB) -> None:
@@ -127,7 +89,7 @@ async def test_a_light_is_placed_moved_confirmed_and_removed(db: StateDB) -> Non
 
 async def test_pc_parts_share_the_pc_placement_until_placed_on_their_own(db: StateDB) -> None:
     grid = Placement(GridShape((6.0, 2.0, 0.8), 0.6, 0.0), "rows")  # 6 LEDs in one row
-    home_map = await _map(db, _pc(), placements={SERVER: grid})
+    home_map = await _map(db, pc_lights(*KEYBOARD_AND_MOUSE), placements={SERVER: grid})
 
     keyboard, mouse = home_map.placed(f"{SERVER}:0"), home_map.placed(f"{SERVER}:1")
     assert keyboard is not None and mouse is not None

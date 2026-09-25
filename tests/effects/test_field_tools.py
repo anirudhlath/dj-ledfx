@@ -1,38 +1,27 @@
 from __future__ import annotations
 
-from types import MappingProxyType
-
 import numpy as np
+from map_home import leds_at
 
 from dj_ledfx.effects.color import palette_at, palette_float
 from dj_ledfx.effects.field_tools import anchor_or_centre, distances, height01, smoothstep
-from dj_ledfx.effects.ledset import LedSource, PlacedLeds, Space, build_ledset
 
 POINTS = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 1.5], [4.0, 2.0, 3.0]])
 
 
 def test_an_anchor_or_the_middle_of_the_zone() -> None:
-    sofa = np.array([1.0, 1.0, 0.5], dtype=np.float32)
-    with_sofa = build_ledset(
-        [LedSource("strip", 3, placed=PlacedLeds.from_positions(POINTS))],
-        Space(anchors=MappingProxyType({"sofa": sofa})),
-    )
-    assert np.allclose(anchor_or_centre(with_sofa, "sofa"), sofa)
+    with_sofa = leds_at(POINTS, anchors={"sofa": (1.0, 1.0, 0.5)})
+    assert np.allclose(anchor_or_centre(with_sofa, "sofa"), [1.0, 1.0, 0.5])
     assert np.allclose(anchor_or_centre(with_sofa, "gone"), [2.0, 1.0, 1.5])
     assert np.allclose(anchor_or_centre(with_sofa, ""), [2.0, 1.0, 1.5])
     assert np.allclose(distances(with_sofa, np.zeros(3, dtype=np.float32))[1], 2.5)
 
 
 def test_height_is_measured_against_the_ceiling_or_the_zone() -> None:
-    placed = PlacedLeds.from_positions(POINTS)
-    mapped = build_ledset([LedSource("strip", 3, placed=placed)], Space(ceiling=3.0))
-    unmapped = build_ledset([LedSource("strip", 3, placed=placed)])
+    mapped, unmapped = leds_at(POINTS, ceiling=3.0), leds_at(POINTS, ceiling=None)
     assert np.allclose(height01(mapped), [0.0, 0.5, 1.0])
     assert np.allclose(height01(unmapped), [0.0, 0.5, 1.0])  # the zone's own bottom to top
-    high = build_ledset(
-        [LedSource("strip", 3, placed=PlacedLeds.from_positions(POINTS + [0, 0, 1.0]))],
-        Space(ceiling=3.0),
-    )
+    high = leds_at(POINTS + [0, 0, 1.0], ceiling=3.0)
     assert np.allclose(height01(high), [1 / 3, 2.5 / 3, 1.0])  # clipped at the ceiling
 
 

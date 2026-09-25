@@ -6,16 +6,10 @@ from typing import Any
 
 import pytest_asyncio
 from api_home import Api, api_home
-from conftest import FakeLight
-from map_home import tiny_home
+from conftest import KEYBOARD_AND_MOUSE, SERVER, FakeLight, pc_lights
+from map_home import IN_THE_DESK_CORNER, IN_THE_EAST_ROOM, tiny_home
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
-
-SERVER = "openrgb:localhost:6742"
 MOUSE = f"{SERVER}:1"
-OPENRGB = DeviceCapabilities(protocol="OpenRGB")
-IN_THE_DESK_CORNER = {"kind": "point", "position": [1.0, 3.5, 1.0]}
-IN_THE_EAST_ROOM = {"kind": "point", "position": [6.0, 3.0, 1.0]}
 IN_THE_NOOK = {"kind": "point", "position": [5.5, 0.5, 1.0]}
 
 
@@ -24,8 +18,7 @@ async def api(tmp_path: Path) -> AsyncIterator[Api]:
     lights = [
         FakeLight("lamp", captured=b"lamp0"),
         FakeLight("bulb"),
-        FakeLight(f"{SERVER}:0", name="Keyboard", led_count=4, caps=OPENRGB),
-        FakeLight(MOUSE, name="Mouse", led_count=2, caps=OPENRGB),
+        *pc_lights(*KEYBOARD_AND_MOUSE),
     ]
     async with api_home(tmp_path, lights, [], plan=tiny_home()) as api:
         yield api

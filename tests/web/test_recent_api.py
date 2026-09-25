@@ -5,13 +5,12 @@ from pathlib import Path
 
 from api_home import api_home
 from conftest import FakeLight
-from map_home import tiny_home
+from map_home import IN_THE_DESK_CORNER, tiny_home
 from zone_home import START
 
 from dj_ledfx.zones.model import ZoneRecord
 
 SHELF = ZoneRecord(id="shelf", name="Shelf", lights=("bulb",))
-IN_THE_DESK_CORNER = {"kind": "point", "position": [1.0, 3.5, 1.0]}
 BREATHE = {"lookId": "classic-breathe"}
 
 

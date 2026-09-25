@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 from conftest import FakeLight
+from map_home import open_map
 
 from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.capabilities import DeviceCapabilities
@@ -242,8 +243,7 @@ async def assemble(
         devices.add_device_from_info(row, tracker, status="offline")
     home_map = None
     if with_map:  # as main wires it (Task 22): the zones follow the map
-        home_map = HomeMap(HomeStore(db), devices, seeds=lambda: (), now=lambda: clock[0])
-        await home_map.load()
+        home_map = await open_map(db, devices, now=lambda: clock[0])
         view = MapZones(home_map)
     looks = LookStore(db)
     await looks.load()

@@ -6,8 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
-from map_home import tiny_home
+from map_home import DESK_CORNER, tiny_home
 
 from dj_ledfx.home.shapes import CylinderShape, GridShape, Placement, PointShape
 from dj_ledfx.home.store import HomeStore
@@ -15,15 +14,6 @@ from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.persistence.toml_io import export_toml, import_toml, migrate_from_toml
 from dj_ledfx.zones.model import Assignment, StoppedLook, ZoneRecord
 from dj_ledfx.zones.store import ZoneStore
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path: Path):
-    db_path = tmp_path / "state.db"
-    state_db = StateDB(db_path)
-    await state_db.open()
-    yield state_db
-    await state_db.close()
 
 
 @pytest.mark.asyncio
@@ -441,7 +431,7 @@ async def test_the_map_and_the_placements_round_trip(db, tmp_path: Path) -> None
     store = HomeStore(db)
     await store.save_home(tiny_home(ceiling=2.6))
     confirmed = Placement(
-        PointShape((1.0, 3.5, 1.0)), "", True, datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+        PointShape(DESK_CORNER), "", True, datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
     )
     await store.save_placement("lamp", confirmed)
     part = Placement(GridShape((6.0, 3.0, 1.0), 0.4, 0.2, (0.0, 90.0, 0.0)), "columns")

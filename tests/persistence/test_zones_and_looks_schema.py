@@ -1,21 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 
 from dj_ledfx.persistence.state_db import StateDB
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
-    state_db = StateDB(tmp_path / "state.db")
-    await state_db.open()
-    yield state_db
-    await state_db.close()
 
 
 async def test_schema_version_is_7(db: StateDB) -> None:

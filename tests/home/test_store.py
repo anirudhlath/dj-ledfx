@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
 
-import pytest_asyncio
 from loguru import logger
 
 from dj_ledfx.home.seed import seed_home
@@ -20,14 +17,6 @@ LAMP = Placement(
     confirmed_at=datetime(2026, 9, 24, 19, 0, tzinfo=UTC),
 )
 ROPE = Placement(LineShape(((0.0, 0.0, 2.0), (2.0, 0.0, 2.0))), "reverse-path")
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
-    state_db = StateDB(tmp_path / "state.db")
-    await state_db.open()
-    yield state_db
-    await state_db.close()
 
 
 async def test_migration_005_adds_the_map_and_the_placements(db: StateDB) -> None:

@@ -4,23 +4,18 @@ from datetime import timedelta
 from pathlib import Path
 
 from api_home import api_home
-from conftest import FakeLight, device_stats
+from conftest import SERVER, FakeLight, device_stats, pc_lights
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.web.ws import _lights_message, stats_message
 from dj_ledfx.zones.model import ZoneRecord
 
-SERVER = "openrgb:localhost:6742"
-OPENRGB = DeviceCapabilities(protocol="OpenRGB")
 KEYBOARD, RAM, HUB = f"{SERVER}:0", f"{SERVER}:1", f"{SERVER}:2"
 DESK = [ZoneRecord(id="desk", name="Desk", lights=(KEYBOARD, RAM))]
 
 
 def _lights() -> list[FakeLight]:
     return [
-        FakeLight(KEYBOARD, name="Keyboard", led_count=4, caps=OPENRGB),
-        FakeLight(RAM, name="RAM", led_count=2, caps=OPENRGB),
-        FakeLight(HUB, name="Hub", led_count=0, caps=OPENRGB),  # no LEDs: no part
+        *pc_lights(("Keyboard", 4), ("RAM", 2), ("Hub", 0)),  # the hub has no LEDs: no part
         FakeLight("lamp"),
     ]
 

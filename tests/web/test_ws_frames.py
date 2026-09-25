@@ -7,13 +7,12 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
-from conftest import FakeLight
+from conftest import OPENRGB, SERVER, FakeLight, colours
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from numpy.typing import NDArray
 from starlette.testclient import WebSocketTestSession
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
@@ -34,10 +33,6 @@ class StubFeed:
     ) -> dict[str, NDArray[np.uint8]]:
         frames = self._frames.get(stream, {})
         return {d: c for d, c in frames.items() if wanted is None or d in wanted}
-
-
-def colours(count: int, value: int) -> NDArray[np.uint8]:
-    return np.full((count, 3), value, dtype=np.uint8)
 
 
 def ws_app(feed: StubFeed, watchers: Watchers, devices: Any = None) -> FastAPI:
@@ -92,9 +87,6 @@ def test_v1_frames_come_from_the_live_stream_while_the_session_watches_it() -> N
     )  # the session ended, so it watches nothing
 
 
-SERVER = "openrgb:localhost:6742"
-
-
 def _light_id(frame: bytes) -> str:
     (length,) = struct.unpack_from("<H", frame, 1)
     return frame[3 : 3 + length].decode()
@@ -107,10 +99,9 @@ def _rgb(frame: bytes) -> bytes:
 
 def test_v2_frames_carry_the_stream_and_the_light_id() -> None:
     devices = DeviceManager()
-    openrgb = DeviceCapabilities(protocol="OpenRGB")
     for light in (
-        FakeLight(f"{SERVER}:0", led_count=2, caps=openrgb),
-        FakeLight(f"{SERVER}:1", led_count=1, caps=openrgb),
+        FakeLight(f"{SERVER}:0", led_count=2, caps=OPENRGB),
+        FakeLight(f"{SERVER}:1", led_count=1, caps=OPENRGB),
         FakeLight("lamp", led_count=1),
         FakeLight("other", led_count=1),
     ):

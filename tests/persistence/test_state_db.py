@@ -5,18 +5,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 
 from dj_ledfx.persistence.state_db import StateDB
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path: Path):
-    db_path = tmp_path / "state.db"
-    state_db = StateDB(db_path)
-    await state_db.open()
-    yield state_db
-    await state_db.close()
 
 
 @pytest.mark.asyncio

@@ -7,11 +7,10 @@ from typing import Any
 import pytest_asyncio
 from api_home import Api, api_home
 from conftest import FakeLight
-from map_home import tiny_home
+from map_home import IN_THE_EAST_ROOM, tiny_home
 from zone_home import zone_record
 
 IN_THE_WEST_ROOM = {"kind": "point", "position": [1.0, 1.0, 1.0]}
-IN_THE_EAST_ROOM = {"kind": "point", "position": [6.0, 3.0, 1.0]}
 
 
 @pytest_asyncio.fixture
