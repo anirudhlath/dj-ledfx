@@ -8,13 +8,13 @@ viewer). On the map that is (x, z, y): east, south, up.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 
 import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
 
-from dj_ledfx.devices.lights import LightEntry
+from dj_ledfx.devices.lights import LightEntry, LightIndex
 from dj_ledfx.effects.ledset import LED_PITCH_M
 from dj_ledfx.home.geometry import point_in_polygon, polygon_area
 from dj_ledfx.home.model import Home, Room, Vec3
@@ -169,15 +169,13 @@ def first_placements(
     placements: dict[str, Placement] = {
         light_id: seed.placement for light_id, seed in matches.items()
     }
-    light_of: Mapping[str, str] = {
-        device: entry.id for entry in lights for device in entry.devices
-    }
+    index = LightIndex(lights)
 
     def room_of(device_id: str) -> str | None:
-        seed = matches.get(light_of.get(device_id, device_id))
+        seed = matches.get(index.light_of(device_id))
         return seed.room if seed is not None else None
 
-    known = [placement for placement in scene if placement.device_id in light_of]
+    known = [p for p in scene if index.get(index.light_of(p.device_id)) is not None]
     placements.update(moved_scene_placements(home, known, room_of))
     placements.update(guess_placements(home, lights, set(placements), ()))
     return placements

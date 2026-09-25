@@ -88,10 +88,17 @@ def test_light_ids() -> None:
     assert light_id_of(unnamed) == "OpenRGB:0"  # no stable id: its own light
 
 
-def test_the_index_reads_the_device_manager() -> None:
+# M2 review A8: the device manager keeps the index, rebuilt with each change to its devices.
+def test_the_device_manager_keeps_the_index() -> None:
     devices = DeviceManager()
     caps = DeviceCapabilities(protocol="OpenRGB")
+    assert devices.lights.entries == ()
     for light in (FakeLight(f"{SERVER}:0", caps=caps), FakeLight(f"{SERVER}:1", caps=caps)):
         devices.add_device(light, LatencyTracker(strategy=StaticLatency(5.0)))
-    [pc] = LightIndex.from_manager(devices).entries
+    [pc] = devices.lights.entries
     assert pc.id == SERVER and len(pc.parts) == 2
+    assert devices.lights is devices.lights  # kept, not rebuilt on every read
+
+    devices.remove_device(f"{SERVER}:1")
+    [pc] = devices.lights.entries
+    assert pc.devices == (f"{SERVER}:0",)

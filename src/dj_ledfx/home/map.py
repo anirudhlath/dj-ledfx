@@ -136,7 +136,7 @@ class HomeMap:
         return MappingProxyType(self._placements)
 
     def lights(self) -> LightIndex:
-        return LightIndex.from_manager(self._devices)
+        return self._devices.lights
 
     def placement(self, target_id: str) -> Placement | None:
         return self._placements.get(target_id)

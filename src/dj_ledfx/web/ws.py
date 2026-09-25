@@ -10,7 +10,6 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.web import contract
 from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
 from dj_ledfx.web.state import ClientSubscription, light_index
@@ -333,7 +332,7 @@ def frame_messages(app: Any, sub: ClientSubscription, seq: int) -> list[bytes]:
             encode_frame_v1(device_id, seq, colors)
             for device_id, colors in feed.frames("live", set(sub.frame_devices) or None).items()
         ]
-    index = LightIndex.from_manager(app.state.device_manager)
+    index = light_index(app)
     wanted = set(index.expand(sub.frame_lights)) or None  # a light's devices: the PC's parts
     return [
         encode_frame_v2(stream, light_id, seq, colors)

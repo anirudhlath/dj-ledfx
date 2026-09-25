@@ -12,6 +12,7 @@ from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.backend import DeviceBackend
 from dj_ledfx.devices.ghost import GhostAdapter
+from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.types import DeviceGroup, DeviceInfo
 
@@ -28,12 +29,18 @@ class DeviceManager:
     def __init__(self) -> None:
         self._devices: list[ManagedDevice] = []
         self._by_id: dict[str | None, ManagedDevice] = {}  # by stable id; see _index
+        self._lights = LightIndex(())
         self._groups: dict[str, DeviceGroup] = {}
         self._device_groups: dict[str, str] = {}  # device_name -> group_name
 
     @property
     def devices(self) -> list[ManagedDevice]:
         return list(self._devices)
+
+    @property
+    def lights(self) -> LightIndex:
+        """Which devices make which light (devices/lights.py), as of the last change."""
+        return self._lights
 
     def add_device(
         self,
@@ -140,10 +147,13 @@ class DeviceManager:
         return self._by_id.get(stable_id)
 
     def _index(self) -> None:
-        """Re-key the devices by stable id after the list or an adapter changed."""
+        """Re-key the devices by stable id, and rebuild the lights, after the list or an
+        adapter changed."""
+        infos = [d.adapter.device_info for d in self._devices]
         self._by_id = {}
-        for d in self._devices:
-            self._by_id.setdefault(d.adapter.device_info.stable_id, d)  # the first one wins
+        for info, d in zip(infos, self._devices, strict=True):
+            self._by_id.setdefault(info.stable_id, d)  # the first one wins
+        self._lights = LightIndex.from_infos(infos)
 
     def add_device_from_info(
         self,

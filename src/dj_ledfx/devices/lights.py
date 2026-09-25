@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from dj_ledfx.devices.manager import DeviceManager
     from dj_ledfx.types import DeviceInfo
 
 PC_NAME = "PC"
@@ -60,17 +59,13 @@ class LightEntry:
 
 
 class LightIndex:
-    """Which devices make which light. Rebuild it whenever the devices change: it is
-    cheap, and holding one would go stale."""
+    """Which devices make which light. DeviceManager.lights keeps one, rebuilt whenever
+    its devices change."""
 
     def __init__(self, entries: Sequence[LightEntry]) -> None:
         self._entries = tuple(entries)
         self._by_id = {entry.id: entry for entry in self._entries}
         self._light_of = {device: entry.id for entry in self._entries for device in entry.devices}
-
-    @classmethod
-    def from_manager(cls, devices: DeviceManager) -> LightIndex:
-        return cls.from_infos([managed.adapter.device_info for managed in devices.devices])
 
     @classmethod
     def from_infos(cls, infos: Iterable[DeviceInfo]) -> LightIndex:

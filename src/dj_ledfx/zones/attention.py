@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
-from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.timing import utcnow
 from dj_ledfx.zones.model import AttentionChanged
 
@@ -115,7 +114,7 @@ class AttentionFeed:
         if managed is None:
             return device_id
         name = managed.adapter.device_info.name
-        index = LightIndex.from_manager(self._devices)
+        index = self._devices.lights
         entry = index.get(index.light_of(device_id))
         return f"{entry.name} {name}" if entry is not None and entry.is_pc else name
 

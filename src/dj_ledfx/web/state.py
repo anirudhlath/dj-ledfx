@@ -61,8 +61,8 @@ def get_attention(request: Request) -> AttentionFeed:
 
 
 def light_index(app: Any) -> LightIndex:
-    """Which devices make which light, as of now: rebuilt on every call (it's cheap)."""
-    return LightIndex.from_manager(app.state.device_manager)
+    """Which devices make which light: the device manager's."""
+    return cast("LightIndex", app.state.device_manager.lights)
 
 
 def get_home_map(request: Request) -> HomeMap:
