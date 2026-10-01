@@ -18,3 +18,8 @@ export function useMediaQuery(query: string): boolean {
 export function useIsPhone(): boolean {
   return useMediaQuery(PHONE_QUERY)
 }
+
+/** The system asks for less motion (§5.4): the stage redraws at most once every SPEC.reducedMotionMs. */
+export function useReducedMotion(): boolean {
+  return useMediaQuery('(prefers-reduced-motion: reduce)')
+}
