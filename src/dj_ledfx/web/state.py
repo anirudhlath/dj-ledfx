@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from dj_ledfx.devices.lights import LightIndex
+from dj_ledfx.prodjlink.listener import Listening
 
 if TYPE_CHECKING:
     from fastapi import Request
@@ -72,6 +73,11 @@ def get_home_map(request: Request) -> HomeMap:
 
 def get_previews(request: Request) -> PreviewManager:
     return cast("PreviewManager", _required(request, "previews", "Previews"))
+
+
+def listening(app: Any) -> Listening:
+    """Where Pro DJ Link is heard: nowhere unless main says (--demo, and tests)."""
+    return cast("Listening | None", app.state.listening) or Listening()
 
 
 def get_tempo(request: Request) -> TempoClock:

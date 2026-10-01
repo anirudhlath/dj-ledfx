@@ -9,14 +9,14 @@ from fastapi import APIRouter, Request
 
 from dj_ledfx.web import contract as api
 from dj_ledfx.web.errors import answers
-from dj_ledfx.web.state import get_tempo
+from dj_ledfx.web.state import get_tempo, listening
 
 router = APIRouter()
 
 
 @router.get("/inputs")
 async def get_inputs(request: Request) -> api.Inputs:
-    return api.inputs_out(get_tempo(request))
+    return api.inputs_out(get_tempo(request), listening(request.app))
 
 
 @router.put("/inputs/tempo")

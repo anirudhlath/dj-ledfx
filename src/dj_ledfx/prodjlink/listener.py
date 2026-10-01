@@ -2,14 +2,33 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass
 
 from loguru import logger
 
 from dj_ledfx.events import BeatEvent, EventBus
+from dj_ledfx.prodjlink.constants import PRODJLINK_PORT
 from dj_ledfx.prodjlink.packets import parse_beat_packet
 
 # Re-export BeatEvent for backward compatibility
-__all__ = ["BeatEvent", "ProDJLinkListener", "start_listener"]
+__all__ = [
+    "BeatEvent",
+    "Listening",
+    "ProDJLinkListener",
+    "hear_pro_dj_link",
+    "listen_address",
+    "start_listener",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class Listening:
+    """Where the app hears Pro DJ Link, for GET /inputs: the bound host:port. None with
+    --demo, or after a bind that failed (`failed`), when the internal clock keeps the
+    tempo."""
+
+    address: str | None = None
+    failed: bool = False
 
 
 class ProDJLinkListener(asyncio.DatagramProtocol):
@@ -57,10 +76,16 @@ class ProDJLinkListener(asyncio.DatagramProtocol):
             self._transport.close()
 
 
+def listen_address(interface: str) -> tuple[str, int]:
+    """Where to hear Pro DJ Link for the config's network.interface: "auto" is every
+    interface. The port is Pro DJ Link's beat port."""
+    return ("0.0.0.0" if interface == "auto" else interface), PRODJLINK_PORT
+
+
 async def start_listener(
     event_bus: EventBus,
     interface: str = "0.0.0.0",
-    port: int = 50001,
+    port: int = PRODJLINK_PORT,
 ) -> ProDJLinkListener:
     loop = asyncio.get_running_loop()
     _transport, protocol = await loop.create_datagram_endpoint(
@@ -68,6 +93,25 @@ async def start_listener(
         local_addr=(interface, port),
         allow_broadcast=True,
     )
-    logger.info("Listening for Pro DJ Link beats on {}:{}", interface, port)
     assert isinstance(protocol, ProDJLinkListener)
+    logger.info("Listening for Pro DJ Link beats on {}", protocol.address)
     return protocol
+
+
+async def hear_pro_dj_link(
+    event_bus: EventBus, host: str, port: int
+) -> tuple[ProDJLinkListener | None, Listening]:
+    """The listener on host:port, and where it listens. A port it can't bind (another app
+    holds it, or no such address) only warns: the internal clock keeps the tempo."""
+    try:
+        listener = await start_listener(event_bus, interface=host, port=port)
+    except OSError as exc:
+        logger.warning(
+            "Pro DJ Link isn't heard: can't listen on {}:{} ({}); the internal clock keeps "
+            "the tempo",
+            host,
+            port,
+            exc,
+        )
+        return None, Listening(failed=True)
+    return listener, Listening(address=listener.address)

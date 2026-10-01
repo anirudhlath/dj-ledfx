@@ -85,7 +85,6 @@ class TempoClock:
         self._running = False
         self._set_started: datetime | None = None  # the DJ set going on, if any
         self._last_beat_wall = wall()  # when the last beat was heard, for the set's end
-        self.listening_on: str | None = None  # where Pro DJ Link is heard (main sets it)
         self._published = (self._tempo_state(start), self._decks.views(start, master=None))
 
     # --- reading: the render loop and the web app ---------------------------------------

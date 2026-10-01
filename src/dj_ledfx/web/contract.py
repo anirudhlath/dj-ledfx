@@ -25,6 +25,7 @@ from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import WallKind
 from dj_ledfx.looks import model as looks
 from dj_ledfx.looks.model import Blend, Category, InputKind, LayerType, Scope, TransitionKind
+from dj_ledfx.prodjlink.listener import Listening
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.tempo.model import (
     MAX_BPM,
@@ -778,8 +779,10 @@ class DjSet(ContractModel):
 
 
 class ProDjLinkInput(ContractModel):
-    state: InputState  # "connected" while a deck plays, "idle" otherwise (M3 ruling 13)
-    interface: str | None  # where the listener listens, host:port; None with --demo
+    # "connected" while a deck plays, "idle" otherwise (M3 ruling 13), "disconnected" when
+    # the listener couldn't bind its port
+    state: InputState
+    interface: str | None  # where the listener listens, host:port; None if it doesn't
     last_set: DjSet | None
     decks: list[Deck]
 
@@ -824,16 +827,19 @@ def tempo_out(tempo: TempoClock) -> TempoInput:
     )
 
 
-def inputs_out(tempo: TempoClock) -> Inputs:
+def inputs_out(tempo: TempoClock, listening: Listening) -> Inputs:
     last = tempo.last_set
     dj_set = (
         None if last is None else DjSet.model_validate({"from": last.started, "to": last.ended})
     )
+    state: InputState = (
+        "disconnected" if listening.failed else "connected" if tempo.dj_playing() else "idle"
+    )
     return Inputs(
         tempo=tempo_out(tempo),
         prodjlink=ProDjLinkInput(
-            state="connected" if tempo.dj_playing() else "idle",
-            interface=tempo.listening_on,
+            state=state,
+            interface=listening.address,
             last_set=dj_set,
             decks=[deck_out(view) for view in tempo.decks()],
         ),

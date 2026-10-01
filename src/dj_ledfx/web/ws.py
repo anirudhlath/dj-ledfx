@@ -17,7 +17,7 @@ from dj_ledfx.tempo.model import DecksChanged, TempoChanged, TempoError
 from dj_ledfx.types import is_finite_number
 from dj_ledfx.web import contract
 from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
-from dj_ledfx.web.state import ClientSubscription, light_index
+from dj_ledfx.web.state import ClientSubscription, light_index, listening
 from dj_ledfx.zones.frames import STREAMS
 from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
 
@@ -190,7 +190,7 @@ def _decks_message(app: Any) -> dict[str, Any]:
 
 
 def _inputs_message(app: Any) -> dict[str, Any]:
-    inputs = contract.inputs_out(app.state.tempo)
+    inputs = contract.inputs_out(app.state.tempo, listening(app))
     return {"channel": "inputs", "inputs": inputs.model_dump(mode="json", by_alias=True)}
 
 

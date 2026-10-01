@@ -13,6 +13,7 @@ from api_home import Api, api_home
 from fastapi.testclient import TestClient
 from tempo_fakes import PLAYER, START_WALL, FakeTime, beat_event, tempo_clock
 
+from dj_ledfx.prodjlink.listener import Listening
 from dj_ledfx.tempo.model import DjSet, TempoSettings
 from dj_ledfx.tempo.store import TempoStore
 from dj_ledfx.web.app import create_app
@@ -137,11 +138,11 @@ async def test_internal_controls_are_refused_under_a_pro_dj_link_lock(api: Api) 
     assert api.home.tempo.internal.how == "default"
 
 
-async def test_a_dj_shows_in_the_inputs(api: Api) -> None:
-    api.home.tempo.listening_on = "0.0.0.0:50001"
-    api.home.tempo.on_beat(beat_event(time.monotonic(), bpm=124.0, deck=2, pitch_percent=1.2))
+async def test_a_dj_shows_in_the_inputs(tmp_path: Path) -> None:
+    async with api_home(tmp_path, [], [], listening=Listening("0.0.0.0:50001")) as api:
+        api.home.tempo.on_beat(beat_event(time.monotonic(), bpm=124.0, deck=2, pitch_percent=1.2))
 
-    inputs = (await api.client.get("/api/inputs")).json()
+        inputs = (await api.client.get("/api/inputs")).json()
 
     assert (inputs["tempo"]["source"], inputs["prodjlink"]["state"]) == ("prodjlink", "connected")
     assert inputs["tempo"]["bpm"] == pytest.approx(124.0 * 1.012)
@@ -156,6 +157,17 @@ async def test_a_dj_shows_in_the_inputs(api: Api) -> None:
             "master": True,
         }
     ]
+
+
+async def test_a_port_that_can_t_be_bound_shows_pro_dj_link_disconnected(tmp_path: Path) -> None:
+    async with api_home(tmp_path, [], [], listening=Listening(failed=True)) as api:
+        inputs = (await api.client.get("/api/inputs")).json()
+
+    assert (inputs["prodjlink"]["state"], inputs["prodjlink"]["interface"]) == (
+        "disconnected",
+        None,
+    )
+    assert inputs["tempo"]["source"] == "internal"  # the internal clock keeps the tempo
 
 
 async def test_the_last_dj_set_reads_from_and_to(api: Api) -> None:

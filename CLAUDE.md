@@ -42,6 +42,7 @@ uv run -m dj_ledfx --demo       # Run with no Pro DJ Link listener: the internal
 uv run -m dj_ledfx --demo --bpm 124  # Set the internal clock's BPM at start; it's saved like a BPM set in the app
 uv run -m dj_ledfx --demo --web # Run with web UI (requires: uv sync --extra web)
 uv run -m dj_ledfx --demo --web dev  # Run with hot-reload dev server (frontend + backend)
+uv run -m dj_ledfx --dj-listen 127.0.0.1:0 --web --web-port 8099  # Hear Pro DJ Link on any free loopback port (GET /api/inputs names it) beside the deployed app
 uv run pytest                    # Run tests
 uv run pytest -x -v              # Run tests, stop on first failure
 uv run ruff check .              # Lint
@@ -76,7 +77,7 @@ cd web && npm run e2e            # Playwright: screenshots, axe on every route, 
 ## Architecture
 
 src/dj_ledfx/ layout:
-- `prodjlink/` — Pro DJ Link UDP protocol (passive listener on port 50001)
+- `prodjlink/` — Pro DJ Link UDP protocol (passive listener on port 50001 of the config's `network.interface`, `auto` being every interface, or on `--dj-listen HOST:PORT`). `hear_pro_dj_link()` returns the listener and its `Listening` (where it listens, for `GET /inputs`); a port it can't bind logs a WARNING and leaves the tempo to the internal clock, and `prodjlink.state` reads `disconnected`
 - `tempo/` — the tempo clock, always running (engine spec §7.2): `model` (sources, locks, the limits and `check_bpm`, `TempoSample`, `DeckView`, `TempoSettings`, the events `TempoChanged` and `DecksChanged`), `timeline` (`Timeline`, a straight line of beats, and `nearest_beat`), `tap` (`TapTempo`: runs of taps on client or arrival times), `decks` (`DeckTracker`: the players the beat packets tell of), `clock` (`TempoClock`: the sources, the lock and the controls, Pro DJ Link, `run()`, saving and reloading) and `store` (`TempoStore`: section `tempo` of `state.db`'s config table)
 - `effects/` — Effect ABC (`base.py`, with today's 1D `StripEffect`) + the 60fps engine, which hosts each running zone's runtime (and the preview's) and renders it ahead into that runtime's ring buffer
 - `effects/context.py` — `RenderContext` (beat, time, signals) that field effects render from; `render_context(clock, t, dt)` samples the tempo clock at the frame's target time, so `beat_index` and `bar_index` are real counts; its one signal before M6, `beat.dj` (`DJ_BEAT`), is 1 while a DJ's deck drives the clock, and `to_beat_context` hands it to 1D effects as `dj`
@@ -233,7 +234,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Every test starts from the app's effect registry (an autouse fixture in conftest); a test effect defined with `register=False` never leaks
 - `tests/map_home.py`: `tiny_home()` (a two-room plan) and points on it (`DESK_CORNER`, `IN_THE_DESK_CORNER`, `IN_THE_EAST_ROOM`), `open_map()` (a real `HomeMap` over state.db and some lights), `leds_at()` (`anchor_points=` gives an anchor more than one point), `handoff_pins()` and `design_home_json()` (the design files), and `seeded_zone_lights()`/`seeded_space()`/`seeded_ledset()` (this home's seeded LEDs, for perf); `build_home(plan=...)` and `api_home(plan=...)` wire a real `HomeMap`; `FakeHome` stands in for the map's zones (a test edits it, then calls `manager.home_changed()`)
 - Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern; `tests/web/conftest.py` shares `mock_deps()`, `write_dist()` and `static_client()` for `create_app`
-- `tests/web/` covers all REST routers and WebSocket hub; `tests/test_main.py` runs the app in a subprocess and checks a SIGTERM shutdown logs no traceback, and that browser tabs closing their sockets never freeze it; its listening driver binds Pro DJ Link to a free loopback port
+- `tests/web/` covers all REST routers and WebSocket hub; `tests/test_main.py` runs the app in a subprocess and checks a SIGTERM shutdown logs no traceback, and that browser tabs closing their sockets never freeze it; every app there hears Pro DJ Link on `--dj-listen 127.0.0.1:0` and a test reads the port back from `GET /api/inputs`'s `prodjlink.interface`; `_app()` starts one and kills it on the way out, and `_stop()` sends SIGTERM and waits
 - Gates compare with a baseline: no new mypy errors (compare `uv run mypy src/` output with the branch's starting point) and no format findings; perf benchmarks are deselected (`-m perf` runs them)
 - `tests/web/test_openapi_types.py` fails when `web/src/api/generated/openapi.json` isn't the backend's schema; `cd web && npm run api:types` regenerates it
 
@@ -277,7 +278,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - LIFX scripts can run beside the deployed app: `LifxTransport.open()` binds an ephemeral port
 - OpenRGB: parts in an `Off` mode keep a stale colour buffer, so `/api/lights` shows a colour for a dark part; read the mode to know. The Corsair Commander Core reports 0 LEDs
 - Home Assistant's Govee integration holds UDP 4002 on this host, so dj-ledfx can't hear Govee replies here (the log warns `could not bind port 4002`)
-- A run beside the deployed app can't bind UDP 50001, and a listener that can't bind stops the app at start: use `--demo`, or bind the listener to a loopback port as `tests/test_main.py`'s listening driver does, and serve on a free `--web-port` (the deployed app holds 8080)
+- A run beside the deployed app can't bind UDP 50001: it warns and runs on its internal clock, with `prodjlink.state` "disconnected". To hear Pro DJ Link there, pass `--dj-listen 127.0.0.1:0` (any free loopback port; `GET /api/inputs` names it), and serve on a free `--web-port` (the deployed app holds 8080)
 - The container mounts `config.toml` read-only (a file bind mount: saving logs `Device or resource busy`); `state.db` lives in the `dj-ledfx_state` volume. At start the app reads its config from state.db, and config.toml only while state.db has none, so settings saved from the web app, preview-only included, survive a restart
 - `is_config_empty()` leaves section `tempo` out, so a `state.db` holding only tempo settings still migrates `config.toml`
 - `Path.resolve()` raises `ValueError` on a NUL byte (a request for `/%00`); path guards must catch it, as `_file_within` in `web/app.py` does

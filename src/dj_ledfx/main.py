@@ -36,7 +36,13 @@ from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.store import LookStore
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.persistence.toml_io import migrate_from_toml
-from dj_ledfx.prodjlink.listener import BeatEvent, ProDJLinkListener, start_listener
+from dj_ledfx.prodjlink.listener import (
+    BeatEvent,
+    Listening,
+    ProDJLinkListener,
+    hear_pro_dj_link,
+    listen_address,
+)
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.status import SystemStatus
 from dj_ledfx.tempo.clock import TempoClock
@@ -52,12 +58,29 @@ from dj_ledfx.zones.preview import PreviewManager
 from dj_ledfx.zones.store import ZoneStore
 
 
+def _host_and_port(text: str) -> tuple[str, int]:
+    """--dj-listen's HOST:PORT; port 0 is any free one."""
+    host, _, port = text.rpartition(":")
+    if not host or not port.isdigit() or int(port) > 65535:
+        raise argparse.ArgumentTypeError(f"expected HOST:PORT, not {text!r}")
+    return host.strip("[]"), int(port)
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="dj-ledfx: Beat-synced LED effects")
-    parser.add_argument(
+    pro_dj_link = parser.add_mutually_exclusive_group()
+    pro_dj_link.add_argument(
         "--demo",
         action="store_true",
         help="Run without Pro DJ Link: the internal clock keeps the tempo",
+    )
+    pro_dj_link.add_argument(
+        "--dj-listen",
+        type=_host_and_port,
+        default=None,
+        metavar="HOST:PORT",
+        help="Hear Pro DJ Link here instead of the config's network.interface on 50001 "
+        "(port 0: any free one)",
     )
     parser.add_argument(
         "--config", type=Path, default=Path("config.toml"), help="Config file path"
@@ -201,12 +224,12 @@ async def _run(args: argparse.Namespace) -> None:
     event_bus.subscribe(BeatEvent, on_beat)
 
     listener: ProDJLinkListener | None = None
+    listening = Listening()
     if args.demo:
         logger.info("Demo mode: no Pro DJ Link; the internal clock keeps the tempo")
     else:
-        logger.info("Starting Pro DJ Link listener")
-        listener = await start_listener(event_bus=event_bus)
-        tempo.listening_on = listener.address
+        host, port = args.dj_listen or listen_address(config.network.interface)
+        listener, listening = await hear_pro_dj_link(event_bus, host, port)
 
     device_manager = DeviceManager()
     registered_devices = await state_db.load_devices()
@@ -364,6 +387,7 @@ async def _run(args: argparse.Namespace) -> None:
             previews=previews,
             frame_feed=frame_feed,
             frame_watchers=watchers,
+            listening=listening,
         )
 
         try:

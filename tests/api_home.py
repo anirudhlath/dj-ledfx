@@ -19,6 +19,7 @@ from zone_home import Home, build_home
 
 from dj_ledfx.config import AppConfig
 from dj_ledfx.home.model import Home as HomeModel
+from dj_ledfx.prodjlink.listener import Listening
 from dj_ledfx.types import DeviceStats
 from dj_ledfx.web.app import create_app
 from dj_ledfx.zones.attention import AttentionFeed
@@ -47,6 +48,7 @@ async def api_home(
     zones: Sequence[ZoneRecord],
     *,
     plan: HomeModel | None = None,
+    listening: Listening | None = None,
 ) -> AsyncIterator[Api]:
     home = await build_home(tmp_path, lights, zones, plan=plan)
     watchers = Watchers()
@@ -82,6 +84,7 @@ async def api_home(
         attention_feed=feed,
         home_map=home.home_map,
         previews=previews,
+        listening=listening,
     )
     transport = httpx.ASGITransport(app=app)
     try:
