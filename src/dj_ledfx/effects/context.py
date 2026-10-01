@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
 
 class SignalView:
-    """Named input signals sampled at the frame's target time. Empty until M6-M7."""
+    """Named input signals sampled at the frame's target time (spec §7.3). Until M6-M7
+    there is one: DJ_BEAT."""
 
     __slots__ = ("_values",)
 
@@ -26,6 +27,8 @@ class SignalView:
 
 
 NO_SIGNALS = SignalView()
+DJ_BEAT = "beat.dj"  # 1 while a DJ's deck drives the tempo clock, so a look can tell
+_DJ_SIGNALS = SignalView({DJ_BEAT: 1.0})
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,10 +54,16 @@ def render_context(clock: TempoClock, t: float, dt: float) -> RenderContext:
         bpm=sample.bpm,
         beat_index=sample.beat_index,
         bar_index=sample.bar_index,
-        signals=NO_SIGNALS,
+        signals=_DJ_SIGNALS if sample.source == "prodjlink" and not sample.stale else NO_SIGNALS,
     )
 
 
 def to_beat_context(ctx: RenderContext) -> BeatContext:
     """The narrow context today's 1D effects render with."""
-    return BeatContext(beat_phase=ctx.beat_phase, bar_phase=ctx.bar_phase, bpm=ctx.bpm, dt=ctx.dt)
+    return BeatContext(
+        beat_phase=ctx.beat_phase,
+        bar_phase=ctx.bar_phase,
+        bpm=ctx.bpm,
+        dt=ctx.dt,
+        dj=ctx.signals.get(DJ_BEAT) > 0.0,
+    )

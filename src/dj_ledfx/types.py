@@ -54,6 +54,7 @@ class BeatContext:
     bar_phase: float  # 0.0-1.0 within current 4-beat bar
     bpm: float  # current pitch-adjusted BPM
     dt: float  # frame delta (seconds)
+    dj: bool = False  # a DJ's deck drives the tempo (effects/context.py's DJ_BEAT signal)
 
 
 @dataclass(frozen=True, slots=True)

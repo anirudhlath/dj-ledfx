@@ -1,11 +1,17 @@
 import numpy as np
+import pytest
+from tempo_fakes import START, FakeTime, play, tempo_clock
 
+from dj_ledfx.effects.context import render_context, to_beat_context
 from dj_ledfx.effects.strobe import Strobe
+from dj_ledfx.tempo.clock import TempoClock
+from dj_ledfx.tempo.model import InternalTempo, TempoSettings
 from dj_ledfx.types import BeatContext
 
 
 def _ctx(beat_phase: float = 0.0, bar_phase: float = 0.0, bpm: float = 128.0) -> BeatContext:
-    return BeatContext(beat_phase=beat_phase, bar_phase=bar_phase, bpm=bpm, dt=0.016)
+    """A DJ's beat: Strobe's subdivisions."""
+    return BeatContext(beat_phase=beat_phase, bar_phase=bar_phase, bpm=bpm, dt=0.016, dj=True)
 
 
 def test_output_shape_and_dtype():
@@ -66,3 +72,35 @@ def test_uniform_across_leds():
     # All LEDs should be the same color
     for i in range(1, 5):
         np.testing.assert_array_equal(result[0], result[i])
+
+
+def _flashes_per_s(clock: TempoClock, seconds: float = 4.0) -> float:
+    """How often Strobe flashes on this clock, drawn every millisecond from START."""
+    strobe, flashes, was_on = Strobe(), 0, False
+    for k in range(round(seconds * 1000)):
+        ctx = to_beat_context(render_context(clock, START + k / 1000, 0.016))
+        on = bool(strobe.render(ctx, 1).any())
+        flashes += on and not was_on
+        was_on = on
+    return flashes / seconds
+
+
+def test_strobe_flashes_once_a_beat_on_the_internal_clock() -> None:
+    clock = tempo_clock(FakeTime())  # no DJ: the internal clock's 120 BPM
+
+    assert _flashes_per_s(clock) == 2.0
+
+
+@pytest.mark.parametrize("bpm", [180.0, 200.0, 300.0])
+def test_strobe_stays_under_three_flashes_a_second_without_a_dj(bpm: float) -> None:
+    clock = tempo_clock(FakeTime(), settings=TempoSettings(internal=InternalTempo(bpm)))
+
+    assert _flashes_per_s(clock) < 3.0
+
+
+def test_strobe_keeps_its_subdivisions_while_a_dj_plays() -> None:
+    time = FakeTime()
+    clock = tempo_clock(time)
+    play(clock, time, 9, bpm=120.0)  # beats from START to START + 4 s
+
+    assert _flashes_per_s(clock) == 4.0  # eighth notes at 120 BPM, as before M3

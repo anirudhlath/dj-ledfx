@@ -14,6 +14,10 @@ from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import BeatContext
 
 _DEFAULT_PALETTE = ["#ffffff"]
+# With no DJ the clock still runs (engine M3), so Strobe keeps below the photosensitive
+# range: at most one flash a beat, under 3 a second. A DJ's beat gets the subdivisions.
+MAX_FLASHES_PER_S = 3.0
+BEATS_PER_BAR = 4
 
 
 class Strobe(StripEffect):
@@ -58,16 +62,21 @@ class Strobe(StripEffect):
             self._max_subdivision = int(kwargs["max_subdivision"])
 
     def render(self, ctx: BeatContext, led_count: int) -> NDArray[np.uint8]:
-        energy = bpm_energy(ctx.bpm)
-        raw_sub = lerp(1.0, float(self._max_subdivision), energy)
-        subdivision = 2 ** round(math.log2(max(raw_sub, 1.0)))
-
-        sub_phase = (ctx.beat_phase * subdivision) % 1.0
-        on = sub_phase < self._duty_cycle
+        beat_in_bar = int(ctx.bar_phase * BEATS_PER_BAR)
+        if ctx.dj:
+            energy = bpm_energy(ctx.bpm)
+            raw_sub = lerp(1.0, float(self._max_subdivision), energy)
+            subdivision = 2 ** round(math.log2(max(raw_sub, 1.0)))
+            on = (ctx.beat_phase * subdivision) % 1.0 < self._duty_cycle
+        else:
+            # A flash every n beats, n the fewest under MAX_FLASHES_PER_S: 1 or 2 up to
+            # MAX_BPM (300), which divides the bar evenly.
+            every = math.floor(ctx.bpm / (60.0 * MAX_FLASHES_PER_S)) + 1
+            on = beat_in_bar % every == 0 and ctx.beat_phase < self._duty_cycle
 
         out = np.zeros((led_count, 3), dtype=np.uint8)
         if on:
-            beat_index = int(ctx.bar_phase * 4) % len(self._palette)
+            beat_index = beat_in_bar % len(self._palette)
             r, g, b = self._palette[beat_index]
             out[:, 0] = r
             out[:, 1] = g
