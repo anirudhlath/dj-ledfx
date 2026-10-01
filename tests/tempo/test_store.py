@@ -6,6 +6,7 @@ import asyncio
 import json
 from datetime import timedelta
 
+from loguru import logger
 from tempo_fakes import START_WALL, FakeTime, events, play, tempo_clock
 
 from dj_ledfx.events import EventBus
@@ -141,6 +142,35 @@ async def test_a_change_just_before_shutdown_is_saved(db: StateDB) -> None:
     store.go.set()
     await clock.save()  # main's last save, before state.db closes
 
+    assert (await TempoStore(db).load()).internal.bpm == 90.0
+
+
+class FailingStore(TempoStore):
+    """A store whose first saves fail, as on a full disk."""
+
+    def __init__(self, db: StateDB, failures: int) -> None:
+        super().__init__(db)
+        self.failures = failures
+
+    async def save(self, settings: TempoSettings) -> None:
+        if self.failures:
+            self.failures -= 1
+            raise OSError("No space left on device")
+        await super().save(settings)
+
+
+async def test_a_failing_save_warns_once_and_says_when_it_works_again(db: StateDB) -> None:
+    clock = tempo_clock(FakeTime(), store=FailingStore(db, failures=3))
+    clock.set_tempo("internal", 90.0)
+    levels: list[str] = []
+    sink = logger.add(lambda message: levels.append(message.record["level"].name), level="DEBUG")
+    try:
+        for _ in range(4):  # run() saves every 0.25 s
+            await clock.save()
+    finally:
+        logger.remove(sink)
+
+    assert levels == ["WARNING", "DEBUG", "DEBUG", "INFO"]
     assert (await TempoStore(db).load()).internal.bpm == 90.0
 
 

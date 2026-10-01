@@ -81,6 +81,7 @@ class TempoClock:
         self._source, self._stale = self._choose(start)
         self._snap = True  # the next beat from a source that took over snaps the phase
         self._saved = settings  # what state.db holds, as far as the clock knows
+        self._failing = False  # the last save failed: warned once, quiet until one works
         self._running = False
         self._set_started: datetime | None = None  # the DJ set going on, if any
         self._last_beat_wall = wall()  # when the last beat was heard, for the set's end
@@ -277,8 +278,13 @@ class TempoClock:
         try:
             await self._store.save(settings)
         except Exception as exc:  # a full disk never stops the clock
-            logger.warning("Couldn't save the tempo settings: {}", exc)
+            log = logger.debug if self._failing else logger.warning
+            log("Couldn't save the tempo settings: {}", exc)
+            self._failing = True
             return
+        if self._failing:
+            logger.info("The tempo settings are saved again")
+            self._failing = False
         self._saved = settings
 
     async def reload(self) -> None:
