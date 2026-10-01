@@ -29,8 +29,8 @@ class DeckTracker:
         self._decks: dict[int, _Deck] = {}
         self.followed: int | None = None  # the deck the clock follows
 
-    def hear(self, event: BeatEvent) -> bool:
-        """Note a deck's beat. True when the clock follows a different deck from now."""
+    def hear(self, event: BeatEvent) -> None:
+        """Note a deck's beat. The clock follows the first deck heard until it goes quiet."""
         track_bpm = event.track_bpm
         if not (math.isfinite(track_bpm) and track_bpm > 0):
             track_bpm = event.bpm  # an event that doesn't know its track's BPM
@@ -42,10 +42,8 @@ class DeckTracker:
             event.timestamp,
         )
         followed = self._decks.get(self.followed) if self.followed is not None else None
-        if followed is not None and _playing(followed, event.timestamp):
-            return False
-        before, self.followed = self.followed, event.device_number
-        return before != self.followed
+        if followed is None or not _playing(followed, event.timestamp):
+            self.followed = event.device_number
 
     def any_playing(self, now: float) -> bool:
         return any(_playing(deck, now) for deck in self._decks.values())

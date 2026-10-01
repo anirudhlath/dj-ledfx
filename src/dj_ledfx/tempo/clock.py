@@ -79,7 +79,6 @@ class TempoClock:
         start = now()
         self._line = Timeline(start, 0.0, 60.0 / self._bpm)
         self._source, self._stale = self._choose(start)
-        self._snap = True  # the next beat from a source that took over snaps the phase
         self._saved = settings  # what state.db holds, as far as the clock knows
         self._failing = False  # the last save failed: warned once, quiet until one works
         self._running = False
@@ -210,30 +209,29 @@ class TempoClock:
             return  # a player with no track loaded, or a broken packet
         now = self._now()
         started = not self._decks.any_playing(now)
-        changed = self._decks.hear(event)
+        self._decks.hear(event)
         self._last_beat_wall = self._wall()
         if started:
             self._dj_started()
         self._settle(now)
         if self._source == "prodjlink" and event.device_number == self._decks.followed:
-            self._follow(event, snap=self._snap or changed)
+            self._follow(event)
         self._publish(now)
 
-    def _follow(self, event: BeatEvent, *, snap: bool) -> None:
-        """Line the clock up with the followed deck's beat. The phase snaps once when a
-        source takes over; after that, soft correction under 5 ms of drift and a hard
-        snap above, as BeatClock did (spec §7.2)."""
+    def _follow(self, event: BeatEvent) -> None:
+        """Line the clock up with the followed deck's beat: soft correction under 5 ms of
+        drift and a hard snap above, as BeatClock did (spec §7.2). A deck that takes over
+        is rarely within 5 ms of the clock's beat, so its first beat snaps the phase."""
         period = 60.0 / event.bpm
         beat = nearest_beat(self._line.position(event.timestamp), event.beat_position)
-        if not snap:
-            drift = event.timestamp - self._line.time_of(beat)
-            if abs(drift) < DRIFT_HARD_SNAP_S:
-                period *= 1.0 + (drift / period) * SOFT_GAIN
-                logger.trace("Beat drift {:.1f} ms: soft correction", drift * 1000.0)
-            else:
-                logger.debug("Beat drift {:.1f} ms: hard snap", drift * 1000.0)
+        drift = event.timestamp - self._line.time_of(beat)
+        if abs(drift) < DRIFT_HARD_SNAP_S:
+            period *= 1.0 + (drift / period) * SOFT_GAIN
+            logger.trace("Beat drift {:.1f} ms: soft correction", drift * 1000.0)
+        else:
+            logger.debug("Beat drift {:.1f} ms: hard snap", drift * 1000.0)
         self._line = Timeline(event.timestamp, float(beat), period)
-        self._bpm, self._pitch, self._snap = event.bpm, event.pitch_percent, False
+        self._bpm, self._pitch = event.bpm, event.pitch_percent
         metrics.BEAT_BPM.set(event.bpm)
         metrics.BEAT_PHASE.set((event.beat_position - 1) / BEATS_PER_BAR)
 
@@ -343,7 +341,6 @@ class TempoClock:
         logger.info("Tempo source: {} to {}", SOURCE_NAMES[self._source], SOURCE_NAMES[source])
         self._source = source
         if source != "internal":
-            self._snap = True  # the phase snaps once, to the new source's next beat
             self._taps.reset()
             return
         # Hand-back: the clock carries on at the last BPM and phase, without a jump.

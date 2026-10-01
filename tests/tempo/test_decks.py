@@ -21,11 +21,12 @@ def test_a_deck_plays_while_its_beats_arrive_and_is_cued_after() -> None:
 def test_the_first_deck_is_followed_until_it_goes_quiet() -> None:
     decks = DeckTracker()
 
-    assert decks.hear(beat_event(10.0, deck=1))  # the first deck heard
-    assert not decks.hear(beat_event(10.2, deck=2))  # a second deck in the mix
-    assert not decks.hear(beat_event(10.47, deck=1))
+    decks.hear(beat_event(10.0, deck=1))  # the first deck heard
     assert decks.followed == 1
-    assert decks.hear(beat_event(12.6, deck=2))  # deck 1 quiet for over 2 s
+    decks.hear(beat_event(10.2, deck=2))  # a second deck in the mix
+    decks.hear(beat_event(10.47, deck=1))
+    assert decks.followed == 1
+    decks.hear(beat_event(12.6, deck=2))  # deck 1 quiet for over 2 s
     assert decks.followed == 2
 
 
