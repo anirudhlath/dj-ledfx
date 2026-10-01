@@ -5,6 +5,15 @@ import type { Vec2, Vec3 } from '@/api/contract'
 /** A plan point in three's world: (x, z, y). */
 export const toWorld = ([x, y, z]: Vec3): Vec3 => [x, z, y]
 
+/** Degrees in radians. */
+export const radians = (deg: number): number => (deg * Math.PI) / 180
+
+/** A plan bearing (degrees clockwise from north, which is up the plan, toward −y) as a unit vector on the plan. */
+export function bearingVector(deg: number): Vec2 {
+  const b = radians(deg)
+  return [Math.sin(b), -Math.cos(b)]
+}
+
 /** Twice the polygon's signed area: positive when it runs clockwise on the plan (y points south). */
 export function doubleArea(polygon: readonly Vec2[]): number {
   let sum = 0

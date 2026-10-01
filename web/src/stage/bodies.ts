@@ -4,6 +4,7 @@
 // columns. A sample takes the LEDs nearest to it; a sample with none borrows the nearest LED.
 import type { GridShape, Id, Light, LightShape, Vec2, Vec3 } from '@/api/contract'
 import { SPEC } from './design-numbers'
+import { radians } from './plan'
 
 /**
  * compact: a point or a short cylinder, drawn as one light (one core at its top sample, point-sized
@@ -70,7 +71,7 @@ function alongPath(path: readonly Vec3[], t: number): Vec3 {
 
 /** shapes.py's _rotation: roll about y, then tilt about x, then turn about z, in degrees. */
 function rotate([turn, tilt, roll]: Vec3, [x, y, z]: Vec3): Vec3 {
-  const [t, a, r] = [turn, tilt, roll].map((deg) => (deg * Math.PI) / 180)
+  const [t, a, r] = [turn, tilt, roll].map(radians)
   const [x1, y1, z1] = [x * Math.cos(r) + z * Math.sin(r), y, -x * Math.sin(r) + z * Math.cos(r)]
   const [x2, y2, z2] = [x1, y1 * Math.cos(a) - z1 * Math.sin(a), y1 * Math.sin(a) + z1 * Math.cos(a)]
   return [x2 * Math.cos(t) - y2 * Math.sin(t), x2 * Math.sin(t) + y2 * Math.cos(t), z2]

@@ -1,15 +1,15 @@
 // The static home (§7.1) as three's objects, made once per home: floors with their edges, the
 // courtyard and the balcony, walls and windows cut at the home's wallCutHeight, columns, furniture,
-// and the ghost volume. The camera's bearing recolours the sides; the stage's size sets the lines'
-// resolution and the patterns' pixel ratio.
+// and the ghost volume. setView(pose, pixelRatio), as LightMeshes.setView(pose) does for the lights,
+// colours the sides the camera sees and sizes the lines and patterns for the stage.
 import { Group, Mesh, type Material, type ShaderMaterial } from 'three'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import type { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import type { Home } from '@/api/contract'
-import type { Size } from '../camera'
+import type { CameraPose } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import { furniturePolygon, ghostLines, homePanes, homePrisms, outlineAt, type Segment } from '../home-geometry'
-import type { StagePalette } from '../palette'
+import { STAGE_PALETTE } from '../palette'
 import { flatGeometry, paneGeometry, segmentsGeometry, SolidGeometry } from './build'
 import { courtyardMaterial, flatMaterial, glassMaterial, hatchMaterial, lineMaterial, solidMaterial } from './materials'
 
@@ -24,8 +24,10 @@ export class HomeScene {
   private readonly lines: LineMaterial[] = []
   private readonly patterns: ShaderMaterial[] = []
   private readonly disposables: { dispose(): void }[] = []
+  private back: CameraPose['back'] | null = null
 
-  constructor(home: Home, palette: StagePalette, bearing: number) {
+  constructor(home: Home) {
+    const palette = STAGE_PALETTE
     const mesh = (geometry: Mesh['geometry'], material: Material, order = 0) => {
       const object = new Mesh(geometry, material)
       object.renderOrder = order
@@ -43,12 +45,12 @@ export class HomeScene {
 
     const { courtyard, balcony } = home.outdoor ?? {}
     if (courtyard != null && courtyard.length >= 3) {
-      const material = courtyardMaterial(palette)
+      const material = courtyardMaterial()
       this.patterns.push(material)
       mesh(flatGeometry([courtyard], COURTYARD_Z), material)
     }
     if (balcony != null && balcony.length >= 3) {
-      const material = hatchMaterial(palette)
+      const material = hatchMaterial()
       this.patterns.push(material)
       mesh(flatGeometry([balcony], BALCONY_Z), material)
       lines(outlineAt(balcony, EDGE_Z), lineMaterial(palette.floorEdge, SPEC.floorEdgePx))
@@ -65,7 +67,7 @@ export class HomeScene {
       lineMaterial(palette.floorEdge, SPEC.floorEdgePx),
     )
 
-    this.solids = new SolidGeometry(homePrisms(home), palette, bearing)
+    this.solids = new SolidGeometry(homePrisms(home))
     const solid = solidMaterial()
     this.group.add(new Mesh(this.solids.geometry, solid))
     this.disposables.push(this.solids, solid)
@@ -78,7 +80,7 @@ export class HomeScene {
     )
 
     const panes = homePanes(home)
-    if (panes.length > 0) mesh(paneGeometry(panes), glassMaterial(palette), 1)
+    if (panes.length > 0) mesh(paneGeometry(panes), glassMaterial(), 1)
     lines(
       panes.map(({ a, b, z1 }): Segment => [
         [a[0], a[1], z1],
@@ -89,14 +91,12 @@ export class HomeScene {
     lines(ghostLines(home), lineMaterial(palette.text, RENDER.ghost.widthPx, SPEC.ghostAlpha))
   }
 
-  /** Recolours the sides for a camera at `bearing`. */
-  turn(bearing: number): void {
-    this.solids.turn(bearing)
-  }
-
-  /** The stage's CSS size and the canvas's pixel ratio. */
-  setView(size: Size, pixelRatio: number): void {
-    for (const material of this.lines) material.resolution.set(size.width, size.height)
+  /** The camera's pose (which sides it sees, the stage's CSS size) and the canvas's pixel ratio. */
+  setView(pose: CameraPose, pixelRatio: number): void {
+    const { back } = pose
+    if (this.back === null || back.some((value, axis) => value !== this.back![axis])) this.solids.face(back)
+    this.back = back
+    for (const material of this.lines) material.resolution.set(pose.width, pose.height)
     for (const material of this.patterns) material.uniforms.pixelRatio.value = pixelRatio
   }
 

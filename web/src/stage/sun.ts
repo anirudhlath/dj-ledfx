@@ -5,10 +5,9 @@
 // is true north's; the home's northOffsetDeg turns it onto the plan.
 import type { Home, SunInput, Vec3 } from '@/api/contract'
 import { formatTime } from '@/lib/format'
-import { bounds } from './plan'
+import { bearingVector, bounds, radians } from './plan'
 
 const POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const
-const RAD = Math.PI / 180
 /** How far outside the outline's box the sun sits. */
 const SUN_MARGIN_M = 1
 
@@ -28,15 +27,13 @@ const up = (sun: Pick<SunInput, 'elevation' | 'azimuth'>) =>
 export function sunPoint(home: Pick<Home, 'outline' | 'ceiling' | 'northOffsetDeg'>, elevationDeg: number, azimuthDeg: number): Vec3 {
   const { min, max } = bounds(home.outline)
   const [cx, cy] = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2]
-  const bearing = (azimuthDeg + home.northOffsetDeg) * RAD
-  // A plan bearing points (sin b, −cos b): north is up the plan, toward −y.
-  const [dx, dy] = [Math.sin(bearing), -Math.cos(bearing)]
+  const [dx, dy] = bearingVector(azimuthDeg + home.northOffsetDeg)
   const exit = Math.min(
     Math.abs(dx) > 1e-9 ? (max[0] - min[0]) / 2 / Math.abs(dx) : Infinity,
     Math.abs(dy) > 1e-9 ? (max[1] - min[1]) / 2 / Math.abs(dy) : Infinity,
   )
   const reach = exit + SUN_MARGIN_M
-  const elevation = elevationDeg * RAD
+  const elevation = radians(elevationDeg)
   const across = reach * Math.cos(elevation)
   return [cx + across * dx, cy + across * dy, home.ceiling + reach * Math.sin(elevation)]
 }

@@ -4,7 +4,7 @@
 import type { OrthographicCamera } from 'three'
 import type { Vec2, Vec3 } from '@/api/contract'
 import { RENDER, SPEC } from './design-numbers'
-import { toWorld } from './plan'
+import { bearingVector, radians, toWorld } from './plan'
 
 export type ViewMode = '3d' | 'plan'
 
@@ -44,14 +44,12 @@ export interface CameraPose {
   zoom: number
   width: number
   height: number
-  tiltDeg: number
 }
 
 /** How far the camera stands back from its target; any distance past the home does. */
 export const EYE_DISTANCE_M = 100
 const NEAR_M = 1
 const FAR_M = 200
-const RAD = Math.PI / 180
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
@@ -70,12 +68,12 @@ export const bearingDeg = (rotateDeg: number) => 180 - SPEC.camera.turnDeg + rot
 
 /** The camera's axes in three's world for a bearing and a tilt above the horizon. */
 export function axes(bearing: number, tiltDeg: number): { right: Vec3; up: Vec3; back: Vec3 } {
-  const b = bearing * RAD
-  const t = tiltDeg * RAD
-  // Plan bearing b points (sin b, −cos b) on the plan: three's (x, z) is the plan's (x, y).
-  const back = unit([Math.cos(t) * Math.sin(b), Math.sin(t), -Math.cos(t) * Math.cos(b)])
+  const [x, y] = bearingVector(bearing)
+  const t = radians(tiltDeg)
+  // three's (x, z) is the plan's (x, y).
+  const back = unit([Math.cos(t) * x, Math.sin(t), Math.cos(t) * y])
   // Straight down, "up" on screen is the way the camera faces, so Plan keeps the turn.
-  const forward: Vec3 = [-Math.sin(b), 0, Math.cos(b)]
+  const forward: Vec3 = [-x, 0, -y]
   const worldUp: Vec3 = tiltDeg >= 89.999 ? forward : [0, 1, 0]
   const right = unit(cross(worldUp, back))
   const up = cross(back, right)
@@ -115,7 +113,7 @@ export function fitPose(outline: readonly Vec2[], size: Size, padding: Padding, 
   // The box sits between the top and bottom padding, not in the middle of the stage.
   const lift = (pad.top - pad.bottom) / 2 / fit
   const target = plus(along(right, (u0 + u1) / 2), along(up, (v0 + v1) / 2 + lift), along(back, (w0 + w1) / 2))
-  return { target, right, up, back, zoom: fit * view.zoom, width: size.width, height: size.height, tiltDeg }
+  return { target, right, up, back, zoom: fit * view.zoom, width: size.width, height: size.height }
 }
 
 /** A plan point (metres) in CSS px from the stage's top left, as the camera draws it. */

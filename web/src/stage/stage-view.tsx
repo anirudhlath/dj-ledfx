@@ -12,7 +12,7 @@ import { sameEntries, useStable } from '@/lib/use-stable'
 import { useReducedMotion } from '@/lib/use-media-query'
 import { stageBehaviour, type StageVariant } from './behaviour'
 import { stageBodies } from './bodies'
-import { bearingDeg, FIT_VIEW, fitPose, LIVE_PADDING, projectPoint } from './camera'
+import { FIT_VIEW, fitPose, LIVE_PADDING, projectPoint } from './camera'
 import { SPEC } from './design-numbers'
 import { FrameWriter, sameLayout, writerEntries } from './frame-writer'
 import { stageLabels } from './labels'
@@ -129,7 +129,6 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
                 entries={entries}
                 mask={mask}
                 pose={pose}
-                bearing={bearingDeg(view.rotateDeg)}
                 cadenceMs={behaviour.cadenceMs}
               />
               <StageSvg pose={pose} marks={marks} labels={labels} sun={sunDrawn} />

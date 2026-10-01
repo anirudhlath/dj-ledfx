@@ -7,7 +7,8 @@ import { Color, DoubleSide, MeshBasicMaterial, ShaderMaterial } from 'three'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { RENDER, SPEC } from '../design-numbers'
 import type { Colour } from '../light-maths'
-import type { StagePalette } from '../palette'
+import { STAGE_PALETTE } from '../palette'
+import { radians } from '../plan'
 
 const rgb = (colour: Colour) => new Color().setRGB(...colour)
 
@@ -22,9 +23,9 @@ export function solidMaterial(): MeshBasicMaterial {
 }
 
 /** §7.1 Windows: "a glass pane (text at SPEC.window.glassAlpha)". */
-export function glassMaterial(palette: StagePalette): MeshBasicMaterial {
+export function glassMaterial(): MeshBasicMaterial {
   return new MeshBasicMaterial({
-    color: rgb(palette.text),
+    color: rgb(STAGE_PALETTE.text),
     transparent: true,
     opacity: SPEC.window.glassAlpha,
     side: DoubleSide,
@@ -44,11 +45,11 @@ const SCREEN_VERTEX = /* glsl */ `
 `
 
 /** §7.1 Courtyard: its colour, with RENDER.courtyard's faint dots on a CSS px grid. */
-export function courtyardMaterial(palette: StagePalette): ShaderMaterial {
+export function courtyardMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     uniforms: {
-      base: { value: rgb(palette.courtyard) },
-      dot: { value: rgb(palette.courtyardDot) },
+      base: { value: rgb(STAGE_PALETTE.courtyard) },
+      dot: { value: rgb(STAGE_PALETTE.courtyardDot) },
       spacing: { value: RENDER.courtyard.dotSpacingPx },
       radius: { value: RENDER.courtyard.dotRadiusPx },
       strength: { value: RENDER.courtyard.opacity },
@@ -73,13 +74,13 @@ export function courtyardMaterial(palette: StagePalette): ShaderMaterial {
 }
 
 /** §7.1 Balcony: SPEC.balconyHatchDeg hatch lines, RENDER.balcony's spacing, width and colour. */
-export function hatchMaterial(palette: StagePalette): ShaderMaterial {
+export function hatchMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     uniforms: {
-      colour: { value: rgb(palette.balconyHatch) },
+      colour: { value: rgb(STAGE_PALETTE.balconyHatch) },
       spacing: { value: RENDER.balcony.hatchSpacingPx },
       width: { value: RENDER.balcony.hatchWidthPx },
-      angle: { value: (SPEC.balconyHatchDeg * Math.PI) / 180 },
+      angle: { value: radians(SPEC.balconyHatchDeg) },
       pixelRatio: { value: 1 },
     },
     transparent: true,

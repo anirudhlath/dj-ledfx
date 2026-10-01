@@ -17,13 +17,11 @@ export interface StageSceneProps {
   entries: readonly WriterEntry[]
   mask: RoomMask
   pose: CameraPose
-  /** The camera's bearing (camera.ts's bearingDeg). */
-  bearing: number
   /** The stage behaviour's (behaviour.ts): null while frames don't redraw the stage. */
   cadenceMs: number | null
 }
 
-export function StageScene({ home, writer, entries, mask, pose, bearing, cadenceMs }: StageSceneProps) {
+export function StageScene({ home, writer, entries, mask, pose, cadenceMs }: StageSceneProps) {
   const camera = useThree((state) => state.camera)
   const invalidate = useThree((state) => state.invalidate)
   useLayoutEffect(() => {
@@ -33,7 +31,7 @@ export function StageScene({ home, writer, entries, mask, pose, bearing, cadence
   }, [camera, pose, invalidate])
   return (
     <>
-      <StaticHome home={home} bearing={bearing} width={pose.width} height={pose.height} />
+      <StaticHome home={home} pose={pose} />
       <LightLayer writer={writer} entries={entries} mask={mask} pose={pose} cadenceMs={cadenceMs} />
     </>
   )

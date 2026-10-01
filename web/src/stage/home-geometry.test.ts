@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Vec2 } from '@/api/contract'
 import { homeFixture } from '@/api/mocks/fixtures'
-import { bearingDeg } from './camera'
+import { axes, bearingDeg } from './camera'
 import { SPEC } from './design-numbers'
 import { facesCamera, ghostLines, homePanes, homePrisms, outlineAt, outwardNormals, wallPolygon } from './home-geometry'
 
@@ -64,9 +64,10 @@ describe("the home's static geometry (§7.1)", () => {
   })
 
   it("colours the sides that face §7.2's camera: south and east of the home", () => {
-    const bearing = bearingDeg(0)
-    expect(facesCamera([0, 1], bearing)).toBe(true) // a south face
-    expect(facesCamera([0, -1], bearing)).toBe(false) // a north face
-    expect(facesCamera([-1, 0], bearing)).toBe(false) // a west face
+    const { back } = axes(bearingDeg(0), SPEC.camera.tiltDeg)
+    expect(facesCamera([0, 1], back)).toBe(true) // a south face
+    expect(facesCamera([1, 0], back)).toBe(true) // an east face
+    expect(facesCamera([0, -1], back)).toBe(false) // a north face
+    expect(facesCamera([-1, 0], back)).toBe(false) // a west face
   })
 })

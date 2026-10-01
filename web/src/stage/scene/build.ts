@@ -3,10 +3,10 @@
 // calls. Sides are coloured by whether they face the camera, and recoloured when the view turns.
 import { BufferAttribute, BufferGeometry, ShapeUtils, Vector2 } from 'three'
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js'
-import type { Vec2 } from '@/api/contract'
+import type { Vec2, Vec3 } from '@/api/contract'
 import { facesCamera, outwardNormals, type Pane, type Prism, type Segment } from '../home-geometry'
 import type { Colour } from '../light-maths'
-import type { StagePalette } from '../palette'
+import { STAGE_PALETTE, type StagePalette } from '../palette'
 import { toWorld } from '../plan'
 
 /** The triangles that fill a polygon, as indices into it. */
@@ -45,17 +45,16 @@ interface Side {
 }
 
 /**
- * Every prism's top and sides, in one geometry with vertex colours. `turn(bearing)` recolours the
- * sides for a camera at that bearing (camera.ts's bearingDeg).
+ * Every prism's top and sides, in one geometry with vertex colours. `face(back)` colours the sides
+ * for a camera standing back that way (camera.ts's pose); until then they're all the facing colour.
  */
 export class SolidGeometry {
   readonly geometry = new BufferGeometry()
   private readonly sides: Side[] = []
-  private readonly palette: StagePalette
   private readonly colours: Float32Array
 
-  constructor(prisms: readonly Prism[], palette: StagePalette, bearing: number) {
-    this.palette = palette
+  constructor(prisms: readonly Prism[]) {
+    const palette = STAGE_PALETTE
     const positions: number[] = []
     const colours: number[] = []
     const vertex = (p: Vec2, z: number, colour: Colour) => {
@@ -75,14 +74,13 @@ export class SolidGeometry {
     this.colours = new Float32Array(colours)
     this.geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
     this.geometry.setAttribute('color', new BufferAttribute(this.colours, 3))
-    this.turn(bearing)
   }
 
-  /** Recolours the sides: the camera's side of each prism in its facing colour, the rest in the other. */
-  turn(bearing: number): void {
+  /** Colours the sides: the camera's side of each prism in its facing colour, the rest in the other. */
+  face(back: Vec3): void {
     for (const side of this.sides) {
       const [facing, other] = SIDES[side.kind]
-      const colour = this.palette[facesCamera(side.normal, bearing) ? facing : other]
+      const colour = STAGE_PALETTE[facesCamera(side.normal, back) ? facing : other]
       for (let v = 0; v < 6; v++) this.colours.set(colour, (side.first + v) * 3)
     }
     this.geometry.getAttribute('color').needsUpdate = true

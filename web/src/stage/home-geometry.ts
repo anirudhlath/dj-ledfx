@@ -125,8 +125,10 @@ export function outwardNormals(polygon: readonly Vec2[]): Vec2[] {
   })
 }
 
-/** Whether a side with this outward normal faces a camera standing at `bearing` (camera.ts's bearingDeg). */
-export function facesCamera(normal: Vec2, bearing: number): boolean {
-  const b = (bearing * Math.PI) / 180
-  return normal[0] * Math.sin(b) - normal[1] * Math.cos(b) > 0
+/**
+ * Whether a side with this outward normal faces the camera: whether it points the way the camera
+ * stands back from the home (the pose's `back`, in three's world, whose (x, z) is the plan's (x, y)).
+ */
+export function facesCamera(normal: Vec2, back: Vec3): boolean {
+  return normal[0] * back[0] + normal[1] * back[2] > 0
 }

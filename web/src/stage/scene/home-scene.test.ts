@@ -2,9 +2,13 @@ import { BufferAttribute, Mesh, ShaderMaterial } from 'three'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { describe, expect, it } from 'vitest'
 import { homeFixture } from '@/api/mocks/fixtures'
-import { bearingDeg } from '../camera'
+import { FIT_VIEW, fitPose, LIVE_PADDING, type Size } from '../camera'
 import { STAGE_PALETTE } from '../palette'
 import { HomeScene } from './home-scene'
+
+/** The camera's pose on a stage this size, orbited `rotateDeg`. */
+const poseAt = (rotateDeg: number, size: Size = { width: 800, height: 600 }) =>
+  fitPose(homeFixture.outline, size, LIVE_PADDING, { ...FIT_VIEW, rotateDeg })!
 
 /** Every vertex colour of the solids (walls, columns, furniture). */
 function sideColours(scene: HomeScene): number[][] {
@@ -15,7 +19,7 @@ function sideColours(scene: HomeScene): number[][] {
 
 describe('the static home (§7.1)', () => {
   it('draws the courtyard, the balcony, the floors, the solids, the glass and the lines', () => {
-    const scene = new HomeScene(homeFixture, STAGE_PALETTE, bearingDeg(0))
+    const scene = new HomeScene(homeFixture)
     const meshes = scene.group.children.filter((child) => child instanceof Mesh && !(child instanceof LineSegments2))
     const lines = scene.group.children.filter((child) => child instanceof LineSegments2)
     // Courtyard, balcony, floors, solids, glass.
@@ -27,9 +31,10 @@ describe('the static home (§7.1)', () => {
   })
 
   it('recolours the sides when the camera turns round', () => {
-    const scene = new HomeScene(homeFixture, STAGE_PALETTE, bearingDeg(0))
+    const scene = new HomeScene(homeFixture)
+    scene.setView(poseAt(0), 1)
     const before = sideColours(scene)
-    scene.turn(bearingDeg(0) + 180)
+    scene.setView(poseAt(180), 1)
     const after = sideColours(scene)
     const changed = before.filter((colour, i) => colour.join() !== after[i].join())
     expect(changed.length).toBeGreaterThan(0)
@@ -40,8 +45,8 @@ describe('the static home (§7.1)', () => {
   })
 
   it('sizes its lines and patterns for the stage', () => {
-    const scene = new HomeScene(homeFixture, STAGE_PALETTE, bearingDeg(0))
-    scene.setView({ width: 800, height: 600 }, 2)
+    const scene = new HomeScene(homeFixture)
+    scene.setView(poseAt(0, { width: 800, height: 600 }), 2)
     const line = scene.group.children.find((child) => child instanceof LineSegments2) as LineSegments2
     expect(line.material.resolution.toArray()).toEqual([800, 600])
     const pattern = scene.group.children.map((child) => (child as Mesh).material).find((material) => material instanceof ShaderMaterial) as ShaderMaterial
@@ -51,7 +56,7 @@ describe('the static home (§7.1)', () => {
 
   it('draws a home with no outdoor areas and no windows', () => {
     const plain = { ...homeFixture, outdoor: undefined, walls: homeFixture.walls.filter((wall) => wall.kind === 'wall') }
-    const scene = new HomeScene(plain, STAGE_PALETTE, bearingDeg(0))
+    const scene = new HomeScene(plain)
     expect(scene.group.children.filter((child) => child instanceof Mesh && !(child instanceof LineSegments2))).toHaveLength(2)
     scene.dispose()
   })

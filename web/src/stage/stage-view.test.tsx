@@ -13,7 +13,7 @@ import { resizeObserved } from '@/test/resize'
 import { seedRest } from '@/test/rest'
 import { setReducedMotion, setViewportWidth } from '@/test/viewport'
 import { lightBodies } from './bodies'
-import { bearingDeg, FIT_VIEW, fitPose, LIVE_PADDING, projectPoint } from './camera'
+import { FIT_VIEW, fitPose, LIVE_PADDING, projectPoint, type View } from './camera'
 import { RENDER, SPEC } from './design-numbers'
 import { anchorOf } from './marks'
 import type { StageSceneProps } from './scene/stage-scene'
@@ -29,7 +29,7 @@ vi.mock('./webgl', () => ({ hasWebGL2: vi.fn(() => true) }))
 vi.mock('./stage-canvas', () => ({
   StageCanvas: (props: StageSceneProps) => {
     drawn.props = props
-    return <div data-testid="stage-canvas" data-cadence={String(props.cadenceMs)} data-bearing={props.bearing} />
+    return <div data-testid="stage-canvas" data-cadence={String(props.cadenceMs)} />
   },
 }))
 const { countedExport } = await vi.hoisted(() => import('@/test/count-renders'))
@@ -101,16 +101,17 @@ describe('the stage on Live (§7, §8.1)', () => {
   })
 
   it('turns to Plan, orbits a step at a time, zooms in to the last step, and fits again', async () => {
-    await openLive()
+    const { state } = await openLive()
+    const poseFor = (view: View) => fitPose(state.home.outline, STAGE, LIVE_PADDING, view)
     await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
     await userEvent.click(screen.getByRole('button', { name: 'Rotate view' }))
-    expect(canvas().dataset.bearing).toBe(String(bearingDeg(SPEC.rotate.stepDeg)))
+    expect(drawn.props!.pose).toEqual(poseFor({ mode: 'plan', rotateDeg: SPEC.rotate.stepDeg, zoom: 1 }))
     const zoomIn = screen.getByRole('button', { name: 'Zoom in' })
     while (!(zoomIn as HTMLButtonElement).disabled) await userEvent.click(zoomIn)
     expect(readStageView(window.localStorage, 'live').view).toEqual({ mode: 'plan', rotateDeg: SPEC.rotate.stepDeg, zoom: 2 })
     await userEvent.click(screen.getByRole('button', { name: 'Fit home' }))
     expect(readStageView(window.localStorage, 'live').view).toEqual({ ...FIT_VIEW, mode: 'plan' })
-    expect(canvas().dataset.bearing).toBe(String(bearingDeg(0)))
+    expect(drawn.props!.pose).toEqual(poseFor({ ...FIT_VIEW, mode: 'plan' }))
   })
 
   // Review focus 3: the link drops, and comes back.
