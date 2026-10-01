@@ -115,16 +115,21 @@ def beat_packet(
     deck: int = 1,
     player: str = PLAYER,
     pitch_percent: float = 0.0,
+    next_beat_ms: int | None = None,
+    capability: int = CAPABILITY_CDJ3000,
 ) -> bytes:
-    """A beat packet from a current-generation player."""
+    """A beat packet from a player; by default a current-generation one, its next beat a
+    beat away."""
+    if next_beat_ms is None:
+        next_beat_ms = round(60_000 / bpm)
     packet = bytearray(BEAT_PACKET_LEN)
     packet[0 : len(MAGIC_HEADER)] = MAGIC_HEADER
     packet[OFFSET_PACKET_TYPE] = PACKET_TYPE_BEAT
     packet[OFFSET_DEVICE_NAME : OFFSET_DEVICE_NAME + 20] = player.encode().ljust(20, b"\x00")
     packet[OFFSET_DEVICE_NUMBER] = deck
-    struct.pack_into(">I", packet, OFFSET_NEXT_BEAT_MS, round(60_000 / bpm))
+    struct.pack_into(">I", packet, OFFSET_NEXT_BEAT_MS, next_beat_ms)
     struct.pack_into(">I", packet, OFFSET_PITCH, round(PITCH_CENTER + pitch_percent * PITCH_SCALE))
     struct.pack_into(">H", packet, OFFSET_BPM, round(bpm * 100))
     packet[OFFSET_BEAT_NUMBER] = beat
-    packet[OFFSET_CAPABILITY] = CAPABILITY_CDJ3000
+    packet[OFFSET_CAPABILITY] = capability
     return bytes(packet)
