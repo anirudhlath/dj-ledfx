@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
 
 from fastapi import HTTPException, Request
 from fastapi.encoders import jsonable_encoder
@@ -42,16 +41,9 @@ def answers() -> Iterator[None]:
 async def unprocessable(request: Request, exc: RequestValidationError) -> JSONResponse:
     """FastAPI's 422, but a NaN or an infinity the request sent comes back as text. JSON
     can't carry them, so FastAPI's own answer fails and the client gets a 500."""
-    return JSONResponse(
-        status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))}
-    )
+    detail = jsonable_encoder(exc.errors(), custom_encoder={float: _finite_or_text})
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
-def _json_safe(value: Any) -> Any:
-    if isinstance(value, float) and not math.isfinite(value):
-        return str(value)
-    if isinstance(value, list):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _json_safe(item) for key, item in value.items()}
-    return value
+def _finite_or_text(value: float) -> float | str:
+    return value if math.isfinite(value) else str(value)
