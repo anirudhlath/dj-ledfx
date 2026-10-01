@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from dj_ledfx.home.map import HomeMap
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
+    from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.zones.attention import AttentionFeed
     from dj_ledfx.zones.lights import LightMonitor
     from dj_ledfx.zones.manager import ZoneManager
@@ -71,3 +72,7 @@ def get_home_map(request: Request) -> HomeMap:
 
 def get_previews(request: Request) -> PreviewManager:
     return cast("PreviewManager", _required(request, "previews", "Previews"))
+
+
+def get_tempo(request: Request) -> TempoClock:
+    return cast("TempoClock", request.app.state.tempo)  # create_app always has one

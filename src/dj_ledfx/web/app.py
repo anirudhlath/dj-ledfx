@@ -8,9 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
+
+from dj_ledfx.web.errors import unprocessable
 
 if TYPE_CHECKING:
     from dj_ledfx.config import AppConfig
@@ -110,7 +113,11 @@ def create_app(
     previews: PreviewManager | None = None,
 ) -> FastAPI:
     # One schema per type, under the contract's name (not Look-Input / Look-Output).
-    app = FastAPI(title="dj-ledfx", separate_input_output_schemas=False)
+    app = FastAPI(
+        title="dj-ledfx",
+        separate_input_output_schemas=False,
+        exception_handlers={RequestValidationError: unprocessable},
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.web.cors_origins,
@@ -160,6 +167,7 @@ def create_app(
     from dj_ledfx.web.router_devices import router as devices_router
     from dj_ledfx.web.router_effects import router as effects_router
     from dj_ledfx.web.router_home import router as home_router
+    from dj_ledfx.web.router_inputs import router as inputs_router
     from dj_ledfx.web.router_lights import router as lights_router
     from dj_ledfx.web.router_looks import router as looks_router
     from dj_ledfx.web.router_preview import router as preview_router
@@ -176,6 +184,7 @@ def create_app(
     app.include_router(attention_router, prefix="/api")
     app.include_router(home_router, prefix="/api")
     app.include_router(preview_router, prefix="/api")
+    app.include_router(inputs_router, prefix="/api")
 
     from dj_ledfx.web.ws import ws_endpoint
 

@@ -362,6 +362,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Inputs */
+        get: operations["get_inputs_api_inputs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inputs/tempo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Tempo
+         * @description Pin a source or go back to Auto. A BPM sets the internal clock.
+         */
+        put: operations["set_tempo_api_inputs_tempo_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inputs/tempo/nudge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Nudge */
+        post: operations["nudge_api_inputs_tempo_nudge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inputs/tempo/tap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tap */
+        post: operations["tap_api_inputs_tempo_tap_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lights": {
         parameters: {
             query?: never;
@@ -1069,6 +1140,27 @@ export interface components {
             /** Radius */
             radius: number;
         };
+        /**
+         * Deck
+         * @description A player on the socket's decks channel: snake_case like the beat (F1's decision 5).
+         */
+        Deck: {
+            /** Bpm */
+            bpm: number | null;
+            /** Master */
+            master: boolean;
+            /** Number */
+            number: number;
+            /** Pitch Percent */
+            pitch_percent: number;
+            /** Player */
+            player: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "empty" | "cued" | "playing";
+        };
         /** DeviceResponse */
         DeviceResponse: {
             /** Address */
@@ -1104,6 +1196,19 @@ export interface components {
              * @enum {string}
              */
             status: "online" | "offline" | "reconnecting";
+        };
+        /** DjSet */
+        DjSet: {
+            /**
+             * From
+             * Format: date-time
+             */
+            from: string;
+            /**
+             * To
+             * Format: date-time
+             */
+            to: string;
         };
         /** Furniture */
         Furniture: {
@@ -1250,6 +1355,29 @@ export interface components {
             eastWest: number;
             /** Northsouth */
             northSouth: number;
+        };
+        /**
+         * Inputs
+         * @description GET /inputs: music, Home Assistant and the sun join in M6 and M7 (M3 ruling 12).
+         */
+        Inputs: {
+            prodjlink: components["schemas"]["ProDjLinkInput"];
+            tempo: components["schemas"]["TempoInput"];
+        };
+        /**
+         * InternalTempo
+         * @description The internal clock's BPM, how it got it and when: "118.0 · tapped 19:10".
+         */
+        InternalTempo: {
+            /** At */
+            at: string | null;
+            /** Bpm */
+            bpm: number;
+            /**
+             * How
+             * @enum {string}
+             */
+            how: "default" | "set" | "tapped" | "kept";
         };
         /** Layer */
         Layer: {
@@ -1501,6 +1629,14 @@ export interface components {
              */
             type: "linear" | "radial";
         };
+        /**
+         * NudgeRequest
+         * @description A phase shift in beats: positive brings the beat sooner (M3 ruling 8).
+         */
+        NudgeRequest: {
+            /** Delta */
+            delta: number;
+        };
         /** Outdoor */
         Outdoor: {
             /** Balcony */
@@ -1615,6 +1751,19 @@ export interface components {
         /** PreviewUpdate */
         PreviewUpdate: {
             look: components["schemas"]["Look"];
+        };
+        /** ProDjLinkInput */
+        ProDjLinkInput: {
+            /** Decks */
+            decks: components["schemas"]["Deck"][];
+            /** Interface */
+            interface: string | null;
+            lastSet: components["schemas"]["DjSet"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "connected" | "stale" | "disconnected" | "idle";
         };
         /**
          * RecentLook
@@ -1875,6 +2024,41 @@ export interface components {
             zoneId: string;
             /** Zonename */
             zoneName: string;
+        };
+        /** TapRequest */
+        TapRequest: {
+            /** Clienttime */
+            clientTime?: number | null;
+        };
+        /** TempoInput */
+        TempoInput: {
+            /** Bpm */
+            bpm: number;
+            /** Held */
+            held: boolean;
+            internal: components["schemas"]["InternalTempo"];
+            /**
+             * Lock
+             * @enum {string}
+             */
+            lock: "auto" | "prodjlink" | "music" | "internal";
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "prodjlink" | "music" | "internal";
+            /** Stale */
+            stale: boolean;
+        };
+        /** TempoRequest */
+        TempoRequest: {
+            /** Bpm */
+            bpm?: number | null;
+            /**
+             * Lock
+             * @enum {string}
+             */
+            lock: "auto" | "prodjlink" | "music" | "internal";
         };
         /** Transition */
         Transition: {
@@ -2723,6 +2907,125 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_inputs_api_inputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Inputs"];
+                };
+            };
+        };
+    };
+    set_tempo_api_inputs_tempo_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TempoRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TempoInput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    nudge_api_inputs_tempo_nudge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NudgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TempoInput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tap_api_inputs_tempo_tap_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TapRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TempoInput"];
+                };
             };
             /** @description Validation Error */
             422: {
