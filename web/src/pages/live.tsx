@@ -15,13 +15,16 @@ const NARROW_QUERY = `(width < ${SPEC.widePx / 16}rem)`
 export function LivePage() {
   const phone = useIsPhone()
   const narrow = useMediaQuery(NARROW_QUERY)
+  const stage = (
+    <Suspense fallback={<StagePending />}>
+      <Stage variant={phone ? 'phone' : 'desktop'} />
+    </Suspense>
+  )
   if (phone) {
     return (
       <div className="flex flex-col">
         <div className="relative shrink-0" style={{ aspectRatio: `${SPEC.phoneStage.width} / ${SPEC.phoneStage.height}` }}>
-          <Suspense fallback={<StagePending />}>
-            <Stage variant="phone" />
-          </Suspense>
+          {stage}
         </div>
         <Placeholder name="Running" milestone="F3" />
       </div>
@@ -29,11 +32,7 @@ export function LivePage() {
   }
   return (
     <div className="flex h-full min-h-0">
-      <div className="relative min-w-0 flex-1">
-        <Suspense fallback={<StagePending />}>
-          <Stage variant="desktop" />
-        </Suspense>
-      </div>
+      <div className="relative min-w-0 flex-1">{stage}</div>
       {!narrow && (
         <aside aria-label="Running" className="w-(--live-panel-w) shrink-0 border-l border-line-soft bg-panel">
           <Placeholder name="Running panel" milestone="F3" />

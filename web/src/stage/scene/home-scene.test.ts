@@ -3,13 +3,13 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { describe, expect, it, vi } from 'vitest'
 import { homeFixture } from '@/api/mocks/fixtures'
 import type { ElementSize } from '@/lib/use-element-size'
-import { FIT_VIEW, fitPose, LIVE_PADDING } from '../camera'
+import { FIT_VIEW, fitPose } from '../camera'
 import { STAGE_PALETTE } from '../palette'
 import { HomeScene } from './home-scene'
 
 /** The camera's pose on a stage this size, orbited `rotateDeg`. */
 const poseAt = (rotateDeg: number, size: ElementSize = { width: 800, height: 600 }) =>
-  fitPose(homeFixture.outline, size, LIVE_PADDING, { ...FIT_VIEW, rotateDeg })!
+  fitPose(homeFixture.outline, size, { ...FIT_VIEW, rotateDeg })!
 
 /** Every vertex colour of the solids (walls, columns, furniture). */
 function sideColours(scene: HomeScene): number[][] {

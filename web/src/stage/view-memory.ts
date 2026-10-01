@@ -5,13 +5,13 @@ import { useCallback, useState } from 'react'
 import { FIT_VIEW, type View } from './camera'
 import { SPEC } from './design-numbers'
 
-/** The stage's own controls: the camera's view, and whether the room labels show. */
-export interface StageView {
+/** What the stage remembers per route: the camera's view, and whether the room labels show. */
+export interface StoredView {
   view: View
   labels: boolean
 }
 
-export const DEFAULT_STAGE_VIEW: StageView = { view: FIT_VIEW, labels: true }
+export const DEFAULT_STAGE_VIEW: StoredView = { view: FIT_VIEW, labels: true }
 
 /** "Zoom in" steps through these; Fit goes back to the first (decision 5). */
 export const ZOOM_STEPS = [1, 1.25, 1.5, 2] as const
@@ -32,7 +32,7 @@ const isRotation = (value: unknown): value is number =>
 const isZoom = (value: unknown): value is number => typeof value === 'number' && (ZOOM_STEPS as readonly number[]).includes(value)
 
 /** The view stored for `route`; the default for whatever is missing or unreadable. */
-export function readStageView(storage: Storage | null, route: string): StageView {
+export function readStageView(storage: Storage | null, route: string): StoredView {
   let stored: unknown = null
   try {
     stored = JSON.parse(storage?.getItem(KEY + route) ?? 'null')
@@ -52,7 +52,7 @@ export function readStageView(storage: Storage | null, route: string): StageView
 }
 
 /** Stores the view for `route`; a storage that refuses is ignored. */
-export function writeStageView(storage: Storage | null, route: string, { view, labels }: StageView): void {
+export function writeStageView(storage: Storage | null, route: string, { view, labels }: StoredView): void {
   try {
     storage?.setItem(KEY + route, JSON.stringify({ ...view, labels }))
   } catch {
@@ -72,10 +72,10 @@ export function nextZoom(zoom: number): number | null {
 }
 
 /** The stage's view for `route`, remembered across visits. */
-export function useStageView(route: string, storage: Storage | null = browserStorage()): [StageView, (next: StageView) => void] {
+export function useStageView(route: string, storage: Storage | null = browserStorage()): [StoredView, (next: StoredView) => void] {
   const [state, setState] = useState(() => readStageView(storage, route))
   const update = useCallback(
-    (next: StageView) => {
+    (next: StoredView) => {
       setState(next)
       writeStageView(storage, route, next)
     },

@@ -496,7 +496,7 @@ export class MockServer {
     this.frameCount += 1
     // ?still holds the frames as well as the beat, so a screenshot of the stage is the same every run.
     const t = this.beatElapsedS(now)
-    const beatPhase = position(this.state, this.beatElapsedS(now)) % 1
+    const beatPhase = position(this.state, t) % 1
     if (this.watching('live')) for (const light of this.live) this.sendFrame(light, 'live', t, beatPhase)
     if (this.preview !== null && this.watching('preview')) {
       for (const light of this.preview.lights) this.sendFrame(light, 'preview', t, beatPhase)

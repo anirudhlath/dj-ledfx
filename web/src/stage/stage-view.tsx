@@ -12,7 +12,7 @@ import { sameEntries, useStable } from '@/lib/use-stable'
 import { useReducedMotion } from '@/lib/use-media-query'
 import { stageBehaviour, type StageVariant } from './behaviour'
 import { stageBodies } from './bodies'
-import { FIT_VIEW, fitPose, LIVE_PADDING, projectPoint } from './camera'
+import { FIT_VIEW, fitPose, projectPoint } from './camera'
 import { SPEC } from './design-numbers'
 import { FrameWriter, sameLayout, writerEntries } from './frame-writer'
 import { stageLabels } from './labels'
@@ -68,7 +68,7 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
   }
   const navigate = useNavigate()
 
-  const pose = useMemo(() => fitPose(home.outline, size, LIVE_PADDING, view), [home.outline, size, view])
+  const pose = useMemo(() => fitPose(home.outline, size, view), [home.outline, size, view])
   const bodies = useMemo(() => stageBodies(lights), [lights])
   // The engine pushes `lights` every few seconds while a look plays. The writer's arrays (and the
   // meshes over them) are made from which bodies are drawn alone, and take each push's colours in

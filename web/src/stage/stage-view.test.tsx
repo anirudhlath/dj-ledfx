@@ -13,7 +13,7 @@ import { resizeObserved } from '@/test/resize'
 import { seedRest } from '@/test/rest'
 import { setReducedMotion, setViewportWidth } from '@/test/viewport'
 import { lightBodies } from './bodies'
-import { FIT_VIEW, fitPose, LIVE_PADDING, projectPoint, type View } from './camera'
+import { FIT_VIEW, fitPose, projectPoint, type View } from './camera'
 import { RENDER, SPEC } from './design-numbers'
 import { anchorOf } from './marks'
 import type { StageSceneProps } from './scene/stage-scene'
@@ -52,7 +52,7 @@ async function openLive(name: ScenarioName = 'hero') {
   const router = renderApp('/next/live')
   await loadedStage()
   act(() => resizeObserved(STAGE.width, STAGE.height))
-  const pose = fitPose(state.home.outline, STAGE, LIVE_PADDING, FIT_VIEW)!
+  const pose = fitPose(state.home.outline, STAGE, FIT_VIEW)!
   return { state, router, pose }
 }
 
@@ -103,7 +103,7 @@ describe('the stage on Live (§7, §8.1)', () => {
 
   it('turns to Plan, orbits a step at a time, zooms in to the last step, and fits again', async () => {
     const { state } = await openLive()
-    const poseFor = (view: View) => fitPose(state.home.outline, STAGE, LIVE_PADDING, view)
+    const poseFor = (view: View) => fitPose(state.home.outline, STAGE, view)
     await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
     await userEvent.click(screen.getByRole('button', { name: 'Rotate view' }))
     expect(drawn.props!.pose).toEqual(poseFor({ mode: 'plan', rotateDeg: SPEC.rotate.stepDeg, zoom: 1 }))

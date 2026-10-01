@@ -3,7 +3,7 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { describe, expect, it, vi } from 'vitest'
 import { homeFixture, lightFixtures } from '@/api/mocks/fixtures'
 import { stageBodies } from '../bodies'
-import { FIT_VIEW, fitPose, LIVE_PADDING } from '../camera'
+import { FIT_VIEW, fitPose } from '../camera'
 import { FrameWriter, writerEntries } from '../frame-writer'
 import { roomMask } from '../room-mask'
 import { lightState } from '../show'
@@ -44,7 +44,7 @@ describe("the lights' meshes (§7.5)", () => {
   it('sizes its discs and lines to the stage and lifts them toward the camera', () => {
     const shared = materials()
     const meshes = new LightMeshes(writer(), shared)
-    const pose = fitPose(homeFixture.outline, { width: 900, height: 700 }, LIVE_PADDING, FIT_VIEW)!
+    const pose = fitPose(homeFixture.outline, { width: 900, height: 700 }, FIT_VIEW)!
     shared.setView(pose)
     meshes.setView(pose)
     const halo = (meshes.lifted.children[0] as InstancedMesh).material as ShaderMaterial

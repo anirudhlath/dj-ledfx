@@ -11,7 +11,7 @@ import { HERO_NOW, pushFrame } from '@/test/live'
 import { linkNames, renderAt } from '@/test/router'
 import { stageBehaviour, type StageOptions } from '../behaviour'
 import { useCadence } from '../cadence'
-import { FIT_VIEW, fitPose, LIVE_PADDING, type CameraPose, type View } from '../camera'
+import { FIT_VIEW, fitPose, type CameraPose, type View } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import type { StageLabel } from '../labels'
 import type { Mark } from '../marks'
@@ -29,7 +29,7 @@ import { ViewControls } from './view-controls'
 
 const hero = buildScenario('hero', HERO_NOW)
 const STAGE = { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }
-const pose: CameraPose = fitPose(hero.home.outline, STAGE, LIVE_PADDING, FIT_VIEW)!
+const pose: CameraPose = fitPose(hero.home.outline, STAGE, FIT_VIEW)!
 const HERO_SUN: SunInput = hero.inputs.sun
 
 /** One mark of each kind, somewhere on the stage. */

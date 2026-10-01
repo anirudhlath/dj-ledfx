@@ -9,7 +9,7 @@ import {
   useStageView,
   writeStageView,
   ZOOM_STEPS,
-  type StageView,
+  type StoredView,
 } from './view-memory'
 
 /** A Storage over a Map. */
@@ -35,7 +35,7 @@ function throwingStorage(): Storage {
   return { length: 0, clear: refuse, getItem: refuse, key: refuse, removeItem: refuse, setItem: refuse }
 }
 
-const PLAN: StageView = { view: { mode: 'plan', rotateDeg: -SPEC.rotate.stepDeg, zoom: ZOOM_STEPS[2] }, labels: false }
+const PLAN: StoredView = { view: { mode: 'plan', rotateDeg: -SPEC.rotate.stepDeg, zoom: ZOOM_STEPS[2] }, labels: false }
 
 describe('the remembered view (§7.2)', () => {
   it('remembers a view per route', () => {

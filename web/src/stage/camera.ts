@@ -80,16 +80,16 @@ export function axes(bearing: number, tiltDeg: number): { right: Vec3; up: Vec3;
  * The padding for a stage of this size: Live's at Main.png's stage size or larger, and in proportion
  * on a smaller one (a narrow window, the phone's stage), so the home keeps the same share of it.
  */
-export function fitPadding(padding: Padding, size: ElementSize): Padding {
+export function fitPadding(size: ElementSize): Padding {
   const k = Math.min(1, size.width / RENDER.stage.widthPx, size.height / RENDER.stage.heightPx)
-  return { side: padding.side * k, top: padding.top * k, bottom: padding.bottom * k }
+  return { side: LIVE_PADDING.side * k, top: LIVE_PADDING.top * k, bottom: LIVE_PADDING.bottom * k }
 }
 
 /**
  * The pose that fits the outline, from the floor to SPEC.fit.heightM, inside the padding, for the
  * view; null while the stage has no size or the home no outline.
  */
-export function fitPose(outline: readonly Vec2[], size: ElementSize, padding: Padding, view: View): CameraPose | null {
+export function fitPose(outline: readonly Vec2[], size: ElementSize, view: View): CameraPose | null {
   if (!(size.width > 0 && size.height > 0) || outline.length === 0) return null
   const tiltDeg = view.mode === 'plan' ? 90 : SPEC.camera.tiltDeg
   const { right, up, back } = axes(bearingDeg(view.rotateDeg), tiltDeg)
@@ -101,7 +101,7 @@ export function fitPose(outline: readonly Vec2[], size: ElementSize, padding: Pa
   const [u0, u1] = span(right)
   const [v0, v1] = span(up)
   const [w0, w1] = span(back)
-  const pad = fitPadding(padding, size)
+  const pad = fitPadding(size)
   const fits = [(size.width - 2 * pad.side) / (u1 - u0), (size.height - pad.top - pad.bottom) / (v1 - v0)].filter(
     (k) => Number.isFinite(k) && k > 0,
   )

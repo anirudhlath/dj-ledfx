@@ -7,7 +7,7 @@ import { liveStore } from '@/api/live-store'
 import { buildScenario, type ScenarioName } from '@/api/mocks/scenarios'
 import { HERO_NOW, startMockDataLayer } from '@/test/live'
 import { stageBodies } from '../bodies'
-import { FIT_VIEW, fitPose, LIVE_PADDING } from '../camera'
+import { FIT_VIEW, fitPose } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import { FrameWriter, writerEntries } from '../frame-writer'
 import type { RGB } from '../light-maths'
@@ -27,7 +27,7 @@ function stageProps(name: ScenarioName = 'hero', overrides: Partial<StageScenePr
     writer: new FrameWriter(entries),
     entries,
     mask: roomMask(home.rooms),
-    pose: fitPose(home.outline, STAGE, LIVE_PADDING, FIT_VIEW)!,
+    pose: fitPose(home.outline, STAGE, FIT_VIEW)!,
     cadenceMs: null,
     ...overrides,
   }

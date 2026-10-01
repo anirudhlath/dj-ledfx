@@ -19,7 +19,8 @@ export interface RoomMask {
 }
 
 /** Rasterises the rooms; rooms[i] is written as i + 1. */
-export function roomMask(rooms: readonly Pick<Room, 'polygon'>[], cellM = MASK_CELL_M): RoomMask {
+export function roomMask(rooms: readonly Pick<Room, 'polygon'>[]): RoomMask {
+  const cellM = MASK_CELL_M
   const points = rooms.flatMap((room) => room.polygon)
   if (points.length === 0) return { data: new Uint8Array(1), width: 1, height: 1, origin: [0, 0], cellM }
   const { min, max } = bounds(points)

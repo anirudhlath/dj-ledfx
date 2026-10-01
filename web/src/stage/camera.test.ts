@@ -13,7 +13,7 @@ const { eastWest, northSouth } = homeFixture.size
 
 describe('the camera (§7.2)', () => {
   it.each(VIEWS)("projects a point as three's camera does: %o", (view) => {
-    const pose = fitPose(OUTLINE, STAGE, LIVE_PADDING, view)!
+    const pose = fitPose(OUTLINE, STAGE, view)!
     const camera = new OrthographicCamera()
     applyPose(camera, pose)
     for (const point of [[0, 0, 0], [eastWest, northSouth, 0], [3, 4, 2.2]] as Vec3[]) {
@@ -25,7 +25,7 @@ describe('the camera (§7.2)', () => {
   })
 
   it('fits the outline and its height inside the padding, touching it', () => {
-    const pose = fitPose(OUTLINE, STAGE, LIVE_PADDING, FIT_VIEW)!
+    const pose = fitPose(OUTLINE, STAGE, FIT_VIEW)!
     const points = OUTLINE.flatMap(([x, y]) => [projectPoint(pose, [x, y, 0]), projectPoint(pose, [x, y, SPEC.fit.heightM])])
     const xs = points.map((p) => p[0])
     const ys = points.map((p) => p[1])
@@ -41,7 +41,7 @@ describe('the camera (§7.2)', () => {
 
   it('keeps north roughly up and west on the left, in 3D and in Plan', () => {
     for (const mode of ['3d', 'plan'] as const) {
-      const pose = fitPose(OUTLINE, STAGE, LIVE_PADDING, { ...FIT_VIEW, mode })!
+      const pose = fitPose(OUTLINE, STAGE, { ...FIT_VIEW, mode })!
       const [nwX, nwY] = projectPoint(pose, [0, 0, 0])
       const [neX] = projectPoint(pose, [eastWest, 0, 0])
       const [, swY] = projectPoint(pose, [0, northSouth, 0])
@@ -51,7 +51,7 @@ describe('the camera (§7.2)', () => {
   })
 
   it('looks straight down in Plan, so height moves nothing', () => {
-    const pose = fitPose(OUTLINE, STAGE, LIVE_PADDING, { ...FIT_VIEW, mode: 'plan' })!
+    const pose = fitPose(OUTLINE, STAGE, { ...FIT_VIEW, mode: 'plan' })!
     const [x0, y0] = projectPoint(pose, [4, 5, 0])
     const [x1, y1] = projectPoint(pose, [4, 5, 3])
     expect(x1).toBeCloseTo(x0, 6)
@@ -59,15 +59,15 @@ describe('the camera (§7.2)', () => {
   })
 
   it('zooms about the same target', () => {
-    const fit = fitPose(OUTLINE, STAGE, LIVE_PADDING, FIT_VIEW)!
-    const zoomed = fitPose(OUTLINE, STAGE, LIVE_PADDING, { ...FIT_VIEW, zoom: 2 })!
+    const fit = fitPose(OUTLINE, STAGE, FIT_VIEW)!
+    const zoomed = fitPose(OUTLINE, STAGE, { ...FIT_VIEW, zoom: 2 })!
     expect(zoomed.zoom).toBeCloseTo(fit.zoom * 2)
     expect(zoomed.target).toEqual(fit.target)
   })
 
   it('finds the floor point under a pixel', () => {
     for (const view of VIEWS) {
-      const pose = fitPose(OUTLINE, STAGE, LIVE_PADDING, view)!
+      const pose = fitPose(OUTLINE, STAGE, view)!
       for (const point of [[1, 2], [eastWest / 2, northSouth / 3]] as Vec2[]) {
         const [x, y] = projectPoint(pose, [point[0], point[1], 0])
         const [px, py] = floorPoint(pose, x, y)
@@ -78,9 +78,9 @@ describe('the camera (§7.2)', () => {
   })
 
   it("keeps Live's padding at Main.png's stage size, and shrinks it in proportion below", () => {
-    expect(fitPadding(LIVE_PADDING, STAGE)).toEqual(LIVE_PADDING)
-    expect(fitPadding(LIVE_PADDING, { width: STAGE.width * 2, height: STAGE.height * 2 })).toEqual(LIVE_PADDING)
-    const phone = fitPadding(LIVE_PADDING, SPEC.phoneStage)
+    expect(fitPadding(STAGE)).toEqual(LIVE_PADDING)
+    expect(fitPadding({ width: STAGE.width * 2, height: STAGE.height * 2 })).toEqual(LIVE_PADDING)
+    const phone = fitPadding(SPEC.phoneStage)
     const k = Math.min(SPEC.phoneStage.width / STAGE.width, SPEC.phoneStage.height / STAGE.height)
     expect(phone.side).toBeCloseTo(LIVE_PADDING.side * k)
     expect(phone.top).toBeCloseTo(LIVE_PADDING.top * k)
@@ -89,7 +89,7 @@ describe('the camera (§7.2)', () => {
 
   // Review focus 4: a narrow window, a phone's stage, or one not laid out yet.
   it('fits a 320 px stage and a zero-size one without NaN', () => {
-    const narrow = fitPose(OUTLINE, { width: 320, height: 220 }, LIVE_PADDING, FIT_VIEW)!
+    const narrow = fitPose(OUTLINE, { width: 320, height: 220 }, FIT_VIEW)!
     expect([...narrow.target, narrow.zoom].every(Number.isFinite)).toBe(true)
     expect(narrow.zoom).toBeGreaterThan(0)
     for (const [x, y] of OUTLINE.map(([px, py]) => projectPoint(narrow, [px, py, 0]))) {
@@ -98,10 +98,10 @@ describe('the camera (§7.2)', () => {
       expect(y).toBeGreaterThanOrEqual(0)
       expect(y).toBeLessThanOrEqual(220)
     }
-    expect(fitPose(OUTLINE, { width: 0, height: 0 }, LIVE_PADDING, FIT_VIEW)).toBeNull()
-    expect(fitPose(OUTLINE, { width: Number.NaN, height: 10 }, LIVE_PADDING, FIT_VIEW)).toBeNull()
-    expect(fitPose([], STAGE, LIVE_PADDING, FIT_VIEW)).toBeNull()
-    const tiny = fitPose(OUTLINE, { width: 1, height: 1 }, LIVE_PADDING, FIT_VIEW)!
+    expect(fitPose(OUTLINE, { width: 0, height: 0 }, FIT_VIEW)).toBeNull()
+    expect(fitPose(OUTLINE, { width: Number.NaN, height: 10 }, FIT_VIEW)).toBeNull()
+    expect(fitPose([], STAGE, FIT_VIEW)).toBeNull()
+    const tiny = fitPose(OUTLINE, { width: 1, height: 1 }, FIT_VIEW)!
     expect(Number.isFinite(tiny.zoom) && tiny.zoom > 0).toBe(true)
   })
 })

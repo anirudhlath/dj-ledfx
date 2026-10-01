@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { homeFixture, lightFixtures } from '@/api/mocks/fixtures'
 import { stageBodies } from './bodies'
-import { FIT_VIEW, fitPose, LIVE_PADDING, projectPoint } from './camera'
+import { FIT_VIEW, fitPose, projectPoint } from './camera'
 import { RENDER } from './design-numbers'
 import { pickLight, pickRoom, screenPoints } from './picking'
 
-const POSE = fitPose(homeFixture.outline, { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }, LIVE_PADDING, FIT_VIEW)!
+const POSE = fitPose(homeFixture.outline, { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }, FIT_VIEW)!
 const LIGHTS = lightFixtures('2026-09-23T18:04:00-05:00')
 const POINTS = screenPoints(POSE, stageBodies(LIGHTS))
 
