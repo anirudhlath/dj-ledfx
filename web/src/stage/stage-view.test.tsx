@@ -199,7 +199,15 @@ describe('the stage on Live (§7, §8.1)', () => {
     seedLive()
     renderApp('/next/live')
     await loadedStage()
-    expect(screen.getByText("The home can't be drawn here")).toBeInTheDocument()
+    const title = screen.getByText("The home can't be drawn here")
+    // Mi7: what happened, without jargon, true whatever stopped WebGL 2 (the ruling's wording).
+    expect(screen.getByText("This browser can't draw the 3D home. Everything else still works.")).toBeInTheDocument()
+    // R19: EmptyState pads itself, so nothing around it pads again.
+    const padded = []
+    for (let element = title.parentElement; element !== null && element.tagName !== 'SECTION'; element = element.parentElement) {
+      if (/(^|\s)p-\d/.test(element.className)) padded.push(element)
+    }
+    expect(padded).toHaveLength(1)
     expect(within(screen.getByRole('navigation', { name: 'Rooms' })).getAllByRole('link').length).toBeGreaterThan(0)
   })
 
