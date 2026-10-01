@@ -202,13 +202,11 @@ describe('the other scenarios', () => {
     expect(buildScenario('reconnecting', HERO_NOW).dropAfterMs).toBe(1000)
   })
 
-  it('dj-playing has four decks, Player 2 the master, and the beat from Pro DJ Link', () => {
+  it('dj-playing has two decks, Player 2 the master, and the beat from Pro DJ Link', () => {
     const state = buildScenario('dj-playing', HERO_NOW)
     expect(state.decks.map((deck) => [deck.player, deck.state, deck.master])).toEqual([
       ['Player 1', 'cued', false],
       ['Player 2', 'playing', true],
-      ['Player 3', 'empty', false],
-      ['Player 4', 'empty', false],
     ])
     expect(state.beat).toMatchObject({ source: 'prodjlink', bar: 17, beatInBar: 3, pitchPercent: 1.2 })
     expect(state.beat.bpm).toBeCloseTo(125.488)

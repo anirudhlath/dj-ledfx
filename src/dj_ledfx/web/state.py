@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from dj_ledfx.devices.lights import LightIndex
+from dj_ledfx.prodjlink.listener import Listening
 
 if TYPE_CHECKING:
     from fastapi import Request
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from dj_ledfx.home.map import HomeMap
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
+    from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.zones.attention import AttentionFeed
     from dj_ledfx.zones.lights import LightMonitor
     from dj_ledfx.zones.manager import ZoneManager
@@ -71,3 +73,14 @@ def get_home_map(request: Request) -> HomeMap:
 
 def get_previews(request: Request) -> PreviewManager:
     return cast("PreviewManager", _required(request, "previews", "Previews"))
+
+
+def listening(app: Any) -> Listening:
+    """Where Pro DJ Link is heard: nowhere unless main says (--demo, and tests)."""
+    return cast("Listening | None", app.state.listening) or Listening()
+
+
+def get_tempo(app: Any) -> TempoClock:
+    """The tempo clock: create_app always has one. It takes the app, so the socket hub reads
+    it as the routes do."""
+    return cast("TempoClock", app.state.tempo)

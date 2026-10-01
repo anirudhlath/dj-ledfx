@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from conftest import FakeLight
+from conftest import FakeLight, events
 from zone_home import BREATHE_AND_GLOW, GLOW, TILE, Home, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
@@ -171,15 +171,14 @@ async def test_status_since_moves_only_when_the_status_changes(make_home: HomeFa
 async def test_lights_changed_is_emitted_only_on_change(make_home: HomeFactory) -> None:
     home = await make_home([FakeLight("lamp")], [zone_record("z", "lamp")])
     monitor = _monitor(home)
-    events: list[LightsChanged] = []
-    home.bus.subscribe(LightsChanged, events.append)
+    changed = events(home.bus, LightsChanged)
 
     monitor.refresh()
     monitor.refresh()
-    assert len(events) == 1
+    assert len(changed) == 1
 
     await home.manager.start("z", home.look("classic-breathe"))
-    assert len(events) == 2
+    assert len(changed) == 2
 
 
 async def test_a_light_that_misses_three_reads_is_reported_offline(
@@ -190,8 +189,7 @@ async def test_a_light_that_misses_three_reads_is_reported_offline(
     shy = FakeLight("shy", power=None, colour=None)  # answers, but can't say its power
     home = await make_home([bulb, lamp, shy], [])
     monitor = _monitor(home)
-    offline: list[DeviceOfflineEvent] = []
-    home.bus.subscribe(DeviceOfflineEvent, offline.append)
+    offline = events(home.bus, DeviceOfflineEvent)
     bulb.silent = lamp.silent = True  # they no longer answer, whatever their protocol
 
     for _ in range(2):

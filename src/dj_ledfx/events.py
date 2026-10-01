@@ -12,10 +12,10 @@ from loguru import logger
 class BeatEvent:
     bpm: float  # pitch-adjusted BPM
     beat_position: int  # 1-4
-    next_beat_ms: int
     device_number: int
     device_name: str
     timestamp: float  # time.monotonic()
+    track_bpm: float  # the track's BPM before pitch
     pitch_percent: float = 0.0
 
 

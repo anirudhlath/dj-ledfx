@@ -6,6 +6,8 @@ from abc import abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
+import numpy as np
+
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.color import palette_float
 
@@ -57,6 +59,11 @@ class ParamField(FieldEffect):
 
     def reseed(self, seed: int) -> None:
         self._seed = seed
+
+    def _rng(self, k: int) -> np.random.Generator:
+        """The random numbers of draw k (a drop, a beat): the same seed and k always give
+        the same ones, however the frames fall."""
+        return np.random.default_rng([self._seed % 2**32, k % 2**63])
 
     def _apply_params(self, **kwargs: Any) -> None:
         self._values = {**getattr(self, "_values", {}), **kwargs}

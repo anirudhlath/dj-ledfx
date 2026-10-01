@@ -1,8 +1,9 @@
 """The attention list, derived on the server so every screen agrees (spec §8; web §9.5).
 
 M1's items: a zone light offline for 2 minutes, a zone crashed, a zone slow, and a light
-dropping more than 5% of its frames for a minute. Input items arrive with the inputs (M3,
-M7). Switched off elsewhere is never an item.
+dropping more than 5% of its frames for a minute. Input items arrive with M7's inputs:
+the tempo clock raises none, since no DJ is never an item. Switched off elsewhere is
+never an item.
 """
 
 from __future__ import annotations

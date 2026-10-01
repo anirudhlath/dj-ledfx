@@ -11,13 +11,14 @@ import sys
 from typing import Any
 from unittest.mock import MagicMock
 
+from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.web.app import create_app
 
 
 def openapi_schema() -> dict[str, Any]:
     """The schema FastAPI serves at /openapi.json."""
     app = create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=MagicMock(),

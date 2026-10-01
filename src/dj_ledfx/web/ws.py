@@ -1,22 +1,31 @@
-"""Multiplexed WebSocket hub with beat, stats, status, and frame channels."""
+"""Multiplexed WebSocket hub: beat, stats, status and frame channels, the pushed snapshots,
+and the tap command."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
+from pydantic import ValidationError
 
+from dj_ledfx.tempo.model import DecksChanged, TempoChanged, TempoError
+from dj_ledfx.types import is_finite_number
 from dj_ledfx.web import contract
 from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
-from dj_ledfx.web.state import ClientSubscription, light_index
+from dj_ledfx.web.state import ClientSubscription, get_tempo, light_index, listening
 from dj_ledfx.zones.frames import STREAMS
 from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
 
+if TYPE_CHECKING:
+    from dj_ledfx.tempo.clock import TempoClock
+
 _GOING_AWAY = 1001  # RFC 6455 close code: the server is going down
+INPUTS_HEARTBEAT_S = 1.0  # the inputs channel: on change, and once a second (web spec §12.4)
 
 
 class Session:
@@ -93,9 +102,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         while (data := await _receive_unless_stopped(websocket, session.stop)) is not None:
             try:
                 msg = json.loads(data)
-                await _handle_command(websocket, app, sub, tasks, msg)
             except json.JSONDecodeError:
                 await _send_json(websocket, {"channel": "error", "detail": "Invalid JSON"})
+                continue
+            if not isinstance(msg, dict):
+                detail = "A command is a JSON object"
+                await _send_json(websocket, {"channel": "error", "detail": detail})
+                continue
+            await _handle_command(websocket, app, sub, tasks, msg)
         await websocket.close(code=_GOING_AWAY)
     except WebSocketDisconnect:
         pass
@@ -168,18 +182,33 @@ def _transport_message(app: Any) -> dict[str, Any] | None:
     return {"channel": "transport", "state": "simulating" if zones.preview_only else "playing"}
 
 
+def _decks_message(app: Any) -> dict[str, Any]:
+    """The players heard, snake_case like the beat (F1's decision 5)."""
+    decks = [deck.model_dump(mode="json") for deck in contract.decks_out(get_tempo(app))]
+    return {"channel": "decks", "decks": decks}
+
+
+def _inputs_message(app: Any) -> dict[str, Any]:
+    inputs = contract.inputs_out(get_tempo(app), listening(app))
+    return {"channel": "inputs", "inputs": inputs.model_dump(mode="json", by_alias=True)}
+
+
 # Each pushed channel's snapshot, and the events that make a channel stale.
 _SNAPSHOTS: dict[str, Callable[[Any], dict[str, Any] | None]] = {
     "running": _running_message,
     "lights": _lights_message,
     "attention": _attention_message,
     "transport": _transport_message,
+    "decks": _decks_message,
+    "inputs": _inputs_message,
 }
 _STALE_ON: dict[type[Any], str] = {
     ZonesChanged: "running",
     LightsChanged: "lights",
     AttentionChanged: "attention",
     PreviewOnlyChanged: "transport",
+    DecksChanged: "decks",
+    TempoChanged: "inputs",
 }
 
 
@@ -190,13 +219,17 @@ def initial_messages(app: Any) -> list[dict[str, Any]]:
 
 
 async def event_broadcast(app: Any) -> None:
-    """Push a channel's snapshot to every client when an event makes it stale.
+    """Push a channel's snapshot to every client when an event makes it stale, and the
+    inputs once a second besides (web spec §12.4's heartbeat): one snapshot for every tab,
+    and none within a second of a push.
 
     Changes that arrive while a push goes out coalesce into the next push.
     """
     event_bus = app.state.event_bus
     stale: dict[str, None] = {}  # an ordered set of channels
     wake = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    inputs_sent = loop.time()
 
     def mark(event: object) -> None:
         stale[_STALE_ON[type(event)]] = None
@@ -206,7 +239,15 @@ async def event_broadcast(app: Any) -> None:
         event_bus.subscribe(event_type, mark)
     try:
         while True:
-            await wake.wait()
+            # Other channels' pushes wake the loop too, so the heartbeat keeps its own time.
+            left = inputs_sent + INPUTS_HEARTBEAT_S - loop.time()
+            if left > 0:
+                try:
+                    await asyncio.wait_for(wake.wait(), left)
+                except TimeoutError:
+                    pass
+            if loop.time() - inputs_sent >= INPUTS_HEARTBEAT_S:
+                stale["inputs"] = None
             wake.clear()
             channels = list(stale)
             stale.clear()
@@ -214,33 +255,42 @@ async def event_broadcast(app: Any) -> None:
                 message = _SNAPSHOTS[channel](app)
                 if message is not None:
                     await _broadcast_json(app, message)
+                if channel == "inputs":
+                    inputs_sent = loop.time()
     finally:
         for event_type in _STALE_ON:
             event_bus.unsubscribe(event_type, mark)
 
 
 async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
-    """Poll beat state at client-requested rate."""
-    last_sent: dict[str, Any] = {}
+    """The beat at the client's rate. The clock always runs, so every message is new."""
     while True:
-        interval = 1.0 / max(sub.beat_fps, 1.0)
-        await asyncio.sleep(interval)
-        clock = app.state.beat_clock
-        state = clock.get_state()
-        beat_data = {
-            "channel": "beat",
-            "bpm": state.bpm,
-            "beat_phase": state.beat_phase,
-            "bar_phase": state.bar_phase,
-            "is_playing": state.is_playing,
-            "beat_pos": int(state.bar_phase * 4) % 4 + 1,
-            "pitch_percent": state.pitch_percent,
-            "deck_number": state.deck_number,
-            "deck_name": state.deck_name,
-        }
-        if beat_data != last_sent:
-            await _send_json(ws, beat_data)
-            last_sent = beat_data
+        await asyncio.sleep(1.0 / max(sub.beat_fps, 1.0))
+        await _send_json(ws, beat_message(get_tempo(app)))
+
+
+def beat_message(tempo: TempoClock) -> dict[str, Any]:
+    """The beat channel: web spec §12.4's v2 fields, and today's UI's until F11. bar counts
+    from 1, beat_in_bar 1–4, and server_time is seconds since the epoch (F1's decision 2)."""
+    sample = tempo.sample()
+    deck = tempo.followed_deck()
+    return {
+        "channel": "beat",
+        "bpm": sample.bpm,
+        "beat_phase": sample.beat_phase,
+        "bar_phase": sample.bar_phase,
+        "bar": sample.bar_index + 1,
+        "beat_in_bar": sample.beat_in_bar,
+        "pitch_percent": sample.pitch_percent,
+        "source": sample.source,
+        "stale": sample.stale,
+        "server_time": time.time(),
+        # Today's UI (frontend/), until F11:
+        "is_playing": not sample.stale,
+        "beat_pos": sample.beat_in_bar,
+        "deck_number": None if deck is None else deck.number,
+        "deck_name": None if deck is None else deck.player,
+    }
 
 
 async def _stats_poll(ws: WebSocket, app: Any) -> None:
@@ -348,7 +398,7 @@ def _subscribe_frames(sub: ClientSubscription, msg: dict[str, Any]) -> None:
     if protocol not in (1, 2):
         raise ValueError(f"Unknown frame protocol {protocol!r}; expected 1 or 2")
     if protocol == 1:
-        fps = min(float(msg.get("fps", 10)), 30.0)
+        fps = _fps(msg, 10.0, 30.0)
         sub.frame_devices = [str(device) for device in msg.get("devices") or []]
         sub.frame_protocol, sub.frame_fps, sub.frame_streams = 1, fps, ["live"]
         return
@@ -356,9 +406,18 @@ def _subscribe_frames(sub: ClientSubscription, msg: dict[str, Any]) -> None:
     unknown = [stream for stream in streams if stream not in STREAMS]
     if unknown:
         raise ValueError(f"Unknown frame stream {unknown[0]!r}; expected live or preview")
-    fps = min(float(msg.get("fps", 30)), 60.0)
+    fps = _fps(msg, 30.0, 60.0)
     sub.frame_lights = [str(light) for light in msg.get("lights") or []]
     sub.frame_protocol, sub.frame_fps, sub.frame_streams = 2, fps, streams
+
+
+def _fps(msg: dict[str, Any], default: float, ceiling: float) -> float:
+    """A subscription's rate, at most `ceiling`, or ValueError when it isn't a finite
+    number: a NaN would stop the stream, since asyncio.sleep refuses one."""
+    fps = msg.get("fps", default)
+    if not is_finite_number(fps):
+        raise ValueError("fps must be a finite number")
+    return min(float(fps), ceiling)
 
 
 def _watch(app: Any, sub: ClientSubscription, streams: list[str]) -> None:
@@ -379,7 +438,11 @@ async def _handle_command(
     cmd_id = msg.get("id")
 
     if action == "subscribe_beat":
-        fps = min(float(msg.get("fps", 10)), 30.0)
+        try:
+            fps = _fps(msg, 10.0, 30.0)
+        except ValueError as exc:
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(exc)})
+            return
         sub.beat_fps = max(fps, 1.0)
         await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
 
@@ -400,6 +463,18 @@ async def _handle_command(
             ws,
             {"channel": "ack", "id": cmd_id, "action": action, "protocol": sub.frame_protocol},
         )
+
+    elif action == "tap":  # saved by the clock's run(), within 0.25 s
+        try:
+            get_tempo(app).tap(contract.TapRequest.model_validate(msg).client_time)
+        except ValidationError:
+            detail = "A tap's client_time is a number of seconds"
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": detail})
+            return
+        except TempoError as exc:  # a lock keeps the internal clock out
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(exc)})
+            return
+        await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
 
     else:
         await _send_json(

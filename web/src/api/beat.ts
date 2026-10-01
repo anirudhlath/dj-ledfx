@@ -1,8 +1,8 @@
 // The beat on the client (spec §12.4, §5.4). The server sends it at up to 30 Hz, and the UI
 // samples it on every animation frame. Between messages the clock runs on at the tempo, and each
-// message pulls it back: softly under 5 ms, with a snap at 5 ms or more, as the engine's BeatClock
-// corrects its drift. Engine M1's beat carries no server time, so its arrival times it, and its
-// band is 50 ms: delivery jitter eases in rather than stepping the beat back and forth.
+// message pulls it back: softly under 5 ms, with a snap at 5 ms or more, as the engine's tempo
+// clock corrects its drift. Engine M1's beat carries no server time, so its arrival times it, and
+// its band is 50 ms: delivery jitter eases in rather than stepping the beat back and forth.
 import type { TempoSource } from './contract'
 import type { BeatMessage } from './ws-messages'
 
@@ -95,7 +95,7 @@ export class ClockOffset {
   }
 }
 
-/** The engine's BeatClock threshold: under it a correction eases in, at or over it the clock snaps. */
+/** The engine's tempo clock threshold: under it a correction eases in, at or over it the clock snaps. */
 const SNAP_S = 0.005
 /** The threshold for a beat timed by its arrival: wide enough for delivery jitter. */
 const JITTER_SNAP_S = 0.05

@@ -18,6 +18,7 @@ from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.web.app import create_app
 from dj_ledfx.zones.frames import Watchers
+from tests.web.conftest import mock_deps, until
 
 Frames = Mapping[str, Mapping[str, NDArray[np.uint8]]]
 
@@ -38,24 +39,15 @@ class StubFeed:
 def ws_app(feed: StubFeed, watchers: Watchers, devices: Any = None) -> FastAPI:
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
-    return create_app(
-        beat_clock=MagicMock(),
-        effect_engine=MagicMock(),
-        device_manager=devices if devices is not None else MagicMock(),
-        scheduler=scheduler,
-        preset_store=MagicMock(),
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"])),
-        config_path=None,
-        frame_feed=feed,
-        frame_watchers=watchers,
-    )
+    deps = mock_deps(scheduler=scheduler, frame_feed=feed, frame_watchers=watchers)
+    if devices is not None:
+        deps["device_manager"] = devices
+    return create_app(**deps)
 
 
 def receive(ws: WebSocketTestSession, count: int = 10) -> tuple[list[dict[str, Any]], list[bytes]]:
-    """The next messages, split into JSON and binary. The beat channel sends nothing here
-    (the clock is a mock), so they are the ack and frames, and a stats message a second."""
+    """The next messages, split into JSON and binary: the snapshots sent on connect, then
+    the ack, frames, ten beats a second and a stats message a second."""
     texts: list[dict[str, Any]] = []
     frames: list[bytes] = []
     for _ in range(count):
@@ -145,9 +137,9 @@ def test_a_bad_frame_subscription_is_refused_with_the_reason() -> None:
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
         ws.send_json({"action": "subscribe_frames", "protocol": 2, "streams": ["fx"], "id": 8})
         ws.send_json({"action": "subscribe_frames", "protocol": 3, "id": 9})
-        texts, _ = receive(ws, 2)
+        errors = [until(ws, "error"), until(ws, "error")]
 
-    assert texts == [
+    assert errors == [
         {
             "channel": "error",
             "id": 8,

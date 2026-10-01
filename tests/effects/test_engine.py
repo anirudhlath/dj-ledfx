@@ -4,24 +4,20 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from conftest import ring_route
+from conftest import builtin_look, ring_route
 
 import dj_ledfx.metrics as metrics_mod
-from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.effects.ring_buffer import RingBuffer
-from dj_ledfx.looks.builtin import builtin_looks
+from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
 
 @pytest.fixture
-def clock() -> BeatClock:
-    c = BeatClock()
-    now = time.monotonic()
-    c.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=now)
-    return c
+def clock() -> TempoClock:
+    return TempoClock()  # the internal clock at 120 BPM, as the app starts
 
 
 def test_ring_buffer_write_and_read() -> None:
@@ -75,13 +71,13 @@ def test_ring_buffer_empty_returns_none() -> None:
     assert buf.find_nearest(100.0) is None
 
 
-def _runtime(zone_id: str, clock: BeatClock) -> ZoneRuntime:
-    look = next(look for look in builtin_looks() if look.id == "classic-breathe")
+def _runtime(zone_id: str, clock: TempoClock) -> ZoneRuntime:
+    look = builtin_look("classic-breathe")
     light = ZoneLight(f"{zone_id}-light", 4, DeviceCapabilities(protocol="LIFX"))
     return ZoneRuntime(zone_id, look, [light], clock=clock, latency_s=lambda _: 0.05)
 
 
-def test_the_engine_renders_each_zone_it_hosts(clock: BeatClock) -> None:
+def test_the_engine_renders_each_zone_it_hosts(clock: TempoClock) -> None:
     engine = EffectEngine(fps=60)
     desk, shelf = _runtime("desk", clock), _runtime("shelf", clock)
     engine.add_runtime(desk)
@@ -101,7 +97,7 @@ def test_the_engine_renders_each_zone_it_hosts(clock: BeatClock) -> None:
 
 
 def test_a_tick_observes_the_render_duration(
-    clock: BeatClock, monkeypatch: pytest.MonkeyPatch
+    clock: TempoClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     duration, rendered = MagicMock(), MagicMock()
     monkeypatch.setattr(metrics_mod, "RENDER_DURATION", duration)
@@ -116,7 +112,7 @@ def test_a_tick_observes_the_render_duration(
     assert engine.avg_render_time_ms > 0.0
 
 
-async def test_the_engine_renders_until_stopped(clock: BeatClock) -> None:
+async def test_the_engine_renders_until_stopped(clock: TempoClock) -> None:
     engine = EffectEngine(fps=60)
     desk = _runtime("desk", clock)
     engine.add_runtime(desk)
@@ -130,7 +126,7 @@ async def test_the_engine_renders_until_stopped(clock: BeatClock) -> None:
 
 
 # M2 review A3: runtimes are kept by identity, so a preview of a zone never replaces it.
-def test_a_preview_renders_beside_its_zone(clock: BeatClock) -> None:
+def test_a_preview_renders_beside_its_zone(clock: TempoClock) -> None:
     engine = EffectEngine(fps=60)
     desk, preview = _runtime("desk", clock), _runtime("desk", clock)
     engine.add_runtime(desk)

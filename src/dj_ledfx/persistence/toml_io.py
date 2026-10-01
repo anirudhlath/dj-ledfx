@@ -31,7 +31,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import tomllib
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, get_args
 
@@ -194,6 +194,14 @@ async def export_toml(db: StateDB) -> str:
     return tomli_w.dumps(doc)
 
 
+def _iso_text(value: object) -> str:
+    """A TOML date or time (a hand-edited file's, unquoted) as the ISO text the stores
+    read: JSON has none of them."""
+    if isinstance(value, date | time):  # a datetime is a date
+        return value.isoformat()
+    raise TypeError(f"{type(value).__name__} isn't a config value")
+
+
 async def import_toml(db: StateDB, toml_str: str) -> None:
     """Import structured TOML into DB, merging with existing state."""
     data = tomllib.loads(toml_str)
@@ -205,7 +213,7 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
             # Convert all values to JSON-serialized strings for storage
             # Using json.dumps preserves type fidelity: booleans -> "true"/"false",
             # numbers stay numeric strings, strings get quoted then stripped by load_all_config
-            str_kv = {k: json.dumps(v) for k, v in kv.items()}
+            str_kv = {k: json.dumps(v, default=_iso_text) for k, v in kv.items()}
             await db.save_config_bulk(section, str_kv)
             logger.debug(
                 "import_toml: imported {} config keys for section '{}'",
@@ -547,18 +555,24 @@ async def _import_recent(db: StateDB, data: dict[str, Any]) -> None:
 
 # --- First-Launch Migration ---
 
+# The legacy TOML migration's run-once mark (StateDB.mark_statement). Schema migration 008
+# gives it to every database that held the app's config before the mark existed.
+TOML_MIGRATED_KEY = "toml_migrated"
+
 
 async def migrate_from_toml(
     db: StateDB,
     config_path: Path | None = None,
     presets_path: Path | None = None,
 ) -> None:
-    """Migrate legacy TOML files into the DB on first launch.
+    """Migrate legacy TOML files into the DB, once: after the first migration the database
+    is the source of truth, and a database with the run-once mark is left alone.
 
     For each provided path:
     - If the file exists, parse it, import data into DB, rename to .bak (or leave it,
       with a warning, when it can't be renamed).
-    - If the file does not exist, silently skip.
+    - If the file does not exist, silently skip. With neither file there's nothing to
+      mark, so a config.toml that turns up later is still migrated.
 
     config_path format (old config.toml):
       [engine]           — engine config
@@ -573,13 +587,23 @@ async def migrate_from_toml(
       effect_class = "..."
       params = { ... }
     """
+    if await db.has_mark(TOML_MIGRATED_KEY):
+        return
+    migrated: list[Path] = []
     if config_path is not None and config_path.exists():
         await _migrate_config_toml(db, config_path)
-        _set_aside(config_path)
-
+        migrated.append(config_path)
     if presets_path is not None and presets_path.exists():
         await _migrate_presets_toml(db, presets_path)
-        _set_aside(presets_path)
+        migrated.append(presets_path)
+    if not migrated:
+        return
+    # Marked before the files are set aside: a crash in between leaves them in place, as
+    # a read-only mount does, and nothing is migrated twice. A crash before the mark
+    # migrates them again at the next start, over the same rows.
+    await db.write_many([db.mark_statement(TOML_MIGRATED_KEY)])
+    for path in migrated:
+        _set_aside(path)
 
 
 def _set_aside(path: Path) -> None:

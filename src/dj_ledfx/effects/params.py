@@ -52,6 +52,12 @@ def level_param(default: float) -> EffectParam:
     )
 
 
+def anchor_param(label: str, description: str = "None: the middle of the zone") -> EffectParam:
+    """A field effect's anchor, a home-map point by name; none (empty) is the middle of the
+    zone (field_tools.anchor_or_centre)."""
+    return EffectParam(type="anchor", default="", label=label, description=description)
+
+
 def _numbers(value: Any, count: int) -> bool:
     return (
         isinstance(value, Sequence)

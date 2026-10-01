@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -10,6 +9,7 @@ import numpy as np
 from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected
 from dj_ledfx.devices.openrgb import OpenRGBAdapter
 from dj_ledfx.effects.color import hsv_to_rgb_array, to_float_rgb
+from dj_ledfx.effects.easing import raised_cosine
 from dj_ledfx.effects.firmware import FirmwareEffect, Params, require_adapter
 from dj_ledfx.effects.params import EffectParam
 
@@ -80,7 +80,7 @@ class OpenrgbMode(FirmwareEffect):
 
     def emulate(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         if self._mode == "Breathing":
-            level = 0.5 - 0.5 * math.cos(2.0 * math.pi * ctx.t / COPY_PERIOD_S)
+            level = raised_cosine(ctx.t / COPY_PERIOD_S)
             out = np.zeros((leds.count, 3), dtype=np.float32)
             out[:, 0] = np.float32(level)
             return out

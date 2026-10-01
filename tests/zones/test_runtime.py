@@ -8,10 +8,10 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
-from conftest import span
+from conftest import builtin_look, span
 from loguru import logger
+from tempo_fakes import START, FakeTime, tempo_clock
 
-from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext, render_context
@@ -19,9 +19,11 @@ from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet, PlacedLeds, Space
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.looks.builtin import classic_look_id
 from dj_ledfx.looks.model import Layer, Look
 from dj_ledfx.looks.selectors import parse_selector
 from dj_ledfx.scheduling.route import to_device_colors
+from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import FloatRGB, RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
@@ -89,6 +91,7 @@ def _runtime(
     look: Look,
     lights: Sequence[ZoneLight] = LIGHTS,
     latencies: dict[str, float | None] | None = None,
+    clock: TempoClock | None = None,
     **kwargs: Any,
 ) -> ZoneRuntime:
     known = latencies or {}
@@ -96,7 +99,7 @@ def _runtime(
         "zone",
         look,
         lights,
-        clock=BeatClock(),
+        clock=clock or TempoClock(),
         latency_s=lambda device_id: known.get(device_id, 0.02),
         **kwargs,
     )
@@ -148,15 +151,28 @@ def test_a_rejected_firmware_effect_falls_back_to_its_streamed_copy() -> None:
 def test_a_streamed_copy_is_drawn_as_on_the_whole_zone() -> None:
     flame = Layer(id="flame", name="Flame", type="firmware", kind="lifx_flame")
     lights = (ZoneLight("bulb", 1, BULB), ZoneLight("tile", 4, TILE), ZoneLight("lamp", 3, LAMP))
-    runtime = _runtime(_look(_field(), flame), lights)
+    clock = TempoClock()
+    runtime = _runtime(_look(_field(), flame), lights, clock=clock)
     runtime.mark_emulated("tile")
     runtime.tick(100.0)
     frame = runtime.ring.find_nearest(1e9)
     assert frame is not None
-    ctx = render_context(BeatClock(), frame.target_time, 1 / 60)
+    ctx = render_context(clock, frame.target_time, 1 / 60)
     whole = LifxFlame().emulate(ctx, runtime.leds)
     assert np.array_equal(frame.colors[1:5], whole[1:5])
     assert np.allclose(frame.colors[[0, 5, 6, 7]], 0.5)  # the field on the others
+
+
+# Today's gap: with no DJ playing, the classic tempo looks held still. The clock always runs.
+def test_classic_looks_move_without_a_dj() -> None:
+    time = FakeTime()
+    look = builtin_look(classic_look_id("beat_pulse"))
+    runtime = _runtime(look, clock=tempo_clock(time))
+    seen = set()
+    for step in range(30):  # one beat at 120 BPM
+        runtime.tick(START + step / 60)
+        seen.add(_latest(runtime).tobytes())
+    assert len(seen) > 10
 
 
 # E11: the ring keeps every frame, so each tick renders a new array.

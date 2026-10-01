@@ -1,6 +1,6 @@
 import numpy as np
 
-from dj_ledfx.types import RGB, BeatContext, BeatState, DeviceInfo, RenderedFrame
+from dj_ledfx.types import RGB, BeatContext, DeviceInfo, RenderedFrame, is_finite_number
 
 
 def test_rgb_type_alias() -> None:
@@ -29,18 +29,6 @@ def test_rendered_frame() -> None:
     )
     assert frame.colors.shape == (10, 3)
     assert frame.target_time == 1000.0
-
-
-def test_beat_state() -> None:
-    state = BeatState(
-        beat_phase=0.25,
-        bar_phase=0.0625,
-        bpm=128.0,
-        is_playing=True,
-        next_beat_time=1000.5,
-    )
-    assert state.bpm == 128.0
-    assert state.is_playing is True
 
 
 def test_device_info_defaults_backward_compatible():
@@ -86,3 +74,9 @@ def test_device_info_frozen():
         raise AssertionError("Should have raised")
     except AttributeError:
         pass
+
+
+def test_a_finite_number_is_an_int_or_float_that_fits_a_float() -> None:
+    assert is_finite_number(3) and is_finite_number(-2.5)
+    for value in (float("nan"), float("inf"), True, "3", None, 10**400):
+        assert not is_finite_number(value), value

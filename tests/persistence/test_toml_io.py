@@ -426,6 +426,78 @@ async def test_migration_leaves_a_file_it_cannot_rename(
     assert config_toml.exists()
 
 
+async def test_the_migration_runs_once(tmp_path: Path) -> None:
+    """A config.toml that turns up after the first one was migrated stays where it is:
+    the database is the source of truth from then on."""
+    config_toml = tmp_path / "config.toml"
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    try:
+        config_toml.write_text("[engine]\nfps = 90\n")
+        await migrate_from_toml(db, config_path=config_toml)
+        config_toml.write_text("[engine]\nfps = 30\n")
+        await migrate_from_toml(db, config_path=config_toml)
+        config = await db.load_all_config()
+    finally:
+        await db.close()
+
+    assert config == {("engine", "fps"): 90}
+    assert config_toml.exists()
+
+
+async def test_a_database_that_held_config_before_the_mark_isn_t_migrated_again(
+    tmp_path: Path,
+) -> None:
+    """An M2-shaped state.db (schema 7, the app's config, no run-once mark) was migrated by
+    the old rule: its upgrade gives it the mark and nothing else, so the deployed
+    config.toml isn't migrated over it."""
+    path = tmp_path / "state.db"
+    db = StateDB(path)
+    await db.open()
+    await db.write("DELETE FROM config WHERE section='_meta' AND key != 'schema_version'")
+    await db.save_config_key("engine", "fps", "60")
+    await db.write("UPDATE config SET value='7' WHERE section='_meta' AND key='schema_version'")
+    await db.close()
+    config_toml = tmp_path / "config.toml"
+    config_toml.write_text("[engine]\nfps = 90\n")
+
+    db = StateDB(path)
+    await db.open()
+    try:
+        await migrate_from_toml(db, config_path=config_toml)
+        config = await db.load_all_config()
+    finally:
+        await db.close()
+
+    assert config == {("engine", "fps"): 60}
+    assert config_toml.exists()
+
+
+async def test_a_database_with_only_tempo_settings_still_migrates(tmp_path: Path) -> None:
+    """The tempo clock's settings (section `tempo`) were never the app's config: an
+    upgrade doesn't take them for a migration that ran."""
+    path = tmp_path / "state.db"
+    db = StateDB(path)
+    await db.open()
+    await db.write("DELETE FROM config WHERE section='_meta' AND key != 'schema_version'")
+    await db.save_config_key("tempo", "internal_bpm", "97.0")
+    await db.write("UPDATE config SET value='7' WHERE section='_meta' AND key='schema_version'")
+    await db.close()
+    config_toml = tmp_path / "config.toml"
+    config_toml.write_text("[engine]\nfps = 90\n")
+
+    db = StateDB(path)
+    await db.open()
+    try:
+        await migrate_from_toml(db, config_path=config_toml)
+        config = await db.load_all_config()
+    finally:
+        await db.close()
+
+    assert config == {("engine", "fps"): 90, ("tempo", "internal_bpm"): 97.0}
+    assert not config_toml.exists()
+
+
 @pytest.mark.asyncio
 async def test_the_map_and_the_placements_round_trip(db, tmp_path: Path) -> None:
     store = HomeStore(db)

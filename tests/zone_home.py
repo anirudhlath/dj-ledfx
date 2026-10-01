@@ -12,7 +12,6 @@ import numpy as np
 from conftest import FakeLight
 from map_home import open_map
 
-from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.ledset import NO_SPACE, PlacedLeds, Space
@@ -26,6 +25,8 @@ from dj_ledfx.looks.model import Layer, Look
 from dj_ledfx.looks.store import LookStore
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.route import DeviceRoute
+from dj_ledfx.tempo.clock import TempoClock
+from dj_ledfx.tempo.store import TempoStore
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.home_view import NO_HOME, HomeView, MapZones
 from dj_ledfx.zones.manager import ZoneManager
@@ -146,6 +147,7 @@ class Home:
     bus: EventBus
     manager: ZoneManager
     clock: list[datetime]  # the manager's "now"; tests move it
+    tempo: TempoClock  # the tempo clock, its settings in this state.db
     view: HomeView = NO_HOME  # the home map the manager asks
     home_map: HomeMap | None = None  # a real map, with build_home(plan=...)
     changes: list[ZonesChanged] = field(default_factory=list)
@@ -252,6 +254,8 @@ async def assemble(
     host, routes = FakeHost(), FakeRoutes(by_id)
     for light in lights:
         light.on_io = routes.send_frames
+    tempo_store = TempoStore(db)
+    tempo = TempoClock(settings=await tempo_store.load(), store=tempo_store, event_bus=bus)
     manager = ZoneManager(
         store=store,
         looks=looks,
@@ -260,7 +264,7 @@ async def assemble(
         host=host,
         routes=routes,
         event_bus=bus,
-        clock=BeatClock(),
+        clock=tempo,
         preview_only=preview_only,
         now=lambda: clock[0],
         home=view or NO_HOME,
@@ -280,6 +284,7 @@ async def assemble(
         bus=bus,
         manager=manager,
         clock=clock,
+        tempo=tempo,
         view=view or NO_HOME,
         home_map=home_map,
     )

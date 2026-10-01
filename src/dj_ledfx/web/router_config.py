@@ -26,7 +26,7 @@ from dj_ledfx.config import (
     save_config,
     strip_none,
 )
-from dj_ledfx.web.state import get_db, get_looks, get_zones
+from dj_ledfx.web.state import get_db, get_looks, get_tempo, get_zones
 
 router = APIRouter()
 
@@ -202,6 +202,7 @@ async def import_state(request: Request) -> dict[str, str]:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {exc}") from exc
     looks = get_looks(request)
     home_map = request.app.state.home_map  # None where the app has no map
+    tempo = get_tempo(request.app)  # takes the file's settings; a pre-M3 file has none
 
     async def restore() -> None:
         try:
@@ -210,6 +211,7 @@ async def import_state(request: Request) -> dict[str, str]:
             await looks.load()
             if home_map is not None:
                 await home_map.load()  # before the zones resume on the backup's map
+            await tempo.reload()
 
     await get_zones(request).replace_state(restore)  # a preview follows the backup's map
     return {"status": "ok"}

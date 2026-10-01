@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import TypeGuard
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,10 +16,15 @@ def clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-def is_finite_number(value: object) -> bool:
-    """An int or float that isn't a bool, NaN or infinite: what a setting or the map takes
-    as a number."""
-    return not isinstance(value, bool) and isinstance(value, int | float) and math.isfinite(value)
+def is_finite_number(value: object) -> TypeGuard[int | float]:
+    """An int or float that isn't a bool, NaN or infinite, and fits a float: what a setting,
+    the map or the tempo takes as a number."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int too big for a float
+        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,26 +53,14 @@ class RenderedFrame:
 
 @dataclass(frozen=True, slots=True)
 class BeatContext:
-    """Minimal beat state for effect rendering. Intentionally strips transport
-    fields from BeatState (is_playing, next_beat_time, etc.) to keep the
-    effect API narrow."""
+    """The beat as today's 1D effects see it; field effects get the whole RenderContext
+    (effects/context.py)."""
 
     beat_phase: float  # 0.0-1.0 within current beat
     bar_phase: float  # 0.0-1.0 within current 4-beat bar
     bpm: float  # current pitch-adjusted BPM
     dt: float  # frame delta (seconds)
-
-
-@dataclass(frozen=True, slots=True)
-class BeatState:
-    beat_phase: float  # 0.0 → 1.0
-    bar_phase: float  # 0.0 → 1.0
-    bpm: float
-    is_playing: bool
-    next_beat_time: float  # monotonic timestamp
-    pitch_percent: float | None = None
-    deck_number: int | None = None
-    deck_name: str | None = None
+    dj: bool = False  # a DJ's deck drives the tempo (effects/context.py's DJ_BEAT signal)
 
 
 @dataclass(frozen=True, slots=True)

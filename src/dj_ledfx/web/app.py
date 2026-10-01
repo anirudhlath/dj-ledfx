@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
+from dj_ledfx.web.errors import unprocessable
+
 if TYPE_CHECKING:
-    from dj_ledfx.beat.clock import BeatClock
     from dj_ledfx.config import AppConfig
     from dj_ledfx.devices.manager import DeviceManager
     from dj_ledfx.effects.engine import EffectEngine
@@ -22,7 +24,9 @@ if TYPE_CHECKING:
     from dj_ledfx.home.map import HomeMap
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
+    from dj_ledfx.prodjlink.listener import Listening
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
+    from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.zones.attention import AttentionFeed
     from dj_ledfx.zones.frames import FrameFeed, Watchers
     from dj_ledfx.zones.lights import LightMonitor
@@ -87,7 +91,7 @@ def _resolve_static_dir(explicit: str | None, config_dir: str | None) -> Path | 
 
 def create_app(
     *,
-    beat_clock: BeatClock,
+    tempo: TempoClock,
     effect_engine: EffectEngine,
     device_manager: DeviceManager,
     scheduler: LookaheadScheduler,
@@ -108,9 +112,14 @@ def create_app(
     frame_watchers: Watchers | None = None,
     home_map: HomeMap | None = None,
     previews: PreviewManager | None = None,
+    listening: Listening | None = None,
 ) -> FastAPI:
     # One schema per type, under the contract's name (not Look-Input / Look-Output).
-    app = FastAPI(title="dj-ledfx", separate_input_output_schemas=False)
+    app = FastAPI(
+        title="dj-ledfx",
+        separate_input_output_schemas=False,
+        exception_handlers={RequestValidationError: unprocessable},
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.web.cors_origins,
@@ -119,7 +128,7 @@ def create_app(
     )
 
     # Store references for routers
-    app.state.beat_clock = beat_clock
+    app.state.tempo = tempo
     app.state.effect_engine = effect_engine
     app.state.device_manager = device_manager
     app.state.scheduler = scheduler
@@ -138,6 +147,7 @@ def create_app(
     app.state.frame_watchers = frame_watchers
     app.state.home_map = home_map
     app.state.previews = previews
+    app.state.listening = listening  # where Pro DJ Link is heard; None: not at all
     app.state.ws_sessions = set()  # open /ws sessions: pushes go to them, ws.close_all ends them
     app.state.ws_closing = False
 
@@ -160,6 +170,7 @@ def create_app(
     from dj_ledfx.web.router_devices import router as devices_router
     from dj_ledfx.web.router_effects import router as effects_router
     from dj_ledfx.web.router_home import router as home_router
+    from dj_ledfx.web.router_inputs import router as inputs_router
     from dj_ledfx.web.router_lights import router as lights_router
     from dj_ledfx.web.router_looks import router as looks_router
     from dj_ledfx.web.router_preview import router as preview_router
@@ -176,6 +187,7 @@ def create_app(
     app.include_router(attention_router, prefix="/api")
     app.include_router(home_router, prefix="/api")
     app.include_router(preview_router, prefix="/api")
+    app.include_router(inputs_router, prefix="/api")
 
     from dj_ledfx.web.ws import ws_endpoint
 

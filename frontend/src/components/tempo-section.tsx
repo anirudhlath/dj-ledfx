@@ -77,6 +77,9 @@ function BeatGrid({
 /** Tempo from the beat clock. Looks start and stop from the look picker now. */
 export function TempoSection({ beat }: { beat: BeatState }) {
   const { bpm, beatPhase, barPhase, isPlaying, beatPos, pitchPercent, deckName } = beat
+  // The clock always runs (engine M3), so is_playing is always on; a deck's name is
+  // there only while a DJ's deck drives the beat.
+  const live = deckName != null
 
   const bpmDisplay = bpm > 0 ? bpm.toFixed(1) : "---.-"
 
@@ -105,10 +108,10 @@ export function TempoSection({ beat }: { beat: BeatState }) {
       {/* LIVE badge — shows when DJ deck is playing */}
       <div className="flex items-center">
         <Badge
-          variant={isPlaying ? "default" : "outline"}
+          variant={live ? "default" : "outline"}
           className={cn(
             "text-xs uppercase tracking-widest font-mono",
-            isPlaying
+            live
               ? "bg-green-600 text-white border-green-600"
               : "text-muted-foreground border-muted",
           )}

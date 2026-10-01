@@ -485,6 +485,57 @@
         "title": "CylinderShape",
         "type": "object"
       },
+      "Deck": {
+        "description": "A player on the socket's decks channel: snake_case like the beat (F1's decision 5).",
+        "properties": {
+          "bpm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bpm"
+          },
+          "master": {
+            "title": "Master",
+            "type": "boolean"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "pitch_percent": {
+            "title": "Pitch Percent",
+            "type": "number"
+          },
+          "player": {
+            "title": "Player",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "empty",
+              "cued",
+              "playing"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "player",
+          "state",
+          "bpm",
+          "pitch_percent",
+          "master"
+        ],
+        "title": "Deck",
+        "type": "object"
+      },
       "DeviceResponse": {
         "properties": {
           "address": {
@@ -552,6 +603,26 @@
           "address"
         ],
         "title": "DeviceResponse",
+        "type": "object"
+      },
+      "DjSet": {
+        "properties": {
+          "from": {
+            "format": "date-time",
+            "title": "From",
+            "type": "string"
+          },
+          "to": {
+            "format": "date-time",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "DjSet",
         "type": "object"
       },
       "Furniture": {
@@ -980,6 +1051,61 @@
           "northSouth"
         ],
         "title": "HomeSize",
+        "type": "object"
+      },
+      "Inputs": {
+        "description": "GET /inputs: music, Home Assistant and the sun join in M6 and M7 (M3 ruling 12).",
+        "properties": {
+          "prodjlink": {
+            "$ref": "#/components/schemas/ProDjLinkInput"
+          },
+          "tempo": {
+            "$ref": "#/components/schemas/TempoInput"
+          }
+        },
+        "required": [
+          "tempo",
+          "prodjlink"
+        ],
+        "title": "Inputs",
+        "type": "object"
+      },
+      "InternalTempo": {
+        "description": "The internal clock's BPM, how it got it and when: \"118.0 · tapped 19:10\".",
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "bpm": {
+            "title": "Bpm",
+            "type": "number"
+          },
+          "how": {
+            "enum": [
+              "default",
+              "set",
+              "tapped",
+              "kept"
+            ],
+            "title": "How",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bpm",
+          "how",
+          "at"
+        ],
+        "title": "InternalTempo",
         "type": "object"
       },
       "Layer": {
@@ -1685,6 +1811,22 @@
         "title": "MappingResponse",
         "type": "object"
       },
+      "NudgeRequest": {
+        "description": "A phase shift in beats: positive brings the beat sooner (M3 ruling 8).",
+        "properties": {
+          "delta": {
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Delta",
+            "type": "number"
+          }
+        },
+        "required": [
+          "delta"
+        ],
+        "title": "NudgeRequest",
+        "type": "object"
+      },
       "Outdoor": {
         "properties": {
           "balcony": {
@@ -2035,6 +2177,56 @@
           "look"
         ],
         "title": "PreviewUpdate",
+        "type": "object"
+      },
+      "ProDjLinkInput": {
+        "properties": {
+          "decks": {
+            "items": {
+              "$ref": "#/components/schemas/Deck"
+            },
+            "title": "Decks",
+            "type": "array"
+          },
+          "interface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interface"
+          },
+          "lastSet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DjSet"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "connected",
+              "stale",
+              "disconnected",
+              "idle"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "interface",
+          "lastSet",
+          "decks"
+        ],
+        "title": "ProDjLinkInput",
         "type": "object"
       },
       "RecentLook": {
@@ -2865,6 +3057,104 @@
           "stopped"
         ],
         "title": "TakeOver",
+        "type": "object"
+      },
+      "TapRequest": {
+        "description": "A tap's time on the client's clock, in seconds since the epoch. It's a hint: one the\nclock can't use (not finite, or more than a day off) times the tap by its arrival.",
+        "properties": {
+          "clientTime": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clienttime"
+          }
+        },
+        "title": "TapRequest",
+        "type": "object"
+      },
+      "TempoInput": {
+        "properties": {
+          "bpm": {
+            "title": "Bpm",
+            "type": "number"
+          },
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "internal": {
+            "$ref": "#/components/schemas/InternalTempo"
+          },
+          "lock": {
+            "enum": [
+              "auto",
+              "prodjlink",
+              "music",
+              "internal"
+            ],
+            "title": "Lock",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "prodjlink",
+              "music",
+              "internal"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source",
+          "lock",
+          "bpm",
+          "stale",
+          "held",
+          "internal"
+        ],
+        "title": "TempoInput",
+        "type": "object"
+      },
+      "TempoRequest": {
+        "properties": {
+          "bpm": {
+            "anyOf": [
+              {
+                "maximum": 300.0,
+                "minimum": 30.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bpm"
+          },
+          "lock": {
+            "enum": [
+              "auto",
+              "prodjlink",
+              "music",
+              "internal"
+            ],
+            "title": "Lock",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lock"
+        ],
+        "title": "TempoRequest",
         "type": "object"
       },
       "Transition": {
@@ -4030,6 +4320,146 @@
           }
         },
         "summary": "Update Sub Zone"
+      }
+    },
+    "/api/inputs": {
+      "get": {
+        "operationId": "get_inputs_api_inputs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inputs"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Inputs"
+      }
+    },
+    "/api/inputs/tempo": {
+      "put": {
+        "description": "Pin a source or go back to Auto. A BPM sets the internal clock.",
+        "operationId": "set_tempo_api_inputs_tempo_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TempoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TempoInput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Tempo"
+      }
+    },
+    "/api/inputs/tempo/nudge": {
+      "post": {
+        "operationId": "nudge_api_inputs_tempo_nudge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NudgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TempoInput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Nudge"
+      }
+    },
+    "/api/inputs/tempo/tap": {
+      "post": {
+        "operationId": "tap_api_inputs_tempo_tap_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TapRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TempoInput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tap"
       }
     },
     "/api/lights": {

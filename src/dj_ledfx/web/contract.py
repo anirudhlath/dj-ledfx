@@ -25,6 +25,17 @@ from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import WallKind
 from dj_ledfx.looks import model as looks
 from dj_ledfx.looks.model import Blend, Category, InputKind, LayerType, Scope, TransitionKind
+from dj_ledfx.prodjlink.listener import Listening
+from dj_ledfx.tempo.clock import TempoClock
+from dj_ledfx.tempo.model import (
+    MAX_BPM,
+    MAX_NUDGE_BEATS,
+    MIN_BPM,
+    DeckState,
+    InternalHow,
+    TempoLock,
+    TempoSource,
+)
 from dj_ledfx.types import RGB, DeviceStats
 from dj_ledfx.zones import attention
 from dj_ledfx.zones.attention import AttentionAction, AttentionKind, Severity, SubjectType
@@ -725,4 +736,105 @@ def attention_out(item: attention.AttentionItem, index: LightIndex) -> Attention
             "since": item.since,
             "actions": list(item.actions),
         }
+    )
+
+
+# --- inputs: the tempo and Pro DJ Link (web spec §12.3; engine spec §7.2) --------------
+
+InputState = Literal["connected", "stale", "disconnected", "idle"]
+
+
+class Deck(BaseModel):
+    """A player on the socket's decks channel: snake_case like the beat (F1's decision 5)."""
+
+    number: int
+    player: str
+    state: DeckState
+    bpm: float | None  # the track's; its pitch is apart (M3 ruling 5)
+    pitch_percent: float
+    master: bool  # the deck the clock follows (M3 ruling 4)
+
+
+class InternalTempo(ContractModel):
+    """The internal clock's BPM, how it got it and when: "118.0 · tapped 19:10"."""
+
+    bpm: float
+    how: InternalHow  # "kept" is a quiet source's last BPM (M3 ruling 3)
+    at: datetime | None  # None for the default
+
+
+class TempoInput(ContractModel):
+    source: TempoSource
+    lock: TempoLock
+    bpm: float
+    stale: bool
+    held: bool  # Internal holds after a tap until a DJ starts again (M3 ruling 11)
+    internal: InternalTempo
+
+
+class DjSet(ContractModel):
+    from_: datetime = Field(alias="from")
+    to: datetime
+
+
+class ProDjLinkInput(ContractModel):
+    # "connected" while a deck plays, "idle" otherwise (M3 ruling 13), "disconnected" when
+    # the listener couldn't bind its port
+    state: InputState
+    interface: str | None  # where the listener listens, host:port; None if it doesn't
+    last_set: DjSet | None
+    decks: list[Deck]
+
+
+class Inputs(ContractModel):
+    """GET /inputs: music, Home Assistant and the sun join in M6 and M7 (M3 ruling 12)."""
+
+    tempo: TempoInput
+    prodjlink: ProDjLinkInput
+
+
+class TempoRequest(ContractModel):
+    lock: TempoLock
+    bpm: float | None = Field(default=None, ge=MIN_BPM, le=MAX_BPM, allow_inf_nan=False)
+
+
+class TapRequest(ContractModel):
+    """A tap's time on the client's clock, in seconds since the epoch. It's a hint: one the
+    clock can't use (not finite, or more than a day off) times the tap by its arrival."""
+
+    client_time: float | None = None
+
+
+class NudgeRequest(ContractModel):
+    """A phase shift in beats: positive brings the beat sooner (M3 ruling 8)."""
+
+    delta: float = Field(ge=-MAX_NUDGE_BEATS, le=MAX_NUDGE_BEATS, allow_inf_nan=False)
+
+
+def decks_out(tempo: TempoClock) -> list[Deck]:
+    """The players heard, the one the clock follows the master: GET /inputs and the
+    socket's decks channel."""
+    return [Deck.model_validate(view, from_attributes=True) for view in tempo.decks()]
+
+
+def tempo_out(tempo: TempoClock) -> TempoInput:
+    return TempoInput.model_validate(tempo, from_attributes=True)
+
+
+def inputs_out(tempo: TempoClock, listening: Listening) -> Inputs:
+    last = tempo.last_set
+    dj_set = (
+        None if last is None else DjSet.model_validate({"from": last.started, "to": last.ended})
+    )
+    state: InputState = (
+        "disconnected" if listening.failed else "connected" if tempo.dj_playing() else "idle"
+    )
+    return Inputs(
+        tempo=tempo_out(tempo),
+        prodjlink=ProDjLinkInput(
+            state=state,
+            interface=listening.address,
+            last_set=dj_set,
+            decks=decks_out(tempo),
+        ),
     )

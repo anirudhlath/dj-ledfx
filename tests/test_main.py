@@ -1,7 +1,9 @@
 """The real entry point in a subprocess. Shutting dj-ledfx down with a browser connected:
 the web server stops through granian's Server.stop(), so the ASGI lifespan shutdown runs
 and an open /ws closes cleanly. Browser tabs closing their sockets never freeze the app.
-And the app serves the home map, its zones and previews."""
+The app serves the home map, its zones and previews, and its tempo clock follows a DJ and
+keeps its settings. Each app here hears Pro DJ Link on a free loopback port (the deployed
+app holds 50001), and one that can't bind its port runs on its internal clock."""
 
 from __future__ import annotations
 
@@ -13,12 +15,16 @@ import signal
 import socket
 import struct
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 import pytest
+from tempo_fakes import beat_packet
 
 from dj_ledfx.home.seed import seed_home
+from dj_ledfx.persistence.state_db import StateDB
 
 pytest.importorskip("fastapi")  # the web extra
 
@@ -36,7 +42,8 @@ dj_ledfx.main.main()
 
 
 def _free_port() -> int:
-    with socket.socket() as probe:
+    """A web port nothing holds now (granian can't say which port 0 gave it)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
 
@@ -107,12 +114,20 @@ async def _close_code(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         writer.close()
 
 
-async def _start_app(tmp_path: Path, port: int) -> asyncio.subprocess.Process:
-    return await asyncio.create_subprocess_exec(
+@asynccontextmanager
+async def _app(
+    tmp_path: Path, *extra: str, dj_listen: str = "127.0.0.1:0"
+) -> AsyncIterator[tuple[asyncio.subprocess.Process, int]]:
+    """The app and its web port, hearing Pro DJ Link at dj_listen (port 0: any free one,
+    which GET /inputs names); killed on the way out if the test left it running."""
+    port = _free_port()
+    app = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
         _DRIVER,
-        "--demo",
+        "--dj-listen",
+        dj_listen,
+        *extra,
         "--web",
         "--web-host",
         "127.0.0.1",
@@ -125,21 +140,26 @@ async def _start_app(tmp_path: Path, port: int) -> asyncio.subprocess.Process:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
-
-
-async def test_shutdown_with_a_browser_connected_is_clean(tmp_path: Path) -> None:
-    port = _free_port()
-    app = await _start_app(tmp_path, port)
     try:
-        reader, writer = await _open_websocket_when_up(port, app)
-        browser = asyncio.create_task(_close_code(reader, writer))
-        app.send_signal(signal.SIGTERM)  # what `docker stop` sends
-        output = (await asyncio.wait_for(app.communicate(), 30))[0].decode()
-        close_code = await asyncio.wait_for(browser, 5)
+        yield app, port
     finally:
         if app.returncode is None:
             app.kill()
             await app.wait()
+
+
+async def _stop(app: asyncio.subprocess.Process) -> str:
+    """SIGTERM, as `docker stop` sends; the app's output."""
+    app.send_signal(signal.SIGTERM)
+    return (await asyncio.wait_for(app.communicate(), 30))[0].decode()
+
+
+async def test_shutdown_with_a_browser_connected_is_clean(tmp_path: Path) -> None:
+    async with _app(tmp_path) as (app, port):
+        reader, writer = await _open_websocket_when_up(port, app)
+        browser = asyncio.create_task(_close_code(reader, writer))
+        output = await _stop(app)
+        close_code = await asyncio.wait_for(browser, 5)
 
     assert "Traceback" not in output, output
     assert "Unexpected exit" not in output, output
@@ -175,9 +195,7 @@ async def _open_and_close_a_tab(port: int) -> None:
 
 
 async def test_tabs_closing_their_sockets_never_freeze_the_app(tmp_path: Path) -> None:
-    port = _free_port()
-    app = await _start_app(tmp_path, port)
-    try:
+    async with _app(tmp_path) as (app, port):
         # httpx's own timeout is off: the 5 s timeout below says which tab froze the app.
         async with httpx.AsyncClient(
             base_url=f"http://127.0.0.1:{port}/api", timeout=None
@@ -191,12 +209,7 @@ async def test_tabs_closing_their_sockets_never_freeze_the_app(tmp_path: Path) -
                 except TimeoutError:
                     pytest.fail(f"dj-ledfx stopped answering after {tab} tab(s) closed")
                 assert running.status_code == 200
-        app.send_signal(signal.SIGTERM)
-        output = (await asyncio.wait_for(app.communicate(), 30))[0].decode()
-    finally:
-        if app.returncode is None:
-            app.kill()
-            await app.wait()
+        output = await _stop(app)
 
     assert "Traceback" not in output, output
     assert app.returncode == 0
@@ -217,19 +230,12 @@ async def _get_when_up(
 
 
 async def test_the_app_serves_the_home_map_its_zones_and_previews(tmp_path: Path) -> None:
-    port = _free_port()
-    app = await _start_app(tmp_path, port)
-    try:
+    async with _app(tmp_path) as (app, port):
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
             home = (await _get_when_up(client, "/home", app)).json()
             zones = (await client.get("/zones")).json()
             preview = await client.post("/preview", json={"zoneId": "home", "lookId": "sunset"})
-        app.send_signal(signal.SIGTERM)
-        output = (await asyncio.wait_for(app.communicate(), 30))[0].decode()
-    finally:
-        if app.returncode is None:
-            app.kill()
-            await app.wait()
+        output = await _stop(app)
 
     assert [room["id"] for room in home["rooms"]] == [room.id for room in seed_home().rooms]
     assert (zones[0]["id"], zones[0]["kind"]) == ("home", "home")
@@ -237,3 +243,73 @@ async def test_the_app_serves_the_home_map_its_zones_and_previews(tmp_path: Path
     assert preview.status_code == 400 and "has no lights" in preview.json()["detail"]
     assert "Traceback" not in output, output
     assert app.returncode == 0
+
+
+async def test_a_dj_on_the_network_drives_the_tempo(tmp_path: Path) -> None:
+    async with _app(tmp_path) as (app, port):
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+            before = (await _get_when_up(client, "/inputs", app)).json()
+            host, dj_port = before["prodjlink"]["interface"].rsplit(":", 1)  # where it bound
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as dj:
+                for beat in range(1, 5):
+                    dj.sendto(beat_packet(beat=beat, bpm=124.0, deck=2), (host, int(dj_port)))
+                    await asyncio.sleep(0.05)
+            after = (await client.get("/inputs")).json()
+        output = await _stop(app)
+
+    assert (before["tempo"]["source"], before["prodjlink"]["state"]) == ("internal", "idle")
+    assert host == "127.0.0.1" and int(dj_port) > 0  # --dj-listen 127.0.0.1:0
+    assert (after["tempo"]["source"], after["prodjlink"]["state"]) == ("prodjlink", "connected")
+    assert [deck["number"] for deck in after["prodjlink"]["decks"]] == [2]
+    assert "Traceback" not in output, output
+
+
+async def test_a_dj_port_that_can_t_be_bound_leaves_the_app_on_its_clock(tmp_path: Path) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as taken:  # another app has it
+        taken.bind(("127.0.0.1", 0))
+        held = f"127.0.0.1:{taken.getsockname()[1]}"
+        async with _app(tmp_path, dj_listen=held) as (app, port):
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+                inputs = (await _get_when_up(client, "/inputs", app)).json()
+            output = await _stop(app)
+
+    assert (inputs["tempo"]["source"], inputs["prodjlink"]["state"]) == (
+        "internal",
+        "disconnected",
+    )
+    assert inputs["prodjlink"]["interface"] is None
+    assert any("WARNING" in line and held in line for line in output.splitlines()), output
+    assert "Traceback" not in output, output
+    assert app.returncode == 0
+
+
+async def test_a_setting_saved_before_config_toml_came_doesn_t_stop_its_migration(
+    tmp_path: Path,
+) -> None:
+    """A state.db whose only row is one the app saved at run time (preview-only), with no
+    config.toml then: the config.toml that comes later is migrated at the next start."""
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    await db.save_config_key("engine", "preview_only", "true")
+    await db.close()
+    (tmp_path / "config.toml").write_text("[engine]\nfps = 42\n")
+
+    async with _app(tmp_path) as (app, port):
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+            engine = (await _get_when_up(client, "/config", app)).json()["engine"]
+        output = await _stop(app)
+
+    assert "Traceback" not in output, output
+    assert (engine["fps"], engine["preview_only"]) == (42, True)
+    assert (tmp_path / "config.toml.bak").exists()
+
+
+async def test_a_tempo_set_at_start_is_kept_across_a_restart(tmp_path: Path) -> None:
+    for extra in (["--bpm", "97"], []):  # the second start has no --bpm
+        async with _app(tmp_path, *extra) as (app, port):
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+                tempo = (await _get_when_up(client, "/inputs", app)).json()["tempo"]
+            output = await _stop(app)
+        assert "Traceback" not in output, output
+
+    assert (tempo["source"], tempo["bpm"], tempo["internal"]["how"]) == ("internal", 97.0, "set")

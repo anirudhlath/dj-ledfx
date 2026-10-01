@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import time
+from tempo_fakes import START, FakeTime, play, tempo_clock
 
-from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.effects.context import (
+    DJ_BEAT,
     NO_SIGNALS,
     RenderContext,
     SignalView,
     render_context,
     to_beat_context,
 )
+from dj_ledfx.tempo.model import TempoSettings
 
 
 def test_signal_view_returns_default_for_missing_signal() -> None:
@@ -27,21 +28,40 @@ def test_signal_view_is_a_snapshot() -> None:
 
 
 def test_render_context_samples_the_clock_at_the_target_time() -> None:
-    clock = BeatClock()
-    now = time.monotonic()
-    clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=now)
-    target = now + 0.25
+    clock = tempo_clock(FakeTime())  # the internal clock: 120 BPM, beat 0 at START
+    target = START + 2.75  # five and a half beats on: the second bar's second beat
 
     ctx = render_context(clock, target, 1 / 60)
 
-    expected = clock.get_state_at(target)
-    assert ctx.t == target
-    assert ctx.dt == 1 / 60
-    assert ctx.beat_phase == expected.beat_phase
-    assert ctx.bar_phase == expected.bar_phase
-    assert ctx.bpm == 120.0
-    assert (ctx.beat_index, ctx.bar_index) == (0, 0)
+    sample = clock.sample_at(target)  # test_clock.py checks its numbers
+    assert (ctx.t, ctx.dt, ctx.bpm) == (target, 1 / 60, sample.bpm)
+    assert (ctx.beat_index, ctx.beat_phase, ctx.bar_index, ctx.bar_phase) == (
+        sample.beat_index,
+        sample.beat_phase,
+        sample.bar_index,
+        sample.bar_phase,
+    )
     assert ctx.signals is NO_SIGNALS
+
+
+def test_a_dj_s_beat_is_signalled_to_the_looks() -> None:
+    time = FakeTime()
+    clock = tempo_clock(time)
+    play(clock, time, 2)
+
+    ctx = render_context(clock, time.now, 1 / 60)
+
+    assert ctx.signals.get(DJ_BEAT) == 1.0
+    assert to_beat_context(ctx).dj
+
+
+def test_a_pro_dj_link_lock_with_no_dj_signals_no_dj() -> None:
+    clock = tempo_clock(FakeTime(), settings=TempoSettings(lock="prodjlink"))
+
+    ctx = render_context(clock, START, 1 / 60)  # stale: the clock carries on alone
+
+    assert ctx.signals is NO_SIGNALS
+    assert not to_beat_context(ctx).dj
 
 
 def test_to_beat_context_keeps_phases_bpm_and_dt() -> None:

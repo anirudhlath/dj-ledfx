@@ -5,7 +5,7 @@ Beat-synced LED lighting engine driven by Pioneer Pro DJ Link. A passive UDP lis
 ## How it works
 
 ```
-CDJ/XDJ decks ──UDP:50001──▶ Pro DJ Link listener ──▶ BeatClock (phase interpolation)
+CDJ/XDJ decks ──UDP:50001──▶ Pro DJ Link listener ──▶ TempoClock (internal clock, taps, DJ takeover)
                                                               │
                      ring buffer of FUTURE frames ◀── 60 fps effect engine
                                                               │
@@ -19,7 +19,8 @@ The key idea: the ring buffer stores *future* frames. The engine renders at `now
 
 ## Features
 
-- **Passive Pro DJ Link listener** — parses broadcast beat packets on UDP 50001 with no virtual-CDJ handshake. BPM is pitch-adjusted (`track_bpm * (1 + pitch/100)`) and the BeatClock applies drift correction (soft-correct under 5 ms, hard snap above). Currently supports CDJ-3000-generation beat packets.
+- **Passive Pro DJ Link listener** — parses broadcast beat packets on UDP 50001 with no virtual-CDJ handshake. BPM is pitch-adjusted (`track_bpm * (1 + pitch/100)`) and the TempoClock follows one deck with drift correction (soft-correct under 5 ms, hard snap above). Currently supports CDJ-3000-generation beat packets.
+- **Always-running tempo clock** — with no DJ, an internal clock keeps the tempo: set a BPM, tap it or nudge the phase from the web app, and it's kept across restarts. A DJ who starts playing takes over; when the decks go quiet, the clock carries on at the DJ's last tempo without a jump.
 - **60 fps effect engine** — effects are pure-NumPy render functions behind an auto-registry, with a hot-swappable effect deck, runtime-introspectable parameters, and TOML presets. Built-in effects: beat_pulse, breathe, color_chase, fire_storm, rainbow_wave, strobe.
 - **Per-device latency compensation** — per-device send loops run at each device's natural FPS; latency is estimated by static, EMA, or windowed-mean strategies, seeded with device-type heuristics.
 - **Device adapters** — OpenRGB (USB/desktop RGB), LIFX LAN (bulbs, strips, tile chains), Govee LAN (UDP segment control with SKU registry). Discovery orchestrator with multi-wave scanning, fast reconnect, and ghost placeholders for offline devices.
@@ -27,7 +28,7 @@ The key idea: the ring buffer stores *future* frames. The engine renders at `now
 - **Web control** — FastAPI REST + WebSocket backend (binary LED frame broadcast) with a React 19 + TypeScript UI: live performance view, effect deck, transport controls, device monitor, and a react-three-fiber 3D scene editor.
 - **Persistence** — SQLite state DB as the runtime source of truth, with TOML import/export and debounced writes.
 - **Observability** — Prometheus metrics with a ready-made Grafana dashboard, plus py-spy and VizTracer profiling modes.
-- **Demo mode** — built-in beat simulator; run the whole stack with no DJ hardware.
+- **Demo mode** — no Pro DJ Link listener: the internal clock keeps the tempo, so the whole stack runs with no DJ hardware.
 
 ## Quick Start
 
@@ -35,7 +36,7 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
-uv run -m dj_ledfx --demo          # Simulated beats (no DJ hardware)
+uv run -m dj_ledfx --demo          # No DJ hardware: the internal clock keeps the tempo
 uv run -m dj_ledfx                  # Pro DJ Link listener mode
 ```
 

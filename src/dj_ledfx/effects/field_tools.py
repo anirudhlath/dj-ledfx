@@ -1,8 +1,9 @@
-"""Small helpers the field effects share (spec §5.1): anchors, distances, height and
-smoothstep (float palettes are in color.py). Pure numpy, no state."""
+"""Small helpers the field effects share (spec §5.1): anchors, distances, bearings, height,
+a soft band and smoothstep (float palettes are in color.py). Pure numpy, no state."""
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -26,6 +27,25 @@ def anchor_or_centre(leds: LedSet, anchor: str) -> F32:
 def distances(leds: LedSet, point: F32) -> F32:
     """Each LED's distance from the point, in metres."""
     return np.asarray(np.linalg.norm(leds.pos - point, axis=1), dtype=np.float32)
+
+
+def bearing(leds: LedSet, anchor: str) -> NDArray[np.float64]:
+    """Each LED's bearing around the anchor (the middle of the zone without one), seen from
+    above, in turns: 0 east, a quarter north, -0.5 to 0.5."""
+    offset = leds.pos.astype(np.float64) - anchor_or_centre(leds, anchor)
+    turns: NDArray[np.float64] = np.arctan2(offset[:, 1], offset[:, 0]) / (2.0 * math.pi)
+    return turns
+
+
+def band(x: NDArray[np.floating[Any]], centre: float, width: float) -> F32:
+    """A soft band of light along x: 1 at the centre, falling away as a Gaussian, e^-1 one
+    width out. Float32, in an array of its own."""
+    gap: F32 = np.subtract(x, np.float32(centre), dtype=np.float32)
+    gap /= np.float32(width)
+    gap *= gap
+    np.negative(gap, out=gap)
+    np.exp(gap, out=gap)
+    return gap
 
 
 def height01(leds: LedSet) -> F32:

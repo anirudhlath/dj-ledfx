@@ -24,9 +24,13 @@ from dj_ledfx.effects.firmware import FirmwareEffect, Params
 from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.ring_buffer import RingBuffer
+from dj_ledfx.events import EventBus
+from dj_ledfx.looks.builtin import builtin_looks
+from dj_ledfx.looks.model import Look
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.spatial.geometry import DeviceGeometry
+from dj_ledfx.tempo.timeline import beat_and_bar
 from dj_ledfx.types import DeviceInfo, DeviceStats, FloatRGB
 
 
@@ -85,6 +89,18 @@ class MockDeviceAdapter(DeviceAdapter):
 
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         self.send_frame_calls.append(colors.copy())
+
+
+def events(bus: EventBus, event_type: type) -> list[Any]:
+    """Every event of this type the bus emits from now on."""
+    seen: list[Any] = []
+    bus.subscribe(event_type, seen.append)
+    return seen
+
+
+def builtin_look(look_id: str) -> Look:
+    """The built-in look with this id."""
+    return next(look for look in builtin_looks() if look.id == look_id)
 
 
 @dataclass
@@ -359,6 +375,21 @@ def render_ctx(
         bpm=bpm,
         beat_index=0,
         bar_index=0,
+        signals=NO_SIGNALS,
+    )
+
+
+def tempo_ctx(beats: float, *, bpm: float = 120.0) -> RenderContext:
+    """The moment `beats` beats after the tempo clock started counting, at a steady bpm."""
+    beat_index, beat_phase, bar_index, bar_phase = beat_and_bar(beats)
+    return RenderContext(
+        t=beats * 60.0 / bpm,
+        dt=1 / 60,
+        beat_phase=beat_phase,
+        bar_phase=bar_phase,
+        bpm=bpm,
+        beat_index=beat_index,
+        bar_index=bar_index,
         signals=NO_SIGNALS,
     )
 
