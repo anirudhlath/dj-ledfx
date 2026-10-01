@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react'
-import { Component, isValidElement, type ReactElement, type ReactNode } from 'react'
+import { createRoot } from '@react-three/fiber'
+import { act, render, screen } from '@testing-library/react'
+import { Component, isValidElement, StrictMode, type ReactElement, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildScenario } from '@/api/mocks/scenarios'
 import type { ElementSize } from '@/lib/use-element-size'
@@ -13,7 +14,8 @@ import { StageScene, type StageSceneProps } from './scene/stage-scene'
 import { lightStates } from './show'
 import { StageCanvas } from './stage-canvas'
 
-// jsdom has no WebGL, so R3F's createRoot is a stand-in that records what the canvas asks of it.
+// jsdom has no WebGL, so R3F's createRoot is a stand-in that records what the canvas asks of it, and
+// its store hands out a renderer whose compileAsync the test settles.
 const root = vi.hoisted(() => ({
   canvas: null as HTMLCanvasElement | null,
   configure: vi.fn(),
@@ -28,11 +30,15 @@ vi.mock('@react-three/fiber', async (importOriginal) => ({
     return root
   }),
 }))
+const state = { gl: { compileAsync: vi.fn() }, scene: { isScene: true }, camera: { isCamera: true }, invalidate: vi.fn() }
+let compiled: () => void
 
 beforeEach(() => {
   root.canvas = null
   root.ready.status = 'fulfilled'
   root.configure.mockReturnValue(Promise.resolve(root))
+  root.render.mockReturnValue({ getState: () => state })
+  state.gl.compileAsync.mockReturnValue(new Promise<void>((resolve) => (compiled = resolve)))
 })
 
 function stageProps(size: ElementSize = { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }): StageSceneProps {
@@ -71,13 +77,38 @@ describe("the stage's canvas (§7.5)", () => {
       camera: { manual: true },
       linear: true,
       flat: true,
-      frameloop: 'demand',
+      frameloop: 'never',
       dpr: [1, SPEC.dprCap],
       size: { width: props.pose.width, height: props.pose.height, top: 0, left: 0 },
       scene: { background: expect.anything() },
     })
     expect(root.configure.mock.lastCall![0]).not.toHaveProperty('events')
     expect(drawnScene().props).toEqual(props)
+  })
+
+  // E4: three links the programs it needs at a draw synchronously, so the first draw waits for them.
+  it("draws nothing until three has compiled the scene's shaders off the main thread, then draws on demand", async () => {
+    const props = { ...stageProps(), cadenceMs: 1000 / 60 }
+    render(<StageCanvas {...props} />)
+    expect(state.gl.compileAsync).toHaveBeenCalledExactlyOnceWith(state.scene, state.camera)
+    expect(root.configure.mock.lastCall![0]).toMatchObject({ frameloop: 'never' })
+    expect(drawnScene().props.cadenceMs).toBeNull()
+    expect(state.invalidate).not.toHaveBeenCalled()
+    await act(async () => compiled())
+    expect(root.configure.mock.lastCall![0]).toMatchObject({ frameloop: 'demand' })
+    expect(drawnScene().props.cadenceMs).toBe(1000 / 60)
+    expect(state.invalidate).toHaveBeenCalled()
+  })
+
+  it('makes one root and compiles once, though StrictMode runs its effects twice', () => {
+    render(
+      <StrictMode>
+        <StageCanvas {...stageProps()} />
+      </StrictMode>,
+    )
+    expect(createRoot).toHaveBeenCalledOnce()
+    expect(state.gl.compileAsync).toHaveBeenCalledOnce()
+    expect(root.unmount).not.toHaveBeenCalled()
   })
 
   it('follows the pose to a new size, and lets go of its root when the stage goes', () => {

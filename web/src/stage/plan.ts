@@ -44,15 +44,23 @@ export function centroid(polygon: readonly Vec2[]): Vec2 {
   return [cx / (3 * area), cy / (3 * area)]
 }
 
-/** Whether the point is inside the polygon (even-odd rule; a point on an edge may go either way). */
-export function contains(polygon: readonly Vec2[], [x, y]: Vec2): boolean {
-  let inside = false
+/**
+ * Where the line across the plan at `y` crosses the polygon's edges, in no order: an edge counts when
+ * one end is past `y` and the other isn't, so a closed polygon gives an even number.
+ */
+export function crossings(polygon: readonly Vec2[], y: number): number[] {
+  const xs: number[] = []
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
     const [xi, yi] = polygon[i]
     const [xj, yj] = polygon[j]
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+    if (yi > y !== yj > y) xs.push(((xj - xi) * (y - yi)) / (yj - yi) + xi)
   }
-  return inside
+  return xs
+}
+
+/** Whether the point is inside the polygon (even-odd rule; a point on an edge may go either way). */
+export function contains(polygon: readonly Vec2[], [x, y]: Vec2): boolean {
+  return crossings(polygon, y).filter((crossing) => x < crossing).length % 2 === 1
 }
 
 /** The smallest box around the points. */
