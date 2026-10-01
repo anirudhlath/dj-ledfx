@@ -31,7 +31,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import tomllib
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, get_args
 
@@ -194,6 +194,14 @@ async def export_toml(db: StateDB) -> str:
     return tomli_w.dumps(doc)
 
 
+def _iso_text(value: object) -> str:
+    """A TOML date or time (a hand-edited file's, unquoted) as the ISO text the stores
+    read: JSON has none of them."""
+    if isinstance(value, date | time):  # a datetime is a date
+        return value.isoformat()
+    raise TypeError(f"{type(value).__name__} isn't a config value")
+
+
 async def import_toml(db: StateDB, toml_str: str) -> None:
     """Import structured TOML into DB, merging with existing state."""
     data = tomllib.loads(toml_str)
@@ -205,7 +213,7 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
             # Convert all values to JSON-serialized strings for storage
             # Using json.dumps preserves type fidelity: booleans -> "true"/"false",
             # numbers stay numeric strings, strings get quoted then stripped by load_all_config
-            str_kv = {k: json.dumps(v) for k, v in kv.items()}
+            str_kv = {k: json.dumps(v, default=_iso_text) for k, v in kv.items()}
             await db.save_config_bulk(section, str_kv)
             logger.debug(
                 "import_toml: imported {} config keys for section '{}'",
