@@ -13,7 +13,7 @@ from dj_ledfx.types import DeviceStats
 from dj_ledfx.web import ws as hub
 from dj_ledfx.web.app import create_app
 from dj_ledfx.web.ws import beat_message, close_all, stats_message
-from tests.web.conftest import until
+from tests.web.conftest import mock_deps, until
 
 
 @pytest.fixture
@@ -21,19 +21,8 @@ def ws_app():
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
 
-    app = create_app(
-        tempo=TempoClock(),
-        effect_engine=MagicMock(),
-        device_manager=MagicMock(),
-        scheduler=scheduler,
-        preset_store=MagicMock(),
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"])),
-        config_path=None,
-        event_bus=EventBus(),  # the pushes and the inputs heartbeat
-    )
-    return app
+    # an event bus for the pushes and the inputs heartbeat
+    return create_app(**mock_deps(scheduler=scheduler, event_bus=EventBus()))
 
 
 @pytest.fixture

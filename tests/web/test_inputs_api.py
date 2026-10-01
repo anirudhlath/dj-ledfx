@@ -212,7 +212,7 @@ def test_a_tap_s_time_counts_only_when_the_clock_can_use_it(
     client_time: Callable[[int], str] | None, bpm: float
 ) -> None:
     fake = FakeTime()
-    app = create_app(**{**mock_deps(), "tempo": tempo_clock(fake)})
+    app = create_app(**mock_deps(tempo=tempo_clock(fake)))
     with TestClient(app) as client:
         for k in range(4):
             body = "{}" if client_time is None else f'{{"clientTime": {client_time(k)}}}'
@@ -230,7 +230,7 @@ def test_a_socket_tap_s_time_counts_only_when_the_clock_can_use_it(
     client_time: Callable[[int], str] | None, bpm: float
 ) -> None:
     fake = FakeTime()
-    app = create_app(**{**mock_deps(), "tempo": tempo_clock(fake)})
+    app = create_app(**mock_deps(tempo=tempo_clock(fake)))
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
         for k in range(4):
             sent = "" if client_time is None else f', "client_time": {client_time(k)}'

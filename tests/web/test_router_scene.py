@@ -9,8 +9,8 @@ from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 from dj_ledfx.spatial.mapping import LinearMapping
 from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
-from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.web.app import create_app
+from tests.web.conftest import mock_deps
 
 
 def _make_test_app(
@@ -28,16 +28,9 @@ def _make_test_app(
     mock_config.scene_config = None
 
     app = create_app(
-        tempo=TempoClock(),
-        effect_engine=MagicMock(),
-        device_manager=MagicMock(),
-        scheduler=MagicMock(),
-        preset_store=MagicMock(),
-        scene_model=scene,
-        compositor=compositor,
-        config=mock_config,
-        config_path=None,
-        state_db=state_db,
+        **mock_deps(
+            scene_model=scene, compositor=compositor, config=mock_config, state_db=state_db
+        )
     )
     return TestClient(app)
 
@@ -150,19 +143,8 @@ class TestSceneEndpoints:
         mock_config.web.cors_origins = ["*"]
         mock_config.web.static_dir = None
         mock_config.scene_config = {"mapping": "linear", "mapping_params": {}}
-        mock_scheduler = MagicMock()
 
-        app = create_app(
-            tempo=TempoClock(),
-            effect_engine=MagicMock(),
-            device_manager=MagicMock(),
-            scheduler=mock_scheduler,
-            preset_store=MagicMock(),
-            scene_model=scene,
-            compositor=None,
-            config=mock_config,
-            config_path=None,
-        )
+        app = create_app(**mock_deps(scene_model=scene, config=mock_config))
         client = TestClient(app)
         client.put("/api/scene/devices/lamp", json={"position": [5.0, 0.0, 0.0]})
         assert isinstance(app.state.compositor, SpatialCompositor)

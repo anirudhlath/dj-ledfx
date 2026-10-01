@@ -19,8 +19,9 @@ from starlette.testclient import WebSocketTestSession  # noqa: E402
 from dj_ledfx.web.app import create_app  # noqa: E402
 
 
-def mock_deps() -> dict[str, Any]:
-    """create_app's required arguments, mocked, with no static directory configured."""
+def mock_deps(**overrides: Any) -> dict[str, Any]:
+    """create_app's required arguments, mocked, with no static directory configured; an
+    override replaces one or adds another of create_app's arguments."""
     return {
         "tempo": TempoClock(),
         "effect_engine": MagicMock(),
@@ -31,7 +32,7 @@ def mock_deps() -> dict[str, Any]:
         "compositor": None,
         "config": MagicMock(web=MagicMock(cors_origins=["*"], static_dir=None)),
         "config_path": None,
-    }
+    } | overrides
 
 
 def write_dist(root: Path, index: str) -> None:

@@ -9,9 +9,9 @@ from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.persistence.state_db import StateDB
-from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.web.app import create_app
+from tests.web.conftest import mock_deps
 
 
 @pytest.fixture
@@ -19,17 +19,7 @@ def client():
     manager = DeviceManager()
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
-    app = create_app(
-        tempo=TempoClock(),
-        effect_engine=MagicMock(),
-        device_manager=manager,
-        scheduler=scheduler,
-        preset_store=MagicMock(),
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"])),
-        config_path=None,
-    )
+    app = create_app(**mock_deps(device_manager=manager, scheduler=scheduler))
     return TestClient(app)
 
 
@@ -55,17 +45,7 @@ def client_with_device():
 
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
-    app = create_app(
-        tempo=TempoClock(),
-        effect_engine=MagicMock(),
-        device_manager=manager,
-        scheduler=scheduler,
-        preset_store=MagicMock(),
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"])),
-        config_path=None,
-    )
+    app = create_app(**mock_deps(device_manager=manager, scheduler=scheduler))
     return TestClient(app), manager
 
 
@@ -102,17 +82,7 @@ def test_scan_endpoint_fallback():
     scheduler.get_device_stats.return_value = []
     # Mock manager.rediscover to avoid real network calls
     manager.rediscover = AsyncMock(return_value=[])
-    app = create_app(
-        tempo=TempoClock(),
-        effect_engine=MagicMock(),
-        device_manager=manager,
-        scheduler=scheduler,
-        preset_store=MagicMock(),
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"])),
-        config_path=None,
-    )
+    app = create_app(**mock_deps(device_manager=manager, scheduler=scheduler))
     test_client = TestClient(app)
     resp = test_client.post("/api/devices/scan")
     assert resp.status_code == 200
@@ -129,17 +99,7 @@ def test_scan_endpoint_with_orchestrator():
     mock_orchestrator = MagicMock()
     mock_orchestrator.run_scan = AsyncMock(return_value=2)
 
-    app = create_app(
-        tempo=TempoClock(),
-        effect_engine=MagicMock(),
-        device_manager=manager,
-        scheduler=scheduler,
-        preset_store=MagicMock(),
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"])),
-        config_path=None,
-    )
+    app = create_app(**mock_deps(device_manager=manager, scheduler=scheduler))
     app.state.discovery_orchestrator = mock_orchestrator
 
     test_client = TestClient(app)
@@ -187,18 +147,7 @@ def test_delete_device_persists_to_db(tmp_path):
 
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
-    app = create_app(
-        tempo=TempoClock(),
-        effect_engine=MagicMock(),
-        device_manager=manager,
-        scheduler=scheduler,
-        preset_store=MagicMock(),
-        scene_model=None,
-        compositor=None,
-        config=MagicMock(web=MagicMock(cors_origins=["*"])),
-        config_path=None,
-        state_db=db,
-    )
+    app = create_app(**mock_deps(device_manager=manager, scheduler=scheduler, state_db=db))
     test_client = TestClient(app)
 
     try:
