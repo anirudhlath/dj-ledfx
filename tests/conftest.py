@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -359,6 +360,22 @@ def render_ctx(
         bpm=bpm,
         beat_index=0,
         bar_index=0,
+        signals=NO_SIGNALS,
+    )
+
+
+def tempo_ctx(beats: float, *, bpm: float = 120.0) -> RenderContext:
+    """The moment `beats` beats after the tempo clock started counting, at a steady bpm."""
+    beat_index = math.floor(beats)
+    bar_index = beat_index // 4
+    return RenderContext(
+        t=beats * 60.0 / bpm,
+        dt=1 / 60,
+        beat_phase=beats - beat_index,
+        bar_phase=(beats - bar_index * 4) / 4,
+        bpm=bpm,
+        beat_index=beat_index,
+        bar_index=bar_index,
         signals=NO_SIGNALS,
     )
 

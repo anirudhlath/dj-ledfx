@@ -8,7 +8,10 @@ from dj_ledfx.effects import firmware_lifx as _firmware_lifx  # noqa: F401
 from dj_ledfx.effects import firmware_openrgb as _firmware_openrgb  # noqa: F401
 from dj_ledfx.effects import focus_field as _focus_field  # noqa: F401
 from dj_ledfx.effects import lava_plasma as _lava_plasma  # noqa: F401
+from dj_ledfx.effects import lighthouse_beam as _lighthouse_beam  # noqa: F401
 from dj_ledfx.effects import rainbow_wave as _rainbow_wave  # noqa: F401
 from dj_ledfx.effects import ripples as _ripples  # noqa: F401
+from dj_ledfx.effects import scanner_plane as _scanner_plane  # noqa: F401
+from dj_ledfx.effects import shockwave_shell as _shockwave_shell  # noqa: F401
 from dj_ledfx.effects import strobe as _strobe  # noqa: F401
 from dj_ledfx.effects import sunset_gradient as _sunset_gradient  # noqa: F401
