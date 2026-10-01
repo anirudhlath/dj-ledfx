@@ -1,7 +1,7 @@
 // §8.1 "Hover a light → tooltip": its name, its colour now (hex and intensity), the look and zone,
 // the model and latency, with a leader to the light as Main.png draws it. The colour line and the
-// swatch follow the frames without React: an animation-frame loop writes them in place, and stops
-// while the stage is frozen.
+// swatch follow the frames without React: an animation-frame loop writes them in place. A frozen
+// stage has no tooltip (§7.6).
 import { useEffect, useRef } from 'react'
 import type { Light, Vec2 } from '@/api/contract'
 import { frames } from '@/api/live'
@@ -23,10 +23,9 @@ export interface LightTooltipProps {
   /** The light, in CSS px on the stage. */
   at: Vec2
   stage: Size
-  frozen: boolean
 }
 
-export function LightTooltip({ light, state, text, at, stage, frozen }: LightTooltipProps) {
+export function LightTooltip({ light, state, text, at, stage }: LightTooltipProps) {
   const swatch = useRef<HTMLSpanElement>(null)
   const colour = useRef<HTMLDivElement>(null)
 
@@ -43,13 +42,12 @@ export function LightTooltip({ light, state, text, at, stage, frozen }: LightToo
       colour.current.hidden = line === null
     }
     paint()
-    if (frozen) return
     let handle = requestAnimationFrame(function tick() {
       paint()
       handle = requestAnimationFrame(tick)
     })
     return () => cancelAnimationFrame(handle)
-  }, [light.id, state, frozen])
+  }, [light.id, state])
 
   const { dxPx, dyPx, widthPx, nameGapPx, swatchPx, leader } = RENDER.tooltip
   // Past the stage's right edge, the box and its leader turn to the light's left.

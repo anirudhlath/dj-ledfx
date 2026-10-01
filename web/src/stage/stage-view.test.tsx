@@ -29,8 +29,7 @@ vi.mock('./webgl', () => ({ hasWebGL2: vi.fn(() => true) }))
 vi.mock('./stage-canvas', () => ({
   StageCanvas: (props: StageSceneProps) => {
     drawn.props = props
-    const { frozen, cadenceMs, bearing } = props
-    return <div data-testid="stage-canvas" data-frozen={String(frozen)} data-cadence={String(cadenceMs)} data-bearing={bearing} />
+    return <div data-testid="stage-canvas" data-cadence={String(props.cadenceMs)} data-bearing={props.bearing} />
   },
 }))
 const { countedExport } = await vi.hoisted(() => import('@/test/count-renders'))
@@ -71,7 +70,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(screen.getByText(roomName('corridor'))).toBeInTheDocument()
     for (const zone of state.running) expect(screen.getAllByText(zone.lookName).length).toBeGreaterThan(0)
     const sun = state.inputs.sun
-    expect(screen.getByText(sunScene(state.home, sun)!.label)).toBeInTheDocument()
+    expect(screen.getByText(sunScene(state.home, sun)!.label!)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Home, live' })).toHaveTextContent(sunReadout(sun)!)
     expect(within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')).toHaveLength(4)
   })
@@ -118,10 +117,9 @@ describe('the stage on Live (§7, §8.1)', () => {
   it('freezes on Reconnecting and thaws when the link is back', async () => {
     await openLive()
     const live = liveStore.getState().connection
-    expect(canvas().dataset.frozen).toBe('false')
     expect(canvas().dataset.cadence).toBe(String(1000 / SPEC.target.fps))
     act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
-    expect(canvas().dataset.frozen).toBe('true')
+    // No draws for frames (§7.6 "no animation"), and the picture greyed.
     expect(canvas().dataset.cadence).toBe('null')
     expect(picture().style.filter).toBe(`grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`)
     expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
@@ -134,7 +132,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     ]
     expect(overlays()).toEqual([null, null, null, null])
     act(() => liveStore.setState({ connection: live }))
-    expect(canvas().dataset.frozen).toBe('false')
+    expect(canvas().dataset.cadence).toBe(String(1000 / SPEC.target.fps))
     expect(picture().style.filter).toBe('')
     expect(screen.getByRole('navigation', { name: 'Rooms' })).toBeInTheDocument()
     for (const overlay of overlays()) expect(overlay).toBeInTheDocument()
@@ -156,6 +154,25 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(tooltip).toHaveTextContent(light.model)
     fireEvent.pointerLeave(picture())
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  // A1: §7.6 lists the hover tooltip under `live` only; a frozen stage has none, like its other controls.
+  it('shows no tooltip while frozen, and the pointer picks nothing until the link is back', async () => {
+    const { state, pose } = await openLive()
+    const light = state.lights.find((candidate) => candidate.status === 'streaming' && candidate.shape != null)!
+    const [x, y] = projectPoint(pose, anchorOf(lightBodies(light)[0]))
+    const hover = () => fireEvent.pointerMove(picture(), { clientX: x, clientY: y, pointerType: 'mouse' })
+    hover()
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(light.name)
+    const live = liveStore.getState().connection
+    act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    hover()
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    act(() => liveStore.setState({ connection: live }))
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    hover()
+    expect(screen.getByRole('tooltip')).toHaveTextContent(light.name)
   })
 
   it('opens the composer for a room with lights, and not for one without', async () => {
@@ -201,7 +218,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'What the lights show' })).not.toBeInTheDocument()
     // §8.10 "(no labels)": Phone-Live.png draws the sun's disc and arc, but not its label.
-    expect(screen.queryByText(sunScene(state.home, state.inputs.sun)!.label)).not.toBeInTheDocument()
+    expect(screen.queryByText(sunScene(state.home, state.inputs.sun)!.label!)).not.toBeInTheDocument()
     expect(canvas().dataset.cadence).toBe(String(1000 / SPEC.phoneFps))
   })
 
@@ -210,7 +227,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     const { state } = await openLive()
     const inputs = liveStore.getState().inputs!
     const sun = state.inputs.sun
-    const sunDrawn = () => screen.queryByText(sunScene(state.home, sun)!.label) ?? screen.queryByText(sunReadoutRuns(sun)![1])
+    const sunDrawn = () => screen.queryByText(sunScene(state.home, sun)!.label!) ?? screen.queryByText(sunReadoutRuns(sun)![1])
     expect(sunDrawn()).toBeInTheDocument()
     act(() => liveStore.setState({ inputs: null }))
     expect(sunDrawn()).not.toBeInTheDocument()

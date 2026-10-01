@@ -20,12 +20,11 @@ export interface StageSceneProps {
   pose: CameraPose
   /** The camera's bearing (camera.ts's bearingDeg). */
   bearing: number
-  frozen: boolean
-  /** cadence.ts's cadenceMs(): null while frames don't redraw the stage. */
+  /** The stage behaviour's (behaviour.ts): null while frames don't redraw the stage. */
   cadenceMs: number | null
 }
 
-export function StageScene({ home, writer, entries, mask, pose, bearing, frozen, cadenceMs }: StageSceneProps) {
+export function StageScene({ home, writer, entries, mask, pose, bearing, cadenceMs }: StageSceneProps) {
   const camera = useThree((state) => state.camera)
   const invalidate = useThree((state) => state.invalidate)
   useLayoutEffect(() => {
@@ -37,7 +36,7 @@ export function StageScene({ home, writer, entries, mask, pose, bearing, frozen,
   return (
     <>
       <StaticHome home={home} bearing={bearing} width={pose.width} height={pose.height} />
-      <LightLayer writer={writer} entries={entries} mask={mask} pose={pose} frozen={frozen} />
+      <LightLayer writer={writer} entries={entries} mask={mask} pose={pose} />
     </>
   )
 }

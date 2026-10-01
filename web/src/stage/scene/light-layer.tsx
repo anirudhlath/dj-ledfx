@@ -17,11 +17,9 @@ export interface LightLayerProps {
   entries: readonly WriterEntry[]
   mask: RoomMask
   pose: CameraPose
-  /** §7.6 frozen: the last frame stays. A light whose state changed still draws once. */
-  frozen: boolean
 }
 
-export function LightLayer({ writer, entries, mask, pose, frozen }: LightLayerProps) {
+export function LightLayer({ writer, entries, mask, pose }: LightLayerProps) {
   const materials = useMemo(() => new LightMaterials(mask), [mask])
   const meshes = useMemo(() => new LightMeshes(writer, materials), [writer, materials])
   const invalidate = useThree((state) => state.invalidate)
@@ -41,7 +39,7 @@ export function LightLayer({ writer, entries, mask, pose, frozen }: LightLayerPr
     invalidate()
   }, [writer, meshes, entries, invalidate])
   useFrame(() => {
-    if (frozen || drawnVersion.current === frames.version) return
+    if (drawnVersion.current === frames.version) return
     writer.write(frames)
     meshes.update()
     drawnVersion.current = frames.version

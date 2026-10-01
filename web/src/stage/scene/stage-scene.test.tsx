@@ -4,6 +4,7 @@ import { InstancedMesh, type Object3D, OrthographicCamera } from 'three'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { frames } from '@/api/live'
+import { liveStore } from '@/api/live-store'
 import { buildScenario, type ScenarioName } from '@/api/mocks/scenarios'
 import { HERO_NOW, startMockDataLayer } from '@/test/live'
 import { stageBodies } from '../bodies'
@@ -32,7 +33,6 @@ function stageProps(name: ScenarioName = 'hero', overrides: Partial<StageScenePr
     mask: roomMask(home.rooms),
     pose: fitPose(home.outline, STAGE, LIVE_PADDING, FIT_VIEW)!,
     bearing: bearingDeg(0),
-    frozen: false,
     cadenceMs: null,
     ...overrides,
   }
@@ -96,23 +96,26 @@ describe('the stage scene (§7.2, §7.5)', () => {
     expect(commits).toBe(0)
   })
 
-  it('keeps the last frame while frozen, and draws a light whose state changed', async () => {
-    startMockDataLayer()
-    const props = stageProps()
+  // Review focus 3: the link drops (the reconnecting scenario drops it a second after it connects).
+  // No frame comes while it's down, so the last one stays; a light whose state changed still draws.
+  it('keeps the last frame when the link drops, and draws a light whose state changed', async () => {
+    startMockDataLayer({ scenario: 'reconnecting' })
+    const props = stageProps('reconnecting')
     const { renderer } = await renderScene(<StageScene {...props} />)
-    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(liveStore.getState().connection.status).toBe('reconnecting')
+    // The last frame, from before the drop.
     await renderer.advanceFrames(1, 1 / 60)
+    expect(props.writer.leds).toBeGreaterThan(0)
     const write = vi.spyOn(props.writer, 'write')
-    await renderer.update(<StageScene {...props} frozen />)
     await vi.advanceTimersByTimeAsync(1000)
     await renderer.advanceFrames(5, 1 / 60)
     expect(write).not.toHaveBeenCalled()
 
-    const changed = stageProps('hero', { frozen: true })
-    const writeChanged = vi.spyOn(changed.writer, 'write')
-    await renderer.update(<StageScene {...props} writer={changed.writer} frozen />)
+    const changed = props.entries.map((entry, index) => (index === 0 ? { ...entry, streamed: false } : entry))
+    await renderer.update(<StageScene {...props} entries={changed} />)
     await renderer.advanceFrames(3, 1 / 60)
-    expect(writeChanged).toHaveBeenCalledTimes(1)
+    expect(write).toHaveBeenCalledTimes(1)
   })
 
   // I1: the engine pushes `lights` every 5 s while a look plays. One that changes only colours draws

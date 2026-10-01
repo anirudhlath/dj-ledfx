@@ -3,7 +3,8 @@
 // excludes three.js).
 import type { Room } from '@/api/contract'
 import { StagePending } from './stage-pending'
-import { StageView, type StageVariant } from './stage-view'
+import type { StageVariant } from './behaviour'
+import { StageView } from './stage-view'
 import { useStageData } from './use-stage-data'
 
 /** "Click a room → /live/put?zone=<room>" (§8.1): a room's zone has the room's id. */

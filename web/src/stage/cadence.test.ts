@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { frames } from '@/api/live'
-import { Cadence, cadenceMs, useCadence } from './cadence'
+import { Cadence, useCadence } from './cadence'
 import { SPEC } from './design-numbers'
 
 // useCadence draws through R3F's advance(); this stands in for the canvas's.
@@ -30,13 +30,6 @@ beforeEach(() => {
 })
 
 describe("the stage's cadence (§7.5)", () => {
-  it('draws at the target rate on desktop, the phone rate on a phone, slowly with reduced motion, never frozen', () => {
-    expect(cadenceMs({ phone: false, reducedMotion: false, frozen: false })).toBeCloseTo(1000 / SPEC.target.fps)
-    expect(cadenceMs({ phone: true, reducedMotion: false, frozen: false })).toBeCloseTo(1000 / SPEC.phoneFps)
-    expect(cadenceMs({ phone: true, reducedMotion: true, frozen: false })).toBe(SPEC.reducedMotionMs)
-    expect(cadenceMs({ phone: false, reducedMotion: true, frozen: true })).toBeNull()
-  })
-
   it('draws only when a frame has arrived since the last draw', () => {
     const cadence = new Cadence(1000 / SPEC.target.fps)
     expect(cadence.due(0, 1)).toBe(true)

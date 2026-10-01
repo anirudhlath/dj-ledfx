@@ -69,10 +69,14 @@ describe("the stage's SVG layer (§7.3, §7.4, §7.6, §9.1)", () => {
 
   it("draws the sun with its label, and its path's arc when it has one", () => {
     const { container, rerender } = render(<StageSvg pose={pose} marks={[]} labels={null} sun={sunScene(hero.home, HERO_SUN)} />)
-    expect(screen.getByText(sunScene(hero.home, HERO_SUN)!.label)).toBeInTheDocument()
+    expect(screen.getByText(sunScene(hero.home, HERO_SUN)!.label!)).toBeInTheDocument()
     expect(container.querySelector('polyline')).toBeInTheDocument()
     rerender(<StageSvg pose={pose} marks={[]} labels={null} sun={sunScene(hero.home, { ...HERO_SUN, path: undefined })} />)
     expect(container.querySelector('polyline')).not.toBeInTheDocument()
+    // Where the stage has no labels (behaviour.ts), the sun has none either.
+    rerender(<StageSvg pose={pose} marks={[]} labels={null} sun={sunScene(hero.home, HERO_SUN, false)} />)
+    expect(container.querySelector('circle')).toBeInTheDocument()
+    expect(container.querySelector('text')).not.toBeInTheDocument()
   })
 })
 
@@ -133,7 +137,7 @@ describe('the light tooltip (§8.1)', () => {
 
   it("names the light and paints its colour now from the frames, with the look and the model", () => {
     decodeFrame(encodeFrame(2, light.id, 1, new Uint8Array(light.leds * 3).fill(128)), 2, frames, 0)
-    render(<LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={STAGE} frozen={false} />)
+    render(<LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={STAGE} />)
     const tooltip = screen.getByRole('tooltip')
     expect(tooltip).toHaveTextContent(light.name)
     expect(tooltip).toHaveTextContent('#808080 · 50%')
@@ -143,7 +147,7 @@ describe('the light tooltip (§8.1)', () => {
 
   it("turns to the light's left near the stage's right edge", () => {
     const at: [number, number] = [STAGE.width - 4, 100]
-    render(<LightTooltip light={light} state={state} text={text} at={at} stage={STAGE} frozen />)
+    render(<LightTooltip light={light} state={state} text={text} at={at} stage={STAGE} />)
     expect(parseFloat(screen.getByRole('tooltip').style.left)).toBeLessThan(at[0])
   })
 })

@@ -40,16 +40,20 @@ export interface SunScene {
   at: Vec3
   /** The recent path above the horizon, oldest first, ending at the sun. */
   path: Vec3[]
-  /** §7.4's label: SUN, the elevation in whole degrees, and the compass point. */
-  label: string
+  /** §7.4's label: SUN, the elevation in whole degrees, and the compass point; null where the stage has no labels. */
+  label: string | null
 }
 
-/** What the stage draws of the sun, or null while it's down or unknown. */
-export function sunScene(home: Pick<Home, 'outline' | 'ceiling' | 'northOffsetDeg'>, sun: SunInput | null | undefined): SunScene | null {
+/** What the stage draws of the sun, labelled or not (behaviour.ts), or null while it's down or unknown. */
+export function sunScene(
+  home: Pick<Home, 'outline' | 'ceiling' | 'northOffsetDeg'>,
+  sun: SunInput | null | undefined,
+  labelled = true,
+): SunScene | null {
   if (sun == null || !up(sun)) return null
   const at = sunPoint(home, sun.elevation, sun.azimuth)
   const path = (sun.path ?? []).filter(up).map((point) => sunPoint(home, point.elevation, point.azimuth))
-  return { at, path: [...path, at], label: `SUN ${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}` }
+  return { at, path: [...path, at], label: labelled ? `SUN ${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}` : null }
 }
 
 /**
