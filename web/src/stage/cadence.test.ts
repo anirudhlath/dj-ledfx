@@ -16,10 +16,22 @@ describe("the stage's cadence (§7.5)", () => {
     expect(cadence.due(2 * SCREEN_MS, 2)).toBe(true)
   })
 
-  it("keeps a phone's rate on a 60 Hz screen: every other animation frame", () => {
-    const cadence = new Cadence(1000 / SPEC.phoneFps)
-    const drawn = Array.from({ length: SCREEN_HZ }, (_, i) => cadence.due(i * SCREEN_MS, i)).filter(Boolean)
-    expect(drawn).toHaveLength(SPEC.phoneFps)
+  // Mi4 = E5: on any screen, each draw is due a whole interval after the last one was due, and the
+  // animation frame nearest that time draws it: the rate holds, and the draws land on its beat.
+  describe.each([
+    ['a phone', SPEC.phoneFps],
+    ['the desktop', SPEC.target.fps],
+  ])('holds %s at its rate', (_, fps) => {
+    it.each([60, 120, 144])('on a %d Hz screen', (hz) => {
+      const frameMs = 1000 / hz
+      const intervalMs = 1000 / fps
+      const cadence = new Cadence(intervalMs)
+      // Two seconds of animation frames, each with a new frame in the store.
+      const drawn: number[] = []
+      for (let i = 0; i < 2 * hz; i++) if (cadence.due(i * frameMs, i)) drawn.push(i * frameMs)
+      expect(drawn).toHaveLength(2 * fps)
+      for (const [n, at] of drawn.entries()) expect(Math.abs(at - n * intervalMs)).toBeLessThanOrEqual(frameMs / 2)
+    })
   })
 
   it('still draws an animation frame that comes a little early', () => {
