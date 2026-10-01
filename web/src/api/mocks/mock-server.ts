@@ -50,7 +50,7 @@ export interface MockServerOptions {
   scenario?: ScenarioName
   /** 2 speaks §12.4. 1 speaks engine M1's protocol (decision 9). */
   protocol?: 1 | 2
-  /** ?still: one beat message after subscribe_beat, then none. */
+  /** ?still: one beat message after subscribe_beat, then none, and frames that never change. */
   still?: boolean
   /** Monotonic ms. */
   clock?: () => number
@@ -80,7 +80,9 @@ interface Painted {
   rgb: Uint8Array
 }
 
-const STREAMING: ReadonlySet<Light['status']> = new Set(['streaming', 'streamed-copy'])
+// The engine streams a light running its own effect to the web app too, an approximation of the
+// effect, while anyone watches the live stream (engine zones/frames.py).
+const STREAMING: ReadonlySet<Light['status']> = new Set(['streaming', 'own-effect', 'streamed-copy'])
 
 const ok = (body: unknown): MockReply => ({ status: 200, body })
 const created = (body: unknown): MockReply => ({ status: 201, body })
@@ -359,7 +361,7 @@ export class MockServer {
     return new Date(this.wallClock()).toISOString()
   }
 
-  /** Seconds the beat has moved: none while ?still holds it. */
+  /** Seconds the beat and the frames have moved: none while ?still holds them. */
   private beatElapsedS(now: number): number {
     return this.still ? 0 : (now - this.startedAt) / 1000
   }
@@ -451,7 +453,8 @@ export class MockServer {
   /** One frame: each light painted once, encoded once per protocol, sent to each session that wants it. */
   private frame(now: number): void {
     this.frameCount += 1
-    const t = (now - this.startedAt) / 1000
+    // ?still holds the frames as well as the beat, so a screenshot of the stage is the same every run.
+    const t = this.beatElapsedS(now)
     const beatPhase = position(this.state, this.beatElapsedS(now)) % 1
     if (this.watching('live')) for (const light of this.live) this.sendFrame(light, 'live', t, beatPhase)
     if (this.preview !== null && this.watching('preview')) {

@@ -8,6 +8,7 @@ import { createLiveStore } from '../live-store'
 import type { ClientCommand } from '../ws-messages'
 import { inMemorySockets } from './in-memory-socket'
 import { RECENT_LIMIT, beatMessage, snapshotMessages, statsMessage, type MockServer } from './mock-server'
+import { HOME_TOTALS } from './fixtures'
 import { SCENARIOS, buildScenario } from './scenarios'
 
 /** Moves the wall clock on: the mock's times come from Date.now(). */
@@ -69,6 +70,28 @@ describe('a connection', () => {
     expect(fps).toBeGreaterThanOrEqual(59)
     expect(fps).toBeLessThanOrEqual(61)
     expect(frames.preview.size).toBe(0)
+  })
+
+  it('streams the lights running their own effect too, as the engine does for the web app', () => {
+    const socket = connect(startMockServer({ scenario: 'firmware' }))
+    socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live'] })
+    vi.advanceTimersByTime(100)
+    const frames = decoded(socket.binary(), 2)
+    // Every light runs its own effect or a streamed copy of one: the whole home streams.
+    expect(frames.live.size).toBe(buildScenario('firmware', HERO_NOW).lights.length)
+    expect([...frames.live.values()].reduce((sum, frame) => sum + frame.count, 0)).toBe(HOME_TOTALS.leds)
+  })
+
+  it('holds the frames for ?still: the same colours, frame after frame', () => {
+    const socket = connect(startMockServer({ still: true }))
+    socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live'] })
+    vi.advanceTimersByTime(20)
+    const first = decoded(socket.binary(), 2)
+    socket.clear()
+    vi.advanceTimersByTime(2000)
+    const after = decoded(socket.binary(), 2)
+    expect(after.live.size).toBe(first.live.size)
+    for (const [id, frame] of after.live) expect(frame.rgb).toEqual(first.live.get(id)!.rgb)
   })
 
   it('speaks as engine M1 with protocol 1: a bare ack, v1 frames at 30 fps, and errors', () => {
