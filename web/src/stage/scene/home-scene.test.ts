@@ -1,6 +1,6 @@
-import { BufferAttribute, Mesh, ShaderMaterial } from 'three'
+import { BufferAttribute, Mesh, ShaderMaterial, type Material } from 'three'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { homeFixture } from '@/api/mocks/fixtures'
 import { FIT_VIEW, fitPose, LIVE_PADDING, type Size } from '../camera'
 import { STAGE_PALETTE } from '../palette'
@@ -25,8 +25,8 @@ describe('the static home (§7.1)', () => {
     // Courtyard, balcony, floors, solids, glass.
     expect(meshes).toHaveLength(5)
     expect(meshes.filter((mesh) => (mesh as Mesh).material instanceof ShaderMaterial)).toHaveLength(2)
-    // Balcony edge, floor edges, furniture edges, glass edges, ghost volume.
-    expect(lines).toHaveLength(5)
+    // Floor edges (the balcony's among them), furniture edges, glass edges, ghost volume.
+    expect(lines).toHaveLength(4)
     scene.dispose()
   })
 
@@ -52,6 +52,14 @@ describe('the static home (§7.1)', () => {
     const pattern = scene.group.children.map((child) => (child as Mesh).material).find((material) => material instanceof ShaderMaterial) as ShaderMaterial
     expect(pattern.uniforms.pixelRatio.value).toBe(2)
     scene.dispose()
+  })
+
+  it('lets go of every geometry and material it made, the solids too', () => {
+    const scene = new HomeScene(homeFixture)
+    const objects = scene.group.children as (Mesh | LineSegments2)[]
+    const spies = objects.flatMap((object) => [vi.spyOn(object.geometry, 'dispose'), vi.spyOn(object.material as Material, 'dispose')])
+    scene.dispose()
+    for (const spy of spies) expect(spy).toHaveBeenCalled()
   })
 
   it('draws a home with no outdoor areas and no windows', () => {

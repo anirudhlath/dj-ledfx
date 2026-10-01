@@ -42,11 +42,8 @@ export function wallPolygon(wall: Pick<Wall, 'a' | 'b' | 'thickness'>): Vec2[] {
   ]
 }
 
-/** A furniture block's footprint: its polygon, or its box [x0, y0, x1, y1]. */
-export function furniturePolygon(item: Home['furniture'][number]): Vec2[] | null {
-  if (item.polygon != null && item.polygon.length >= 3) return item.polygon
-  if (item.box == null) return null
-  const [x0, y0, x1, y1] = item.box
+/** A box on the plan, from its two corners, as a polygon. */
+function boxPolygon([x0, y0]: Vec2, [x1, y1]: Vec2): Vec2[] {
   return [
     [x0, y0],
     [x1, y0],
@@ -55,20 +52,21 @@ export function furniturePolygon(item: Home['furniture'][number]): Vec2[] | null
   ]
 }
 
+/** A furniture block's footprint: its polygon, or its box [x0, y0, x1, y1]. */
+export function furniturePolygon(item: Home['furniture'][number]): Vec2[] | null {
+  if (item.polygon != null && item.polygon.length >= 3) return item.polygon
+  if (item.box == null) return null
+  const [x0, y0, x1, y1] = item.box
+  return boxPolygon([x0, y0], [x1, y1])
+}
+
 /** Every solid of the home: wall pieces up to the cut (or a window's sill), columns, furniture. */
 export function homePrisms(home: Home): Prism[] {
   const cut = home.wallCutHeight
   const walls = home.walls.map(
     (wall): Prism => ({ kind: 'wall', polygon: wallPolygon(wall), z0: 0, z1: wall.kind === 'wall' ? cut : sillOf(wall) }),
   )
-  const columns = home.columns.map(
-    ({ min, max }): Prism => ({
-      kind: 'column',
-      polygon: [min, [max[0], min[1]], max, [min[0], max[1]]],
-      z0: 0,
-      z1: cut + SPEC.columnAboveCutM,
-    }),
-  )
+  const columns = home.columns.map(({ min, max }): Prism => ({ kind: 'column', polygon: boxPolygon(min, max), z0: 0, z1: cut + SPEC.columnAboveCutM }))
   const furniture = home.furniture.flatMap((item): Prism[] => {
     const polygon = furniturePolygon(item)
     return polygon === null ? [] : [{ kind: 'furniture', polygon, z0: item.z0, z1: item.z0 + item.height }]
@@ -88,20 +86,13 @@ export function homePanes(home: Home): Pane[] {
 /** §7.1 Ghost volume: the outline at the ceiling, and upright lines from the cut to it at each corner. */
 export function ghostLines(home: Home): Segment[] {
   const { outline, ceiling, wallCutHeight } = home
-  const ring = outline.map((p, i): Segment => {
-    const q = outline[(i + 1) % outline.length]
-    return [
-      [p[0], p[1], ceiling],
-      [q[0], q[1], ceiling],
-    ]
-  })
   const uprights = outline.map(
     ([x, y]): Segment => [
       [x, y, wallCutHeight],
       [x, y, ceiling],
     ],
   )
-  return [...ring, ...uprights]
+  return [...outlineAt(outline, ceiling), ...uprights]
 }
 
 /** A polygon's edges as segments at height z, closed. */

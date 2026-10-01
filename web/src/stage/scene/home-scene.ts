@@ -44,6 +44,8 @@ export class HomeScene {
     }
 
     const { courtyard, balcony } = home.outdoor ?? {}
+    // The floors' edges, the balcony's among them: one line in one material.
+    const edges = home.rooms.flatMap((room) => outlineAt(room.polygon, EDGE_Z))
     if (courtyard != null && courtyard.length >= 3) {
       const material = courtyardMaterial()
       this.patterns.push(material)
@@ -53,7 +55,7 @@ export class HomeScene {
       const material = hatchMaterial()
       this.patterns.push(material)
       mesh(flatGeometry([balcony], BALCONY_Z), material)
-      lines(outlineAt(balcony, EDGE_Z), lineMaterial(palette.floorEdge, SPEC.floorEdgePx))
+      edges.push(...outlineAt(balcony, EDGE_Z))
     }
     mesh(
       flatGeometry(
@@ -62,15 +64,10 @@ export class HomeScene {
       ),
       flatMaterial(palette.floor),
     )
-    lines(
-      home.rooms.flatMap((room) => outlineAt(room.polygon, EDGE_Z)),
-      lineMaterial(palette.floorEdge, SPEC.floorEdgePx),
-    )
+    lines(edges, lineMaterial(palette.floorEdge, SPEC.floorEdgePx))
 
     this.solids = new SolidGeometry(homePrisms(home))
-    const solid = solidMaterial()
-    this.group.add(new Mesh(this.solids.geometry, solid))
-    this.disposables.push(this.solids, solid)
+    mesh(this.solids.geometry, solidMaterial())
     lines(
       home.furniture.flatMap((item) => {
         const polygon = furniturePolygon(item)

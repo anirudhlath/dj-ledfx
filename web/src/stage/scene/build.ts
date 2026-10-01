@@ -17,6 +17,26 @@ export function triangulate(polygon: readonly Vec2[]): number[][] {
   )
 }
 
+/** A geometry of positions alone, three numbers a vertex in three's world. */
+function positionGeometry(positions: readonly number[]): BufferGeometry {
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
+  return geometry
+}
+
+/** An upright quad on the plan line from a to b, from z0 to z1: two triangles' six vertices, in three's world. */
+function uprightQuad(a: Vec2, b: Vec2, z0: number, z1: number): Vec3[] {
+  const corners: [Vec2, number][] = [
+    [a, z0],
+    [b, z0],
+    [b, z1],
+    [a, z0],
+    [b, z1],
+    [a, z1],
+  ]
+  return corners.map(([point, z]) => toWorld([point[0], point[1], z]))
+}
+
 /** Flat polygons at height z, one colour: the floors, the courtyard, the balcony. */
 export function flatGeometry(polygons: readonly (readonly Vec2[])[], z: number): BufferGeometry {
   const positions: number[] = []
@@ -25,9 +45,7 @@ export function flatGeometry(polygons: readonly (readonly Vec2[])[], z: number):
       for (const index of triangle) positions.push(...toWorld([polygon[index][0], polygon[index][1], z]))
     }
   }
-  const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
-  return geometry
+  return positionGeometry(positions)
 }
 
 const TOP: Record<Prism['kind'], keyof StagePalette> = { wall: 'wallTop', column: 'columnTop', furniture: 'furnitureTop' }
@@ -57,18 +75,18 @@ export class SolidGeometry {
     const palette = STAGE_PALETTE
     const positions: number[] = []
     const colours: number[] = []
-    const vertex = (p: Vec2, z: number, colour: Colour) => {
-      positions.push(...toWorld([p[0], p[1], z]))
+    const vertex = (world: Vec3, colour: Colour) => {
+      positions.push(...world)
       colours.push(...colour)
     }
     for (const prism of prisms) {
       const { polygon, z0, z1, kind } = prism
-      for (const triangle of triangulate(polygon)) for (const index of triangle) vertex(polygon[index], z1, palette[TOP[kind]])
+      for (const triangle of triangulate(polygon)) {
+        for (const index of triangle) vertex(toWorld([polygon[index][0], polygon[index][1], z1]), palette[TOP[kind]])
+      }
       outwardNormals(polygon).forEach((normal, i) => {
-        const p = polygon[i]
-        const q = polygon[(i + 1) % polygon.length]
         this.sides.push({ first: positions.length / 3, normal, kind })
-        for (const [point, z] of [[p, z0], [q, z0], [q, z1], [p, z0], [q, z1], [p, z1]] as const) vertex(point, z, palette.wallSide)
+        for (const world of uprightQuad(polygon[i], polygon[(i + 1) % polygon.length], z0, z1)) vertex(world, palette.wallSide)
       })
     }
     this.colours = new Float32Array(colours)
@@ -85,21 +103,11 @@ export class SolidGeometry {
     }
     this.geometry.getAttribute('color').needsUpdate = true
   }
-
-  dispose(): void {
-    this.geometry.dispose()
-  }
 }
 
 /** The windows' and glass doors' panes, upright along their walls. */
 export function paneGeometry(panes: readonly Pane[]): BufferGeometry {
-  const positions: number[] = []
-  for (const { a, b, z0, z1 } of panes) {
-    for (const [point, z] of [[a, z0], [b, z0], [b, z1], [a, z0], [b, z1], [a, z1]] as const) positions.push(...toWorld([point[0], point[1], z]))
-  }
-  const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
-  return geometry
+  return positionGeometry(panes.flatMap(({ a, b, z0, z1 }) => uprightQuad(a, b, z0, z1).flat()))
 }
 
 /** Plan segments as LineSegments2's geometry. */
