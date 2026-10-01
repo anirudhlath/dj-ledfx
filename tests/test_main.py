@@ -1,11 +1,13 @@
 """The real entry point in a subprocess. Shutting dj-ledfx down with a browser connected:
 the web server stops through granian's Server.stop(), so the ASGI lifespan shutdown runs
-and an open /ws closes cleanly. And the app serves the home map, its zones and previews."""
+and an open /ws closes cleanly. Browser tabs closing their sockets never freeze the app.
+And the app serves the home map, its zones and previews."""
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import signal
 import socket
@@ -67,23 +69,36 @@ async def _open_websocket_when_up(
                 await asyncio.sleep(0.1)
 
 
+_CLOSE = 0x8  # the close frame's opcode
+
+
+def _client_frame(opcode: int, payload: bytes) -> bytes:
+    """One masked frame, as a browser sends it (a payload under 126 bytes)."""
+    mask = os.urandom(4)
+    masked = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    return bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + masked
+
+
+async def _read_frame(reader: asyncio.StreamReader) -> tuple[int, bytes]:
+    """The server's next frame: its opcode and payload."""
+    head = await reader.readexactly(2)
+    length = head[1] & 0x7F
+    if length == 126:
+        (length,) = struct.unpack(">H", await reader.readexactly(2))
+    elif length == 127:
+        (length,) = struct.unpack(">Q", await reader.readexactly(8))
+    return head[0] & 0x0F, await reader.readexactly(length)
+
+
 async def _close_code(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> int | None:
     """Read frames until the server closes, answering its close frame as a browser does.
 
     Returns the close code, or None if the connection ended without one."""
     try:
         while True:
-            head = await reader.readexactly(2)
-            length = head[1] & 0x7F
-            if length == 126:
-                (length,) = struct.unpack(">H", await reader.readexactly(2))
-            elif length == 127:
-                (length,) = struct.unpack(">Q", await reader.readexactly(8))
-            payload = await reader.readexactly(length)
-            if head[0] & 0x0F == 0x8:  # close
-                mask = os.urandom(4)
-                echo = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload[:2]))
-                writer.write(bytes([0x88, 0x80 | len(echo)]) + mask + echo)
+            opcode, payload = await _read_frame(reader)
+            if opcode == _CLOSE:
+                writer.write(_client_frame(_CLOSE, payload[:2]))
                 await writer.drain()
                 return int(struct.unpack(">H", payload[:2])[0]) if len(payload) >= 2 else None
     except (asyncio.IncompleteReadError, ConnectionError):
@@ -130,6 +145,60 @@ async def test_shutdown_with_a_browser_connected_is_clean(tmp_path: Path) -> Non
     assert "Unexpected exit" not in output, output
     assert "dj-ledfx stopped" in output, output
     assert close_code == 1001  # going away
+    assert app.returncode == 0
+
+
+async def _read_until_closed(reader: asyncio.StreamReader, seconds: float) -> None:
+    """Read the server's frames for up to `seconds`, stopping early at its close frame."""
+    try:
+        async with asyncio.timeout(seconds):
+            while (await _read_frame(reader))[0] != _CLOSE:
+                pass
+    except (TimeoutError, asyncio.IncompleteReadError, ConnectionError):
+        pass
+
+
+async def _open_and_close_a_tab(port: int) -> None:
+    """A tab of the web app: it subscribes to the beat at web/'s rate (live-client.ts's
+    BEAT_FPS), reads it for a moment, then closes its socket as a closing tab does."""
+    reader, writer = await _open_websocket(port)
+    try:
+        subscribe = {"action": "subscribe_beat", "id": "beat", "fps": 30}
+        writer.write(_client_frame(0x1, json.dumps(subscribe).encode()))  # a text frame
+        await writer.drain()
+        await _read_until_closed(reader, 0.1)
+        writer.write(_client_frame(_CLOSE, struct.pack(">H", 1001)))  # going away
+        await writer.drain()
+        await _read_until_closed(reader, 1.0)  # the server's close, as a browser waits for it
+    finally:
+        writer.close()
+
+
+async def test_tabs_closing_their_sockets_never_freeze_the_app(tmp_path: Path) -> None:
+    port = _free_port()
+    app = await _start_app(tmp_path, port)
+    try:
+        # httpx's own timeout is off: the 5 s timeout below says which tab froze the app.
+        async with httpx.AsyncClient(
+            base_url=f"http://127.0.0.1:{port}/api", timeout=None
+        ) as client:
+            await _get_when_up(client, "/running", app)
+            for tab in range(1, 31):  # granian 2.7.2 froze within the first three
+                try:
+                    async with asyncio.timeout(5):  # a frozen app never answers again
+                        await _open_and_close_a_tab(port)
+                        running = await client.get("/running")
+                except TimeoutError:
+                    pytest.fail(f"dj-ledfx stopped answering after {tab} tab(s) closed")
+                assert running.status_code == 200
+        app.send_signal(signal.SIGTERM)
+        output = (await asyncio.wait_for(app.communicate(), 30))[0].decode()
+    finally:
+        if app.returncode is None:
+            app.kill()
+            await app.wait()
+
+    assert "Traceback" not in output, output
     assert app.returncode == 0
 
 
