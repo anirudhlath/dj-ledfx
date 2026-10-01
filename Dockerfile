@@ -39,7 +39,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-c", "import urllib.request as r; r.urlopen('http://127.0.0.1:8080/api/running', timeout=4)"]
 
 # config.toml is mounted read-only and only seeds a fresh state.db, which lives on a
-# volume. No --demo: the beat comes from Pro DJ Link.
+# volume. No --demo: the beat comes from the tempo clock (Pro DJ Link when a DJ plays).
 ENTRYPOINT ["entrypoint"]
 CMD ["python", "-m", "dj_ledfx", "--web", "--web-host", "0.0.0.0", \
      "--config", "/app/config/config.toml", "--db", "/app/state/state.db"]
