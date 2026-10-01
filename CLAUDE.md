@@ -38,7 +38,8 @@ The Claude Design handoff is the only source of design truth. Don't work from me
 uv sync                          # Install dependencies
 uv sync --extra web              # Install with web UI extras
 uv run -m dj_ledfx              # Run the app
-uv run -m dj_ledfx --demo       # Run with simulated beats (no DJ hardware)
+uv run -m dj_ledfx --demo       # Run with no Pro DJ Link listener: the internal clock keeps the tempo (no DJ hardware)
+uv run -m dj_ledfx --demo --bpm 124  # Set the internal clock's BPM at start; it's saved like a BPM set in the app
 uv run -m dj_ledfx --demo --web # Run with web UI (requires: uv sync --extra web)
 uv run -m dj_ledfx --demo --web dev  # Run with hot-reload dev server (frontend + backend)
 uv run pytest                    # Run tests
@@ -76,14 +77,15 @@ cd web && npm run e2e            # Playwright: screenshots, axe on every route, 
 
 src/dj_ledfx/ layout:
 - `prodjlink/` — Pro DJ Link UDP protocol (passive listener on port 50001)
-- `beat/` — BeatClock phase interpolation + BeatSimulator for demo mode
+- `tempo/` — the tempo clock, always running (engine spec §7.2): `model` (sources, locks, the limits and `check_bpm`, `TempoSample`, `DeckView`, `TempoSettings`, the events `TempoChanged` and `DecksChanged`), `timeline` (`Timeline`, a straight line of beats, and `nearest_beat`), `tap` (`TapTempo`: runs of taps on client or arrival times), `decks` (`DeckTracker`: the players the beat packets tell of), `clock` (`TempoClock`: the sources, the lock and the controls, Pro DJ Link, `run()`, saving and reloading) and `store` (`TempoStore`: section `tempo` of `state.db`'s config table)
 - `effects/` — Effect ABC (`base.py`, with today's 1D `StripEffect`) + the 60fps engine, which hosts each running zone's runtime (and the preview's) and renders it ahead into that runtime's ring buffer
-- `effects/context.py` — `RenderContext` (beat, time, signals) that field effects render from
+- `effects/context.py` — `RenderContext` (beat, time, signals) that field effects render from; `render_context(clock, t, dt)` samples the tempo clock at the frame's target time, so `beat_index` and `bar_index` are real counts
 - `effects/ledset.py` — `LedSet`: a zone's LEDs where their placements put them on the home map, in order, carrying the zone's `Space` (rooms, anchors, ceiling; equal by value), with its `bounds` and `centre` cached; `subset()` gives some devices' LEDs with the zone's positions and device indices (a firmware layer's copy is drawn on its own lights)
 - `effects/ring_buffer.py` — `RingBuffer`: a running zone's frames, rendered ahead; `find_nearest` hands out the frame itself
 - `effects/field.py`, `effects/strip_adapter.py` — `FieldEffect`, and `ParamField` (each setting and its default stated once in `parameters()`, filled in by `__init__(**settings)`; the settings in one dict; `_prepare()` rebuilds what's derived from them, the float palette included, and `_per_leds()` keeps per-LED work until the LEDs or a setting change; `level_param()`); `StripAdapter` plays a 1D `StripEffect` by projecting each LED's position onto an axis, linear or radial (`spatial/mapping.py`), or along the LEDs in zone order
 - `effects/blend.py` (`blend_into()`: the five blend modes), `effects/field_tools.py` (anchors, distances, height, smoothstep on easing's cubic), `effects/noise.py` (seeded 3D value noise, each axis hashed once; `fbm3`)
 - `effects/{sunset_gradient,aurora_curtains,lava_plasma,color_carousel,ripples,focus_field}.py` — the six showcase looks' field effects
+- `effects/{shockwave_shell,lighthouse_beam,scanner_plane,checker_cubes,speaker_waves}.py` — the field effects of engine M3's four tempo looks
 - `effects/firmware.py`, `firmware_lifx.py`, `firmware_openrgb.py` — effects the light runs itself: LIFX Flame and Morph (matrix), Move (multizone), waveforms (bulbs), OpenRGB hardware modes; lights that can't run one get its streamed `emulate()`; `require_adapter()` turns the wrong kind of light into `FirmwareRejected`
 - `effects/color.py` — Color math: hex/RGB conversion, and one HSV formula and one palette interpolation, in floats (`hsv_float`, `palette_float`, `palette_at`); `hsv_to_rgb_array` and `palette_lerp` are their 8-bit forms
 - `effects/easing.py` — Easing functions: lerp, ease_in/out, sine_ease
@@ -97,7 +99,7 @@ src/dj_ledfx/ layout:
 - `devices/backend.py` — DeviceBackend ABC for protocol-level adapters
 - `devices/govee/` — Govee WiFi LED protocol (UDP segment control, SKU registry, transport)
 - `devices/lifx/` — LIFX LAN protocol (bulb/strip/tile discovery, packet encoding, transport); `base.py` shared adapter, `transport.py` `ask`/`query` (retries, the reply type checked and parsed, None on silence), `products.py` `lifx_capabilities()` from the vendored `data/products.json`
-- `looks/` — the look model, the built-ins (the handoff's six M2 looks and the Firmware showcase, in looks.json's order from the vendored `data/looks.json`, then the six classics), and the store (saved looks, stars)
+- `looks/` — the look model, the built-ins (the handoff's M2 and M3 looks and the Firmware showcase, in looks.json's order from the vendored `data/looks.json`, then the six classics; the `speakers` look runs on the beat until M7, `NEEDS_UNTIL_M7`), and the store (saved looks, stars)
 - `looks/selectors.py` — which lights a layer picks: light ids, or `type:<word>`. The look model parses a layer's `lights` setting into `Layer.lights` and writes it back as a list
 - `zones/` — `model` (every light, rooms, groups), `store`, `runtime` (a running look's layer stack and ring buffer), `manager` (take-over, capture/restore, brightness, Stop all, resume, preview-only, the sharing policy, "Start again"), `lights` (LightMonitor: status and the 5 s/30 s polls), `attention` (the feed)
 - `zones/home_view.py` (`HomeView`, what the zone manager asks of the map; `MapZones`: the whole home, rooms and sub-zones as zones), `zones/preview.py` (`PreviewManager`: one preview at a time), `zones/frames.py` (`Watchers.watching(stream)`: who watches which stream; `FrameFeed(live, previews)`: the web app's frames, read from the rings, each runtime's frame converted once and only for the devices asked for)
@@ -108,19 +110,20 @@ src/dj_ledfx/ layout:
 - `effects/registry.py` — Effect auto-registry via __init_subclass__, get_effect_classes/schemas
 - `effects/presets.py` — PresetStore with TOML persistence
 - `devices/manager.py` — DeviceManager: the managed devices (online and ghosts), indexed by stable id (`get_by_stable_id` is a dict lookup, rebuilt on every change) and by light (`lights`, the `LightIndex`, rebuilt beside it), promote/demote, groups
-- `web/` — FastAPI app factory, REST routers (effects, devices, config, scene, looks, zones, lights, attention, home, preview), WebSocket hub, Pydantic schemas
+- `web/` — FastAPI app factory, REST routers (effects, devices, config, scene, looks, zones, lights, attention, home, preview, inputs), WebSocket hub, Pydantic schemas
+- `web/router_inputs.py` — `GET /inputs` (the tempo, and Pro DJ Link with its decks) and the three tempo controls: `PUT /inputs/tempo`, `POST /inputs/tempo/tap`, `POST /inputs/tempo/nudge`
 - `web/frames.py` — frame encoders v1 and v2; `light_frames()` assembles each light's bytes (the PC's parts in part order, black where a part has nothing)
-- `web/contract.py` — the web spec's API models (camelCase) and the converters from engine types; `web/errors.py` — `answers()` maps engine errors to HTTP
-- `web/ws.py` — WebSocket hub: binary LED frames from `FrameFeed`, v1 by default and v2 after `subscribe_frames` with `"protocol": 2` (streams `live`/`preview`, optional `lights`); beat, stats and status channels; pushed `running`, `lights` and `attention` snapshots; `transport` carries preview-only (`simulating` while on, `playing` otherwise); `close_all()` ends sessions with 1001 at shutdown
+- `web/contract.py` — the web spec's API models (camelCase) and the converters from engine types; `web/errors.py` — `answers()` maps engine errors to HTTP, and `unprocessable` is the 422 handler, which answers a NaN as text
+- `web/ws.py` — WebSocket hub: binary LED frames from `FrameFeed`, v1 by default and v2 after `subscribe_frames` with `"protocol": 2` (streams `live`/`preview`, optional `lights`); the beat at the client's rate, web spec §12.4's fields plus the old UI's (`is_playing`, `beat_pos`, `deck_number`, `deck_name`) until F11; stats and status channels; pushed `running`, `lights`, `attention` and `decks` snapshots on change, and `inputs` on change and once a second; the `tap` command takes `client_time`; `transport` carries preview-only (`simulating` while on, `playing` otherwise); `close_all()` ends sessions with 1001 at shutdown
 - `web/state.py` — WS subscription state and the `app.state` getters (`get_zones`, `get_looks`, ...)
 - `web/router_scene.py` — Scene REST endpoints for the old scene page until F11 (placement CRUD, mapping config)
 - `spatial/mapping.py` — mapping_from_config() shared factory for LinearMapping/RadialMapping
 - `spatial/compositor.py` — Spatial compositor for multi-device LED frame distribution (the old scene page's, until F11)
 - `spatial/geometry.py` — 3D geometry utilities for spatial calculations
 - `spatial/scene.py` — SceneModel: device placements, spatial configuration
-- `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, BeatState, DeviceStats), and `clamp01`
+- `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, DeviceStats), and `clamp01`
 - `timing.py` — `utcnow()`, `as_utc()`, the one-second rate window (`RATE_WINDOW_S`, `trim_window`) and `paced()`, the fixed-period loop the engine and the scheduler run
-- `events.py` — Typed callback event bus (sync, non-blocking callbacks only) + device events; the zones' events (`ZonesChanged`, `PreviewOnlyChanged`, `LightsChanged`, `AttentionChanged`) live in `zones/model.py`
+- `events.py` — Typed callback event bus (sync, non-blocking callbacks only) + device events; the zones' events (`ZonesChanged`, `PreviewOnlyChanged`, `LightsChanged`, `AttentionChanged`) live in `zones/model.py`, the tempo's (`TempoChanged`, `DecksChanged`) in `tempo/model.py`
 - `persistence/` — SQLite-backed state persistence (state_db.py, toml_io.py, debounced_writer.py, migrations/); `StateDB.write_many` runs statements as one transaction, and `has_mark`/`mark_statement` mark run-once steps
 - `devices/discovery.py` — DiscoveryOrchestrator: multi-wave scanning, fast reconnect, ghost promote/demote
 - `devices/ghost.py` — GhostAdapter: placeholder for offline devices (is_connected=False, send_frame no-op)
@@ -161,8 +164,8 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - New effects must: import in `effects/__init__.py` to trigger auto-registry via `__init_subclass__`
 - Use shared utilities from `effects/color.py` (hex_to_rgb, rgb_to_hex, hsv_float, palette_float, palette_at, hsv_to_rgb_array, palette_lerp, to_float_rgb) and `effects/easing.py`
 - Effect render methods are synchronous (pure numpy math, no I/O)
-- BeatClock read methods are synchronous and lock-free (called from render loop)
-- BeatClock write method is `on_beat(bpm, beat_number, next_beat_ms, timestamp, ...)` (not `update()`)
+- `TempoClock`'s reads (`sample_at(t)`, `sample()`, its properties) are synchronous and lock-free, called from the render loop
+- `TempoClock`'s writes are `on_beat(event)` (the bus's `BeatEvent`), `set_tempo(lock, bpm)`, `tap(client_time)` and `nudge(delta)`; `settle()` lets the sources change hands (`run()` calls it every 0.25 s). A bad value raises `TempoError` (a `ValueError`), and a control under a Pro DJ Link or Music lock raises `TempoLockedError` (409)
 - DeviceAdapter is ABC (abstract base class). ProbeStrategy remains Protocol. Always code to the interface.
 - All components run on a single asyncio event loop — no cross-thread state access
 - AppConfig uses nested dataclasses: `config.engine.fps`, `config.devices.openrgb.host` (not flat)
@@ -178,9 +181,11 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Each zone runtime renders at `now + horizon` (its lights' largest latency plus a frame, within the lookahead) into its own ring buffer. Scheduler picks frame at `now + device_latency`.
 - A frame in a ring buffer is never changed after it's written: the runtime renders a new array every tick, `find_nearest` hands out the frame itself, and a route's `to_device_colors` makes the new 8-bit array each send uses.
 - Passive Pro DJ Link mode for MVP (no virtual CDJ handshake needed for beat packets).
-- BeatClock drift correction: soft correct if <5ms, hard snap if >=5ms.
-- BPM must always be pitch-adjusted: `track_bpm * (1 + pitch/100)`.
-- `is_playing` inferred from packet flow in passive mode (no explicit play/pause signal).
+- One `TempoClock`, always running (spec §7.2): Pro DJ Link while a DJ plays, the music's beat from M7, then the internal clock (a BPM, taps, nudges). A takeover snaps the phase once onto the nearest beat and keeps the beat and bar counts; after that, drift is corrected softly under 5 ms and snapped at 5 ms or more. A source quiet for 2 s hands back at the last BPM and phase.
+- BPM must always be pitch-adjusted: `track_bpm * (1 + pitch/100)`. A deck's `bpm` is its track's, with `pitch_percent` beside it.
+- A deck plays while its beats arrive (one in the last 2 s), is cued after, and is forgotten after 30 min: passive mode has no play/pause signal. The clock follows one deck at a time, the first heard, and `master` marks it, since passive mode can't hear the DJ's master. The old UI's `is_playing` is "the clock isn't stale".
+- A set BPM, a tap or a nudge holds Internal under Auto until a DJ starts again; `PUT /inputs/tempo` with `lock: "auto"` and no BPM releases the hold.
+- The tempo settings (the lock, the internal BPM with how and when it was set, the last DJ set) live in `state.db`'s config table under section `tempo`. They join backup and restore, and a restore applies them at once.
 - Event bus callbacks must be non-blocking (<1ms). Async work uses `create_task()`.
 - Per-device send loops: each device runs at its natural FPS (bounded by configurable cap). Distributor writes target_time floats to depth-1 FrameSlots — no numpy copies until actual send.
 - Device-type heuristic latency: Govee WiFi=100ms, LIFX WiFi=50ms, USB=5ms. Seeds the latency strategy. OpenRGB adapters use heuristics permanently (supports_latency_probing=False).
@@ -218,16 +223,16 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 
 ## Testing
 
-- Tests mirror src structure: `tests/prodjlink/`, `tests/beat/`, etc.
+- Tests mirror src structure: `tests/prodjlink/`, `tests/tempo/`, etc.
 - Use `pytest-asyncio` for async tests
 - Packet parsing tests use hex dump fixtures from `tests/fixtures/`; `tests/fixtures/lifx/recorded/` holds replies recorded from this home's lights (a product with no recording skips)
 - Mock `openrgb-python` for device tests
-- Integration tests run BeatSimulator → full pipeline → mock DeviceAdapter
-- Shared fakes: `tests/conftest.py` (`FakeLight`, a controllable light; `GlowFirmware`, a firmware effect; `device_stats()`, `render_ctx()`; the `db` fixture, an open state.db; the PC's `SERVER`, `OPENRGB`, `pc_lights()`, `pc_part_info()`, and `lamp_info()`, `colours()`), `tests/zone_home.py` (a zone manager over fake lights; `zone_record()`), `tests/api_home.py` (the same behind the web app), `tests/lifx_fakes.py` (`FakeLifxTransport`, a LifxTransport with a faked socket; `lifx_bulb/strip/candle()`; `read_hex()` for hex fixtures); `pythonpath = ["tests"]` makes them importable
+- Integration tests drive a `TempoClock` with a DJ's beat (`beat_event()`) → full pipeline → mock DeviceAdapter
+- Shared fakes: `tests/conftest.py` (`FakeLight`, a controllable light; `GlowFirmware`, a firmware effect; `device_stats()`, `render_ctx()`, `tempo_ctx()` (a moment some beats into a steady tempo); the `db` fixture, an open state.db; the PC's `SERVER`, `OPENRGB`, `pc_lights()`, `pc_part_info()`, and `lamp_info()`, `colours()`), `tests/zone_home.py` (a zone manager over fake lights, and `Home.tempo`, a real `TempoClock` over its state.db; `zone_record()`), `tests/api_home.py` (the same behind the web app), `tests/lifx_fakes.py` (`FakeLifxTransport`, a LifxTransport with a faked socket; `lifx_bulb/strip/candle()`; `read_hex()` for hex fixtures), `tests/tempo_fakes.py` (`FakeTime`, `tempo_clock()`, `events()`, `beat_event()`, `beat_packet()`, `play()`, `PLAYER`, `START`, `START_WALL`); `pythonpath = ["tests"]` makes them importable
 - Every test starts from the app's effect registry (an autouse fixture in conftest); a test effect defined with `register=False` never leaks
-- `tests/map_home.py`: `tiny_home()` (a two-room plan) and points on it (`DESK_CORNER`, `IN_THE_DESK_CORNER`, `IN_THE_EAST_ROOM`), `open_map()` (a real `HomeMap` over state.db and some lights), `leds_at()`, `handoff_pins()` and `design_home_json()` (the design files), and `seeded_zone_lights()`/`seeded_space()`/`seeded_ledset()` (this home's seeded LEDs, for perf); `build_home(plan=...)` and `api_home(plan=...)` wire a real `HomeMap`; `FakeHome` stands in for the map's zones (a test edits it, then calls `manager.home_changed()`)
+- `tests/map_home.py`: `tiny_home()` (a two-room plan) and points on it (`DESK_CORNER`, `IN_THE_DESK_CORNER`, `IN_THE_EAST_ROOM`), `open_map()` (a real `HomeMap` over state.db and some lights), `leds_at()` (`anchor_points=` gives an anchor more than one point), `handoff_pins()` and `design_home_json()` (the design files), and `seeded_zone_lights()`/`seeded_space()`/`seeded_ledset()` (this home's seeded LEDs, for perf); `build_home(plan=...)` and `api_home(plan=...)` wire a real `HomeMap`; `FakeHome` stands in for the map's zones (a test edits it, then calls `manager.home_changed()`)
 - Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern; `tests/web/conftest.py` shares `mock_deps()`, `write_dist()` and `static_client()` for `create_app`
-- `tests/web/` covers all REST routers and WebSocket hub; `tests/test_main.py` runs the app in a subprocess and checks a SIGTERM shutdown logs no traceback, and that browser tabs closing their sockets never freeze it
+- `tests/web/` covers all REST routers and WebSocket hub; `tests/test_main.py` runs the app in a subprocess and checks a SIGTERM shutdown logs no traceback, and that browser tabs closing their sockets never freeze it; its listening driver binds Pro DJ Link to a free loopback port
 - Gates compare with a baseline: no new mypy errors (compare `uv run mypy src/` output with the branch's starting point) and no format findings; perf benchmarks are deselected (`-m perf` runs them)
 - `tests/web/test_openapi_types.py` fails when `web/src/api/generated/openapi.json` isn't the backend's schema; `cd web && npm run api:types` regenerates it
 
@@ -270,9 +275,11 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - LIFX scripts can run beside the deployed app: `LifxTransport.open()` binds an ephemeral port
 - OpenRGB: parts in an `Off` mode keep a stale colour buffer, so `/api/lights` shows a colour for a dark part; read the mode to know. The Corsair Commander Core reports 0 LEDs
 - Home Assistant's Govee integration holds UDP 4002 on this host, so dj-ledfx can't hear Govee replies here (the log warns `could not bind port 4002`)
-- Without `--demo` (as deployed), classic tempo looks hold still until a DJ plays (M3 adds the internal clock); firmware looks animate
+- A run beside the deployed app can't bind UDP 50001, and a listener that can't bind stops the app at start: use `--demo`, or bind the listener to a loopback port as `tests/test_main.py`'s listening driver does, and serve on a free `--web-port` (the deployed app holds 8080)
 - The container mounts `config.toml` read-only (a file bind mount: saving logs `Device or resource busy`); `state.db` lives in the `dj-ledfx_state` volume. At start the app reads its config from state.db, and config.toml only while state.db has none, so settings saved from the web app, preview-only included, survive a restart
+- `is_config_empty()` leaves section `tempo` out, so a `state.db` holding only tempo settings still migrates `config.toml`
 - `Path.resolve()` raises `ValueError` on a NUL byte (a request for `/%00`); path guards must catch it, as `_file_within` in `web/app.py` does
+- FastAPI's own 422 echoes the request's input, and JSON can't carry a NaN, so a NaN in a body gave a 500; `unprocessable` in `web/errors.py` answers it as text
 - Web app: tokens.css names both a colour and a font size `control`; `text-control` is the colour, `text-size-control` the size
 - Web app: where tokens.css has a token, use its utility (`text-data`, `h-(--touch-min)`), never an arbitrary value equal to it
 - Web app: `@import "./tokens.css" theme(static)` keeps every token as a CSS variable, even ones no class uses
@@ -289,6 +296,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Web app: `npm run e2e` builds the mock bundle (`dist-mock`) and serves it on :4174, and the production bundle on :4175 for e2e/production.spec.ts (no backend, so it says Reconnecting), both with `strictPort` and no server reuse, so only one worktree can run it at a time; `vite preview` proxies nothing, so e2e never reaches a real server
 - Web app: Playwright baselines are per OS (`*-linux.png`); re-record with `npm run e2e -- --update-snapshots` only after comparing with the reference renders by eye
 - Web app: a backend API change (a route, a contract model) needs `cd web && npm run api:types` in the same commit, or tests/web/test_openapi_types.py fails; when the backend starts serving a type `contract.ts` wrote by hand, `contract.test.ts` fails `tsc -b` until the hand-written type becomes the generated alias
+- A route's docstring is its OpenAPI description: changing one changes the generated types (`cd web && npm run api:types`)
 - Web app: MSW's worker comes from the msw package (`msw/mockServiceWorker.js`), served by the `mswWorker()` plugin in vite.config.ts in dev and emitted into `dist-mock`, never into a production build; `scripts/check-dist.ts` fails `npm run build` if MSW, the mock fixtures or home.json gets in. ESLint keeps `@/api/mocks/*`, `fetch` and `WebSocket` inside src/api/
 - Web app: if MSW's worker fails to register (plain http off localhost), app/boot.tsx draws "The mocks didn't start" with the browser's reason instead of a blank page
 - Web app: the chrome and the pages read the live store a slice at a time (`useLive(selector)`); a selector that builds an object needs `useLiveShallow`, or its component redraws on every message. Frames never go into React state
