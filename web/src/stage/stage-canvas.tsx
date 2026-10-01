@@ -2,12 +2,12 @@
 // (`linear` and `flat`: no colour conversion, no tone mapping), the pixel ratio capped at
 // SPEC.dprCap, and a draw only when something asks for one.
 import { Canvas } from '@react-three/fiber'
-import { Color } from 'three'
 import { SPEC } from './design-numbers'
 import { STAGE_PALETTE } from './palette'
+import { rgb } from './scene/materials'
 import { StageScene, type StageSceneProps } from './scene/stage-scene'
 
-const BACKGROUND = new Color().setRGB(...STAGE_PALETTE.bg)
+const BACKGROUND = rgb(STAGE_PALETTE.bg)
 
 export function StageCanvas(props: StageSceneProps) {
   return (

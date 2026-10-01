@@ -28,6 +28,7 @@ import { ViewControls } from './overlays/view-controls'
 import { pickLight, pickRoom, screenPoints } from './picking'
 import { roomMask } from './room-mask'
 import { StageCanvas } from './stage-canvas'
+import { STAGE_LABEL } from './stage-pending'
 import { sunScene } from './sun'
 import { tooltipText } from './tooltip'
 import type { StageData } from './use-stage-data'
@@ -112,7 +113,7 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
   const state = hovered === null ? undefined : states.get(hovered)
 
   return (
-    <section ref={ref} aria-label="Home, live" className="relative size-full overflow-hidden bg-bg">
+    <section ref={ref} aria-label={STAGE_LABEL} className="relative size-full overflow-hidden bg-bg">
       {webgl ? (
         // The picture. Greyed is the only thing a frozen stage does to it (§7.6).
         <div

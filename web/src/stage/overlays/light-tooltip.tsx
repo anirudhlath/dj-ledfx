@@ -1,15 +1,16 @@
 // §8.1 "Hover a light → tooltip": its name, its colour now (hex and intensity), the look and zone,
-// the model and latency (the stats channel's, as it changes), with a leader to the light as Main.png draws it. The colour line and the
-// swatch follow the frames without React: they're painted on mount, then after each of the stage's
-// draws (cadence.ts), so they change as the canvas does, and only when the light has a new frame
-// that says something new. A frozen stage has no tooltip (§7.6).
+// the model and latency (the stats channel's, as it changes), with a leader to the light as
+// Main.png draws it. The colour line and the swatch follow the frames without React: they're
+// painted on mount, then after each of the stage's draws (cadence.ts), so they change as the canvas
+// does, and only when the light has a new frame that says something new. A frozen stage has no
+// tooltip (§7.6).
 import { useEffect, useRef } from 'react'
 import type { Light, Vec2 } from '@/api/contract'
 import { frames } from '@/api/live'
 import { useLive } from '@/api/live-store'
 import { cx } from '@/design/cx'
 import { TOOLTIP_SURFACE } from '@/design/overlays'
-import type { Size } from '../camera'
+import type { ElementSize } from '@/lib/use-element-size'
 import { onStageDraw } from '../cadence'
 import { RENDER } from '../design-numbers'
 import { swatchFill, swatchGlow, type RGB } from '../light-maths'
@@ -25,7 +26,7 @@ export interface LightTooltipProps {
   text: TooltipText
   /** The light, in CSS px on the stage. */
   at: Vec2
-  stage: Size
+  stage: ElementSize
 }
 
 export function LightTooltip({ light, state, text, at, stage }: LightTooltipProps) {

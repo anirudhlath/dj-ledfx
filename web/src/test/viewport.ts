@@ -1,9 +1,9 @@
 // jsdom has no matchMedia. This stand-in answers the two kinds of query the app asks,
 // "(width < Nrem)" and "(prefers-reduced-motion: reduce)", and fires "change" when a test resizes
 // across one or turns reduced motion on or off.
-type Listener = () => void
+import { REDUCED_MOTION_QUERY } from '@/lib/use-media-query'
 
-const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+type Listener = () => void
 
 let width = 1440
 let reducedMotion = false

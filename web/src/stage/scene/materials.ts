@@ -10,7 +10,8 @@ import type { Colour } from '../light-maths'
 import { STAGE_PALETTE } from '../palette'
 import { radians } from '../plan'
 
-const rgb = (colour: Colour) => new Color().setRGB(...colour)
+/** A palette colour for three, set as it is (see above). */
+export const rgb = (colour: Colour): Color => new Color().setRGB(...colour)
 
 /** One flat colour. */
 export function flatMaterial(colour: Colour): MeshBasicMaterial {

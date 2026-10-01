@@ -17,6 +17,7 @@ import { FIT_VIEW, fitPose, LIVE_PADDING, projectPoint, type View } from './came
 import { RENDER, SPEC } from './design-numbers'
 import { anchorOf } from './marks'
 import type { StageSceneProps } from './scene/stage-scene'
+import { STAGE_LABEL } from './stage-pending'
 import { sunPosition, sunScene } from './sun'
 import { readStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
@@ -40,8 +41,8 @@ const STAGE = { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }
 /** The stage, once its code and data have loaded. */
 async function loadedStage(): Promise<HTMLElement> {
   // The stage's code is a lazy chunk, and three.js takes a moment to load the first time.
-  await waitFor(() => expect(screen.getByRole('region', { name: 'Home, live' })).not.toHaveAttribute('aria-busy'), { timeout: 10_000 })
-  return screen.getByRole('region', { name: 'Home, live' })
+  await waitFor(() => expect(screen.getByRole('region', { name: STAGE_LABEL })).not.toHaveAttribute('aria-busy'), { timeout: 10_000 })
+  return screen.getByRole('region', { name: STAGE_LABEL })
 }
 
 /** Live on a scenario's data, laid out at Main.png's stage size. */
@@ -71,7 +72,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     for (const zone of state.running) expect(screen.getAllByText(zone.lookName).length).toBeGreaterThan(0)
     const sun = state.inputs.sun
     expect(screen.getByText(sunScene(state.home, sun)!.label!)).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: 'Home, live' })).getByText(sunPosition(sun)!)).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: STAGE_LABEL })).getByText(sunPosition(sun)!)).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')).toHaveLength(4)
   })
 

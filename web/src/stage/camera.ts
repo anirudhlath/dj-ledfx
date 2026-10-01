@@ -3,6 +3,7 @@
 // overlays (labels, marks, the tooltip) project with the same one, and tests need no WebGL.
 import type { OrthographicCamera } from 'three'
 import type { Vec2, Vec3 } from '@/api/contract'
+import type { ElementSize } from '@/lib/use-element-size'
 import { RENDER, SPEC } from './design-numbers'
 import { bearingVector, radians, toWorld } from './plan'
 
@@ -18,11 +19,6 @@ export interface View {
 }
 
 export const FIT_VIEW: View = { mode: '3d', rotateDeg: 0, zoom: 1 }
-
-export interface Size {
-  width: number
-  height: number
-}
 
 /** CSS px kept clear at the stage's edges. */
 export interface Padding {
@@ -84,7 +80,7 @@ export function axes(bearing: number, tiltDeg: number): { right: Vec3; up: Vec3;
  * The padding for a stage of this size: Live's at Main.png's stage size or larger, and in proportion
  * on a smaller one (a narrow window, the phone's stage), so the home keeps the same share of it.
  */
-export function fitPadding(padding: Padding, size: Size): Padding {
+export function fitPadding(padding: Padding, size: ElementSize): Padding {
   const k = Math.min(1, size.width / RENDER.stage.widthPx, size.height / RENDER.stage.heightPx)
   return { side: padding.side * k, top: padding.top * k, bottom: padding.bottom * k }
 }
@@ -93,7 +89,7 @@ export function fitPadding(padding: Padding, size: Size): Padding {
  * The pose that fits the outline, from the floor to SPEC.fit.heightM, inside the padding, for the
  * view; null while the stage has no size or the home no outline.
  */
-export function fitPose(outline: readonly Vec2[], size: Size, padding: Padding, view: View): CameraPose | null {
+export function fitPose(outline: readonly Vec2[], size: ElementSize, padding: Padding, view: View): CameraPose | null {
   if (!(size.width > 0 && size.height > 0) || outline.length === 0) return null
   const tiltDeg = view.mode === 'plan' ? 90 : SPEC.camera.tiltDeg
   const { right, up, back } = axes(bearingDeg(view.rotateDeg), tiltDeg)

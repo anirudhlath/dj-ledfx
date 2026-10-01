@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { frames } from '@/api/live'
 import { liveStore } from '@/api/live-store'
 import { RENDER } from '@/stage/design-numbers'
+import { STAGE_LABEL } from '@/stage/stage-pending'
 import { renderApp } from '@/test/app'
 import { HERO_NOW, startMockDataLayer } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
@@ -39,7 +40,7 @@ it('fills the stores from the mock at 60 fps, and React commits nothing', async 
   // in-memory socket delivers in microtasks between the timers. The stage's lazy chunk loads
   // meanwhile; then it gets Main.png's size, and draws.
   await act(() => vi.advanceTimersByTimeAsync(3000))
-  await vi.waitFor(() => expect(screen.getByRole('region', { name: 'Home, live' })).not.toHaveAttribute('aria-busy'), { timeout: 10_000 })
+  await vi.waitFor(() => expect(screen.getByRole('region', { name: STAGE_LABEL })).not.toHaveAttribute('aria-busy'), { timeout: 10_000 })
   act(() => resizeObserved(RENDER.stage.widthPx, RENDER.stage.heightPx))
   expect(screen.getByTestId('stage-canvas')).toBeInTheDocument()
   expect(liveStore.getState().connection).toEqual({ status: 'live', fps: 60 })
