@@ -464,10 +464,9 @@ async def _handle_command(
             {"channel": "ack", "id": cmd_id, "action": action, "protocol": sub.frame_protocol},
         )
 
-    elif action == "tap":
-        tempo = get_tempo(app)
+    elif action == "tap":  # saved by the clock's run(), within 0.25 s
         try:
-            tempo.tap(contract.TapRequest.model_validate(msg).client_time)
+            get_tempo(app).tap(contract.TapRequest.model_validate(msg).client_time)
         except ValidationError:
             detail = "A tap's client_time is a number of seconds"
             await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": detail})
@@ -476,7 +475,6 @@ async def _handle_command(
             await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(exc)})
             return
         await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
-        await tempo.save()
 
     else:
         await _send_json(

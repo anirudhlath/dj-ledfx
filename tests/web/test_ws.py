@@ -90,6 +90,32 @@ def test_a_tap_is_acked_and_sets_the_tempo(ws_app) -> None:
     assert (tempo.source, tempo.internal.how) == ("internal", "tapped")
 
 
+class _CountingStore:
+    """A tempo store that counts its saves."""
+
+    def __init__(self) -> None:
+        self.saves = 0
+
+    async def save(self, settings: object) -> None:
+        self.saves += 1
+
+
+def test_a_socket_tap_leaves_the_save_to_the_clock_s_run(ws_app) -> None:
+    """run() saves what changed within 0.25 s; only the REST controls save before answering."""
+    store = _CountingStore()
+    ws_app.state.tempo = TempoClock(store=store)
+    with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
+        sent = time.time()
+        for k in range(4):  # 150 BPM
+            ws.send_json({"action": "tap", "id": k, "client_time": sent + 0.4 * k})
+            until(ws, "ack")
+        ws.send_json({"action": "subscribe_beat", "id": "after", "fps": 5})
+        until(ws, "ack")  # the hub has finished with every tap
+
+    assert ws_app.state.tempo.bpm == pytest.approx(150.0)
+    assert store.saves == 0
+
+
 # Review Focus 2: a tap's time the clock can't use is timed by its arrival, one that isn't
 # a number is refused as REST refuses it; never a crash.
 def test_a_bad_tap_is_answered_and_the_session_lives(ws_app) -> None:
