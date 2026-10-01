@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 from tempo_fakes import PLAYER, beat_event
 
 from dj_ledfx.tempo.decks import DeckTracker
@@ -33,12 +31,10 @@ def test_the_first_deck_is_followed_until_it_goes_quiet() -> None:
 def test_a_deck_shows_its_track_bpm_and_pitch_apart() -> None:
     decks = DeckTracker()
     decks.hear(beat_event(10.0, deck=1, bpm=124.0, pitch_percent=1.2))
-    decks.hear(replace(beat_event(10.0, deck=3, bpm=126.0), track_bpm=0.0))  # not known
 
-    one, three = decks.views(10.0, master=None)
+    [one] = decks.views(10.0, master=None)
 
     assert (one.bpm, one.pitch_percent) == (124.0, 1.2)
-    assert three.bpm == 126.0  # the event's own BPM
 
 
 def test_decks_are_forgotten_once_a_set_is_over() -> None:

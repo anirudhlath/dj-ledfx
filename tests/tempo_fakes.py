@@ -71,7 +71,6 @@ def beat_event(
     return BeatEvent(
         bpm=bpm * (1.0 + pitch_percent / 100.0),
         beat_position=beat,
-        next_beat_ms=round(60_000 / bpm),
         device_number=deck,
         device_name=player,
         timestamp=at,

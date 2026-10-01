@@ -55,7 +55,6 @@ class ProDJLinkListener(asyncio.DatagramProtocol):
         event = BeatEvent(
             bpm=packet.pitch_adjusted_bpm,
             beat_position=packet.beat_number,
-            next_beat_ms=packet.next_beat_ms,
             device_number=packet.device_number,
             device_name=packet.device_name,
             timestamp=time.monotonic(),

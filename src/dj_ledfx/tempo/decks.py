@@ -8,7 +8,6 @@ goes quiet. So two decks in a mix never pull the beat back and forth.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 from dj_ledfx.events import BeatEvent
@@ -31,13 +30,10 @@ class DeckTracker:
 
     def hear(self, event: BeatEvent) -> None:
         """Note a deck's beat. The clock follows the first deck heard until it goes quiet."""
-        track_bpm = event.track_bpm
-        if not (math.isfinite(track_bpm) and track_bpm > 0):
-            track_bpm = event.bpm  # an event that doesn't know its track's BPM
         self._decks[event.device_number] = _Deck(
             event.device_number,
             event.device_name,
-            track_bpm,
+            event.track_bpm,
             event.pitch_percent,
             event.timestamp,
         )
