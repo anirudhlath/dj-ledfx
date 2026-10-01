@@ -69,9 +69,9 @@ def _field(
     return Layer(id=layer_id, name=name, type="field", kind=kind, blend=blend, settings=settings)
 
 
-def _anchor_of(look_id: str) -> str:
-    """The anchor the look's looks.json description names, on the seeded map."""
-    return anchor_named_in(handoff_looks()[look_id]["description"], seed_home().anchors)
+def _anchor_of(look_id: str, anchors: Sequence[Anchor]) -> str:
+    """The anchor the look's looks.json description names, among the seeded map's."""
+    return anchor_named_in(handoff_looks()[look_id]["description"], anchors)
 
 
 def _firmware(
@@ -89,7 +89,9 @@ def _firmware(
 
 def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
     """The layers of each handoff look this milestone can run, by look id."""
-    tv, speakers = _anchor_of("shockwave"), _anchor_of("speakers")
+    anchors = seed_home().anchors
+    tv, speakers = _anchor_of("shockwave", anchors), _anchor_of("speakers", anchors)
+    focus = _anchor_of("focus", anchors)
     return {
         "sunset": (
             _field("sky", "Gradient", "sunset_gradient"),
@@ -108,7 +110,7 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
         "lava": (_field("plasma", "Plasma", "lava_plasma"),),
         "carousel": (_field("carousel", "Carousel", "color_carousel"),),
         "ripples": (_field("ripples", "Ripples", "ripples"),),
-        "focus": (_field("focus", "Focus", "focus_field", anchor=_anchor_of("focus")),),
+        "focus": (_field("focus", "Focus", "focus_field", anchor=focus),),
         "shockwave": (
             _field("shell", "Shockwave", "shockwave_shell", anchor=tv),
             _field("beam", "Beam", "lighthouse_beam", blend="add", anchor=tv),

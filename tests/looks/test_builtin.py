@@ -11,7 +11,9 @@ from map_home import DESIGN, handoff_pins, seeded_ledset, tiny_home
 from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.registry import get_strip_effect_classes
+from dj_ledfx.home.model import Home
 from dj_ledfx.home.seed import seed_home
+from dj_ledfx.looks import builtin
 from dj_ledfx.looks.builtin import (
     CLASSIC_NAMES,
     FIRMWARE_LOOK_ID,
@@ -111,6 +113,19 @@ def test_m3_looks_start_from_the_anchor_their_description_names(look_id: str) ->
 
     assert anchor is not None
     assert anchor.name.lower() in look.description.lower()
+
+
+def test_the_handoff_layers_seed_the_map_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    seeded: list[Home] = []
+
+    def counted() -> Home:
+        seeded.append(seed_home())
+        return seeded[-1]
+
+    monkeypatch.setattr(builtin, "seed_home", counted)
+    builtin._handoff_layers()
+
+    assert len(seeded) == 1  # one map serves every anchored look
 
 
 def test_speaker_waves_plays_on_the_beat_until_m7() -> None:
