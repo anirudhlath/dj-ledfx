@@ -26,14 +26,6 @@ export interface Body {
   leds: Uint32Array
 }
 
-const DEFAULT_ORDER: Record<LightShape['kind'], string> = {
-  point: '',
-  line: 'along-path',
-  'bent-line': 'along-path',
-  cylinder: 'bottom-to-top',
-  grid: 'rows',
-}
-
 /** §7.3's sample count for the shape. */
 export function sampleCount(shape: LightShape): number {
   switch (shape.kind) {
@@ -107,25 +99,27 @@ export function samplePoints(shape: LightShape): Vec3[] {
   }
 }
 
-/** How far along the shape (0–1, in sample order) LED `i` of `count` sits. */
+/**
+ * How far along the shape (0–1, in sample order) LED `i` of `count` sits. Only the orders that turn
+ * the shape's own one round matter; any other, '' included, is the shape's own.
+ */
 export function ledAlong(shape: LightShape, order: string, i: number, count: number): number {
-  const known = order === '' ? DEFAULT_ORDER[shape.kind] : order
   switch (shape.kind) {
     case 'point':
       return 0.5
     case 'line':
     case 'bent-line': {
       const u = (i + 0.5) / count
-      return known === 'reverse-path' ? 1 - u : u
+      return order === 'reverse-path' ? 1 - u : u
     }
     case 'cylinder': {
       const u = (i + 0.5) / count
-      return known === 'top-to-bottom' ? 1 - u : u
+      return order === 'top-to-bottom' ? 1 - u : u
     }
     case 'grid': {
       const columns = gridColumns(count, shape.width, shape.depth)
       const rows = Math.ceil(count / columns)
-      const column = known === 'columns' ? Math.floor(i / rows) : i % columns
+      const column = order === 'columns' ? Math.floor(i / rows) : i % columns
       return (column + 0.5) / columns
     }
   }
