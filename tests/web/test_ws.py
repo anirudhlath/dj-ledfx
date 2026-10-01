@@ -7,6 +7,7 @@ from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from tempo_fakes import PLAYER, START, FakeTime, play, tempo_clock
 
+from dj_ledfx.events import EventBus
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import DeviceStats
 from dj_ledfx.web import ws as hub
@@ -30,6 +31,7 @@ def ws_app():
         compositor=None,
         config=MagicMock(web=MagicMock(cors_origins=["*"])),
         config_path=None,
+        event_bus=EventBus(),  # the pushes and the inputs heartbeat
     )
     return app
 

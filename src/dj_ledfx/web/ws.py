@@ -97,7 +97,6 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         tasks.append(asyncio.create_task(_beat_poll(websocket, app, sub)))
         tasks.append(asyncio.create_task(_stats_poll(websocket, app)))
         tasks.append(asyncio.create_task(_status_poll(websocket, app)))
-        tasks.append(asyncio.create_task(_inputs_poll(websocket, app)))
 
         # Handle incoming commands until the client leaves or the server stops
         while (data := await _receive_unless_stopped(websocket, session.stop)) is not None:
@@ -220,13 +219,17 @@ def initial_messages(app: Any) -> list[dict[str, Any]]:
 
 
 async def event_broadcast(app: Any) -> None:
-    """Push a channel's snapshot to every client when an event makes it stale.
+    """Push a channel's snapshot to every client when an event makes it stale, and the
+    inputs once a second besides (web spec §12.4's heartbeat): one snapshot for every tab,
+    and none within a second of a push.
 
     Changes that arrive while a push goes out coalesce into the next push.
     """
     event_bus = app.state.event_bus
     stale: dict[str, None] = {}  # an ordered set of channels
     wake = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    inputs_sent = loop.time()
 
     def mark(event: object) -> None:
         stale[_STALE_ON[type(event)]] = None
@@ -236,7 +239,15 @@ async def event_broadcast(app: Any) -> None:
         event_bus.subscribe(event_type, mark)
     try:
         while True:
-            await wake.wait()
+            # Other channels' pushes wake the loop too, so the heartbeat keeps its own time.
+            left = inputs_sent + INPUTS_HEARTBEAT_S - loop.time()
+            if left > 0:
+                try:
+                    await asyncio.wait_for(wake.wait(), left)
+                except TimeoutError:
+                    pass
+            if loop.time() - inputs_sent >= INPUTS_HEARTBEAT_S:
+                stale["inputs"] = None
             wake.clear()
             channels = list(stale)
             stale.clear()
@@ -244,6 +255,8 @@ async def event_broadcast(app: Any) -> None:
                 message = _SNAPSHOTS[channel](app)
                 if message is not None:
                     await _broadcast_json(app, message)
+                if channel == "inputs":
+                    inputs_sent = loop.time()
     finally:
         for event_type in _STALE_ON:
             event_bus.unsubscribe(event_type, mark)
@@ -278,13 +291,6 @@ def beat_message(tempo: TempoClock) -> dict[str, Any]:
         "deck_number": None if deck is None else deck.number,
         "deck_name": None if deck is None else deck.player,
     }
-
-
-async def _inputs_poll(ws: WebSocket, app: Any) -> None:
-    """The inputs channel's heartbeat, beside its pushes on change."""
-    while True:
-        await asyncio.sleep(INPUTS_HEARTBEAT_S)
-        await _send_json(ws, _inputs_message(app))
 
 
 async def _stats_poll(ws: WebSocket, app: Any) -> None:
