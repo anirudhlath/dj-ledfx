@@ -55,8 +55,8 @@ def ws_app(feed: StubFeed, watchers: Watchers, devices: Any = None) -> FastAPI:
 
 
 def receive(ws: WebSocketTestSession, count: int = 10) -> tuple[list[dict[str, Any]], list[bytes]]:
-    """The next messages, split into JSON and binary. The beat channel sends nothing here
-    (the clock is a mock), so they are the ack and frames, and a stats message a second."""
+    """The next messages, split into JSON and binary: the snapshots sent on connect, then
+    the ack, frames, ten beats a second and a stats message a second."""
     texts: list[dict[str, Any]] = []
     frames: list[bytes] = []
     for _ in range(count):
@@ -146,9 +146,9 @@ def test_a_bad_frame_subscription_is_refused_with_the_reason() -> None:
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
         ws.send_json({"action": "subscribe_frames", "protocol": 2, "streams": ["fx"], "id": 8})
         ws.send_json({"action": "subscribe_frames", "protocol": 3, "id": 9})
-        texts, _ = receive(ws, 2)
+        texts, _ = receive(ws, 6)
 
-    assert texts == [
+    assert [text for text in texts if text["channel"] == "error"] == [
         {
             "channel": "error",
             "id": 8,

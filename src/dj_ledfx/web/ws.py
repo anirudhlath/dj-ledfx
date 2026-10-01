@@ -1,9 +1,11 @@
-"""Multiplexed WebSocket hub with beat, stats, status, and frame channels."""
+"""Multiplexed WebSocket hub: beat, stats, status and frame channels, the pushed snapshots,
+and the tap command."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -11,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from dj_ledfx.tempo.model import DecksChanged, TempoChanged, TempoError
 from dj_ledfx.web import contract
 from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
 from dj_ledfx.web.state import ClientSubscription, light_index
@@ -21,6 +24,7 @@ if TYPE_CHECKING:
     from dj_ledfx.tempo.clock import TempoClock
 
 _GOING_AWAY = 1001  # RFC 6455 close code: the server is going down
+INPUTS_HEARTBEAT_S = 1.0  # the inputs channel: on change, and once a second (web spec §12.4)
 
 
 class Session:
@@ -92,6 +96,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         tasks.append(asyncio.create_task(_beat_poll(websocket, app, sub)))
         tasks.append(asyncio.create_task(_stats_poll(websocket, app)))
         tasks.append(asyncio.create_task(_status_poll(websocket, app)))
+        tasks.append(asyncio.create_task(_inputs_poll(websocket, app)))
 
         # Handle incoming commands until the client leaves or the server stops
         while (data := await _receive_unless_stopped(websocket, session.stop)) is not None:
@@ -172,18 +177,33 @@ def _transport_message(app: Any) -> dict[str, Any] | None:
     return {"channel": "transport", "state": "simulating" if zones.preview_only else "playing"}
 
 
+def _decks_message(app: Any) -> dict[str, Any]:
+    """The players heard, snake_case like the beat (F1's decision 5)."""
+    decks = [contract.deck_out(view).model_dump(mode="json") for view in app.state.tempo.decks()]
+    return {"channel": "decks", "decks": decks}
+
+
+def _inputs_message(app: Any) -> dict[str, Any]:
+    inputs = contract.inputs_out(app.state.tempo)
+    return {"channel": "inputs", "inputs": inputs.model_dump(mode="json", by_alias=True)}
+
+
 # Each pushed channel's snapshot, and the events that make a channel stale.
 _SNAPSHOTS: dict[str, Callable[[Any], dict[str, Any] | None]] = {
     "running": _running_message,
     "lights": _lights_message,
     "attention": _attention_message,
     "transport": _transport_message,
+    "decks": _decks_message,
+    "inputs": _inputs_message,
 }
 _STALE_ON: dict[type[Any], str] = {
     ZonesChanged: "running",
     LightsChanged: "lights",
     AttentionChanged: "attention",
     PreviewOnlyChanged: "transport",
+    DecksChanged: "decks",
+    TempoChanged: "inputs",
 }
 
 
@@ -252,6 +272,13 @@ def beat_message(tempo: TempoClock) -> dict[str, Any]:
         "deck_number": None if deck is None else deck.number,
         "deck_name": None if deck is None else deck.player,
     }
+
+
+async def _inputs_poll(ws: WebSocket, app: Any) -> None:
+    """The inputs channel's heartbeat, beside its pushes on change."""
+    while True:
+        await asyncio.sleep(INPUTS_HEARTBEAT_S)
+        await _send_json(ws, _inputs_message(app))
 
 
 async def _stats_poll(ws: WebSocket, app: Any) -> None:
@@ -412,7 +439,29 @@ async def _handle_command(
             {"channel": "ack", "id": cmd_id, "action": action, "protocol": sub.frame_protocol},
         )
 
+    elif action == "tap":
+        tempo = app.state.tempo
+        try:
+            tempo.tap(_client_time(msg.get("client_time")))
+        except TempoError as exc:  # a lock keeps the internal clock out
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(exc)})
+            return
+        await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
+        await tempo.save()
+
     else:
         await _send_json(
             ws, {"channel": "error", "id": cmd_id, "detail": f"Unknown action: {action}"}
         )
+
+
+def _client_time(value: object) -> float | None:
+    """A tap's client time in seconds, or None when it isn't a finite number: the tap is
+    then timed by its arrival."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    try:
+        seconds = float(value)
+    except OverflowError:  # an integer too big for a float
+        return None
+    return seconds if math.isfinite(seconds) else None

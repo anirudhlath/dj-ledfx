@@ -11,6 +11,7 @@ from tempo_fakes import PLAYER, START, FakeTime, play, tempo_clock
 
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import DeviceStats
+from dj_ledfx.web import ws as hub
 from dj_ledfx.web.app import create_app
 from dj_ledfx.web.ws import beat_message, close_all, stats_message
 
@@ -82,6 +83,44 @@ def test_the_beat_channel_speaks_v2_and_today_s_ui() -> None:
         2,
         PLAYER,
     )
+
+
+def test_a_tap_is_acked_and_sets_the_tempo(ws_app) -> None:
+    with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
+        for k in range(4):  # 0.4 s apart on the client's clock: 150 BPM
+            ws.send_json({"action": "tap", "id": k, "client_time": 1_790_000_000.0 + 0.4 * k})
+            assert _until(ws, "ack") == {"channel": "ack", "id": k, "action": "tap"}
+
+    tempo = ws_app.state.tempo
+    assert tempo.bpm == pytest.approx(150.0)
+    assert (tempo.source, tempo.internal.how) == ("internal", "tapped")
+
+
+# Review Focus 2: a tap the clock can't use is timed by its arrival or refused; never a crash.
+def test_a_bad_tap_is_answered_and_the_session_lives(ws_app) -> None:
+    times = ['"soon"', "NaN", "-Infinity", "1e400", "1" + "0" * 400, "true", "null", "[]"]
+    with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
+        for k, client_time in enumerate(times):
+            ws.send_text(f'{{"action": "tap", "id": {k}, "client_time": {client_time}}}')
+            assert _until(ws, "ack")["id"] == k  # timed by its arrival instead
+        ws_app.state.tempo.set_tempo("prodjlink")
+        ws.send_json({"action": "tap", "id": "locked", "client_time": 1_790_000_000.0})
+        refused = _until(ws, "error")
+        ws.send_json({"action": "subscribe_beat", "id": "alive", "fps": 5})
+        alive = _until(ws, "ack")
+
+    assert refused["id"] == "locked" and "Pro DJ Link" in refused["detail"]
+    assert alive["id"] == "alive"
+
+
+def test_the_inputs_beat_once_a_second(ws_app, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hub, "INPUTS_HEARTBEAT_S", 0.01)
+    with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
+        on_connect = _until(ws, "inputs")
+        heartbeat = _until(ws, "inputs")
+
+    assert on_connect["inputs"]["tempo"]["source"] == "internal"
+    assert heartbeat["inputs"] == on_connect["inputs"]
 
 
 def test_ws_subscribe_beat_command(client):

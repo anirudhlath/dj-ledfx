@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator, Callable
 from datetime import timedelta
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 import pytest_asyncio
 from api_home import Api, api_home
 from conftest import FakeLight
+from tempo_fakes import PLAYER, beat_event
 
 from dj_ledfx.web.ws import Session, event_broadcast, initial_messages
 from dj_ledfx.zones.model import ZoneRecord, ZonesChanged
@@ -113,7 +115,7 @@ async def test_a_client_that_connects_gets_every_pushed_channel(api: Api) -> Non
 
     channels = [message["channel"] for message in initial_messages(api.app)]
 
-    assert channels == ["running", "lights", "attention", "transport"]
+    assert channels == ["running", "lights", "attention", "transport", "decks", "inputs"]
 
 
 async def test_preview_only_is_pushed_as_the_transport_state(api: Api, socket: FakeSocket) -> None:
@@ -121,3 +123,29 @@ async def test_preview_only_is_pushed_as_the_transport_state(api: Api, socket: F
     await until(lambda: bool(socket.on("transport")))
 
     assert socket.on("transport") == [{"channel": "transport", "state": "simulating"}]
+
+
+async def test_decks_and_inputs_are_pushed_when_a_dj_starts(api: Api, socket: FakeSocket) -> None:
+    api.home.tempo.on_beat(beat_event(time.monotonic(), deck=2))
+    await until(lambda: bool(socket.on("decks")) and bool(socket.on("inputs")))
+
+    assert socket.on("decks")[-1]["decks"] == [
+        {
+            "number": 2,
+            "player": PLAYER,
+            "state": "playing",
+            "bpm": 128.0,
+            "pitch_percent": 0.0,
+            "master": True,
+        }
+    ]
+    assert socket.on("inputs")[-1]["inputs"]["prodjlink"]["state"] == "connected"
+
+
+async def test_the_inputs_are_pushed_when_the_tempo_is_set(api: Api, socket: FakeSocket) -> None:
+    await api.client.put("/api/inputs/tempo", json={"lock": "auto", "bpm": 98.0})
+    await until(lambda: bool(socket.on("inputs")))
+
+    [message] = socket.on("inputs")
+    assert message["inputs"]["tempo"]["bpm"] == 98.0
+    assert message["inputs"]["tempo"]["internal"]["how"] == "set"
