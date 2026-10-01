@@ -31,6 +31,14 @@ export function counted<P extends object>(name: string, Real: ComponentType<P>):
 }
 
 /**
+ * `StandIn` in place of `Real` (one jsdom can't render, such as the WebGL canvas), counted under
+ * `name` and memoised as `Real` is, so a render that memo() would skip isn't counted.
+ */
+export function countedStandIn<P extends object>(name: string, Real: ComponentType<P>, StandIn: ComponentType<P>): ComponentType<P> {
+  return counted(name, isMemo<P>(Real) ? (memo(StandIn, Real.compare ?? undefined) as unknown as ComponentType<P>) : StandIn)
+}
+
+/**
  * A vi.mock factory: the module as it is, but its component `exportName` counted under `name`. The
  * factory runs before the test file's imports, so reach this through vi.hoisted.
  */

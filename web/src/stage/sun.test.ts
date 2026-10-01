@@ -4,7 +4,7 @@ import { homeFixture } from '@/api/mocks/fixtures'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { HERO_NOW } from '@/test/live'
 import { bounds } from './plan'
-import { compass, sunPoint, sunPosition, sunScene, sunsetTime } from './sun'
+import { compass, sameSun, sunPoint, sunPosition, sunScene, sunsetTime } from './sun'
 
 const HERO_SUN = buildScenario('hero', HERO_NOW).inputs.sun
 /** A sun of this test's own: well up, south of west, setting at 20:05. */
@@ -65,6 +65,20 @@ describe('the sun (§7.4)', () => {
     const path = [...HERO_SUN.path!, { at: HERO_SUN.sunset, elevation: 5, azimuth: Number.NaN }]
     expect(sunScene(homeFixture, { ...HERO_SUN, path })!.path.flat().every(Number.isFinite)).toBe(true)
     expect(sunScene(homeFixture, { ...HERO_SUN, path: 'soon' } as unknown as SunInput)!.path).toHaveLength(1)
+  })
+
+  // E6: the inputs heartbeat sends a new copy of the sun each second.
+  it('takes a copy of the sun for the same sun, and a moved field or path point for a new one', () => {
+    const copy = structuredClone(HERO_SUN)
+    expect(sameSun(HERO_SUN, copy)).toBe(true)
+    expect(sameSun(null, null)).toBe(true)
+    expect(sameSun(HERO_SUN, null)).toBe(false)
+    expect(sameSun(HERO_SUN, { ...copy, azimuth: copy.azimuth + 0.1 })).toBe(false)
+    expect(sameSun(HERO_SUN, { ...copy, path: copy.path!.slice(1) })).toBe(false)
+    const moved = structuredClone(HERO_SUN)
+    moved.path![0].elevation += 0.1
+    expect(sameSun(HERO_SUN, moved)).toBe(false)
+    expect(sameSun(HERO_SUN, { ...copy, path: undefined })).toBe(false)
   })
 
   it("knows no sunset when the time doesn't parse", () => {

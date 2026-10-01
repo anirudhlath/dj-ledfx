@@ -22,19 +22,20 @@ import { sunPosition, sunScene } from './sun'
 import { readStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
 
-// jsdom has no WebGL: the canvas is a stand-in that shows what it was asked to draw, and keeps the
-// props it was given last. The rest of the stage (the SVG layer, the overlays, the pointer) is the
-// real one, with the SVG layer's renders counted.
+// jsdom has no WebGL: the canvas is a stand-in, memoised as the real one is, that shows what it was
+// asked to draw and keeps the props it was given last. The rest of the stage (the SVG layer, the
+// overlays, the pointer) is the real one. The view's, the canvas's and the SVG layer's renders are counted.
 const drawn = vi.hoisted(() => ({ props: null as StageSceneProps | null }))
 vi.mock('./webgl', () => ({ hasWebGL2: vi.fn(() => true) }))
-vi.mock('./stage-canvas', () => ({
-  StageCanvas: (props: StageSceneProps) => {
+const { countedExport, countedStandIn } = await vi.hoisted(() => import('@/test/count-renders'))
+vi.mock('./stage-canvas', async (importOriginal: <T>() => Promise<T>) => ({
+  StageCanvas: countedStandIn('canvas', (await importOriginal<typeof import('./stage-canvas')>()).StageCanvas, (props: StageSceneProps) => {
     drawn.props = props
     return <div data-testid="stage-canvas" data-cadence={String(props.cadenceMs)} />
-  },
+  }),
 }))
-const { countedExport } = await vi.hoisted(() => import('@/test/count-renders'))
 vi.mock('./overlays/stage-svg', countedExport('svg', 'StageSvg'))
+vi.mock('./stage-view', countedExport('view', 'StageView'))
 
 const STAGE = { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }
 
@@ -92,6 +93,32 @@ describe('the stage on Live (§7, §8.1)', () => {
     push((light) => (light.id === streaming.id ? { status: 'offline' } : {}))
     expect(drawn.props!.writer).not.toBe(writer)
     expect(renders.svg).toBe(1)
+  })
+
+  // E6: hovering re-renders the view, for the tooltip, and nothing it draws.
+  it('renders neither the canvas nor the SVG layer again for a hover', async () => {
+    const { state, pose } = await openLive()
+    const light = state.lights.find((candidate) => candidate.shape != null)!
+    const [x, y] = projectPoint(pose, anchorOf(lightBodies(light)[0]))
+    resetRenders()
+    fireEvent.pointerMove(picture(), { clientX: x, clientY: y, pointerType: 'mouse' })
+    expect(await screen.findByRole('tooltip')).toBeInTheDocument()
+    expect(renders.canvas ?? 0).toBe(0)
+    expect(renders.svg ?? 0).toBe(0)
+  })
+
+  // E6: the engine sends `inputs` once a second; one whose sun hasn't changed changes nothing drawn.
+  it('renders nothing again for an inputs heartbeat with the same sun', async () => {
+    await openLive()
+    const inputs = liveStore.getState().inputs!
+    const heartbeat = (sun = inputs.sun) => act(() => applyMessage(liveStore, { channel: 'inputs', inputs: structuredClone({ ...inputs, sun }) }, 0))
+    resetRenders()
+    heartbeat()
+    expect(renders).toEqual({})
+    heartbeat({ ...inputs.sun!, elevation: inputs.sun!.elevation + 1 })
+    expect(renders.view).toBe(1)
+    expect(renders.svg).toBe(1)
+    expect(renders.canvas ?? 0).toBe(0)
   })
 
   it('hides the labels with the Labels switch, and remembers that for Live', async () => {

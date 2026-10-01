@@ -8,7 +8,7 @@
 // programs synchronously, so until compileAsync() has them ready off the main thread, nothing draws:
 // not on demand (frameloop "never") and not on the cadence (cadenceMs null).
 import { createRoot, type ReconcilerRoot } from '@react-three/fiber'
-import { Component, useInsertionEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Component, memo, useInsertionEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { SPEC } from './design-numbers'
 import { STAGE_PALETTE } from './palette'
 import { rgb } from './scene/materials'
@@ -33,7 +33,8 @@ class HandOn extends Component<{ onError: (error: unknown) => void; children: Re
   }
 }
 
-export function StageCanvas(props: StageSceneProps) {
+/** Memoised: a hover or anything else the page re-renders for doesn't touch the canvas. */
+export const StageCanvas = memo(function StageCanvas(props: StageSceneProps) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const root = useRef<ReconcilerRoot<HTMLCanvasElement> | null>(null)
   const compiling = useRef(false)
@@ -83,4 +84,4 @@ export function StageCanvas(props: StageSceneProps) {
   })
 
   return <canvas ref={canvas} aria-hidden="true" className="absolute inset-0" />
-}
+})

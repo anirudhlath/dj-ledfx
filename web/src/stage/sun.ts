@@ -50,6 +50,24 @@ export interface SunScene {
  * Where the sun stands, in whole degrees and the nearest compass point ("12° · W"), as §7.4's label
  * and §8.1's readout say it; null while it's down or unknown (decision 7).
  */
+/**
+ * Whether two of the server's suns say the same, field by field: the inputs heartbeat sends a new copy
+ * each second. A field it can't compare (item 7: the sun is trusted in nothing) counts as changed.
+ */
+export function sameSun(before: SunInput | null, after: SunInput | null): boolean {
+  if (before === after) return true
+  if (before === null || after === null) return false
+  const fields = (['elevation', 'azimuth', 'sunrise', 'sunset'] as const).every((field) => before[field] === after[field])
+  const [a, b] = [before.path, after.path]
+  const paths =
+    a === b ||
+    (Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((point, i) => point?.at === b[i]?.at && point?.elevation === b[i]?.elevation && point?.azimuth === b[i]?.azimuth))
+  return fields && paths
+}
+
 export function sunPosition(sun: SunInput | null | undefined): string | null {
   if (sun == null || !up(sun)) return null
   return `${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}`
