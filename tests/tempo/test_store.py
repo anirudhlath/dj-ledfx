@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import timedelta
+from pathlib import Path
 
 from loguru import logger
 from tempo_fakes import START_WALL, FakeTime, events, play, tempo_clock
 
 from dj_ledfx.events import EventBus
 from dj_ledfx.persistence.state_db import StateDB
-from dj_ledfx.persistence.toml_io import export_toml, import_toml
+from dj_ledfx.persistence.toml_io import export_toml, import_toml, migrate_from_toml
 from dj_ledfx.tempo.model import (
     QUIET_S,
     DjSet,
@@ -79,10 +80,14 @@ async def test_the_settings_never_hold_a_null_so_a_backup_can_carry_them(db: Sta
     assert (await store.load()).internal == InternalTempo()
 
 
-async def test_tempo_settings_are_not_the_app_s_config(db: StateDB) -> None:
+async def test_tempo_settings_are_not_the_app_s_config(db: StateDB, tmp_path: Path) -> None:
     await TempoStore(db).save(SETTINGS)
+    config_toml = tmp_path / "config.toml"
+    config_toml.write_text("[engine]\nfps = 90\n")
 
-    assert await db.is_config_empty()  # a fresh start still migrates config.toml
+    await migrate_from_toml(db, config_path=config_toml)  # a first start migrates it
+
+    assert (await db.load_all_config())[("engine", "fps")] == 90
 
 
 async def test_the_clock_saves_what_changed_and_starts_from_it(db: StateDB) -> None:

@@ -24,6 +24,7 @@ import pytest
 from tempo_fakes import beat_packet
 
 from dj_ledfx.home.seed import seed_home
+from dj_ledfx.persistence.state_db import StateDB
 
 pytest.importorskip("fastapi")  # the web extra
 
@@ -280,6 +281,27 @@ async def test_a_dj_port_that_can_t_be_bound_leaves_the_app_on_its_clock(tmp_pat
     assert any("WARNING" in line and held in line for line in output.splitlines()), output
     assert "Traceback" not in output, output
     assert app.returncode == 0
+
+
+async def test_a_setting_saved_before_config_toml_came_doesn_t_stop_its_migration(
+    tmp_path: Path,
+) -> None:
+    """A state.db whose only row is one the app saved at run time (preview-only), with no
+    config.toml then: the config.toml that comes later is migrated at the next start."""
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    await db.save_config_key("engine", "preview_only", "true")
+    await db.close()
+    (tmp_path / "config.toml").write_text("[engine]\nfps = 42\n")
+
+    async with _app(tmp_path) as (app, port):
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+            engine = (await _get_when_up(client, "/config", app)).json()["engine"]
+        output = await _stop(app)
+
+    assert "Traceback" not in output, output
+    assert (engine["fps"], engine["preview_only"]) == (42, True)
+    assert (tmp_path / "config.toml.bak").exists()
 
 
 async def test_a_tempo_set_at_start_is_kept_across_a_restart(tmp_path: Path) -> None:

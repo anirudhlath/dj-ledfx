@@ -555,18 +555,24 @@ async def _import_recent(db: StateDB, data: dict[str, Any]) -> None:
 
 # --- First-Launch Migration ---
 
+# The legacy TOML migration's run-once mark (StateDB.mark_statement). Schema migration 008
+# gives it to every database that held the app's config before the mark existed.
+TOML_MIGRATED_KEY = "toml_migrated"
+
 
 async def migrate_from_toml(
     db: StateDB,
     config_path: Path | None = None,
     presets_path: Path | None = None,
 ) -> None:
-    """Migrate legacy TOML files into the DB on first launch.
+    """Migrate legacy TOML files into the DB, once: after the first migration the database
+    is the source of truth, and a database with the run-once mark is left alone.
 
     For each provided path:
     - If the file exists, parse it, import data into DB, rename to .bak (or leave it,
       with a warning, when it can't be renamed).
-    - If the file does not exist, silently skip.
+    - If the file does not exist, silently skip. With neither file there's nothing to
+      mark, so a config.toml that turns up later is still migrated.
 
     config_path format (old config.toml):
       [engine]           — engine config
@@ -581,13 +587,23 @@ async def migrate_from_toml(
       effect_class = "..."
       params = { ... }
     """
+    if await db.has_mark(TOML_MIGRATED_KEY):
+        return
+    migrated: list[Path] = []
     if config_path is not None and config_path.exists():
         await _migrate_config_toml(db, config_path)
-        _set_aside(config_path)
-
+        migrated.append(config_path)
     if presets_path is not None and presets_path.exists():
         await _migrate_presets_toml(db, presets_path)
-        _set_aside(presets_path)
+        migrated.append(presets_path)
+    if not migrated:
+        return
+    # Marked before the files are set aside: a crash in between leaves them in place, as
+    # a read-only mount does, and nothing is migrated twice. A crash before the mark
+    # migrates them again at the next start, over the same rows.
+    await db.write_many([db.mark_statement(TOML_MIGRATED_KEY)])
+    for path in migrated:
+        _set_aside(path)
 
 
 def _set_aside(path: Path) -> None:

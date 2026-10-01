@@ -256,14 +256,6 @@ class StateDB:
                 result[(section, key)] = value
         return result
 
-    async def is_config_empty(self) -> bool:
-        """Return True if there are no user config entries. The tempo clock's settings
-        (section `tempo`) aren't the app's config: they never stop a TOML migration."""
-        rows = await self._execute_read(
-            "SELECT COUNT(*) FROM config WHERE section NOT IN ('_meta', 'tempo')"
-        )
-        return rows[0][0] == 0
-
     async def save_config_key(self, section: str, key: str, value: str) -> None:
         """Upsert a single config key-value in a section."""
         await self._execute_write(

@@ -133,20 +133,23 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+_CONFIG_SECTIONS = frozenset({"engine", "network", "web", "discovery", "effect"})
+
+
 async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
     """Build AppConfig from StateDB config table.
 
-    Returns None if the config table is empty (fresh DB with no migrated config).
+    Returns None if the table holds none of AppConfig's sections (a fresh DB with no
+    migrated config). Other sections, such as the tempo clock's, don't count.
     """
-    if await state_db.is_config_empty():
-        return None
-
     all_config = await state_db.load_all_config()
 
     # Group by section
     sections: dict[str, dict[str, object]] = {}
     for (section, key), value in all_config.items():
         sections.setdefault(section, {})[key] = value
+    if not _CONFIG_SECTIONS & sections.keys():
+        return None
 
     engine = EngineConfig(**filter_fields(EngineConfig, sections.get("engine", {})))
     network = NetworkConfig(**filter_fields(NetworkConfig, sections.get("network", {})))
@@ -191,15 +194,11 @@ async def _run(args: argparse.Namespace) -> None:
     state_db = StateDB(db_path)
     await state_db.open()
 
-    presets_toml = args.config.parent / "presets.toml"
-    if await state_db.is_config_empty():
-        if args.config.exists() or presets_toml.exists():
-            logger.info("Fresh DB detected — running TOML migration")
-            await migrate_from_toml(
-                state_db,
-                config_path=args.config if args.config.exists() else None,
-                presets_path=presets_toml if presets_toml.exists() else None,
-            )
+    # config.toml and presets.toml move into state.db once, at the first start that finds
+    # them (a run-once mark); from then on the database is the source of truth
+    await migrate_from_toml(
+        state_db, config_path=args.config, presets_path=args.config.parent / "presets.toml"
+    )
 
     config = await _load_config_from_db(state_db)
     if config is None:
