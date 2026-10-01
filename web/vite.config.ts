@@ -42,7 +42,11 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  build: { outDir: mode === 'mock' ? 'dist-mock' : 'dist' },
+  build: {
+    outDir: mode === 'mock' ? 'dist-mock' : 'dist',
+    // three.js in a chunk of its own: §14's first-load budget excludes it (scripts/check-dist.ts).
+    rolldownOptions: { output: { codeSplitting: { groups: [{ name: 'three', test: /[\\/]node_modules[\\/]three[\\/]/ }] } } },
+  },
   server: {
     port: 5174,
     strictPort: true,

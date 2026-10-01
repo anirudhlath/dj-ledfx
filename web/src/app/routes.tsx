@@ -1,6 +1,7 @@
 import { Navigate, type RouteObject } from 'react-router'
 import { formatDayDateTime, formatDayTime } from '@/lib/format'
 import { AppError, RootError } from '@/pages/app-error'
+import { LivePage } from '@/pages/live'
 import { NotFound } from '@/pages/not-found'
 import { Placeholder } from '@/pages/placeholder'
 import { AppShell } from '@/shell/app-shell'
@@ -42,7 +43,7 @@ export const routes: RouteObject[] = [
         errorElement: <AppError />,
         children: [
           { index: true, element: <Navigate to="/live" replace /> },
-          { path: 'live', handle: LIVE, element: <Placeholder name="Stage and Running panel" milestone="F2 and F3" /> },
+          { path: 'live', handle: LIVE, element: <LivePage /> },
           { path: 'live/put', handle: LIVE, element: <Placeholder name="Put a look on" milestone="F4" /> },
           { path: 'live/zones/:zoneId', handle: LIVE, element: <Placeholder name="Zone" milestone="F3" /> },
           { path: 'looks', handle: LOOKS, element: <Placeholder name="Looks" milestone="F5" /> },
