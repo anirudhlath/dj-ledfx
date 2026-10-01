@@ -6,12 +6,12 @@ import json
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
-from dj_ledfx.timing import as_utc, utcnow
+from dj_ledfx.timing import parse_utc, utc_text, utcnow
 from dj_ledfx.zones.model import (
     ALL_LIGHTS_ZONE_ID,
     DERIVED_KINDS,
@@ -44,17 +44,11 @@ def _lights(text: str, zone_id: str) -> tuple[str, ...]:
 
 
 def _time(text: str, zone_id: str) -> datetime:
-    try:
-        value = datetime.fromisoformat(text)
-    except ValueError:
+    value = parse_utc(text)
+    if value is None:
         logger.warning("Zone {}: unreadable start time {!r}; using now", zone_id, text)
         return utcnow()
-    return as_utc(value)
-
-
-def _utc(when: datetime) -> str:
-    """A time as UTC text, so that recent_looks' text compares as the times do."""
-    return as_utc(when).astimezone(UTC).isoformat()
+    return value
 
 
 class ZoneStore:
@@ -167,13 +161,11 @@ class ZoneStore:
         )
         recent: list[StoppedLook] = []
         for zone_id, look_id, started_at, stopped_at in rows:
-            try:
-                started = datetime.fromisoformat(started_at)
-                stopped = datetime.fromisoformat(stopped_at)
-            except ValueError:
+            started, stopped = parse_utc(started_at), parse_utc(stopped_at)
+            if started is None or stopped is None:
                 logger.warning("Zone {}: unreadable times for look {}; left out", zone_id, look_id)
                 continue
-            recent.append(StoppedLook(zone_id, look_id, as_utc(started), as_utc(stopped)))
+            recent.append(StoppedLook(zone_id, look_id, started, stopped))
         return recent
 
     async def migrate_scenes_once(self) -> None:
@@ -230,7 +222,12 @@ class ZoneStore:
                 "ON CONFLICT(zone_id, look_id) DO UPDATE SET started_at=excluded.started_at, "
                 "stopped_at=excluded.stopped_at "
                 "WHERE excluded.stopped_at >= recent_looks.stopped_at",
-                (entry.zone_id, entry.look_id, _utc(entry.started_at), _utc(entry.stopped_at)),
+                (
+                    entry.zone_id,
+                    entry.look_id,
+                    utc_text(entry.started_at),
+                    utc_text(entry.stopped_at),
+                ),
             )
             for entry in stopped
         ]

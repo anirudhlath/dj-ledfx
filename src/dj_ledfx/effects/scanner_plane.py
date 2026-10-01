@@ -3,13 +3,13 @@ the ceiling and back every two beats."""
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.color import palette_float
+from dj_ledfx.effects.easing import raised_cosine
 from dj_ledfx.effects.field import ParamField
 from dj_ledfx.effects.field_tools import height01
 from dj_ledfx.effects.params import EffectParam, level_param
@@ -50,7 +50,7 @@ class ScannerPlane(ParamField):
         values = self._values
         heights: NDArray[np.float32] = self._per_leds(leds, height01)
         cycle = ((ctx.beat_index % 2) + ctx.beat_phase) / 2.0  # up in one beat, down in the next
-        plane = np.float32(0.5 - 0.5 * math.cos(2.0 * math.pi * cycle))
+        plane = np.float32(raised_cosine(cycle))
         gap = (heights - plane) / np.float32(values["width"])
         glow = np.exp(-(gap * gap))
         out = self._rest + (self._colour - self._rest) * glow[:, None]

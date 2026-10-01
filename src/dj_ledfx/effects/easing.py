@@ -35,6 +35,12 @@ def ease_in_out(t: float | NDArray[np.float64]) -> float | NDArray[np.float64]:
     return t * t * (3.0 - 2.0 * t)
 
 
+def raised_cosine(p: float) -> float:
+    """0 at p = 0, rising smoothly to 1 at p = 0.5 and back to 0 at p = 1: one breath, or
+    one there-and-back, per unit of p."""
+    return 0.5 - 0.5 * math.cos(2.0 * math.pi * p)
+
+
 def sine_ease(
     t: float | NDArray[np.float64],
 ) -> float | NDArray[np.float64]:

@@ -16,13 +16,13 @@ router = APIRouter()
 
 @router.get("/inputs")
 async def get_inputs(request: Request) -> api.Inputs:
-    return api.inputs_out(get_tempo(request), listening(request.app))
+    return api.inputs_out(get_tempo(request.app), listening(request.app))
 
 
 @router.put("/inputs/tempo")
 async def set_tempo(request: Request, body: api.TempoRequest) -> api.TempoInput:
     """Pin a source or go back to Auto. A BPM sets the internal clock."""
-    tempo = get_tempo(request)
+    tempo = get_tempo(request.app)
     with answers():
         tempo.set_tempo(body.lock, body.bpm)
     await tempo.save()
@@ -31,7 +31,7 @@ async def set_tempo(request: Request, body: api.TempoRequest) -> api.TempoInput:
 
 @router.post("/inputs/tempo/tap")
 async def tap(request: Request, body: api.TapRequest | None = None) -> api.TempoInput:
-    tempo = get_tempo(request)
+    tempo = get_tempo(request.app)
     with answers():
         tempo.tap(None if body is None else body.client_time)
     await tempo.save()
@@ -40,7 +40,7 @@ async def tap(request: Request, body: api.TapRequest | None = None) -> api.Tempo
 
 @router.post("/inputs/tempo/nudge")
 async def nudge(request: Request, body: api.NudgeRequest) -> api.TempoInput:
-    tempo = get_tempo(request)
+    tempo = get_tempo(request.app)
     with answers():
         tempo.nudge(body.delta)
     await tempo.save()

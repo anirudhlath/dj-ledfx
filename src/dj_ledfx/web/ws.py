@@ -17,7 +17,7 @@ from dj_ledfx.tempo.model import DecksChanged, TempoChanged, TempoError
 from dj_ledfx.types import is_finite_number
 from dj_ledfx.web import contract
 from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
-from dj_ledfx.web.state import ClientSubscription, light_index, listening
+from dj_ledfx.web.state import ClientSubscription, get_tempo, light_index, listening
 from dj_ledfx.zones.frames import STREAMS
 from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
 
@@ -185,12 +185,12 @@ def _transport_message(app: Any) -> dict[str, Any] | None:
 
 def _decks_message(app: Any) -> dict[str, Any]:
     """The players heard, snake_case like the beat (F1's decision 5)."""
-    decks = [deck.model_dump(mode="json") for deck in contract.decks_out(app.state.tempo)]
+    decks = [deck.model_dump(mode="json") for deck in contract.decks_out(get_tempo(app))]
     return {"channel": "decks", "decks": decks}
 
 
 def _inputs_message(app: Any) -> dict[str, Any]:
-    inputs = contract.inputs_out(app.state.tempo, listening(app))
+    inputs = contract.inputs_out(get_tempo(app), listening(app))
     return {"channel": "inputs", "inputs": inputs.model_dump(mode="json", by_alias=True)}
 
 
@@ -253,7 +253,7 @@ async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
     """The beat at the client's rate. The clock always runs, so every message is new."""
     while True:
         await asyncio.sleep(1.0 / max(sub.beat_fps, 1.0))
-        await _send_json(ws, beat_message(app.state.tempo))
+        await _send_json(ws, beat_message(get_tempo(app)))
 
 
 def beat_message(tempo: TempoClock) -> dict[str, Any]:
@@ -459,7 +459,7 @@ async def _handle_command(
         )
 
     elif action == "tap":
-        tempo = app.state.tempo
+        tempo = get_tempo(app)
         try:
             tempo.tap(contract.TapRequest.model_validate(msg).client_time)
         except ValidationError:

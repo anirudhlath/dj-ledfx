@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any
 
 from dj_ledfx.persistence.state_db import StateDB
@@ -23,7 +22,7 @@ from dj_ledfx.tempo.model import (
     TempoSettings,
     check_bpm,
 )
-from dj_ledfx.timing import as_utc
+from dj_ledfx.timing import parse_utc, utc_text
 
 SECTION = "tempo"
 
@@ -62,16 +61,16 @@ def settings_to(settings: TempoSettings) -> dict[str, Any]:
         "internal_how": settings.internal.how,
     }
     if settings.internal.at is not None:
-        values["internal_at"] = as_utc(settings.internal.at).isoformat()
+        values["internal_at"] = utc_text(settings.internal.at)
     if settings.last_set is not None:
-        values["last_set_from"] = as_utc(settings.last_set.started).isoformat()
-        values["last_set_to"] = as_utc(settings.last_set.ended).isoformat()
+        values["last_set_from"] = utc_text(settings.last_set.started)
+        values["last_set_to"] = utc_text(settings.last_set.ended)
     return values
 
 
 def settings_from(values: Mapping[str, Any]) -> TempoSettings:
     lock = values.get("lock")
-    started, ended = _time(values.get("last_set_from")), _time(values.get("last_set_to"))
+    started, ended = parse_utc(values.get("last_set_from")), parse_utc(values.get("last_set_to"))
     last_set = None
     if started is not None and ended is not None and started <= ended:
         last_set = DjSet(started, ended)
@@ -89,13 +88,5 @@ def _internal(values: Mapping[str, Any]) -> InternalTempo:
         return InternalTempo()  # without its BPM the rest means nothing
     given = values.get("internal_how")
     how: InternalHow = given if given in HOWS else "set"
-    return InternalTempo(bpm, how, None if how == "default" else _time(values.get("internal_at")))
-
-
-def _time(value: Any) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return as_utc(datetime.fromisoformat(value))
-    except ValueError:
-        return None
+    at = None if how == "default" else parse_utc(values.get("internal_at"))
+    return InternalTempo(bpm, how, at)

@@ -21,6 +21,7 @@ from dj_ledfx.devices.lifx.packet import (
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
 from dj_ledfx.effects.color import hex_to_rgb, palette_lerp, rgb_to_hex, to_float_rgb
+from dj_ledfx.effects.easing import raised_cosine
 from dj_ledfx.effects.firmware import FirmwareEffect, Params, require_adapter
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import RGB, clamp01
@@ -327,7 +328,7 @@ class LifxWaveform(FirmwareEffect):
         elif shape == "pulse":
             v = 1.0 if p < 0.5 else 0.0
         else:
-            v = 0.5 - 0.5 * math.cos(2.0 * math.pi * p)
+            v = raised_cosine(p)
         if self._rgb is None:
             self._rgb = (
                 np.array(hex_to_rgb(self._base), dtype=np.float32),

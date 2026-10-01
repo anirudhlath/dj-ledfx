@@ -80,5 +80,7 @@ def listening(app: Any) -> Listening:
     return cast("Listening | None", app.state.listening) or Listening()
 
 
-def get_tempo(request: Request) -> TempoClock:
-    return cast("TempoClock", request.app.state.tempo)  # create_app always has one
+def get_tempo(app: Any) -> TempoClock:
+    """The tempo clock: create_app always has one. It takes the app, so the socket hub reads
+    it as the routes do."""
+    return cast("TempoClock", app.state.tempo)

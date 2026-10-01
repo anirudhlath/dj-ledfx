@@ -202,7 +202,7 @@ async def import_state(request: Request) -> dict[str, str]:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {exc}") from exc
     looks = get_looks(request)
     home_map = request.app.state.home_map  # None where the app has no map
-    tempo = get_tempo(request)  # takes the file's settings; a pre-M3 file has none
+    tempo = get_tempo(request.app)  # takes the file's settings; a pre-M3 file has none
 
     async def restore() -> None:
         try:

@@ -24,6 +24,23 @@ def as_utc(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
+def utc_text(when: datetime) -> str:
+    """A time as UTC ISO text, for state.db: saved times then compare as text as they do as
+    times."""
+    return as_utc(when).astimezone(UTC).isoformat()
+
+
+def parse_utc(text: object) -> datetime | None:
+    """A saved time read back (UTC when it says no timezone), or None for anything that
+    isn't ISO text."""
+    if not isinstance(text, str):
+        return None
+    try:
+        return as_utc(datetime.fromisoformat(text))
+    except ValueError:
+        return None
+
+
 def trim_window(stamps: deque[float], now: float) -> None:
     """Drop the stamps older than the rate window, so len(stamps) is a rate per second."""
     while stamps and now - stamps[0] > RATE_WINDOW_S:

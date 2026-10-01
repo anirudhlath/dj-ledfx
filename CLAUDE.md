@@ -123,7 +123,7 @@ src/dj_ledfx/ layout:
 - `spatial/geometry.py` — 3D geometry utilities for spatial calculations
 - `spatial/scene.py` — SceneModel: device placements, spatial configuration
 - `types.py` — Canonical location for all shared types (RGB, DeviceInfo, RenderedFrame, DeviceStats), and `clamp01`
-- `timing.py` — `utcnow()`, `as_utc()`, the one-second rate window (`RATE_WINDOW_S`, `trim_window`) and `paced()`, the fixed-period loop the engine and the scheduler run
+- `timing.py` — `utcnow()`, `as_utc()`, `utc_text()` and `parse_utc()` (a saved time as UTC text and back, for the zone and tempo stores), the one-second rate window (`RATE_WINDOW_S`, `trim_window`) and `paced()`, the fixed-period loop the engine and the scheduler run
 - `events.py` — Typed callback event bus (sync, non-blocking callbacks only) + device events; the zones' events (`ZonesChanged`, `PreviewOnlyChanged`, `LightsChanged`, `AttentionChanged`) live in `zones/model.py`, the tempo's (`TempoChanged`, `DecksChanged`) in `tempo/model.py`
 - `persistence/` — SQLite-backed state persistence (state_db.py, toml_io.py, debounced_writer.py, migrations/); `StateDB.write_many` runs statements as one transaction, and `has_mark`/`mark_statement` mark run-once steps
 - `devices/discovery.py` — DiscoveryOrchestrator: multi-wave scanning, fast reconnect, ghost promote/demote
@@ -266,7 +266,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Focus's anchor comes from its looks.json description, not from typed text
 - The deployed app's first M2 start runs migrations 005 and 006 and places every known light, unconfirmed; a light discovered later gets no placement until `POST /api/lights/placement/guess` or the next start
 - From the deployed app's first M3 start the tempo clock always runs: with no DJ, the classic looks move at the internal clock's 120 BPM (until a BPM is set) where before they stood still. Strobe flashes once a beat, under 3 a second, until a DJ's beat drives it (`beat.dj`); with a DJ it keeps its subdivisions
-- `recent_looks` compares its times as text, so they're written in UTC (`ZoneStore._utc`)
+- `recent_looks` compares its times as text, so they're written in UTC (`timing.utc_text`)
 - MockDeviceAdapter: never patch `type(adapter).device_info` (class-level property) — leaks to all instances across tests. Use a subclass instead.
 - Web tests: `uv sync --extra web` required in worktrees — web tests skip silently without it
 - Granian's embedded `Server.stop()` abandons open websockets, and a close sent from another task hangs while a receive is pending: each `/ws` session cancels its own receive, then closes (`ws.close_all`)
