@@ -10,8 +10,6 @@ export interface TooltipText {
   name: string
   /** "<look> · <zone>": the newest look running on the light; null when none is. */
   running: string | null
-  /** The model, then its latency once one is known: an override, else the measure. */
-  device: string
 }
 
 export function tooltipText(light: Light, running: readonly RunningZone[], zoneNames: ReadonlyMap<Id, string>): TooltipText {
@@ -19,13 +17,23 @@ export function tooltipText(light: Light, running: readonly RunningZone[], zoneN
     .sort((a, b) => Date.parse(b.since) - Date.parse(a.since))
     .find((candidate) => candidate.lights.includes(light.id))
   const where = zone === undefined ? undefined : zoneNames.get(zone.zoneId)
-  const { overrideMs, measuredMs, estimated } = light.latency
-  const latency = overrideMs != null ? formatLatency(overrideMs) : measuredMs !== null ? formatLatency(measuredMs, estimated) : null
   return {
     name: light.name,
     running: zone === undefined ? null : where === undefined ? zone.lookName : `${zone.lookName} · ${where}`,
-    device: latency === null ? light.model : `${light.model} · ${latency}`,
   }
+}
+
+/**
+ * The last line: the model, then the latency the engine times the light's frames by, once one is
+ * known. An override comes first; then `liveMs`, the stats channel's latency_ms (the light's
+ * effective latency, its manual offset included); and until the first stats message, REST's
+ * measure (which leaves the offset out). REST's estimated flag gives the "~".
+ */
+export function deviceLine(light: Light, liveMs: number | null): string {
+  const { overrideMs, measuredMs, estimated } = light.latency
+  const ms = liveMs ?? measuredMs
+  const latency = overrideMs != null ? formatLatency(overrideMs) : ms !== null ? formatLatency(ms, estimated) : null
+  return latency === null ? light.model : `${light.model} · ${latency}`
 }
 
 /** The light's colour now: its frame's LEDs averaged, else the colour it rests on; null when neither. */

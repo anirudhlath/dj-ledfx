@@ -1,10 +1,11 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import type { SunInput } from '@/api/contract'
 import { decodeFrame, encodeFrame } from '@/api/frames'
 import { frames } from '@/api/live'
+import { applyMessage, liveStore } from '@/api/live-store'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { HERO_NOW, pushFrame } from '@/test/live'
 import { stageBehaviour, type StageOptions } from '../behaviour'
@@ -15,7 +16,7 @@ import type { StageLabel } from '../labels'
 import type { Mark } from '../marks'
 import { lightState } from '../show'
 import { sunReadout, sunReadoutRuns, sunScene } from '../sun'
-import { tooltipText } from '../tooltip'
+import { deviceLine, tooltipText } from '../tooltip'
 import { nextRotation, ZOOM_STEPS } from '../view-memory'
 import { Legend } from './legend'
 import { LightTooltip } from './light-tooltip'
@@ -143,7 +144,7 @@ describe('the light tooltip (§8.1)', () => {
     const tooltip = screen.getByRole('tooltip')
     expect(tooltip).toHaveTextContent(light.name)
     expect(tooltip).toHaveTextContent('#808080 · 50%')
-    expect(tooltip).toHaveTextContent(text.device)
+    expect(tooltip).toHaveTextContent(deviceLine(light, null))
     if (text.running !== null) expect(tooltip).toHaveTextContent(text.running)
   })
 
@@ -207,6 +208,15 @@ describe('the light tooltip (§8.1)', () => {
     }
     expect(observer.takeRecords()).toHaveLength(0)
     expect(tooltip).toHaveTextContent('#808080 · 50%')
+  })
+
+  it("follows its light's latency on the stats channel", () => {
+    render(<LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={STAGE} />)
+    const tooltip = screen.getByRole('tooltip')
+    expect(tooltip).toHaveTextContent(deviceLine(light, null))
+    const stat = { id: light.id, send_fps: 60, latency_ms: 123, dropped_pct: 0 }
+    act(() => applyMessage(liveStore, { channel: 'stats', devices: [], lights: [stat] }, 0))
+    expect(tooltip).toHaveTextContent('123 ms')
   })
 
   it("turns to the light's left near the stage's right edge", () => {

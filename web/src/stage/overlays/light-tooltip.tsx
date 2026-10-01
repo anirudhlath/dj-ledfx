@@ -1,11 +1,12 @@
 // §8.1 "Hover a light → tooltip": its name, its colour now (hex and intensity), the look and zone,
-// the model and latency, with a leader to the light as Main.png draws it. The colour line and the
+// the model and latency (the stats channel's, as it changes), with a leader to the light as Main.png draws it. The colour line and the
 // swatch follow the frames without React: they're painted on mount, then after each of the stage's
 // draws (cadence.ts), so they change as the canvas does, and only when the light has a new frame
 // that says something new. A frozen stage has no tooltip (§7.6).
 import { useEffect, useRef } from 'react'
 import type { Light, Vec2 } from '@/api/contract'
 import { frames } from '@/api/live'
+import { useLive } from '@/api/live-store'
 import { cx } from '@/design/cx'
 import { TOOLTIP_SURFACE } from '@/design/overlays'
 import type { Size } from '../camera'
@@ -14,7 +15,7 @@ import { RENDER } from '../design-numbers'
 import { swatchFill, swatchGlow, type RGB } from '../light-maths'
 import { cssColour } from '../palette'
 import type { LightState } from '../show'
-import { colourLine, currentColour, type TooltipText } from '../tooltip'
+import { colourLine, currentColour, deviceLine, type TooltipText } from '../tooltip'
 
 const BLACK: RGB = [0, 0, 0]
 
@@ -28,6 +29,7 @@ export interface LightTooltipProps {
 }
 
 export function LightTooltip({ light, state, text, at, stage }: LightTooltipProps) {
+  const latencyMs = useLive((live) => live.stats?.[light.id]?.latency_ms ?? null)
   const swatch = useRef<HTMLSpanElement>(null)
   const colour = useRef<HTMLDivElement>(null)
 
@@ -76,7 +78,7 @@ export function LightTooltip({ light, state, text, at, stage }: LightTooltipProp
         </div>
         <div ref={colour} className="num text-text-2" />
         {text.running !== null && <div className="text-text-2">{text.running}</div>}
-        <div className="text-text-2">{text.device}</div>
+        <div className="text-text-2">{deviceLine(light, latencyMs)}</div>
       </div>
     </>
   )
