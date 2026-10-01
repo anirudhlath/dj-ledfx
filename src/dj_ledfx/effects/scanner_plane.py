@@ -51,7 +51,6 @@ class ScannerPlane(ParamField):
         heights: NDArray[np.float32] = self._per_leds(leds, height01)
         cycle = ((ctx.beat_index % 2) + ctx.beat_phase) / 2.0  # up in one beat, down in the next
         glow = band(heights, raised_cosine(cycle), float(values["width"]))
-        frame: FloatRGB = (palette_at(self._ramp, glow) * np.float32(values["level"])).astype(
-            np.float32
-        )
+        frame = palette_at(self._ramp, glow)  # an array of its own, float32
+        frame *= np.float32(values["level"])
         return frame

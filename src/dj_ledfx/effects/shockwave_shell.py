@@ -55,9 +55,8 @@ class ShockwaveShell(ParamField):
         front = float(values["reach_m"]) * ctx.beat_phase
         glow = band(away, front, float(values["shell_m"]))
         glow *= np.float32((1.0 - ctx.beat_phase) ** 2)
-        frame: FloatRGB = (palette_at(self._ramp, glow) * np.float32(values["level"])).astype(
-            np.float32
-        )
+        frame = palette_at(self._ramp, glow)  # an array of its own, float32
+        frame *= np.float32(values["level"])
         return frame
 
     def _away(self, leds: LedSet) -> NDArray[np.float32]:

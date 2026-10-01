@@ -46,9 +46,13 @@ class LighthouseBeam(ParamField):
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
         turns = self._per_leds(leds, self._bearing)
-        off = (turns - ctx.bar_phase + 0.5) % 1.0 - 0.5  # turns from the beam, -0.5 to 0.5
-        beam = band(off, 0.0, float(values["width_deg"]) / 720.0) * np.float32(values["level"])
-        frame: FloatRGB = (self._colour * beam[:, None]).astype(np.float32)
+        off = turns - ctx.bar_phase  # turns from the beam, wrapped to -0.5 to 0.5
+        off += 0.5
+        off %= 1.0
+        off -= 0.5
+        beam = band(off, 0.0, float(values["width_deg"]) / 720.0)
+        beam *= np.float32(values["level"])
+        frame: FloatRGB = self._colour * beam[:, None]  # float32 times float32
         return frame
 
     def _bearing(self, leds: LedSet) -> NDArray[np.float64]:
