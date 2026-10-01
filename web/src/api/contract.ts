@@ -79,25 +79,32 @@ export type FrameStream = 'live' | 'preview'
  */
 export type RecentLook = Schemas['RecentLook']
 
-// ── Pending: engine M3 (the tempo source chain) ───────────────────────────────────────────
-export type TempoSource = 'prodjlink' | 'music' | 'internal'
-export type TempoLock = 'auto' | TempoSource
-/** One player on the socket's `decks` channel (§12.4, snake_case like the beat). */
-export interface Deck {
-  number: number
-  player: string
-  state: 'empty' | 'cued' | 'playing'
-  bpm: number | null
-  pitch_percent: number
-  master: boolean
-}
+// ── Served since engine M3 (the tempo clock) ─────────────────────────────────────────────
+/** GET /inputs's tempo. `held`: a tap or a set BPM keeps Internal until a DJ starts again. */
+export type TempoInput = Schemas['TempoInput']
+export type TempoSource = TempoInput['source']
+export type TempoLock = TempoInput['lock']
+/** The internal clock's BPM, how it got it and when: "118.0 · tapped 19:10". */
+export type InternalTempo = Schemas['InternalTempo']
+/**
+ * One player on the socket's `decks` channel (§12.4, snake_case like the beat): the players heard,
+ * with the track's BPM and the pitch apart. `master` is the deck the clock follows.
+ */
+export type Deck = Schemas['Deck']
+export type DjSet = Schemas['DjSet']
+/** `interface` is where the server listens (host:port), null when it doesn't. */
+export type ProDjLinkInput = Schemas['ProDjLinkInput']
+export type InputState = ProDjLinkInput['state']
+/** PUT /inputs/tempo: a lock, and a BPM for the internal clock. */
+export type TempoRequest = Schemas['TempoRequest']
+/** POST /inputs/tempo/tap: the tap's time on the client's clock, in seconds. */
+export type TapRequest = Schemas['TapRequest']
+/** POST /inputs/tempo/nudge: a phase shift in beats, -1 to 1; positive brings the beat sooner. */
+export type NudgeRequest = Schemas['NudgeRequest']
 
 // ── Pending: engine M6/M7 (Music Assistant, Home Assistant, the sun, signals) ─────────────
 // Shaped from §12.3–12.4, §9.3 and the Inputs renders; the milestone that serves them owns the
 // final shape (decision 6).
-export type InputState = 'connected' | 'stale' | 'disconnected' | 'idle'
-export interface TempoInput { source: TempoSource; lock: TempoLock; bpm: number; stale: boolean }
-export interface ProDjLinkInput { state: InputState; interface: string; lastSet: { from: string; to: string } | null }
 export interface MusicInput {
   state: InputState
   track: { title: string; artist: string } | null
@@ -119,17 +126,14 @@ export interface HomeAssistantInput {
   entities: HomeAssistantEntity[]
 }
 export interface SunInput { elevation: number; azimuth: number; sunrise: string; sunset: string }
-export interface Inputs {
-  tempo: TempoInput
-  prodjlink: ProDjLinkInput
-  music: MusicInput
-  homeAssistant: HomeAssistantInput
-  sun: SunInput
-}
+/** What M6 and M7 add to GET /inputs. */
+export interface PendingInputs { music: MusicInput; homeAssistant: HomeAssistantInput; sun: SunInput }
+/** GET /inputs: the tempo and Pro DJ Link since engine M3; the rest is optional until it's served. */
+export type Inputs = Schemas['Inputs'] & Partial<PendingInputs>
 export type SignalValue = number | string | boolean
 export interface Signal { name: string; value: SignalValue; unit?: string; usedBy: Id[] }
 
 /** The pending types' names, as the backend's schema will name them. */
-export type PendingSchema = 'Deck' | 'Inputs' | 'Signal'
+export type PendingSchema = 'Signal'
 /** The pending REST paths (§12.3), with FastAPI's parameter names. */
-export type PendingPath = '/api/inputs' | '/api/signals'
+export type PendingPath = '/api/signals'

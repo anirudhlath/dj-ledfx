@@ -51,7 +51,8 @@ export interface ScenarioState {
   attention: AttentionItem[]
   beat: ScenarioBeat
   decks: Deck[]
-  inputs: Inputs
+  /** Every input, the ones engine M6 and M7 bring included. */
+  inputs: Required<Inputs>
   signals: Signal[]
   previewOnly: boolean
   /** The mock drops every session this long after the first one connects, and refuses new ones. */
@@ -200,13 +201,22 @@ function musicWentQuiet(state: ScenarioState, now: Date): AttentionItem {
 
 const SPECTRUM = Array.from({ length: 32 }, (_, band) => Math.round(83 * Math.exp(-band / 10)) / 100)
 
-function heroInputs(now: Date): Inputs {
+function heroInputs(now: Date): Required<Inputs> {
   return {
-    tempo: { source: 'music', lock: 'auto', bpm: 121.8, stale: false },
+    tempo: {
+      source: 'music',
+      lock: 'auto',
+      bpm: 121.8,
+      stale: false,
+      held: false,
+      // The Inputs render's source chain: "118.0 · tapped 19:10".
+      internal: { bpm: 118, how: 'tapped', at: after(now, -4 * MINUTE) },
+    },
     prodjlink: {
       state: 'idle',
       interface: 'eth0',
       lastSet: { from: after(now, -4114 * MINUTE), to: after(now, -3959 * MINUTE) },
+      decks: [],
     },
     music: {
       state: 'connected',
@@ -300,7 +310,7 @@ function hero(state: ScenarioState, now: Date): void {
 /** State-Inputs-Down: the music went quiet 42 s ago, so the tempo fell back to Internal. */
 function inputsDown(state: ScenarioState, now: Date): void {
   state.beat = { ...state.beat, source: 'internal', bpm: 118 }
-  state.inputs.tempo = { source: 'internal', lock: 'auto', bpm: 118, stale: false }
+  state.inputs.tempo = { ...state.inputs.tempo, source: 'internal', bpm: 118, stale: false }
   state.inputs.music = { ...state.inputs.music, state: 'stale', updatedAt: after(now, -42 * SECOND) }
   state.inputs.homeAssistant = {
     ...state.inputs.homeAssistant,
@@ -402,8 +412,8 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
       { number: 3, player: 'Player 3', state: 'empty', bpm: null, pitch_percent: 0, master: false },
       { number: 4, player: 'Player 4', state: 'empty', bpm: null, pitch_percent: 0, master: false },
     ]
-    state.inputs.tempo = { source: 'prodjlink', lock: 'auto', bpm: state.beat.bpm, stale: false }
-    state.inputs.prodjlink = { ...state.inputs.prodjlink, state: 'connected' }
+    state.inputs.tempo = { ...state.inputs.tempo, source: 'prodjlink', bpm: state.beat.bpm, stale: false }
+    state.inputs.prodjlink = { ...state.inputs.prodjlink, state: 'connected', decks: state.decks }
     // "Music Assistant: nothing playing."
     state.inputs.music = {
       ...state.inputs.music,

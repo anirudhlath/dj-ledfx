@@ -47,7 +47,7 @@ describe('MSW over the mock server', () => {
     const { store, frames } = serve(2)
     await expect.poll(() => frames.live.size, { timeout: 3000 }).toBe(17)
     expect(store.getState().attention).toHaveLength(1)
-    expect(store.getState().inputs?.music.state).toBe('connected')
+    expect(store.getState().inputs?.music?.state).toBe('connected')
     await expect.poll(() => store.getState().beat?.source, { timeout: 3000 }).toBe('music')
     expect(store.getState().beat?.bar).toBeGreaterThanOrEqual(42)
   })

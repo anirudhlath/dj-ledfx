@@ -246,7 +246,9 @@ export class MockServer {
     const state = buildScenario(options.scenario ?? 'hero', new Date(this.wallClock()))
     this.state = this.protocol === 1 ? asEngineM1(state) : state
     this.routes =
-      this.protocol === 1 ? this.servedRoutes() : [...this.servedRoutes(), ...this.m2Routes(), ...this.pendingRoutes()]
+      this.protocol === 1
+        ? this.servedRoutes()
+        : [...this.servedRoutes(), ...this.m2Routes(), ...this.m3Routes(), ...this.pendingRoutes()]
     this.startedAt = this.clock()
     this.nextFrameAt = this.startedAt
     this.nextStatsAt = this.startedAt + STATS_MS
@@ -590,10 +592,16 @@ export class MockServer {
     })
   }
 
-  /** What no engine serves yet (M3, M6 and M7), so a 404 with protocol 1. */
+  /** Engine M3's routes: the tempo clock's inputs. A 404 with protocol 1. */
+  private m3Routes(): Route[] {
+    return compile<ApiPath>({
+      '/api/inputs': { GET: () => ok(this.state.inputs) },
+    })
+  }
+
+  /** What no engine serves yet (M6 and M7), so a 404 with protocol 1. */
   private pendingRoutes(): Route[] {
     return compile<PendingPath>({
-      '/api/inputs': { GET: () => ok(this.state.inputs) },
       '/api/signals': { GET: () => ok(this.state.signals) },
     })
   }

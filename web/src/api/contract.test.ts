@@ -1,8 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { components, paths } from './generated/schema'
 import type {
-  ApiPath, Furniture, Home, InputKind, Light, LightShape, LightStatus, Location, PendingPath, PendingSchema, Room,
-  RunningZone,
+  ApiPath, Deck, Furniture, Home, InputKind, InputState, Light, LightShape, LightStatus, Location, PendingPath,
+  PendingSchema, Room, RunningZone, TempoLock, TempoSource,
 } from './contract'
 
 describe('the contract', () => {
@@ -32,6 +32,28 @@ describe('the contract', () => {
       | '/api/home' | '/api/home/subzones/{sub_zone_id}' | '/api/lights/{light_id}/placement' | '/api/preview/{preview_id}'
       | '/api/running/recent'
     >().toExtend<keyof paths>()
+  })
+
+  // Engine M3 serves the tempo clock under F1's names, shaped as §12.4 shapes them.
+  it("serves engine M3's types and paths under F1's names", () => {
+    expectTypeOf<
+      | 'Deck' | 'Inputs' | 'TempoInput' | 'InternalTempo' | 'ProDjLinkInput' | 'DjSet' | 'TempoRequest' | 'TapRequest'
+      | 'NudgeRequest'
+    >().toExtend<keyof components['schemas']>()
+    expectTypeOf<'/api/inputs' | '/api/inputs/tempo' | '/api/inputs/tempo/tap' | '/api/inputs/tempo/nudge'>().toExtend<
+      keyof paths
+    >()
+    expectTypeOf<Deck>().toEqualTypeOf<{
+      number: number
+      player: string
+      state: 'empty' | 'cued' | 'playing'
+      bpm: number | null
+      pitch_percent: number
+      master: boolean
+    }>()
+    expectTypeOf<TempoSource>().toEqualTypeOf<'prodjlink' | 'music' | 'internal'>()
+    expectTypeOf<TempoLock>().toEqualTypeOf<'auto' | 'prodjlink' | 'music' | 'internal'>()
+    expectTypeOf<InputState>().toEqualTypeOf<'connected' | 'stale' | 'disconnected' | 'idle'>()
   })
 
   // I1: engine M2 serves the home's size and which rooms hold lights.
