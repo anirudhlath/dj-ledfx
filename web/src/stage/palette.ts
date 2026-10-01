@@ -1,15 +1,13 @@
 // The stage's colours, by name: a tokens.css custom property ("--color-stage-floor") or, where the
 // renders draw a colour tokens.css lacks, RENDER's hex (scripts/design-extract.ts names each). WebGL
-// takes them as 0–1 sRGB numbers, read from tokens.css itself; CSS and SVG take var(--…).
-import tokensCss from '@/styles/tokens.css?raw'
-import { RENDER } from './design-numbers'
+// takes them as 0–1 sRGB numbers, from TOKENS (tokens.css's colours, generated into
+// design-numbers.ts); CSS and SVG take var(--…).
+import { RENDER, TOKENS } from './design-numbers'
 import { parseHex, type Colour } from './light-maths'
-
-const TOKENS = new Map([...tokensCss.matchAll(/(--color-[\w-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)].map((m) => [m[1], m[2]]))
 
 /** A colour for WebGL. Throws on a name tokens.css doesn't have: a typo, or a handoff that renamed it. */
 export function colourOf(name: string): Colour {
-  const hex = name.startsWith('--') ? TOKENS.get(name) : name
+  const hex = name.startsWith('--') ? TOKENS[name] : name
   const rgb = parseHex(hex)
   if (rgb === null) throw new Error(`stage palette: no colour ${name}`)
   return [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255]

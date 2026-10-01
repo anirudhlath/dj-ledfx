@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import tokensCss from '@/styles/tokens.css?raw'
+import { TOKENS } from './design-numbers'
+import { parseHex } from './light-maths'
 import { colourOf, cssColour, STAGE_PALETTE } from './palette'
 
 describe("the stage's palette", () => {
-  it('reads a token from tokens.css, and a render hex as it is', () => {
-    const hex = /--color-stage-floor:\s*(#[0-9a-fA-F]{6})/.exec(tokensCss)![1]
-    const n = parseInt(hex.slice(1), 16)
-    expect(colourOf('--color-stage-floor')).toEqual([(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255])
+  it("reads a token from tokens.css's colours, and a render hex as it is", () => {
+    const [r, g, b] = parseHex(TOKENS['--color-stage-floor'])!
+    expect(colourOf('--color-stage-floor')).toEqual([r / 255, g / 255, b / 255])
     expect(colourOf('#ff0000')).toEqual([1, 0, 0])
   })
 

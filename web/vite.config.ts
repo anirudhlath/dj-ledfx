@@ -65,7 +65,5 @@ export default defineConfig(({ mode }) => ({
     // A spy (a muted console.error, say) ends with the test that made it, and so does a stubbed global.
     restoreMocks: true,
     unstubGlobals: true,
-    // The stage's palette reads tokens.css?raw, which Vitest leaves empty unless it processes the file.
-    css: { include: [/tokens\.css/] },
   },
 }))
