@@ -1,6 +1,7 @@
 import { onTestFinished } from 'vitest'
 import type { AttentionItem, Id } from '@/api/contract'
-import { startDataLayer } from '@/api/live'
+import { decodeFrame, encodeFrame, type FrameStore } from '@/api/frames'
+import { frames, startDataLayer } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { inMemorySockets } from '@/api/mocks/in-memory-socket'
 import { beatMessage, MockServer, snapshotMessages, type MockServerOptions } from '@/api/mocks/mock-server'
@@ -31,6 +32,11 @@ export function startMockDataLayer(options: MockServerOptions = {}): MockServer 
   const server = startMockServer(options)
   startDataLayer({ openSocket: inMemorySockets(server), url: 'mock' })
   return server
+}
+
+/** A light's live frame, `rgb` three bytes an LED, decoded as the socket would: into the app's frame store unless given another. */
+export function pushFrame(id: Id, seq: number, rgb: ArrayLike<number>, { store = frames, at = 0 }: { store?: FrameStore; at?: number } = {}): void {
+  decodeFrame(encodeFrame(2, id, seq, Uint8Array.from(rgb)), 2, store, at)
 }
 
 const KIND = { light: 'light-offline', zone: 'zone-crashed', input: 'input-disconnected' } as const

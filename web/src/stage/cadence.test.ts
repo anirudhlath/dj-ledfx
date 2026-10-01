@@ -4,30 +4,9 @@ import { frames } from '@/api/live'
 import { Cadence, useCadence } from './cadence'
 import { SPEC } from './design-numbers'
 
-// useCadence draws through R3F's advance(); this stands in for the canvas's.
-const { advance } = vi.hoisted(() => ({ advance: vi.fn() }))
-vi.mock('@react-three/fiber', () => ({ useThree: (select: (state: { advance: typeof advance }) => unknown) => select({ advance }) }))
-
 /** A 60 Hz screen. */
 const SCREEN_HZ = 60
 const SCREEN_MS = 1000 / SCREEN_HZ
-
-/** Its animation frames, run by hand. */
-let queued: FrameRequestCallback[] = []
-function animationFrame(now: number) {
-  const due = queued
-  queued = []
-  for (const callback of due) callback(now)
-}
-
-beforeEach(() => {
-  queued = []
-  advance.mockClear()
-  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => queued.push(callback))
-  vi.stubGlobal('cancelAnimationFrame', () => {
-    queued = []
-  })
-})
 
 describe("the stage's cadence (§7.5)", () => {
   it('draws only when a frame has arrived since the last draw', () => {
@@ -49,26 +28,42 @@ describe("the stage's cadence (§7.5)", () => {
     expect(cadence.due(100 + SCREEN_MS - 1, 2)).toBe(true)
   })
 
-  // A draw asked for with invalidate() comes an animation frame late, and R3F's demand loop then
-  // draws every other one: half the rate. The stage draws in the animation frame that's due.
-  it('draws in the animation frame that is due, every one while frames keep coming', () => {
-    const { unmount } = renderHook(() => useCadence(SCREEN_MS))
-    for (let i = 0; i < SCREEN_HZ; i += 1) {
-      frames.version += 1
-      animationFrame(i * SCREEN_MS)
-    }
-    expect(advance).toHaveBeenCalledTimes(SCREEN_HZ)
-    unmount()
+})
+
+describe('useCadence', () => {
+  // Vitest's animation frames: one every 16 ms.
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  /** One animation frame, with a new frame in the store before it; its time. */
+  function nextFrame(): number {
     frames.version += 1
-    animationFrame(1000)
-    expect(advance).toHaveBeenCalledTimes(SCREEN_HZ)
+    vi.advanceTimersToNextFrame()
+    return performance.now()
+  }
+
+  it('draws in the animation frame a draw is due, given its time', () => {
+    const draw = vi.fn()
+    renderHook(() => useCadence(1000 / SPEC.target.fps, draw))
+    const times = Array.from({ length: 10 }, nextFrame)
+    expect(draw.mock.calls.map(([now]) => now)).toEqual(times)
+  })
+
+  it('stops when the stage goes', () => {
+    const draw = vi.fn()
+    const { unmount } = renderHook(() => useCadence(1000 / SPEC.target.fps, draw))
+    nextFrame()
+    unmount()
+    for (let i = 0; i < 10; i++) nextFrame()
+    expect(draw).toHaveBeenCalledTimes(1)
   })
 
   it('draws nothing while frozen', () => {
-    renderHook(() => useCadence(null))
-    frames.version += 1
-    animationFrame(0)
-    expect(queued).toHaveLength(0)
-    expect(advance).not.toHaveBeenCalled()
+    const draw = vi.fn()
+    renderHook(() => useCadence(null, draw))
+    for (let i = 0; i < 10; i++) nextFrame()
+    expect(draw).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

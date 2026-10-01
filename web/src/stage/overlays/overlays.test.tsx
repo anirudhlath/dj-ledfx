@@ -6,7 +6,9 @@ import type { SunInput } from '@/api/contract'
 import { decodeFrame, encodeFrame } from '@/api/frames'
 import { frames } from '@/api/live'
 import { buildScenario } from '@/api/mocks/scenarios'
-import { HERO_NOW } from '@/test/live'
+import { HERO_NOW, pushFrame } from '@/test/live'
+import { stageBehaviour, type StageOptions } from '../behaviour'
+import { useCadence } from '../cadence'
 import { FIT_VIEW, fitPose, LIVE_PADDING, type CameraPose, type View } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import type { StageLabel } from '../labels'
@@ -143,6 +145,68 @@ describe('the light tooltip (§8.1)', () => {
     expect(tooltip).toHaveTextContent('#808080 · 50%')
     expect(tooltip).toHaveTextContent(text.device)
     if (text.running !== null) expect(tooltip).toHaveTextContent(text.running)
+  })
+
+  /** The stage's draw tick, as its canvas runs it (scene/light-layer.tsx), drawing nothing here. */
+  function DrawTick({ cadenceMs }: { cadenceMs: number | null }) {
+    useCadence(cadenceMs, () => {})
+    return null
+  }
+
+  function renderOnStage(options: Omit<StageOptions, 'mode' | 'labels'>) {
+    const { cadenceMs } = stageBehaviour({ mode: 'live', labels: true, ...options })
+    render(
+      <>
+        <DrawTick cadenceMs={cadenceMs} />
+        <LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={STAGE} />
+      </>,
+    )
+    return { tooltip: screen.getByRole('tooltip'), cadenceMs: cadenceMs! }
+  }
+
+  /** Every LED of the light one grey. */
+  const grey = (level: number) => new Uint8Array(light.leds * 3).fill(level)
+
+  // Mi5: the tooltip shows the light as the stage draws it, so with reduced motion or on a phone it
+  // changes no more often than the canvas does (§5.4, §7.5).
+  it.each([
+    ['once per SPEC.reducedMotionMs with reduced motion', { variant: 'desktop', reducedMotion: true }],
+    ["at the phone's rate on a phone", { variant: 'phone', reducedMotion: false }],
+  ] as const)('repaints its colour as the stage draws: %s', (_, options) => {
+    vi.useFakeTimers()
+    const { tooltip, cadenceMs } = renderOnStage(options)
+    const line = tooltip.querySelector('.num')!
+    // Two seconds of frames, a new colour in every animation frame (Vitest's come every 16 ms).
+    const painted: number[] = []
+    let last = line.textContent
+    for (let seq = 1; seq <= 125; seq++) {
+      pushFrame(light.id, seq, grey(seq))
+      vi.advanceTimersToNextFrame()
+      if (line.textContent === last) continue
+      last = line.textContent
+      painted.push(performance.now())
+    }
+    const gaps = painted.slice(1).map((at, index) => at - painted[index])
+    expect(painted.length).toBeGreaterThan(1)
+    // An animation frame that comes a little early still draws: half of one.
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(cadenceMs - 8)
+  })
+
+  // E3: the tooltip writes to the page only when what it says changes, not on every frame.
+  it("writes nothing while its light's colour holds, whatever else streams", () => {
+    vi.useFakeTimers()
+    const other = hero.lights.find((candidate) => candidate.id !== light.id && candidate.leds > 0)!
+    pushFrame(light.id, 1, grey(128))
+    const { tooltip } = renderOnStage({ variant: 'desktop', reducedMotion: false })
+    const observer = new MutationObserver(() => {})
+    observer.observe(tooltip, { subtree: true, childList: true, characterData: true, attributes: true })
+    for (let seq = 2; seq <= 60; seq++) {
+      pushFrame(light.id, seq, grey(128))
+      pushFrame(other.id, seq, new Uint8Array(other.leds * 3).fill(seq))
+      vi.advanceTimersToNextFrame()
+    }
+    expect(observer.takeRecords()).toHaveLength(0)
+    expect(tooltip).toHaveTextContent('#808080 · 50%')
   })
 
   it("turns to the light's left near the stage's right edge", () => {

@@ -1,13 +1,15 @@
 // §8.1 "Hover a light → tooltip": its name, its colour now (hex and intensity), the look and zone,
 // the model and latency, with a leader to the light as Main.png draws it. The colour line and the
-// swatch follow the frames without React: an animation-frame loop writes them in place. A frozen
-// stage has no tooltip (§7.6).
+// swatch follow the frames without React: they're painted on mount, then after each of the stage's
+// draws (cadence.ts), so they change as the canvas does, and only when the light has a new frame
+// that says something new. A frozen stage has no tooltip (§7.6).
 import { useEffect, useRef } from 'react'
 import type { Light, Vec2 } from '@/api/contract'
 import { frames } from '@/api/live'
 import { cx } from '@/design/cx'
 import { TOOLTIP_SURFACE } from '@/design/overlays'
 import type { Size } from '../camera'
+import { onStageDraw } from '../cadence'
 import { RENDER } from '../design-numbers'
 import { swatchFill, swatchGlow, type RGB } from '../light-maths'
 import { cssColour } from '../palette'
@@ -30,23 +32,23 @@ export function LightTooltip({ light, state, text, at, stage }: LightTooltipProp
   const colour = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    let drawn = -1
+    let seq: number | null = null
+    let painted: string | null | undefined
     const paint = () => {
-      if (frames.version === drawn || swatch.current === null || colour.current === null) return
-      drawn = frames.version
-      const rgb = currentColour(frames.get(light.id), state)
+      const frame = frames.get(light.id)
+      if (frame !== undefined && frame.seq === seq) return
+      seq = frame?.seq ?? null
+      const rgb = currentColour(frame, state)
       const line = colourLine(state, rgb)
+      if (line === painted || swatch.current === null || colour.current === null) return
+      painted = line
       swatch.current.style.background = swatchFill(rgb ?? BLACK)
       swatch.current.style.boxShadow = swatchGlow(rgb ?? BLACK, RENDER.tooltip.swatchGlowPx)
       colour.current.textContent = line
       colour.current.hidden = line === null
     }
     paint()
-    let handle = requestAnimationFrame(function tick() {
-      paint()
-      handle = requestAnimationFrame(tick)
-    })
-    return () => cancelAnimationFrame(handle)
+    return onStageDraw(paint)
   }, [light.id, state])
 
   const { dxPx, dyPx, widthPx, nameGapPx, swatchPx, leader } = RENDER.tooltip

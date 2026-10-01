@@ -1,11 +1,12 @@
 // The lights on the canvas (§7.3, §7.5). Their materials are made once per room mask, and their
 // meshes when the writer is (which bodies are drawn changed); a `lights` push that changes only what
 // a light shows is written into them in place, and drawn at once. Frames never pass through React:
-// on each draw, useFrame writes the frame store's latest bytes into the meshes' own arrays, if a
-// frame arrived since the last draw.
-import { useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+// the light layer draws on the stage's cadence (cadence.ts), writing the frame store's latest bytes
+// into the meshes' own arrays, then drawing the canvas in that animation frame.
+import { useThree } from '@react-three/fiber'
+import { useEffect, useLayoutEffect, useMemo } from 'react'
 import { frames } from '@/api/live'
+import { useCadence } from '../cadence'
 import type { CameraPose } from '../camera'
 import type { FrameWriter, WriterEntry } from '../frame-writer'
 import type { RoomMask } from '../room-mask'
@@ -17,13 +18,15 @@ export interface LightLayerProps {
   entries: readonly WriterEntry[]
   mask: RoomMask
   pose: CameraPose
+  /** The stage behaviour's (behaviour.ts): null while frames don't redraw the stage. */
+  cadenceMs: number | null
 }
 
-export function LightLayer({ writer, entries, mask, pose }: LightLayerProps) {
+export function LightLayer({ writer, entries, mask, pose, cadenceMs }: LightLayerProps) {
   const materials = useMemo(() => new LightMaterials(mask), [mask])
   const meshes = useMemo(() => new LightMeshes(writer, materials), [writer, materials])
   const invalidate = useThree((state) => state.invalidate)
-  const drawnVersion = useRef(-1)
+  const advance = useThree((state) => state.advance)
   useEffect(() => () => materials.dispose(), [materials])
   useEffect(() => () => meshes.dispose(), [meshes])
   useLayoutEffect(() => {
@@ -35,14 +38,12 @@ export function LightLayer({ writer, entries, mask, pose }: LightLayerProps) {
     writer.setEntries(entries)
     writer.write(frames)
     meshes.update()
-    drawnVersion.current = frames.version
     invalidate()
   }, [writer, meshes, entries, invalidate])
-  useFrame(() => {
-    if (drawnVersion.current === frames.version) return
+  useCadence(cadenceMs, (now) => {
     writer.write(frames)
     meshes.update()
-    drawnVersion.current = frames.version
+    advance(now)
   })
   return (
     <>

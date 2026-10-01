@@ -3,7 +3,6 @@ import { Profiler, type ReactNode } from 'react'
 import { InstancedMesh, type Object3D, OrthographicCamera } from 'three'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { frames } from '@/api/live'
 import { liveStore } from '@/api/live-store'
 import { buildScenario, type ScenarioName } from '@/api/mocks/scenarios'
 import { HERO_NOW, startMockDataLayer } from '@/test/live'
@@ -56,9 +55,10 @@ async function renderScene(element: ReactNode) {
   return { renderer, camera }
 }
 
+// From HERO_NOW, so the animation frames (every 16 ms from the fake clock's start) keep one phase
+// against the mock's ticks, run after run.
 beforeEach(() => {
-  vi.useFakeTimers()
-  vi.setSystemTime(HERO_NOW)
+  vi.useFakeTimers({ now: HERO_NOW })
 })
 
 describe('the stage scene (§7.2, §7.5)', () => {
@@ -71,12 +71,12 @@ describe('the stage scene (§7.2, §7.5)', () => {
 
   // Done when (§13.1 M2): the frame rate with every LED (SPEC.target). The firmware scenario streams
   // every light (own effects and streamed copies alike), all SPEC.target.leds of them, at §14's
-  // stream rate.
+  // stream rate, and the cadence draws each frame in the animation frame after it arrives.
   it('draws every LED of every frame for a second, and React commits nothing', async () => {
     startMockDataLayer({ scenario: 'firmware' })
-    const props = stageProps('firmware')
+    const props = stageProps('firmware', { cadenceMs: 1000 / SPEC.target.fps })
     let commits = 0
-    const { renderer } = await renderScene(
+    await renderScene(
       <Profiler id="stage" onRender={() => void (commits += 1)}>
         <StageScene {...props} />
       </Profiler>,
@@ -84,15 +84,10 @@ describe('the stage scene (§7.2, §7.5)', () => {
     // Connect and subscribe; the frames start.
     await vi.advanceTimersByTimeAsync(1000)
     commits = 0
-    let drawn = 0
-    for (let i = 0; i < FPS; i++) {
-      const version = frames.version
-      await vi.advanceTimersByTimeAsync(1000 / FPS)
-      expect(frames.version).toBeGreaterThan(version)
-      await renderer.advanceFrames(1, 1 / FPS)
-      if (props.writer.leds === SPEC.target.leds) drawn += 1
-    }
-    expect(drawn).toBe(FPS)
+    const write = vi.spyOn(props.writer, 'write')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(write).toHaveBeenCalledTimes(FPS)
+    expect(props.writer.leds).toBe(SPEC.target.leds)
     expect(commits).toBe(0)
   })
 
@@ -100,21 +95,19 @@ describe('the stage scene (§7.2, §7.5)', () => {
   // No frame comes while it's down, so the last one stays; a light whose state changed still draws.
   it('keeps the last frame when the link drops, and draws a light whose state changed', async () => {
     startMockDataLayer({ scenario: 'reconnecting' })
-    const props = stageProps('reconnecting')
+    const props = stageProps('reconnecting', { cadenceMs: 1000 / SPEC.target.fps })
     const { renderer } = await renderScene(<StageScene {...props} />)
     await vi.advanceTimersByTimeAsync(1500)
     expect(liveStore.getState().connection.status).toBe('reconnecting')
     // The last frame, from before the drop.
-    await renderer.advanceFrames(1, 1 / 60)
     expect(props.writer.leds).toBeGreaterThan(0)
     const write = vi.spyOn(props.writer, 'write')
     await vi.advanceTimersByTimeAsync(1000)
-    await renderer.advanceFrames(5, 1 / 60)
     expect(write).not.toHaveBeenCalled()
 
     const changed = props.entries.map((entry, index) => (index === 0 ? { ...entry, streamed: false } : entry))
     await renderer.update(<StageScene {...props} entries={changed} />)
-    await renderer.advanceFrames(3, 1 / 60)
+    await vi.advanceTimersByTimeAsync(100)
     expect(write).toHaveBeenCalledTimes(1)
   })
 

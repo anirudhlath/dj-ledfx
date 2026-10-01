@@ -1,10 +1,9 @@
-// Everything on the stage's canvas: the camera where the pose puts it (§7.2), the static home, the
-// lights, and the cadence that redraws them (§7.5).
+// Everything on the stage's canvas: the camera where the pose puts it (§7.2), the static home, and
+// the lights, which draw on the stage's cadence (§7.5).
 import { useThree } from '@react-three/fiber'
 import { useLayoutEffect } from 'react'
 import type { OrthographicCamera } from 'three'
 import type { Home } from '@/api/contract'
-import { useCadence } from '../cadence'
 import { applyPose, type CameraPose } from '../camera'
 import type { FrameWriter, WriterEntry } from '../frame-writer'
 import type { RoomMask } from '../room-mask'
@@ -32,11 +31,10 @@ export function StageScene({ home, writer, entries, mask, pose, bearing, cadence
     applyPose(camera as OrthographicCamera, pose)
     invalidate()
   }, [camera, pose, invalidate])
-  useCadence(cadenceMs)
   return (
     <>
       <StaticHome home={home} bearing={bearing} width={pose.width} height={pose.height} />
-      <LightLayer writer={writer} entries={entries} mask={mask} pose={pose} />
+      <LightLayer writer={writer} entries={entries} mask={mask} pose={pose} cadenceMs={cadenceMs} />
     </>
   )
 }
