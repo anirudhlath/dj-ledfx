@@ -86,8 +86,9 @@ def test_tempo_controls_refuse_bad_values() -> None:
     for delta in (math.nan, math.inf, 1.5, -2.0):
         with pytest.raises(TempoError):
             clock.nudge(delta)
-    with pytest.raises(TempoLockedError):
+    with pytest.raises(TempoError) as refused:
         clock.set_tempo("prodjlink", 120.0)  # a BPM only for Auto or Internal
+    assert not isinstance(refused.value, TempoLockedError)  # nothing is locked yet
 
     assert (clock.lock, clock.bpm, clock.held) == ("auto", 120.0, False)
     assert clock.sample_at(time.now) == before

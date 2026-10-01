@@ -149,8 +149,10 @@ class TempoClock:
             raise TempoError(f"No tempo lock {lock!r}")
         if bpm is not None:
             bpm = check_bpm(bpm)
-            if lock not in UNLOCKED:
-                raise TempoLockedError(lock)
+            if lock not in UNLOCKED:  # 409 only for a lock that's already on
+                if lock == self._lock:
+                    raise TempoLockedError(lock)
+                raise TempoError("A BPM can only be set with Auto or Internal")
         now = self._now()
         self._lock = lock
         if bpm is None:

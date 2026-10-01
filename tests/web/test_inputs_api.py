@@ -112,6 +112,14 @@ async def test_a_nudge_holds_the_internal_clock_and_a_wild_one_is_refused(api: A
     assert [answer.status_code for answer in wild] == [422, 422]
 
 
+async def test_a_bpm_with_a_lock_that_isn_t_on_is_a_bad_request(api: Api) -> None:
+    answer = await api.client.put("/api/inputs/tempo", json={"lock": "prodjlink", "bpm": 128})
+
+    assert answer.status_code == 400  # not 409: nothing is locked
+    assert answer.json()["detail"] == "A BPM can only be set with Auto or Internal"
+    assert api.home.tempo.settings() == TempoSettings()
+
+
 async def test_internal_controls_are_refused_under_a_pro_dj_link_lock(api: Api) -> None:
     await api.client.put("/api/inputs/tempo", json={"lock": "prodjlink"})
 

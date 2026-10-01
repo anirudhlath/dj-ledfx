@@ -165,7 +165,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Use shared utilities from `effects/color.py` (hex_to_rgb, rgb_to_hex, hsv_float, palette_float, palette_at, hsv_to_rgb_array, palette_lerp, to_float_rgb) and `effects/easing.py`
 - Effect render methods are synchronous (pure numpy math, no I/O)
 - `TempoClock`'s reads (`sample_at(t)`, `sample()`, its properties) are synchronous and lock-free, called from the render loop
-- `TempoClock`'s writes are `on_beat(event)` (the bus's `BeatEvent`), `set_tempo(lock, bpm)`, `tap(client_time)` and `nudge(delta)`; `settle()` lets the sources change hands (`run()` calls it every 0.25 s). A bad value raises `TempoError` (a `ValueError`), and a control under a Pro DJ Link or Music lock raises `TempoLockedError` (409)
+- `TempoClock`'s writes are `on_beat(event)` (the bus's `BeatEvent`), `set_tempo(lock, bpm)`, `tap(client_time)` and `nudge(delta)`; `settle()` lets the sources change hands (`run()` calls it every 0.25 s). A bad value raises `TempoError` (a `ValueError`, 400), a BPM sent with the Pro DJ Link or Music lock is one too, and a control while such a lock is on raises `TempoLockedError` (409)
 - DeviceAdapter is ABC (abstract base class). ProbeStrategy remains Protocol. Always code to the interface.
 - All components run on a single asyncio event loop — no cross-thread state access
 - AppConfig uses nested dataclasses: `config.engine.fps`, `config.devices.openrgb.host` (not flat)
