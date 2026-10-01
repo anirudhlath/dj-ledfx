@@ -31,6 +31,11 @@ export type Light = Schemas['Light']
 export type LightPart = Schemas['LightPart']
 /** One light on the socket's `lights` channel. */
 export type LightUpdate = Pick<Light, 'id' | 'status' | 'statusSince' | 'ownEffect' | 'power' | 'colour'>
+/**
+ * The statuses whose lights the engine streams to the web app: a look's, and while anyone watches
+ * the live stream, an approximation of a light's own effect (engine zones/frames.py).
+ */
+export const STREAMED: ReadonlySet<LightStatus> = new Set<LightStatus>(['streaming', 'own-effect', 'streamed-copy'])
 
 // ── Served since engine M2 (home map, preview runtimes, frame protocol v2) ────────────────
 // §12.2's Home, Room, SubZone, Anchor and LightShape, with home.json's names for what §12.2

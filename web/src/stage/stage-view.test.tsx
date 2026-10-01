@@ -7,6 +7,7 @@ import { liveStore } from '@/api/live-store'
 import { roomName } from '@/api/mocks/fixtures'
 import type { ScenarioName } from '@/api/mocks/scenarios'
 import { renderApp } from '@/test/app'
+import { renders, resetRenders } from '@/test/count-renders'
 import { seedLive } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
 import { seedRest } from '@/test/rest'
@@ -20,14 +21,20 @@ import { sunReadout, sunReadoutRuns, sunScene } from './sun'
 import { readStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
 
-// jsdom has no WebGL: the canvas is a stand-in that shows what it was asked to draw. The rest of the
-// stage (the SVG layer, the overlays, the pointer) is the real one.
+// jsdom has no WebGL: the canvas is a stand-in that shows what it was asked to draw, and keeps the
+// props it was given last. The rest of the stage (the SVG layer, the overlays, the pointer) is the
+// real one, with the SVG layer's renders counted.
+const drawn = vi.hoisted(() => ({ props: null as StageSceneProps | null }))
 vi.mock('./webgl', () => ({ hasWebGL2: vi.fn(() => true) }))
 vi.mock('./stage-canvas', () => ({
-  StageCanvas: ({ frozen, cadenceMs, bearing }: StageSceneProps) => (
-    <div data-testid="stage-canvas" data-frozen={String(frozen)} data-cadence={String(cadenceMs)} data-bearing={bearing} />
-  ),
+  StageCanvas: (props: StageSceneProps) => {
+    drawn.props = props
+    const { frozen, cadenceMs, bearing } = props
+    return <div data-testid="stage-canvas" data-frozen={String(frozen)} data-cadence={String(cadenceMs)} data-bearing={bearing} />
+  },
 }))
+const { countedExport } = await vi.hoisted(() => import('@/test/count-renders'))
+vi.mock('./overlays/stage-svg', countedExport('svg', 'StageSvg'))
 
 const STAGE = { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }
 
@@ -67,6 +74,24 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(screen.getByText(sunScene(state.home, sun)!.label)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Home, live' })).toHaveTextContent(sunReadout(sun)!)
     expect(within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')).toHaveLength(4)
+  })
+
+  // I1: the engine pushes `lights` every 5 s while a look plays, with the colours it read back. Only a
+  // change to what's drawn makes a new writer; the marks follow the lights' status alone.
+  it('keeps the light layer and the marks when a push changes only colours', async () => {
+    const { state } = await openLive()
+    const writer = drawn.props!.writer
+    const push = (patch: (light: (typeof state.lights)[number]) => object) =>
+      act(() => liveStore.setState({ lights: Object.fromEntries(state.lights.map((light) => [light.id, { ...liveStore.getState().lights![light.id], ...patch(light) }])) }))
+    resetRenders()
+    push(() => ({ power: true, colour: '#00FF00' }))
+    expect(drawn.props!.writer).toBe(writer)
+    expect(drawn.props!.entries.some((entry) => entry.resting?.join() === '0,255,0')).toBe(true)
+    expect(renders.svg ?? 0).toBe(0)
+    const streaming = state.lights.find((light) => light.status === 'streaming')!
+    push((light) => (light.id === streaming.id ? { status: 'offline' } : {}))
+    expect(drawn.props!.writer).not.toBe(writer)
+    expect(renders.svg).toBe(1)
   })
 
   it('hides the labels with the Labels switch, and remembers that for Live', async () => {

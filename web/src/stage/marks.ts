@@ -2,8 +2,8 @@
 // drop line from every raised compact light to a floor tick; a ring and slash for a light switched off
 // elsewhere; a dashed ring (a compact light) or dashed segments (a strip) for one offline; a dotted
 // ring for one running its own effect; wave marks beside a streamed copy's last sample. They depend
-// on the pose and the lights' status, never on frames, so they're drawn when either changes.
-import type { Id, Vec2 } from '@/api/contract'
+// on the pose and the lights' status, never on frames or colours, so they're drawn when either changes.
+import type { Id, LightStatus, Vec2 } from '@/api/contract'
 import type { Body } from './bodies'
 import { projectPoint, type CameraPose } from './camera'
 import type { LightState } from './show'
@@ -18,7 +18,12 @@ export function anchorOf(body: Body): Body['samples'][number] {
   return body.form === 'compact' ? body.samples[body.samples.length - 1] : body.samples[Math.floor(body.samples.length / 2)]
 }
 
-export function lightMarks(pose: CameraPose, bodies: readonly Body[], states: ReadonlyMap<Id, LightState>): Mark[] {
+/** Each light's status: all the marks read of its state. */
+export function statusesOf(states: ReadonlyMap<Id, LightState>): Map<Id, LightStatus> {
+  return new Map([...states].map(([id, state]) => [id, state.status]))
+}
+
+export function lightMarks(pose: CameraPose, bodies: readonly Body[], statuses: ReadonlyMap<Id, LightStatus>): Mark[] {
   return bodies.flatMap((body, index): Mark[] => {
     const key = `${body.lightId}:${index}`
     const marks: Mark[] = []
@@ -26,7 +31,7 @@ export function lightMarks(pose: CameraPose, bodies: readonly Body[], states: Re
       const bottom = body.samples[0]
       if (bottom[2] > 0) marks.push({ kind: 'drop', key: `${key}:drop`, from: projectPoint(pose, bottom), to: projectPoint(pose, [bottom[0], bottom[1], 0]) })
     }
-    const status = states.get(body.lightId)?.status
+    const status = statuses.get(body.lightId)
     const at = projectPoint(pose, anchorOf(body))
     switch (status) {
       case 'switched-off':

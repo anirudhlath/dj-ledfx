@@ -4,7 +4,7 @@ import type { Id, Light, RunningZone } from '@/api/contract'
 import type { LightFrame } from '@/api/frames'
 import { formatLatency, formatTime } from '@/lib/format'
 import { hexOf, intensityOf, type RGB } from './light-maths'
-import { lightShow, restingColour, type LightState } from './show'
+import { isStreamed, restingColour, type LightState } from './show'
 
 export interface TooltipText {
   name: string
@@ -30,7 +30,7 @@ export function tooltipText(light: Light, running: readonly RunningZone[], zoneN
 
 /** The light's colour now: its frame's LEDs averaged, else the colour it rests on; null when neither. */
 export function currentColour(frame: LightFrame | undefined, state: LightState): RGB | null {
-  if (lightShow(state) === 'frames' && frame !== undefined && frame.count > 0) {
+  if (isStreamed(state) && frame !== undefined && frame.count > 0) {
     let [r, g, b] = [0, 0, 0]
     for (let i = 0; i < frame.count; i++) {
       r += frame.rgb[i * 3]
@@ -44,9 +44,8 @@ export function currentColour(frame: LightFrame | undefined, state: LightState):
 
 /** The second line: the colour's hex and intensity, or what the light is doing instead; null when nothing is known. */
 export function colourLine(state: LightState, rgb: RGB | null): string | null {
-  const show = lightShow(state)
-  if (show === 'offline') return `Offline since ${formatTime(new Date(state.since))}`
-  if (show === 'switched-off') return 'Switched off elsewhere'
+  if (state.status === 'offline') return `Offline since ${formatTime(new Date(state.since))}`
+  if (state.status === 'switched-off') return 'Switched off elsewhere'
   if (rgb !== null) return `${hexOf(rgb)} · ${Math.round(intensityOf(rgb) * 100)}%`
   return state.power === false ? 'Off' : null
 }

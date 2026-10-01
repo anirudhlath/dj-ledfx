@@ -1,7 +1,7 @@
 // The stage's SVG layer, over the canvas: the lights' marks (§7.3, §9.1), the room labels (§7.6) and
 // the sun (§7.4). It depends on the pose, the lights' status, what runs and the sun, never on frames,
-// so React draws it only when one of those changes. Every size and colour is SPEC's or RENDER's.
-import { useId } from 'react'
+// so React draws it only when one of those changes (memo). Every size and colour is SPEC's or RENDER's.
+import { memo, useId } from 'react'
 import type { Vec2 } from '@/api/contract'
 import { projectPoint, type CameraPose } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
@@ -20,7 +20,7 @@ export interface StageSvgProps {
   sunLabel?: boolean
 }
 
-export function StageSvg({ pose, marks, labels, sun, sunLabel = true }: StageSvgProps) {
+export const StageSvg = memo(function StageSvg({ pose, marks, labels, sun, sunLabel = true }: StageSvgProps) {
   return (
     <svg aria-hidden="true" className="pointer-events-none absolute inset-0" width={pose.width} height={pose.height}>
       {sun !== null && <SunMark pose={pose} sun={sun} withLabel={sunLabel} />}
@@ -32,7 +32,7 @@ export function StageSvg({ pose, marks, labels, sun, sunLabel = true }: StageSvg
       ))}
     </svg>
   )
-}
+})
 
 const line = (colour: string, alpha: number, width: number, dash?: readonly [number, number]) => ({
   stroke: cssColour(colour),

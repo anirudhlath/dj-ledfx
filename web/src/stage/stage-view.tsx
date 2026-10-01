@@ -5,14 +5,15 @@ import { useMemo, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useNavigate } from 'react-router'
 import type { Id, Room } from '@/api/contract'
 import { useElementSize } from '@/lib/use-element-size'
+import { sameEntries, useStable } from '@/lib/use-stable'
 import { useReducedMotion } from '@/lib/use-media-query'
 import { stageBodies } from './bodies'
 import { cadenceMs } from './cadence'
 import { bearingDeg, FIT_VIEW, fitPose, LIVE_PADDING, projectPoint } from './camera'
 import { SPEC } from './design-numbers'
-import { FrameWriter, writerEntries } from './frame-writer'
+import { FrameWriter, sameLayout, writerEntries } from './frame-writer'
 import { stageLabels } from './labels'
-import { anchorOf, lightMarks } from './marks'
+import { anchorOf, lightMarks, statusesOf } from './marks'
 import { Legend } from './overlays/legend'
 import { LightTooltip } from './overlays/light-tooltip'
 import { NoWebGL } from './overlays/no-webgl'
@@ -59,9 +60,15 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
 
   const pose = useMemo(() => fitPose(home.outline, size, LIVE_PADDING, view), [home.outline, size, view])
   const bodies = useMemo(() => stageBodies(lights), [lights])
-  const writer = useMemo(() => new FrameWriter(writerEntries(bodies, lights, states, home.rooms), WRITER_COLOURS), [bodies, lights, states, home.rooms])
+  // The engine pushes `lights` every few seconds while a look plays. The writer's arrays (and the
+  // meshes over them) are made from which bodies are drawn alone, and take each push's colours in
+  // place; the marks, from each light's status alone (I1).
+  const entries = useMemo(() => writerEntries(bodies, lights, states, home.rooms), [bodies, lights, states, home.rooms])
+  const layout = useStable(entries, sameLayout)
+  const writer = useMemo(() => new FrameWriter(layout, WRITER_COLOURS), [layout])
   const mask = useMemo(() => roomMask(home.rooms), [home.rooms])
-  const marks = useMemo(() => (pose === null ? [] : lightMarks(pose, bodies, states)), [pose, bodies, states])
+  const statuses = useStable(useMemo(() => statusesOf(states), [states]), sameEntries)
+  const marks = useMemo(() => (pose === null ? [] : lightMarks(pose, bodies, statuses)), [pose, bodies, statuses])
   const labels = useMemo(() => (phone || !stored.labels ? null : stageLabels(home, running, lights)), [phone, stored.labels, home, running, lights])
   const sunDrawn = useMemo(() => sunScene(home, sun), [home, sun])
   const points = useMemo(() => (pose === null ? [] : screenPoints(pose, bodies)), [pose, bodies])
@@ -105,6 +112,7 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
                 <StageCanvas
                   home={home}
                   writer={writer}
+                  entries={entries}
                   mask={mask}
                   pose={pose}
                   bearing={bearingDeg(view.rotateDeg)}

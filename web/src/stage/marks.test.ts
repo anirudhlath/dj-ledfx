@@ -7,10 +7,9 @@ import { lightBodies, stageBodies } from './bodies'
 import { FIT_VIEW, fitPose, LIVE_PADDING, projectPoint } from './camera'
 import { RENDER } from './design-numbers'
 import { anchorOf, lightMarks } from './marks'
-import { lightState } from './show'
 
 const POSE = fitPose(homeFixture.outline, { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }, LIVE_PADDING, FIT_VIEW)!
-const statesOf = (lights: Light[]) => new Map(lights.map((light) => [light.id, lightState(light, undefined)]))
+const statesOf = (lights: Light[]) => new Map(lights.map((light) => [light.id, light.status]))
 
 describe('the marks on the stage (§7.3, §9.1)', () => {
   it("drops a line from every raised compact light to the floor, and none from a strip", () => {

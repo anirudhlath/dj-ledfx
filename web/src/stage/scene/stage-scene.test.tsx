@@ -1,6 +1,7 @@
 import ReactThreeTestRenderer from '@react-three/test-renderer'
 import { Profiler, type ReactNode } from 'react'
-import { OrthographicCamera } from 'three'
+import { InstancedMesh, type Object3D, OrthographicCamera } from 'three'
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { frames } from '@/api/live'
 import { buildScenario, type ScenarioName } from '@/api/mocks/scenarios'
@@ -9,6 +10,7 @@ import { stageBodies } from '../bodies'
 import { bearingDeg, FIT_VIEW, fitPose, LIVE_PADDING } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import { FrameWriter, writerEntries } from '../frame-writer'
+import type { RGB } from '../light-maths'
 import { WRITER_COLOURS } from '../palette'
 import { roomMask } from '../room-mask'
 import { lightState } from '../show'
@@ -22,9 +24,11 @@ const FPS = SPEC.quality.streamFps
 function stageProps(name: ScenarioName = 'hero', overrides: Partial<StageSceneProps> = {}): StageSceneProps {
   const { home, lights } = buildScenario(name, HERO_NOW)
   const states = new Map(lights.map((light) => [light.id, lightState(light, undefined)]))
+  const entries = writerEntries(stageBodies(lights), lights, states, home.rooms)
   return {
     home,
-    writer: new FrameWriter(writerEntries(stageBodies(lights), lights, states, home.rooms), WRITER_COLOURS),
+    writer: new FrameWriter(entries, WRITER_COLOURS),
+    entries,
     mask: roomMask(home.rooms),
     pose: fitPose(home.outline, STAGE, LIVE_PADDING, FIT_VIEW)!,
     bearing: bearingDeg(0),
@@ -32,6 +36,17 @@ function stageProps(name: ScenarioName = 'hero', overrides: Partial<StageScenePr
     cadenceMs: null,
     ...overrides,
   }
+}
+
+/** The light layer's three objects, and their materials, in the scene's order: all but the home's group, which comes first. */
+function lightLayer(scene: Object3D) {
+  const objects: (InstancedMesh | LineSegments2)[] = []
+  for (const child of scene.children.slice(1)) {
+    child.traverse((object) => {
+      if (object instanceof InstancedMesh || object instanceof LineSegments2) objects.push(object)
+    })
+  }
+  return { objects, materials: objects.map((object) => object.material) }
 }
 
 /** The stage's scene on test-renderer's canvas, with the camera the test can look at. */
@@ -98,6 +113,38 @@ describe('the stage scene (§7.2, §7.5)', () => {
     await renderer.update(<StageScene {...props} writer={changed.writer} frozen />)
     await renderer.advanceFrames(3, 1 / 60)
     expect(writeChanged).toHaveBeenCalledTimes(1)
+  })
+
+  // I1: the engine pushes `lights` every 5 s while a look plays. One that changes only colours draws
+  // into the light layer as it is; one that changes what's drawn makes new meshes, but no new
+  // materials, so no shader compiles again.
+  it('draws a push that changes only colours into the same meshes and materials', async () => {
+    const props = stageProps()
+    const { renderer } = await renderScene(<StageScene {...props} />)
+    const scene = renderer.scene.instance as Object3D
+    const before = lightLayer(scene)
+    expect(before.objects.length).toBeGreaterThan(0)
+    const green: RGB = [0, 255, 0]
+    const recoloured = props.entries.map((entry, index) => (index === 0 ? { ...entry, streamed: false, resting: green } : entry))
+    await renderer.update(<StageScene {...props} entries={recoloured} />)
+    const after = lightLayer(scene)
+    // Identity only: three's objects are too big to compare by value.
+    expect(after.objects.length).toBe(before.objects.length)
+    expect(after.objects.every((object, index) => object === before.objects[index])).toBe(true)
+    expect(after.materials.every((material, index) => material === before.materials[index])).toBe(true)
+    expect([...props.writer.haloColours.slice(0, 3)]).toEqual([0, 1, 0])
+  })
+
+  it('keeps the materials when a light stops being drawn and the meshes are made again', async () => {
+    const props = stageProps()
+    const { renderer } = await renderScene(<StageScene {...props} />)
+    const scene = renderer.scene.instance as Object3D
+    const before = lightLayer(scene)
+    const fewer = props.entries.slice(1)
+    await renderer.update(<StageScene {...props} writer={new FrameWriter(fewer, WRITER_COLOURS)} entries={fewer} />)
+    const after = lightLayer(scene)
+    expect(after.objects[0] === before.objects[0]).toBe(false)
+    expect(after.materials.every((material) => before.materials.includes(material))).toBe(true)
   })
 
   it('lets go of the home when the stage goes', async () => {

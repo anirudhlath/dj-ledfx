@@ -7,7 +7,7 @@ import { useMemo } from 'react'
 import type { Home, Id, Light, RunningZone, SunInput } from '@/api/contract'
 import { useLive } from '@/api/live-store'
 import { queries } from '@/api/queries'
-import { lightState, type LightState } from './show'
+import { lightStates, type LightState } from './show'
 
 export interface StageData {
   home: Home
@@ -34,10 +34,7 @@ export function useStageData(): StageData | null {
   const running = useLive((state) => state.running?.zones ?? NOTHING_RUNS)
   const sun = useLive((state) => state.inputs?.sun ?? null)
   const frozen = useLive((state) => state.connection.status === 'reconnecting')
-  const states = useMemo(
-    () => new Map((lights ?? []).map((light) => [light.id, lightState(light, updates?.[light.id])])),
-    [lights, updates],
-  )
+  const states = useMemo(() => lightStates(lights ?? [], updates), [lights, updates])
   const zoneNames = useMemo(() => new Map((zones ?? []).map((zone) => [zone.id, zone.name])), [zones])
   if (home === undefined || lights === undefined) return null
   return { home, lights, states, running, zoneNames, sun, frozen }

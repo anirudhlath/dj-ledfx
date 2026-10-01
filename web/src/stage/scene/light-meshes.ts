@@ -2,7 +2,9 @@
 // the strips as two LineSegments2 (SPEC.stripPx's two widths). Their attributes are the frame
 // writer's own arrays, so a frame is written once and only flagged here. The halos, cores and strips
 // sit LIFT_M toward the camera: a lamp's halo is a flat disc facing the camera, and lifted it clears
-// the floor and the wall it hangs on while a wall in front still hides it.
+// the floor and the wall it hangs on while a wall in front still hides it. Their materials, and the
+// room mask's texture, are LightMaterials: made once per mask and shared by every LightMeshes, so a
+// light that stops being drawn makes new meshes, but no shader is compiled again (I1).
 import {
   DynamicDrawUsage,
   Group,
@@ -38,11 +40,39 @@ function instanced(count: number, material: ShaderMaterial, attributes: Record<s
   return mesh
 }
 
-function strips(buffers: StripBuffers, width: number): { object: LineSegments2; colours: InterleavedBufferAttribute } {
+function strips(buffers: StripBuffers, material: LineMaterial): { object: LineSegments2; colours: InterleavedBufferAttribute } {
   const geometry = new LineSegmentsGeometry().setPositions(buffers.positions).setColors(buffers.colours)
-  const object = new LineSegments2(geometry, new LineMaterial({ vertexColors: true, linewidth: width, worldUnits: false }))
+  const object = new LineSegments2(geometry, material)
   object.frustumCulled = false
   return { object, colours: geometry.getAttribute('instanceColorStart') as InterleavedBufferAttribute }
+}
+
+const stripMaterial = (width: number) => new LineMaterial({ vertexColors: true, linewidth: width, worldUnits: false })
+
+/** The lights' materials and the room mask's texture: once per mask, whatever the lights do. */
+export class LightMaterials {
+  readonly halo = haloMaterial()
+  readonly core = coreMaterial()
+  readonly pool: ShaderMaterial
+  /** The strips' two widths, SPEC.stripPx's. */
+  readonly narrow = stripMaterial(SPEC.stripPx.min)
+  readonly wide = stripMaterial(SPEC.stripPx.max)
+  private readonly texture: DataTexture
+
+  constructor(mask: RoomMask) {
+    this.texture = maskTexture(mask)
+    this.pool = poolMaterial(mask, this.texture)
+  }
+
+  /** The pose's size, for the screen-space discs and lines. */
+  setView(pose: CameraPose): void {
+    for (const material of [this.halo, this.core]) material.uniforms.viewport.value.set(pose.width, pose.height)
+    for (const material of [this.narrow, this.wide]) material.resolution.set(pose.width, pose.height)
+  }
+
+  dispose(): void {
+    for (const item of [this.halo, this.core, this.pool, this.narrow, this.wide, this.texture]) item.dispose()
+  }
 }
 
 export class LightMeshes {
@@ -52,14 +82,10 @@ export class LightMeshes {
   readonly pools: InstancedMesh | null = null
   private readonly dynamic: InstancedBufferAttribute[] = []
   private readonly stripColours: InterleavedBufferAttribute[] = []
-  private readonly discs: ShaderMaterial[] = []
-  private readonly lines: LineMaterial[] = []
+  /** Its own: the materials are shared, and LightMaterials lets go of them. */
   private readonly disposables: { dispose(): void }[] = []
-  private readonly texture: DataTexture
 
-  constructor(writer: FrameWriter, mask: RoomMask) {
-    this.texture = maskTexture(mask)
-    this.disposables.push(this.texture)
+  constructor(writer: FrameWriter, materials: LightMaterials) {
     if (writer.glows > 0) {
       const centres = attribute(writer.glowCentres, 3)
       const haloColours = attribute(writer.haloColours, 3)
@@ -67,42 +93,34 @@ export class LightMeshes {
       const poolColours = attribute(writer.poolColours, 3)
       const poolRadii = attribute(writer.poolRadii, 1)
       this.dynamic.push(haloColours, haloSizes, poolColours, poolRadii)
-      const halo = haloMaterial()
-      const pool = poolMaterial(mask, this.texture)
-      this.discs.push(halo)
       const room = new InstancedBufferAttribute(writer.glowRooms, 1)
-      this.pools = instanced(writer.glows, pool, { centre: centres, colour: poolColours, radius: poolRadii, room })
-      this.lifted.add(instanced(writer.glows, halo, { centre: centres, colour: haloColours, size: haloSizes }))
-      this.disposables.push(halo, pool)
+      this.pools = instanced(writer.glows, materials.pool, { centre: centres, colour: poolColours, radius: poolRadii, room })
+      this.lifted.add(instanced(writer.glows, materials.halo, { centre: centres, colour: haloColours, size: haloSizes }))
     }
     if (writer.cores > 0) {
       const colours = attribute(writer.coreColours, 3)
       const sizes = attribute(writer.coreSizes, 1)
       this.dynamic.push(colours, sizes)
-      const core = coreMaterial()
-      this.discs.push(core)
-      this.lifted.add(instanced(writer.cores, core, { centre: attribute(writer.coreCentres, 3), colour: colours, size: sizes }))
-      this.disposables.push(core)
+      this.lifted.add(instanced(writer.cores, materials.core, { centre: attribute(writer.coreCentres, 3), colour: colours, size: sizes }))
     }
-    for (const [buffers, width] of [
-      [writer.narrow, SPEC.stripPx.min],
-      [writer.wide, SPEC.stripPx.max],
+    for (const [buffers, material] of [
+      [writer.narrow, materials.narrow],
+      [writer.wide, materials.wide],
     ] as const) {
       if (buffers.segments === 0) continue
-      const { object, colours } = strips(buffers, width)
+      const { object, colours } = strips(buffers, material)
       this.lifted.add(object)
       this.stripColours.push(colours)
-      this.lines.push(object.material)
-      this.disposables.push(object.geometry, object.material)
+      this.disposables.push(object.geometry)
     }
-    for (const object of this.lifted.children) if (object instanceof InstancedMesh) this.disposables.push(object.geometry)
-    if (this.pools !== null) this.disposables.push(this.pools.geometry)
+    // Mi6: an instanced mesh holds buffers of its own (its instance matrices) beside its geometry's.
+    for (const object of [this.pools, ...this.lifted.children]) {
+      if (object instanceof InstancedMesh) this.disposables.push(object.geometry, object)
+    }
   }
 
-  /** The pose's size for the screen-space discs and lines, and the lift toward its camera. */
+  /** The lift toward the pose's camera. */
   setView(pose: CameraPose): void {
-    for (const material of this.discs) material.uniforms.viewport.value.set(pose.width, pose.height)
-    for (const material of this.lines) material.resolution.set(pose.width, pose.height)
     this.lifted.position.set(pose.back[0] * LIFT_M, pose.back[1] * LIFT_M, pose.back[2] * LIFT_M)
   }
 

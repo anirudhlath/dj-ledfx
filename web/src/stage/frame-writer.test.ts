@@ -4,7 +4,7 @@ import { decodeFrame, encodeFrame, FrameStore } from '@/api/frames'
 import { HOME_TOTALS, homeFixture, lightFixtures } from '@/api/mocks/fixtures'
 import { lightBodies, stageBodies, type Body } from './bodies'
 import { SPEC } from './design-numbers'
-import { FrameWriter, writerEntries, type WriterColours, type WriterEntry } from './frame-writer'
+import { FrameWriter, sameLayout, writerEntries, type WriterColours, type WriterEntry } from './frame-writer'
 import { coreColour, haloRadiusPx, liftOf, poolRadiusM } from './light-maths'
 import { lightState } from './show'
 
@@ -18,7 +18,7 @@ const COLOURS: WriterColours = { lightOff: [0.1, 0.2, 0.3], stripDark: [0.4, 0.5
 const bodyOf = (light: Light): Body => lightBodies(light)[0]
 const entry = (light: Light, patch: Partial<WriterEntry> = {}): WriterEntry => ({
   body: bodyOf(light),
-  show: 'frames',
+  streamed: true,
   resting: null,
   room: 1,
   ...patch,
@@ -83,22 +83,34 @@ describe('the frame writer', () => {
     expect(writer.coreSizes[0]).toBe(Math.fround(SPEC.core.darkPx))
   })
 
-  it("rests on the light's own colour until its frames come, and draws a dark light dark", () => {
+  it("rests on the light's own colour until its frames come, and draws a light with none dark", () => {
     const frames = new FrameStore()
     const waiting = new FrameWriter([entry(POINT, { resting: [255, 0, 0] })], COLOURS)
     waiting.write(frames)
     expect(waiting.haloColours[0]).toBeCloseTo(1)
-    const resting = new FrameWriter([entry(POINT, { show: 'resting', resting: [255, 0, 0] })], COLOURS)
+    const resting = new FrameWriter([entry(POINT, { streamed: false, resting: [255, 0, 0] })], COLOURS)
+    stream(frames, POINT.id, solid(POINT.leds, [0, 0, 255]))
     resting.write(frames)
     expect(resting.haloColours[0]).toBeCloseTo(1)
-    const dark = new FrameWriter([entry(POINT, { show: 'dark', resting: [255, 0, 0] })], COLOURS)
+    const dark = new FrameWriter([entry(POINT, { streamed: false })], COLOURS)
     dark.write(frames)
     expect(dark.haloSizes[0]).toBe(0)
   })
 
-  it('gives offline and switched-off lights nothing to draw', () => {
-    const writer = new FrameWriter([entry(POINT, { show: 'offline' }), entry(STRIP, { show: 'switched-off' })], COLOURS)
-    expect([writer.glows, writer.cores, writer.narrow.segments, writer.wide.segments]).toEqual([0, 0, 0, 0])
+  // I1: a `lights` push that changes only colours, or what a light shows, reuses the writer's arrays.
+  it('takes new entries in place: the same arrays, written with the new colours', () => {
+    const frames = new FrameStore()
+    const writer = new FrameWriter([entry(POINT, { streamed: false, resting: [255, 0, 0] })], COLOURS)
+    writer.write(frames)
+    const colours = writer.haloColours
+    writer.setEntries([entry(POINT, { streamed: false, resting: [0, 255, 0] })])
+    writer.write(frames)
+    expect(writer.haloColours).toBe(colours)
+    expect([...writer.haloColours]).toEqual([0, 1, 0])
+    stream(frames, POINT.id, solid(POINT.leds, [0, 0, 255]))
+    writer.setEntries([entry(POINT, { streamed: true, resting: [0, 255, 0] })])
+    writer.write(frames)
+    expect([...writer.haloColours]).toEqual([0, 0, 1])
   })
 
   it('lights no floor for a light in no room', () => {
@@ -148,7 +160,7 @@ describe('the frame writer', () => {
     }
     const frames = new FrameStore()
     stream(frames, pc.id, solid(pc.leds, [9, 9, 9]))
-    const writer = new FrameWriter(lightBodies(placed).map((body) => ({ body, show: 'frames', resting: null, room: 1 })), COLOURS)
+    const writer = new FrameWriter(lightBodies(placed).map((body) => ({ body, streamed: true, resting: null, room: 1 })), COLOURS)
     writer.write(frames)
     expect(writer.leds).toBe(pc.leds)
     writer.write(new FrameStore())
@@ -168,12 +180,32 @@ describe('the frame writer', () => {
 })
 
 describe('the writer entries', () => {
-  it("give each body its light's show, resting colour and room", () => {
+  it("give each body whether its light streams, the colour it rests on, and its room", () => {
     const light: Light = { ...POINT, status: 'idle', power: true, colour: '#00ff00' }
     const states = new Map([[light.id, lightState(light, undefined)]])
     const [only] = writerEntries(lightBodies(light), [light], states, homeFixture.rooms)
-    expect(only).toMatchObject({ show: 'resting', resting: [0, 255, 0] })
+    expect(only).toMatchObject({ streamed: false, resting: [0, 255, 0] })
     expect(homeFixture.rooms[only.room - 1].id).toBe(light.room)
     expect(liftOf(0)).toBe(SPEC.core.liftBase)
+  })
+
+  // §9.1: offline and switched-off lights show only their marks, which are the overlay's.
+  it('leave out offline and switched-off lights', () => {
+    const lights: Light[] = [{ ...POINT, status: 'offline' }, { ...STRIP, status: 'switched-off' }, { ...GRID, status: 'streaming' }]
+    const states = new Map(lights.map((light) => [light.id, lightState(light, undefined)]))
+    const entries = writerEntries(stageBodies(lights), lights, states, homeFixture.rooms)
+    expect(entries.map((e) => e.body.lightId)).toEqual([GRID.id])
+    expect(entries[0].streamed).toBe(true)
+  })
+
+  it('keep their layout while only colours change, and not when a light stops being drawn', () => {
+    const light: Light = { ...POINT, status: 'idle', power: true, colour: '#00ff00' }
+    const bodies = stageBodies([light])
+    const entriesOf = (patch: Partial<Light>) =>
+      writerEntries(bodies, [light], new Map([[light.id, lightState({ ...light, ...patch }, undefined)]]), homeFixture.rooms)
+    const green = entriesOf({})
+    expect(sameLayout(green, entriesOf({ colour: '#ff0000' }))).toBe(true)
+    expect(sameLayout(green, entriesOf({ status: 'streaming' }))).toBe(true)
+    expect(sameLayout(green, entriesOf({ status: 'offline' }))).toBe(false)
   })
 })

@@ -6,7 +6,7 @@ import type { OrthographicCamera } from 'three'
 import type { Home } from '@/api/contract'
 import { useCadence } from '../cadence'
 import { applyPose, type CameraPose } from '../camera'
-import type { FrameWriter } from '../frame-writer'
+import type { FrameWriter, WriterEntry } from '../frame-writer'
 import type { RoomMask } from '../room-mask'
 import { LightLayer } from './light-layer'
 import { StaticHome } from './static-home'
@@ -14,6 +14,8 @@ import { StaticHome } from './static-home'
 export interface StageSceneProps {
   home: Home
   writer: FrameWriter
+  /** What each drawn light shows now, laid out as the writer is (frame-writer.ts's sameLayout()). */
+  entries: readonly WriterEntry[]
   mask: RoomMask
   pose: CameraPose
   /** The camera's bearing (camera.ts's bearingDeg). */
@@ -23,7 +25,7 @@ export interface StageSceneProps {
   cadenceMs: number | null
 }
 
-export function StageScene({ home, writer, mask, pose, bearing, frozen, cadenceMs }: StageSceneProps) {
+export function StageScene({ home, writer, entries, mask, pose, bearing, frozen, cadenceMs }: StageSceneProps) {
   const camera = useThree((state) => state.camera)
   const invalidate = useThree((state) => state.invalidate)
   useLayoutEffect(() => {
@@ -35,7 +37,7 @@ export function StageScene({ home, writer, mask, pose, bearing, frozen, cadenceM
   return (
     <>
       <StaticHome home={home} bearing={bearing} width={pose.width} height={pose.height} />
-      <LightLayer writer={writer} mask={mask} pose={pose} frozen={frozen} />
+      <LightLayer writer={writer} entries={entries} mask={mask} pose={pose} frozen={frozen} />
     </>
   )
 }

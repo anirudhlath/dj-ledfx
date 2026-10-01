@@ -3,10 +3,12 @@
 // (handlers.ts); tests reach it through an in-memory socket. With `protocol: 1` it is engine M1 as
 // deployed today: a bare ack, the v1 beat, v1 frames at 30 fps, an error for any other command, no
 // decks or inputs (decision 9), 404 for the routes M1 doesn't serve, and the PC as a light per part.
-import type {
-  AnchorIn, ApiPath, CreateGroup, FrameStream, HomeSettings, Id, Inputs, Light, LightShape, LightUpdate, Look, PendingPath,
-  Placement, PlacementIn, PreviewRequest, PreviewUpdate, RecentLook, RunningZone, StartRequest, SubZoneIn, TakeOver, UpdateGroup,
-  Zone,
+import {
+  STREAMED,
+  type AnchorIn, type ApiPath, type CreateGroup, type FrameStream, type HomeSettings, type Id, type Inputs, type Light,
+  type LightShape, type LightUpdate, type Look, type PendingPath, type Placement, type PlacementIn, type PreviewRequest,
+  type PreviewUpdate, type RecentLook, type RunningZone, type StartRequest, type SubZoneIn, type TakeOver, type UpdateGroup,
+  type Zone,
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import { PATH_PARAM } from '../rest'
@@ -18,6 +20,8 @@ import { asEngineM1, buildScenario, type ScenarioName, type ScenarioState } from
 const FRAME_MS = 1000 / 60
 const TICK_MS = 16
 const STATS_MS = 1000
+/** Engine zones/lights.py reads each zone light back this often, and pushes `lights` when it moved. */
+const LIGHTS_MS = 5000
 const STATUS_MS = 10_000
 const SIGNALS_MS = 100
 /** After a stall longer than this (a hidden tab), frames pick up from now rather than catch up. */
@@ -80,9 +84,18 @@ interface Painted {
   rgb: Uint8Array
 }
 
-// The engine streams a light running its own effect to the web app too, an approximation of the
-// effect, while anyone watches the live stream (engine zones/frames.py).
-const STREAMING: ReadonlySet<Light['status']> = new Set(['streaming', 'own-effect', 'streamed-copy'])
+/** "#RRGGBB" for the average of `rgb`'s LEDs: what reading a streamed light's colour back finds. */
+function averageHex(rgb: Uint8Array): string {
+  const leds = rgb.length / 3
+  const channel = (offset: number) => {
+    let sum = 0
+    for (let i = offset; i < rgb.length; i += 3) sum += rgb[i]
+    return Math.round(sum / Math.max(1, leds))
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${channel(0)}${channel(1)}${channel(2)}`.toUpperCase()
+}
 
 const ok = (body: unknown): MockReply => ({ status: 200, body })
 const created = (body: unknown): MockReply => ({ status: 201, body })
@@ -240,6 +253,7 @@ export class MockServer {
   private frameCount = 0
   private nextFrameAt: number
   private nextStatsAt: number
+  private nextLightsAt: number
   private nextStatusAt: number
   private nextSignalsAt: number
   private firstConnectAt: number | null = null
@@ -260,6 +274,7 @@ export class MockServer {
     this.startedAt = this.clock()
     this.nextFrameAt = this.startedAt
     this.nextStatsAt = this.startedAt + STATS_MS
+    this.nextLightsAt = this.startedAt + LIGHTS_MS
     this.nextStatusAt = this.startedAt + STATUS_MS
     this.nextSignalsAt = this.startedAt
     this.plan()
@@ -400,6 +415,10 @@ export class MockServer {
       this.nextStatsAt += STATS_MS
       this.broadcast(statsMessage(this.state, this.protocol))
     }
+    if (now >= this.nextLightsAt) {
+      this.nextLightsAt += LIGHTS_MS
+      this.readLightsBack(now)
+    }
     if (now >= this.nextStatusAt) {
       this.nextStatusAt += STATUS_MS
       this.broadcast({
@@ -423,6 +442,28 @@ export class MockServer {
     return { channel: 'signals', values }
   }
 
+  /**
+   * The engine's 5 s read-back: each streamed light's colour is the frame it shows now, and `lights`
+   * goes out when one moved. While a look plays that's every time; under ?still the frames, and so
+   * the colours, hold after the first.
+   */
+  private readLightsBack(now: number): void {
+    const t = this.beatElapsedS(now)
+    const beatPhase = position(this.state, t) % 1
+    let moved = false
+    for (const painted of this.live) {
+      const light = this.state.lights.find((candidate) => candidate.id === painted.id)
+      if (light === undefined) continue
+      paint(painted.rgb, painted.spec, painted.frozen ? 0 : t, beatPhase, painted.brightness, painted.seed)
+      const colour = averageHex(painted.rgb)
+      if (light.colour === colour) continue
+      light.colour = colour
+      moved = true
+    }
+    // What streams hasn't changed, so the frames need no new plan.
+    if (moved) this.broadcast({ channel: 'lights', lights: this.state.lights.map(lightUpdate) })
+  }
+
   // ── Frames ───────────────────────────────────────────────────────────────────────────────
 
   private painted(id: Id, leds: number, spec: MotifSpec, brightness: number, frozen: boolean): Painted {
@@ -438,7 +479,7 @@ export class MockServer {
       const spec = motifFor(look ?? { id: zone.lookId, category: 'ambient' })
       for (const id of zone.lights) {
         const light = lights.get(id)
-        if (light === undefined || !STREAMING.has(light.status)) continue
+        if (light === undefined || !STREAMED.has(light.status)) continue
         this.live.push(this.painted(id, light.leds, spec, zone.brightness, zone.state === 'crashed'))
       }
     }

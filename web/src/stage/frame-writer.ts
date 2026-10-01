@@ -1,19 +1,21 @@
 // Turns the frame store's bytes into what the GPU draws (§7.3, §7.5): for each sample a halo and a
 // floor pool, for each compact light one core, for each strip its segments. It writes into arrays
-// made once, when what's drawn changes, so a frame allocates nothing; the light layer hands these
-// very arrays to three. Offline and switched-off lights get no glow here (§9.1): their marks are the
-// overlay's.
+// made once, when which bodies are drawn changes (sameLayout()), so a frame allocates nothing, and
+// nor does a `lights` push that changes only colours: setEntries() takes those in place. The light
+// layer hands these very arrays to three. Offline and switched-off lights have no entry (§9.1): their
+// marks are the overlay's.
 import type { Id, Light, Room } from '@/api/contract'
 import type { FrameStore, LightFrame } from '@/api/frames'
 import type { Body } from './bodies'
 import { SPEC } from './design-numbers'
 import { haloRadiusPx, isDark, liftOf, poolRadiusM, type Colour, type RGB } from './light-maths'
 import { toWorld } from './plan'
-import { lightShow, restingColour, type LightShow, type LightState } from './show'
+import { isDrawn, isStreamed, restingColour, type LightState } from './show'
 
 export interface WriterEntry {
   body: Body
-  show: LightShow
+  /** Its light's frames are streamed: drawn from them once one has come. */
+  streamed: boolean
   /** The colour drawn without a frame; null draws the light dark. */
   resting: RGB | null
   /** The room whose floor its pools may light: 1-based in home.rooms; 0 lights none. */
@@ -35,7 +37,10 @@ export interface StripBuffers {
 }
 
 interface Slot {
-  entry: WriterEntry
+  body: Body
+  room: number
+  streamed: boolean
+  resting: RGB | null
   /** Its first halo and pool. */
   glow: number
   /** Its core, or −1. */
@@ -46,8 +51,6 @@ interface Slot {
   /** The first of its light's bodies: the one that counts the light's LEDs. */
   counts: boolean
 }
-
-const drawn = (entry: WriterEntry) => entry.show !== 'offline' && entry.show !== 'switched-off'
 
 function strip(segments: number): StripBuffers {
   return { segments, positions: new Float32Array(segments * 6), colours: new Float32Array(segments * 6) }
@@ -78,13 +81,13 @@ export class FrameWriter {
   /** Scratch: each sample's average, three bytes' worth per sample of the longest body. */
   private readonly average: Float32Array
 
+  /** Laid out for these entries' bodies and rooms; setEntries() changes the rest in place. */
   constructor(entries: readonly WriterEntry[], colours: WriterColours) {
     this.colours = colours
-    const shown = entries.filter(drawn)
     const segments = (wide: boolean) =>
-      shown.reduce((sum, e) => sum + (e.body.form === 'strip' && e.body.wide === wide ? e.body.samples.length - 1 : 0), 0)
-    this.glows = shown.reduce((sum, e) => sum + e.body.samples.length, 0)
-    this.cores = shown.filter((e) => e.body.form === 'compact').length
+      entries.reduce((sum, e) => sum + (e.body.form === 'strip' && e.body.wide === wide ? e.body.samples.length - 1 : 0), 0)
+    this.glows = entries.reduce((sum, e) => sum + e.body.samples.length, 0)
+    this.cores = entries.filter((e) => e.body.form === 'compact').length
     this.glowCentres = new Float32Array(this.glows * 3)
     this.glowRooms = new Float32Array(this.glows)
     this.haloColours = new Float32Array(this.glows * 3)
@@ -96,19 +99,18 @@ export class FrameWriter {
     this.coreSizes = new Float32Array(this.cores)
     this.narrow = strip(segments(false))
     this.wide = strip(segments(true))
-    this.average = new Float32Array(3 * Math.max(1, ...shown.map((e) => e.body.samples.length)))
+    this.average = new Float32Array(3 * Math.max(1, ...entries.map((e) => e.body.samples.length)))
 
     const counted = new Set<Id>()
     let glow = 0
     let core = 0
     const next = { narrow: 0, wide: 0 }
-    for (const entry of shown) {
-      const { body } = entry
-      const slot: Slot = { entry, glow, core: -1, strip: null, segment: 0, counts: !counted.has(body.lightId) }
+    for (const { body, room, streamed, resting } of entries) {
+      const slot: Slot = { body, room, streamed, resting, glow, core: -1, strip: null, segment: 0, counts: !counted.has(body.lightId) }
       counted.add(body.lightId)
       body.samples.forEach((sample, s) => {
         this.glowCentres.set(toWorld(sample), (glow + s) * 3)
-        this.glowRooms[glow + s] = entry.room
+        this.glowRooms[glow + s] = room
       })
       glow += body.samples.length
       if (body.form === 'compact') {
@@ -128,12 +130,25 @@ export class FrameWriter {
     }
   }
 
+  /**
+   * Whether each light streams and the colour it rests on, from entries laid out as this writer's
+   * (sameLayout()): a `lights` push that changes only those reallocates nothing.
+   */
+  setEntries(entries: readonly WriterEntry[]): void {
+    if (entries.length !== this.slots.length) throw new Error('FrameWriter.setEntries: the entries are laid out differently')
+    entries.forEach((entry, index) => {
+      const slot = this.slots[index]
+      slot.streamed = entry.streamed
+      slot.resting = entry.resting
+    })
+  }
+
   /** Every drawn light from the store's latest frames (or its resting colour). Allocates nothing. */
   write(frames: FrameStore): void {
     let leds = 0
     for (const slot of this.slots) {
-      const { body, show } = slot.entry
-      const frame = show === 'frames' ? frames.get(body.lightId) : undefined
+      const { body } = slot
+      const frame = slot.streamed ? frames.get(body.lightId) : undefined
       if (frame !== undefined && slot.counts) leds += Math.min(frame.count, body.ledCount)
       this.averageOf(slot, frame)
       this.paint(slot)
@@ -142,9 +157,8 @@ export class FrameWriter {
   }
 
   private averageOf(slot: Slot, frame: LightFrame | undefined): void {
-    const { body, show, resting } = slot.entry
+    const { body, resting: fallback } = slot
     const out = this.average
-    const fallback = show === 'dark' ? null : resting
     for (let s = 0; s < body.samples.length; s++) {
       let r = 0
       let g = 0
@@ -173,7 +187,7 @@ export class FrameWriter {
   }
 
   private paint(slot: Slot): void {
-    const { body, room } = slot.entry
+    const { body, room } = slot
     const { lightOff, stripDark } = this.colours
     const compact = body.form === 'compact'
     const count = body.samples.length
@@ -229,7 +243,7 @@ export class FrameWriter {
   }
 }
 
-/** Each body with what its light shows, the colour it rests on, and its room. */
+/** Each drawn body with whether its light streams, the colour it rests on, and its room. */
 export function writerEntries(
   bodies: readonly Body[],
   lights: readonly Light[],
@@ -240,8 +254,13 @@ export function writerEntries(
   return bodies.flatMap((body) => {
     const light = byId.get(body.lightId)
     const state = states.get(body.lightId)
-    if (light === undefined || state === undefined) return []
+    if (light === undefined || state === undefined || !isDrawn(state)) return []
     const room = rooms.findIndex((candidate) => candidate.id === light.room) + 1
-    return [{ body, show: lightShow(state), resting: restingColour(state), room }]
+    return [{ body, streamed: isStreamed(state), resting: restingColour(state), room }]
   })
+}
+
+/** Whether two sets of entries make the same arrays: the same bodies drawn, in the same rooms. */
+export function sameLayout(a: readonly WriterEntry[], b: readonly WriterEntry[]): boolean {
+  return a.length === b.length && a.every((entry, index) => entry.body === b[index].body && entry.room === b[index].room)
 }
