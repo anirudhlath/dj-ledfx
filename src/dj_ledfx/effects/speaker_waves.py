@@ -1,5 +1,6 @@
 """Speaker waves' field (looks.json "speakers"): kicks send wavefronts out from each of the
-anchor's points, snares bloom between them and hi-hats sparkle up high.
+anchor's points, snares bloom between them and hi-hats sparkle up high. Each kick's front
+crosses the whole zone within the beat, however big the zone.
 
 Until M7 brings the music's own kicks, snares and hats, the beat stands in for them
 (M3 ruling 16): a kick on every beat, a snare on the second and fourth, hats on the
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 # M3 ruling 17
 KICK_COLOUR, SNARE_COLOUR, HAT_COLOUR, REST_COLOUR = "#ff5a1f", "#ffd23f", "#e8f4ff", "#05030a"
 WAVE_M = 0.4  # a wavefront's thickness
+ACROSS_BY = 0.75  # a kick's front reaches the zone's far corner this far into the beat
 BLOOM_M = 1.5  # a snare's reach from the middle of the speakers
 HIGH_FROM, HIGH_TO = 0.55, 0.85  # where "up high" starts and is full, floor 0 to ceiling 1
 
@@ -46,15 +48,6 @@ class SpeakerWaves(ParamField):
             "snare": EffectParam(type="color", default=SNARE_COLOUR, label="Snare"),
             "hat": EffectParam(type="color", default=HAT_COLOUR, label="Hi-hat"),
             "rest": EffectParam(type="color", default=REST_COLOUR, label="Between"),
-            "speed_m": EffectParam(
-                type="float",
-                default=6.0,
-                min=1.0,
-                max=30.0,
-                step=0.5,
-                label="Wave speed",
-                description="Metres a second",
-            ),
             "sparkle": EffectParam(
                 type="float",
                 default=0.15,
@@ -76,10 +69,10 @@ class SpeakerWaves(ParamField):
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
-        each, middle, high = self._per_leds(leds, self._sources)
+        each, middle, high, reach = self._per_leds(leds, self._sources)
         fade = np.float32(1.0 - ctx.beat_phase)
-        since = ctx.beat_phase * 60.0 / max(ctx.bpm, 1.0)  # seconds since the beat
-        gap = (each - np.float32(float(values["speed_m"]) * since)) / np.float32(WAVE_M)
+        front = np.float32(reach * ctx.beat_phase / ACROSS_BY)  # metres out from each point
+        gap = (each - front) / np.float32(WAVE_M)
         kick = np.exp(-(gap * gap)).max(axis=0) * fade
         snare = np.zeros_like(middle)
         if ctx.beat_index % 2 == 1:  # the second and fourth beats
@@ -98,13 +91,17 @@ class SpeakerWaves(ParamField):
         draws = np.random.default_rng([self._seed % 2**32, beat_index % 2**63]).random(count)
         return (draws < share).astype(np.float32)
 
-    def _sources(self, leds: LedSet) -> tuple[F32, F32, F32]:
+    def _sources(self, leds: LedSet) -> tuple[F32, F32, F32, float]:
         """Each LED's distance from each of the anchor's points (k, n), from their middle,
-        and how high up it is (0 low, 1 high)."""
+        how high up it is (0 low, 1 high), and the kick's reach: from the points to the
+        farthest corner of the zone's bounds."""
         anchor = self._values["anchor"]
         points = leds.space.anchor_points.get(anchor) if anchor else None
         if points is None or len(points) == 0:
             points = anchor_or_centre(leds, anchor)[None, :]
         each = np.stack([distances(leds, point) for point in points])
         middle = distances(leds, points.mean(axis=0).astype(np.float32))
-        return each, middle, smoothstep(HIGH_FROM, HIGH_TO, height01(leds))
+        low, top = leds.bounds
+        farthest = np.maximum(abs(points - low), abs(points - top))  # to each point's far corner
+        reach = float(np.linalg.norm(farthest, axis=1).max())
+        return each, middle, smoothstep(HIGH_FROM, HIGH_TO, height01(leds)), reach
