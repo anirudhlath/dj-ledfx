@@ -297,9 +297,8 @@ class TempoClock:
             settings.last_set,
         )
         self._held = False
-        if self._choose(now)[0] == "internal":  # the backup's BPM drives, without a jump
-            self._bpm, self._pitch = self._internal.bpm, 0.0
-            self._line = self._line.moved(now, period=60.0 / self._bpm)
+        if self._choose(now)[0] == "internal":  # the backup's BPM drives
+            self._drive(now, self._internal.bpm)
         self._settle(now)
         self._publish(now)
 
@@ -318,9 +317,13 @@ class TempoClock:
         holds until a DJ starts again."""
         self._internal = InternalTempo(bpm, how, self._wall())
         self._held = self._lock == "auto"
+        self._drive(now, bpm)
+        self._settle(now)
+
+    def _drive(self, now: float, bpm: float) -> None:
+        """The clock goes on at this BPM from now, from where it is: nothing jumps."""
         self._bpm, self._pitch = bpm, 0.0
         self._line = self._line.moved(now, period=60.0 / bpm)
-        self._settle(now)
 
     def _choose(self, now: float) -> tuple[TempoSource, bool]:
         """The source that drives, and whether it's stale (locked, with nothing to say)."""
@@ -346,8 +349,7 @@ class TempoClock:
         # Hand-back: the clock carries on at the last BPM and phase, without a jump.
         if self._bpm != self._internal.bpm:
             self._internal = InternalTempo(self._bpm, "kept", self._wall())
-        self._pitch = 0.0
-        self._line = self._line.moved(now, period=60.0 / self._bpm)
+        self._drive(now, self._bpm)
 
     def _master(self) -> int | None:
         return self._decks.followed if self._source == "prodjlink" and not self._stale else None
