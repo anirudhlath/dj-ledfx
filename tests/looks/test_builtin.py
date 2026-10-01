@@ -5,16 +5,17 @@ from importlib.resources import files
 
 import numpy as np
 import pytest
+from conftest import tempo_ctx
 from map_home import DESIGN, handoff_pins, seeded_ledset, tiny_home
 
 from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
-from dj_ledfx.effects.context import NO_SIGNALS, RenderContext
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.registry import get_strip_effect_classes
 from dj_ledfx.home.seed import seed_home
 from dj_ledfx.looks.builtin import (
     CLASSIC_NAMES,
     FIRMWARE_LOOK_ID,
+    NEEDS_UNTIL_M7,
     anchor_named_in,
     builtin_looks,
     classic_look_id,
@@ -31,7 +32,11 @@ from dj_ledfx.looks.selectors import Selector
 from dj_ledfx.types import FloatRGB
 
 VENDORED = files("dj_ledfx.looks") / "data" / "looks.json"
-SHOWCASE = ["sunset", "aurora", "lava", "carousel", "ripples", "focus", FIRMWARE_LOOK_ID]
+SHOWCASE = [
+    *("sunset", "aurora", "lava", "carousel", "ripples", "focus"),  # M2
+    *("shockwave", "scanner", "checker", "speakers"),  # M3
+    FIRMWARE_LOOK_ID,
+]
 
 
 def _look(look_id: str) -> Look:
@@ -61,7 +66,7 @@ def test_the_handoff_looks_come_first_in_its_order_with_its_metadata() -> None:
         assert (look.thumbnail, look.scope, list(look.needs)) == (
             entry["thumbnail"],
             entry["scope"],
-            entry["inputs"],
+            list(NEEDS_UNTIL_M7.get(look.id, entry["inputs"])),
         )
         assert look.built_in
 
@@ -77,6 +82,11 @@ def test_each_showcase_look_has_its_fields_and_firmware() -> None:
     assert layers["carousel"] == [("field", "color_carousel")]
     assert layers["ripples"] == [("field", "ripples")]
     assert layers["focus"] == [("field", "focus_field")]
+    assert layers["shockwave"] == [("field", "shockwave_shell"), ("field", "lighthouse_beam")]
+    assert layers["scanner"] == [("field", "scanner_plane")]
+    assert layers["checker"] == [("field", "checker_cubes")]
+    assert layers["speakers"] == [("field", "speaker_waves")]
+    assert _look("shockwave").layers[1].blend == "add"  # the beam adds onto the shell
     sunset_flame, aurora_morph = _look("sunset").layers[1], _look("aurora").layers[1]
     assert (sunset_flame.lights, sunset_flame.settings) == ((Selector("type", "candle"),), {})
     assert aurora_morph.lights == (Selector("type", "candle"), Selector("type", "tube"))
@@ -90,6 +100,24 @@ def test_focus_is_calm_around_the_anchor_its_description_names() -> None:
 
     assert anchor is not None
     assert anchor.name.lower() in focus.description.lower()
+
+
+@pytest.mark.parametrize("look_id", ["shockwave", "speakers"])
+def test_m3_looks_start_from_the_anchor_their_description_names(look_id: str) -> None:
+    look = _look(look_id)
+
+    [anchor_id] = {layer.settings["anchor"] for layer in visible_field_layers(look)}
+    anchor = seed_home().anchor(anchor_id)
+
+    assert anchor is not None
+    assert anchor.name.lower() in look.description.lower()
+
+
+def test_speaker_waves_plays_on_the_beat_until_m7() -> None:
+    speakers = _look("speakers")
+
+    assert handoff_looks()["speakers"]["inputs"] == ["music"]  # what M7 brings
+    assert (speakers.category, speakers.needs) == ("audio", ("tempo",))
 
 
 def test_an_anchor_is_found_by_the_name_a_text_mentions() -> None:
@@ -145,17 +173,7 @@ def _frames(look: Look, seed: int) -> list[FloatRGB]:
         effect.reseed(seed)
     frames: list[FloatRGB] = []
     for step in range(180):
-        t = 1000.0 + step / 60
-        ctx = RenderContext(
-            t=t,
-            dt=1 / 60,
-            beat_phase=(t * 2.0) % 1.0,
-            bar_phase=(t / 2.0) % 1.0,
-            bpm=120.0,
-            beat_index=0,
-            bar_index=0,
-            signals=NO_SIGNALS,
-        )
+        ctx = tempo_ctx(2.0 * (1000.0 + step / 60))  # 120 BPM, from 1000 s on
         for effect in effects:
             if isinstance(effect, FirmwareEffect):
                 frames.append(effect.emulate(ctx, leds))

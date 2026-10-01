@@ -1,9 +1,10 @@
 """Built-in looks (spec §5.2).
 
 The handoff's looks take their metadata from its looks.json (vendored in data/looks.json,
-byte for byte), in its order: M2's six showcase looks and the Firmware showcase. The
-handoff has no layers, so they live here. The six classic looks are today's effects; the
-handoff has no entry for them, so their names and descriptions live here too.
+byte for byte), in its order: M2's six showcase looks, M3's four tempo looks and the
+Firmware showcase. The handoff has no layers, so they live here. The six classic looks
+are today's effects; the handoff has no entry for them, so their names and descriptions
+live here too.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from typing import Any
 from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
 from dj_ledfx.home.model import Anchor
 from dj_ledfx.home.seed import normalise_name, seed_home
-from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.looks.model import Blend, InputKind, Layer, Look
 from dj_ledfx.looks.selectors import parse_selector
 
 FIRMWARE_LOOK_ID = "firmware"
@@ -29,6 +30,10 @@ SHOWCASE_LAYERS: tuple[tuple[str, str, str], ...] = (
     ("move", "LIFX Move", "lifx_move"),
     ("flame", "LIFX Flame", "lifx_flame"),
 )
+
+# A look whose inputs wait for a later milestone runs on these until then: Speaker waves
+# plays on the beat until M7 brings the music's kicks, snares and hats (M3 ruling 16).
+NEEDS_UNTIL_M7: dict[str, tuple[InputKind, ...]] = {"speakers": ("tempo",)}
 
 CLASSIC_NAMES: dict[str, str] = {
     "beat_pulse": "Beat pulse",
@@ -58,8 +63,15 @@ def anchor_named_in(text: str, anchors: Sequence[Anchor]) -> str:
     return named[0] if len(named) == 1 else ""
 
 
-def _field(layer_id: str, name: str, kind: str, **settings: Any) -> Layer:
-    return Layer(id=layer_id, name=name, type="field", kind=kind, settings=settings)
+def _field(
+    layer_id: str, name: str, kind: str, *, blend: Blend = "normal", **settings: Any
+) -> Layer:
+    return Layer(id=layer_id, name=name, type="field", kind=kind, blend=blend, settings=settings)
+
+
+def _anchor_of(look_id: str) -> str:
+    """The anchor the look's looks.json description names, on the seeded map."""
+    return anchor_named_in(handoff_looks()[look_id]["description"], seed_home().anchors)
 
 
 def _firmware(
@@ -77,7 +89,7 @@ def _firmware(
 
 def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
     """The layers of each handoff look this milestone can run, by look id."""
-    focus = handoff_looks()["focus"]["description"]
+    tv, speakers = _anchor_of("shockwave"), _anchor_of("speakers")
     return {
         "sunset": (
             _field("sky", "Gradient", "sunset_gradient"),
@@ -96,11 +108,14 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
         "lava": (_field("plasma", "Plasma", "lava_plasma"),),
         "carousel": (_field("carousel", "Carousel", "color_carousel"),),
         "ripples": (_field("ripples", "Ripples", "ripples"),),
-        "focus": (
-            _field(
-                "focus", "Focus", "focus_field", anchor=anchor_named_in(focus, seed_home().anchors)
-            ),
+        "focus": (_field("focus", "Focus", "focus_field", anchor=_anchor_of("focus")),),
+        "shockwave": (
+            _field("shell", "Shockwave", "shockwave_shell", anchor=tv),
+            _field("beam", "Beam", "lighthouse_beam", blend="add", anchor=tv),
         ),
+        "scanner": (_field("plane", "Plane", "scanner_plane"),),
+        "checker": (_field("cubes", "Cubes", "checker_cubes"),),
+        "speakers": (_field("waves", "Waves", "speaker_waves", anchor=speakers),),
         FIRMWARE_LOOK_ID: tuple(
             _firmware(layer_id, name, kind) for layer_id, name, kind in SHOWCASE_LAYERS
         ),
@@ -115,7 +130,7 @@ def _from_handoff(entry: Mapping[str, Any], layers: tuple[Layer, ...]) -> Look:
         description=entry["description"],
         thumbnail=entry["thumbnail"],
         scope=entry["scope"],
-        needs=tuple(entry["inputs"]),
+        needs=NEEDS_UNTIL_M7.get(entry["id"], tuple(entry["inputs"])),
         layers=layers,
         built_in=True,
     )
