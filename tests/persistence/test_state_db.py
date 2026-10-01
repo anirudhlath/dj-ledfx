@@ -2,7 +2,9 @@
 
 import asyncio
 import sqlite3
+import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -788,3 +790,46 @@ async def test_close_safe_during_concurrent_read(tmp_path):
     results = await asyncio.gather(do_read(), do_close(), return_exceptions=True)
     for result in results:
         assert not isinstance(result, Exception), f"Unexpected exception: {result}"
+
+
+class _HeldCommit:
+    """The real connection, with a COMMIT that waits until the test lets it go: a write's
+    thread that outlives its task."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self.committing, self.go = threading.Event(), threading.Event()
+
+    def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
+        if sql == "COMMIT":
+            self.committing.set()
+            self.go.wait(5.0)
+        return self._conn.execute(sql, *args)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+
+async def test_a_cancelled_write_keeps_the_lock_until_its_thread_is_done(tmp_path: Path) -> None:
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    assert db._conn is not None
+    held = _HeldCommit(db._conn)
+    db._conn = held  # type: ignore[assignment]
+    write = asyncio.create_task(
+        db.write_many([("INSERT INTO config (section, key, value) VALUES ('t', 'k', '1')", ())])
+    )
+    await asyncio.to_thread(held.committing.wait, 5.0)
+
+    write.cancel()  # a shutdown, mid-write
+    close = asyncio.create_task(db.close())
+    await asyncio.sleep(0.05)
+    assert not close.done()  # the write's thread still has the connection
+
+    held.go.set()
+    await asyncio.wait([write, close], timeout=5.0)
+    assert write.cancelled() and close.done()
+    again = StateDB(tmp_path / "state.db")
+    await again.open()
+    assert await again.load_config("t") == {"k": "1"}  # the write finished, whole
+    await again.close()

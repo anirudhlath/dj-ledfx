@@ -256,7 +256,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - SQLite: single `asyncio.Lock` on StateDB protects the `sqlite3.Connection` object (not thread-safe despite `check_same_thread=False`), not DB-level locking
 - Scheduler hot path: don't `list()` wrap `dict.values()` iteration — unnecessary allocation at 60fps on single event loop
 - TOML serialization: use `json.dumps(v)` not `str(v)` for config values — `str(True)` produces `"True"` which fails `json.loads()` round-trip
-- `close()` on StateDB must acquire the lock to prevent races with in-flight `to_thread` operations
+- StateDB: every call on the connection, `close()` included, goes through `_locked()`, which holds the lock until the worker thread is done with the connection, even when the caller is cancelled (a shutdown mid-write): a thread can't be stopped, so a cancelled caller waits for it
 - numpy `np.clip(...).astype()` returns `Any` per mypy — bind it to an annotated `NDArray` local before returning (M2's way), or `# type: ignore[no-any-return]` (not `[return-value]`)
 - Migration SQL is split on `;` (`state_db.py`), so a migration's comments must not contain one
 - `HomeMap.load()` calls no listeners, so restore can run it under the zone manager's lock

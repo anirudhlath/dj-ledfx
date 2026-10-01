@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from loguru import logger
 
@@ -15,6 +16,22 @@ from loguru import logger
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 Statement = tuple[str, tuple[Any, ...]]  # one write for write_many: SQL and its parameters
+T = TypeVar("T")
+
+
+async def _to_the_end(work: Callable[[], T]) -> T:
+    """Run `work` in a thread and wait for it, even when the caller is cancelled: the
+    thread can't be stopped, so the caller waits for it before it hears the cancellation."""
+    future = asyncio.ensure_future(asyncio.to_thread(work))
+    try:
+        return await asyncio.shield(future)
+    except asyncio.CancelledError:
+        while not future.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.wait([future])
+        if not future.cancelled():
+            future.exception()  # the caller hears its cancellation, not the thread's error
+        raise
 
 
 def coerce_config_values(raw: dict[str, str]) -> dict[str, object]:
@@ -36,7 +53,8 @@ class StateDB:
     the lifetime of the StateDB instance.
 
     A lock serialises concurrent to_thread calls so two coroutines cannot
-    race on the single sqlite3.Connection.
+    race on the single sqlite3.Connection. `_locked()` is the one way in: it keeps the
+    lock until the thread is done with the connection, even when its caller is cancelled.
     """
 
     def __init__(self, path: Path) -> None:
@@ -118,7 +136,13 @@ class StateDB:
 
     async def get_schema_version(self) -> int:
         """Return the current schema version number."""
-        return await asyncio.to_thread(self._get_schema_version_sync)
+        return await self._locked(self._get_schema_version_sync)
+
+    async def _locked(self, work: Callable[[], T]) -> T:
+        """Run `work` on the connection in a thread, holding the lock until the thread is
+        done with it, even when the caller is cancelled (a shutdown mid-write)."""
+        async with self._lock:
+            return await _to_the_end(work)
 
     async def close(self) -> None:
         """Close the database connection.
@@ -127,12 +151,15 @@ class StateDB:
         raises. Callers should flush any DebouncedWriter before calling this.
         The lock is acquired to prevent races with in-flight operations.
         """
-        async with self._lock:
-            conn = self._conn
-            if conn is not None:
-                self._conn = None
-                await asyncio.to_thread(conn.close)
-                logger.info("StateDB closed: {}", self._path)
+        if await self._locked(self._close_sync):
+            logger.info("StateDB closed: {}", self._path)
+
+    def _close_sync(self) -> bool:
+        conn, self._conn = self._conn, None
+        if conn is None:
+            return False
+        conn.close()
+        return True
 
     async def _execute_read(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
         """Execute a read query and return all rows."""
@@ -142,8 +169,7 @@ class StateDB:
             cur = self._conn.execute(sql, params)
             return cur.fetchall()
 
-        async with self._lock:
-            return await asyncio.to_thread(_run)
+        return await self._locked(_run)
 
     async def _execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         """Execute a single write statement."""
@@ -153,8 +179,7 @@ class StateDB:
             self._conn.execute(sql, params)
             self._conn.commit()
 
-        async with self._lock:
-            await asyncio.to_thread(_run)
+        await self._locked(_run)
 
     async def _executemany_write(self, sql: str, params_seq: list[tuple[Any, ...]]) -> None:
         """Execute a write statement for each set of params."""
@@ -164,8 +189,7 @@ class StateDB:
             self._conn.executemany(sql, params_seq)
             self._conn.commit()
 
-        async with self._lock:
-            await asyncio.to_thread(_run)
+        await self._locked(_run)
 
     async def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
         """Run a read query and return every row."""
@@ -189,8 +213,7 @@ class StateDB:
                 raise
             self._conn.execute("COMMIT")
 
-        async with self._lock:
-            await asyncio.to_thread(_run)
+        await self._locked(_run)
 
     async def has_mark(self, key: str) -> bool:
         """Whether the run-once step `key` has run: mark_statement() wrote its mark."""

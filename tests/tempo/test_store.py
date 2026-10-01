@@ -144,6 +144,37 @@ async def test_a_change_just_before_shutdown_is_saved(db: StateDB) -> None:
     assert (await TempoStore(db).load()).internal.bpm == 90.0
 
 
+async def test_a_save_that_lands_after_a_restore_is_put_right(db: StateDB) -> None:
+    store = WaitingStore(db)
+    clock = tempo_clock(FakeTime(), store=store)
+    clock.set_tempo("internal", 90.0)
+    saving = asyncio.create_task(clock.save())
+    async with asyncio.timeout(2.0):
+        await store.waiting.wait()  # the save has its settings and waits for state.db
+    await TempoStore(db).save(SETTINGS)  # a restore writes the backup's
+    await clock.reload()  # and the clock takes them
+
+    store.go.set()
+    await saving  # the older settings land over the backup's
+    await clock.save()
+
+    assert await TempoStore(db).load() == clock.settings() == SETTINGS
+
+
+async def test_a_set_that_ends_during_a_restore_is_saved(db: StateDB) -> None:
+    store = TempoStore(db)
+    time = FakeTime()
+    clock = tempo_clock(time, store=store)
+    *_, last = play(clock, time, 4)
+    time.now = last + QUIET_S + 0.5  # the DJ stopped, and nothing has settled since
+    await store.save(TempoSettings())  # a restore writes a backup with no set
+
+    await clock.reload()
+    await clock.save()
+
+    assert (await store.load()).last_set == clock.last_set != None  # noqa: E711
+
+
 async def test_reload_takes_a_restored_backup_at_once(db: StateDB) -> None:
     bus = EventBus()
     changed = events(bus, TempoChanged)

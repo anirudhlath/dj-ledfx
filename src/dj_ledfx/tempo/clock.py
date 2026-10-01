@@ -80,7 +80,7 @@ class TempoClock:
         self._line = Timeline(start, 0.0, 60.0 / self._bpm)
         self._source, self._stale = self._choose(start)
         self._snap = True  # the next beat from a source that took over snaps the phase
-        self._dirty = False  # settings changed since they were saved
+        self._saved = settings  # what state.db holds, as far as the clock knows
         self._running = False
         self._set_started: datetime | None = None  # the DJ set going on, if any
         self._last_beat_wall = wall()  # when the last beat was heard, for the set's end
@@ -152,8 +152,7 @@ class TempoClock:
             if lock not in UNLOCKED:
                 raise TempoLockedError(lock)
         now = self._now()
-        if lock != self._lock:
-            self._lock, self._dirty = lock, True
+        self._lock = lock
         if bpm is None:
             self._held = False
             self._settle(now)
@@ -249,7 +248,7 @@ class TempoClock:
         """The last deck went quiet: the set so far is the last set."""
         if self._set_started is not None and not self._decks.any_playing(now):
             self._last_set = DjSet(self._set_started, self._last_beat_wall)
-            self._set_started, self._dirty = None, True
+            self._set_started = None
         self._decks.forget(now)
 
     # --- keeping time, and the settings ---------------------------------------------------
@@ -266,18 +265,18 @@ class TempoClock:
         self._running = False
 
     async def save(self) -> None:
-        """Write the settings to state.db if they changed since the last save."""
-        if not self._dirty or self._store is None:
+        """Write the settings to state.db if they aren't what it holds. They count as saved
+        only once the write is done, so a save cancelled or failing part-way leaves them
+        for the next."""
+        settings = self.settings()
+        if self._store is None or settings == self._saved:
             return
-        self._dirty = False
         try:
-            await self._store.save(self.settings())
-        except asyncio.CancelledError:  # shutdown, maybe mid-write: the last save writes them
-            self._dirty = True
-            raise
+            await self._store.save(settings)
         except Exception as exc:  # a full disk never stops the clock
-            self._dirty = True
             logger.warning("Couldn't save the tempo settings: {}", exc)
+            return
+        self._saved = settings
 
     async def reload(self) -> None:
         """Take what state.db holds now: a restored backup's lock, internal BPM and set."""
@@ -285,6 +284,7 @@ class TempoClock:
             return
         settings = await self._store.load()
         now = self._now()
+        self._saved = settings
         self._lock, self._internal, self._last_set = (
             settings.lock,
             settings.internal,
@@ -295,7 +295,6 @@ class TempoClock:
             self._bpm, self._pitch = self._internal.bpm, 0.0
             self._line = self._line.moved(now, period=60.0 / self._bpm)
         self._settle(now)
-        self._dirty = False
         self._publish(now)
 
     # --- inside ---------------------------------------------------------------------------
@@ -305,7 +304,6 @@ class TempoClock:
         holds until a DJ starts again."""
         self._internal = InternalTempo(bpm, how, self._wall())
         self._held = self._lock == "auto"
-        self._dirty = True
         self._bpm, self._pitch = bpm, 0.0
         self._line = self._line.moved(now, period=60.0 / bpm)
         self._settle(now)
@@ -334,7 +332,7 @@ class TempoClock:
             return
         # Hand-back: the clock carries on at the last BPM and phase, without a jump.
         if self._bpm != self._internal.bpm:
-            self._internal, self._dirty = InternalTempo(self._bpm, "kept", self._wall()), True
+            self._internal = InternalTempo(self._bpm, "kept", self._wall())
         self._pitch = 0.0
         self._line = self._line.moved(now, period=60.0 / self._bpm)
 
