@@ -1,0 +1,110 @@
+// three's geometry for the home (§7.1), from home-geometry.ts's data. Everything is in three's world
+// (plan (x, y, z) → (x, z, y)) with vertex colours, so the whole static home is a handful of draw
+// calls. Sides are coloured by whether they face the camera, and recoloured when the view turns.
+import { BufferAttribute, BufferGeometry, ShapeUtils, Vector2 } from 'three'
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js'
+import type { Vec2 } from '@/api/contract'
+import { facesCamera, outwardNormals, type Pane, type Prism, type Segment } from '../home-geometry'
+import type { Colour } from '../light-maths'
+import type { StagePalette } from '../palette'
+import { toWorld } from '../plan'
+
+/** The triangles that fill a polygon, as indices into it. */
+export function triangulate(polygon: readonly Vec2[]): number[][] {
+  return ShapeUtils.triangulateShape(
+    polygon.map(([x, y]) => new Vector2(x, y)),
+    [],
+  )
+}
+
+/** Flat polygons at height z, one colour: the floors, the courtyard, the balcony. */
+export function flatGeometry(polygons: readonly (readonly Vec2[])[], z: number): BufferGeometry {
+  const positions: number[] = []
+  for (const polygon of polygons) {
+    for (const triangle of triangulate(polygon)) {
+      for (const index of triangle) positions.push(...toWorld([polygon[index][0], polygon[index][1], z]))
+    }
+  }
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
+  return geometry
+}
+
+const TOP: Record<Prism['kind'], keyof StagePalette> = { wall: 'wallTop', column: 'columnTop', furniture: 'furnitureTop' }
+const SIDES: Record<Prism['kind'], [keyof StagePalette, keyof StagePalette]> = {
+  wall: ['wallSide', 'wallSide2'],
+  column: ['wallSide', 'wallSide2'],
+  furniture: ['furnitureSide', 'furnitureSide2'],
+}
+
+/** One side of a prism: where its six vertices start in the buffer, and which way it faces. */
+interface Side {
+  first: number
+  normal: Vec2
+  kind: Prism['kind']
+}
+
+/**
+ * Every prism's top and sides, in one geometry with vertex colours. `turn(bearing)` recolours the
+ * sides for a camera at that bearing (camera.ts's bearingDeg).
+ */
+export class SolidGeometry {
+  readonly geometry = new BufferGeometry()
+  private readonly sides: Side[] = []
+  private readonly palette: StagePalette
+  private readonly colours: Float32Array
+
+  constructor(prisms: readonly Prism[], palette: StagePalette, bearing: number) {
+    this.palette = palette
+    const positions: number[] = []
+    const colours: number[] = []
+    const vertex = (p: Vec2, z: number, colour: Colour) => {
+      positions.push(...toWorld([p[0], p[1], z]))
+      colours.push(...colour)
+    }
+    for (const prism of prisms) {
+      const { polygon, z0, z1, kind } = prism
+      for (const triangle of triangulate(polygon)) for (const index of triangle) vertex(polygon[index], z1, palette[TOP[kind]])
+      outwardNormals(polygon).forEach((normal, i) => {
+        const p = polygon[i]
+        const q = polygon[(i + 1) % polygon.length]
+        this.sides.push({ first: positions.length / 3, normal, kind })
+        for (const [point, z] of [[p, z0], [q, z0], [q, z1], [p, z0], [q, z1], [p, z1]] as const) vertex(point, z, palette.wallSide)
+      })
+    }
+    this.colours = new Float32Array(colours)
+    this.geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
+    this.geometry.setAttribute('color', new BufferAttribute(this.colours, 3))
+    this.turn(bearing)
+  }
+
+  /** Recolours the sides: the camera's side of each prism in its facing colour, the rest in the other. */
+  turn(bearing: number): void {
+    for (const side of this.sides) {
+      const [facing, other] = SIDES[side.kind]
+      const colour = this.palette[facesCamera(side.normal, bearing) ? facing : other]
+      for (let v = 0; v < 6; v++) this.colours.set(colour, (side.first + v) * 3)
+    }
+    this.geometry.getAttribute('color').needsUpdate = true
+  }
+
+  dispose(): void {
+    this.geometry.dispose()
+  }
+}
+
+/** The windows' and glass doors' panes, upright along their walls. */
+export function paneGeometry(panes: readonly Pane[]): BufferGeometry {
+  const positions: number[] = []
+  for (const { a, b, z0, z1 } of panes) {
+    for (const [point, z] of [[a, z0], [b, z0], [b, z1], [a, z0], [b, z1], [a, z1]] as const) positions.push(...toWorld([point[0], point[1], z]))
+  }
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
+  return geometry
+}
+
+/** Plan segments as LineSegments2's geometry. */
+export function segmentsGeometry(segments: readonly Segment[]): LineSegmentsGeometry {
+  return new LineSegmentsGeometry().setPositions(new Float32Array(segments.flatMap(([a, b]) => [...toWorld(a), ...toWorld(b)])))
+}
