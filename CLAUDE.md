@@ -27,6 +27,7 @@ The Claude Design handoff is the only source of design truth. Don't work from me
 - Behaviour, structure, data contract and copy: the web app spec. Look and layout: the reference renders in `docs/design/web-app/reference/`.
 - The renders are not in git. They live in the main checkout, `/home/anirudhlath/code/private/dj-ledfx/docs/design/web-app/reference/`; read them there from a worktree. If they're missing, extract them from `.superpowers/design-handoff/2026-09-23-dj-ledfx-web-handoff.zip` in the main checkout.
 - `docs/design/web-app/HANDOFF.sha256` pins every design file, renders included. Check with `sha256sum -c --ignore-missing HANDOFF.sha256` in that directory.
+- Each render's HTML sits beside its PNG (`Main.html` beside `Main.png`). Where the app and a render differ, its markup settles what the picture can't: a font run, a colour, what a state leaves out.
 - Use `tokens.css`, `icons.ts`, `looks.json` and `home.json` as they are: import them, or copy them byte for byte with a test that fails when the copy differs. Never retype a token, colour, size, icon path or look description, and never restate design values in docs or in this file.
 - Before each web app task, re-read the spec sections and look at the renders that the task names.
 - A new handoff replaces `docs/design/web-app/` and the web app spec wholesale. Don't hand-edit the design files.
@@ -55,15 +56,17 @@ uv run python scripts/lifx_record_fixtures.py  # Record the LAN's LIFX replies i
 docker compose up -d --build     # Deploy: from the main checkout ~/code/private/dj-ledfx, after a merge (see Deployment)
 docker compose logs app          # The deployed app's log
 cd web && npm install            # New web app (F0–F11): install dependencies
-cd web && npm run dev            # Dev server at http://localhost:5174/next/ (proxies /api and /ws to :8080); add ?scenario=<name> to run on the mocks (?still holds the beat, ?protocol=1 speaks as engine M1)
-cd web && npm run build          # Type-check and build web/dist; fails if MSW got in or the JS passes §14's budget; FastAPI serves it at /next
+cd web && npm run dev            # Dev server at http://localhost:5174/next/ (proxies /api and /ws to :8080); add ?scenario=<name> to run on the mocks (?still holds the beat and the frames, ?protocol=1 speaks as engine M1)
+cd web && npm run build          # Type-check and build web/dist; fails if MSW got in or the JS, three.js's chunk aside, passes §14's budget; FastAPI serves it at /next
 cd web && npm run build:mock     # Build web/dist-mock: the app on its mocks (the hero unless ?scenario=), which e2e serves
 cd web && npm run api:types      # Regenerate web/src/api/generated/ from the backend's code, after any API change
 cd web && npm run api:check      # Fail if the generated types aren't the backend's; `-- --url http://127.0.0.1:8080` also compares a running server (GET only)
+cd web && npm run design:numbers # Regenerate src/stage/design-numbers.ts from the spec and the pinned renders (read from the main checkout); `-- --check` fails if it's stale
 cd web && npm test               # Vitest: unit and component tests
 cd web && npm run lint           # ESLint (npx tsc -b type-checks)
 cd web && npx playwright install chromium  # Once per machine
 cd web && npm run e2e            # Playwright: screenshots, axe on every route, keyboard, reflow
+cd web && npm run e2e:perf       # Playwright on this machine's GPU: the stage's frame rate and idle main thread against §14 (e2e's ports: never beside npm run e2e)
 ```
 
 ## Deployment
@@ -146,11 +149,13 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - `src/api/` — the data layer (§12); components never call `fetch` or touch the socket. `generated/` (the backend's OpenAPI schema and openapi-typescript's types, committed), `contract.ts` (generated aliases, and the pending types later engine milestones serve), `rest.ts` (`api.*`), `live-client.ts` (the one socket: backoff, silence watchdog, resync, frame protocol handshake), `live-store.ts` (zustand; `useLive(selector)`), `frames.ts` (`FrameStore`: reused typed arrays React never watches), `beat.ts` (`BeatClock`), `queries.ts` (TanStack Query), `live.ts` (the app's singletons; `startDataLayer()`, and `resetDataLayer()` for tests)
 - `src/api/mocks/` — `MockServer` plays a §12.5 scenario (REST, channels, animated frames) from byte copies of `home.json` and `looks.json`; MSW puts it behind fetch and WebSocket in dev (`?scenario=`) and in `dist-mock`; tests reach it through `inMemorySockets()`
 - `scripts/dump_openapi.py` prints the backend's OpenAPI schema from the code, with no server
+- `scripts/design-numbers.ts` (with `design-extract.ts`) writes `src/stage/design-numbers.ts`: `SPEC` read from the spec's own sentences, `RENDER` from the pinned `Main.html` and `State-Firmware.html`
+- `src/stage/` — the stage (§7), `live` and `frozen` modes. Pure modules turn the API's data into what is drawn (`plan`, `bodies`, `show`, `camera`, `view-memory`, `home-geometry`, `room-mask`, `labels`, `picking`, `marks`, `sun`, `tooltip`), every number from `design-numbers.ts` and every colour from tokens.css through `palette.ts`. `FrameWriter` writes the frame store's arrays into the instances in place; `cadence.ts` says when the canvas draws; `scene/` is three.js under React Three Fiber (`HomeScene`, `LightMeshes`); `overlays/` the SVG layer and the HTML overlays; `StageView` puts them together, and `stage.tsx` is Live's lazy chunk
 - `src/shell/` — rail, top bar, tab bar, phone header; `AppShell` swaps desktop and phone chrome at the phone breakpoint without remounting the page
 - `src/app/` — `boot.tsx` (starts the mocks when asked, then the data layer and the router; `main.tsx` only calls it), routes (§4.3), each with a `PageMeta` handle for its titles and context lines; pages sit in a pathless route whose `errorElement` keeps the chrome, and the root route's catches `AppShell` itself
-- `src/pages/` — placeholders, not-found and error pages (all drawn by `EmptyState`), and the unlinked `/system` specimen
-- `src/lib/` — formatters and the viewport and clock hooks (`useIsPhone`, `useNow`)
-- `e2e/` — Playwright specs and the committed screenshot baselines
+- `src/pages/` — `live.tsx` (the stage, loaded lazily, and the Running panel's place until F3), placeholders, not-found and error pages (all drawn by `EmptyState`), and the unlinked `/system` specimen
+- `src/lib/` — formatters and the viewport, size, motion and clock hooks (`useIsPhone`, `useElementSize`, `useReducedMotion`, `useNow`)
+- `e2e/` — Playwright specs and the committed screenshot baselines; `stage.perf.ts` runs only under `npm run e2e:perf` (`playwright.perf.config.ts`)
 - `src/dj_ledfx/web/app.py` serves `web/dist` at `/next` (SPA fallback), registered before the old UI's catch-all
 
 ## Code Style
@@ -304,10 +309,19 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Web app: if MSW's worker fails to register (plain http off localhost), app/boot.tsx draws "The mocks didn't start" with the browser's reason instead of a blank page
 - Web app: the chrome and the pages read the live store a slice at a time (`useLive(selector)`); a selector that builds an object needs `useLiveShallow`, or its component redraws on every message. Frames never go into React state
 - Web app: the beat clock and the link's watchdog run on `performance.now()` (`clientNow()`), which Playwright's `page.clock.setFixedTime` leaves running; the mock's times come from `Date`, so a fixed clock still shows the renders' times
-- Web app: e2e runs on the mock, which renders only once MSW's worker is up, so a Playwright test waits for the data (`open()` in e2e/shell.spec.ts waits for the attention button, whatever it says) before `document.fonts.ready`; a test that measures the tempo waits for it with `tempo()`, and a screenshot opens with `openStill()` (`?still` holds the beat)
+- Web app: e2e runs on the mock, which renders only once MSW's worker is up, so a Playwright test waits for the data (`open()` in e2e/shell.spec.ts waits for the attention button, whatever it says) before `document.fonts.ready`; a test that measures the tempo waits for it with `tempo()`, and a screenshot opens with `openStill()` (`?still` holds the beat and the frames)
 - Web app: a test running a `MockServer` through `inMemorySockets()` advances fake timers with `await vi.advanceTimersByTimeAsync()`, because the socket delivers in microtasks; `startMockServer()` and `startMockDataLayer()` in src/test/live.ts start one on `Date.now()` and stop it after the test; `startDataLayer()` stops the client it started before, so there is one socket at a time
 - Web app: the shared test setup calls `resetDataLayer()` after each test (the client stopped; the live store, frames, beat clock and REST cache empty); a component test that needs the server's data seeds it with `seedLive()` from src/test/live.ts
 - Web app: the owner renamed room `corridor` for display through `OWNER_ROOM_NAMES` in src/api/mocks/fixtures.ts, as engine M2's seed does; the byte copy of home.json stays as it is, and a room name is read through `roomName()` or the fixtures, never from the JSON
 - Web app: "Start again" is `api.recentLooks()` (`GET /api/running/recent`), newest stop first; one tap is `api.start(zoneId, { lookId })`, and the mock remembers stops as engine M2 does
 - Web app: Vitest strips types without checking them, so `npx tsc -b` is the type gate: a class with two members of one name runs in Vitest with the later one silently winning
 - Web app: MSW's Node server makes Node 26 print `ExperimentalWarning: localStorage is not available` in node-environment tests; it's harmless
+- Web app: the stage's numbers are `SPEC` and `RENDER` in `src/stage/design-numbers.ts`, which `npm run design:numbers` generates; never edit it by hand. After a new handoff, regenerate it: `src/stage/design-numbers.node.test.ts` fails until then, and skips its render half where the renders are missing (CI)
+- Web app: the stage's canvas runs R3F's `frameloop="demand"`, and `useCadence` calls `advance(now)` in the animation frame a draw is due; `invalidate()` waits for the next animation frame, so the demand loop would draw every other frame and halve the rate
+- Web app: the stage's canvas is `linear` and `flat`: colours are made with `Color.setRGB()` from `palette.ts`, never from a hex string, which three.js would convert from sRGB
+- Web app: jsdom has no WebGL, ResizeObserver or reduced-motion query. Stage tests mock `stage-canvas.tsx`, size the stage with `resizeObserved()` (src/test/resize.ts), seed the REST data with `seedRest()` (src/test/rest.ts) and switch reduced motion with `setReducedMotion()` (src/test/viewport.ts); Node's `THREE_CJS_DEPRECATED` warning in those tests comes from React Three Fiber's CommonJS build, which Vitest loads, and is harmless
+- Web app: Vitest leaves a `?raw` CSS import empty unless `test.css.include` lists the file; vite.config.ts lists tokens.css, which the stage's palette reads
+- Web app: three.js is a chunk of its own (`codeSplitting` in vite.config.ts), which `scripts/check-dist.ts` leaves out of §14's budget; Vite's warning that the chunk is large is expected
+- Web app: `npm run e2e:perf` draws on the machine's GPU (ANGLE over Vulkan) and fails on a software renderer; it serves on e2e's ports, so it can't run beside `npm run e2e`
+- Web app: the mock streams the lights running their own effect, as the engine does while the live stream is watched, so the firmware scenario streams every LED in the home; that is what `e2e:perf` measures
+- Web app: Playwright's web servers run `tsc -b` before they build, so a type error anywhere stops `npm run e2e` and `e2e:perf` at start with `Process from config.webServer was not able to start. Exit code: 2`; `npx tsc -b` shows it
