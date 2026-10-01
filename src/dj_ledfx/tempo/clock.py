@@ -225,7 +225,7 @@ class TempoClock:
         self._decks.hear(event)
         self._last_beat_wall = self._wall()
         if started:
-            self._dj_started()
+            self._dj_started(self._last_beat_wall)
         self._settle(now)
         if self._source == "prodjlink" and event.device_number == self._decks.followed:
             self._follow(event)
@@ -245,14 +245,13 @@ class TempoClock:
             logger.debug("Beat drift {:.1f} ms: hard snap", drift * 1000.0)
         self._line = Timeline(event.timestamp, float(beat), period)
         self._bpm, self._pitch = event.bpm, event.pitch_percent
-        metrics.BEAT_BPM.set(event.bpm)
         metrics.BEAT_PHASE.set((event.beat_position - 1) / BEATS_PER_BAR)
 
-    def _dj_started(self) -> None:
-        """A DJ starts playing: a hold ends ("until a higher source starts again"), and a
-        set begins, or goes on if the last one ended less than SET_GAP_S ago."""
+    def _dj_started(self, wall: datetime) -> None:
+        """A DJ starts playing at `wall`: a hold ends ("until a higher source starts again"),
+        and a set begins, or goes on if the last one ended less than SET_GAP_S ago."""
         self._held = False
-        wall, last = self._wall(), self._last_set
+        last = self._last_set
         if last is not None and (wall - last.ended).total_seconds() < SET_GAP_S:
             self._set_started = last.started
         else:

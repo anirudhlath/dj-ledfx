@@ -45,7 +45,7 @@ class TapTempo:
         self._stamps: list[float] = []
         self._client = False
         self._index = -1
-        self._offset = 0.0  # client time to server time, from the least-delayed tap
+        self._offset = math.inf  # client time to server time: the least-delayed tap's
         self._arrived = -math.inf
 
     def tap(self, arrived: float, client_time: float | None = None) -> Tap | None:
@@ -53,7 +53,7 @@ class TapTempo:
         second tap within MIN_INTERVAL_S of the last, or one stamped before it.
         `client_time` is a usable_client_time(), or None."""
         client = client_time is not None
-        stamp = float(client_time) if client_time is not None and client else arrived
+        stamp = arrived if client_time is None else client_time
         last = self._stamps[-1] if self._stamps else None
         if (
             last is None
@@ -63,7 +63,6 @@ class TapTempo:
         ):
             self.reset()
             self._client = client
-            self._offset = arrived - stamp
         elif stamp - last < MIN_INTERVAL_S:
             return None
         self._stamps = [*self._stamps[-MAX_INTERVALS:], stamp]
