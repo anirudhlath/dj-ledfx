@@ -114,6 +114,36 @@ async def test_run_saves_a_hand_back(db: StateDB) -> None:
     assert (await store.load()).last_set is not None
 
 
+class WaitingStore(TempoStore):
+    """A store whose saves wait until the test lets them go on, as a save waits for
+    state.db's lock while another write holds it."""
+
+    def __init__(self, db: StateDB) -> None:
+        super().__init__(db)
+        self.waiting, self.go = asyncio.Event(), asyncio.Event()
+
+    async def save(self, settings: TempoSettings) -> None:
+        self.waiting.set()
+        await self.go.wait()
+        await super().save(settings)
+
+
+async def test_a_change_just_before_shutdown_is_saved(db: StateDB) -> None:
+    store = WaitingStore(db)
+    clock = tempo_clock(FakeTime(), store=store)
+    task = asyncio.create_task(clock.run())
+    clock.set_tempo("internal", 90.0)
+    async with asyncio.timeout(2.0):
+        await store.waiting.wait()  # run() is saving it, and waits for state.db
+
+    task.cancel()  # shutdown
+    await asyncio.wait([task])
+    store.go.set()
+    await clock.save()  # main's last save, before state.db closes
+
+    assert (await TempoStore(db).load()).internal.bpm == 90.0
+
+
 async def test_reload_takes_a_restored_backup_at_once(db: StateDB) -> None:
     bus = EventBus()
     changed = events(bus, TempoChanged)

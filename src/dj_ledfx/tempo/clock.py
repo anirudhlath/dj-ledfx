@@ -272,6 +272,9 @@ class TempoClock:
         self._dirty = False
         try:
             await self._store.save(self.settings())
+        except asyncio.CancelledError:  # shutdown, maybe mid-write: the last save writes them
+            self._dirty = True
+            raise
         except Exception as exc:  # a full disk never stops the clock
             self._dirty = True
             logger.warning("Couldn't save the tempo settings: {}", exc)
