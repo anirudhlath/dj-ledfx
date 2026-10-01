@@ -12,7 +12,8 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "api:types": "node scripts/api-types.ts",
-    "api:check": "node scripts/api-types.ts --check"
+    "api:check": "node scripts/api-types.ts --check",
+    "design:numbers": "node scripts/design-numbers.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
