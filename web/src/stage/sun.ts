@@ -17,7 +17,12 @@ export function compass(azimuthDeg: number): (typeof POINTS)[number] {
   return POINTS[Math.round((((azimuthDeg % 360) + 360) % 360) / 45) % 8]
 }
 
-const up = (sun: Pick<SunInput, 'elevation'>) => sun.elevation > 0
+/**
+ * Up, and placeable: engine M6 settles the sun's shape (contract.ts), so a point without a finite
+ * elevation and azimuth is no sun at all.
+ */
+const up = (sun: Pick<SunInput, 'elevation' | 'azimuth'>) =>
+  Number.isFinite(sun.elevation) && Number.isFinite(sun.azimuth) && sun.elevation > 0
 
 /** Where the sun is, in plan metres, for an elevation and azimuth. */
 export function sunPoint(home: Pick<Home, 'outline' | 'ceiling' | 'northOffsetDeg'>, elevationDeg: number, azimuthDeg: number): Vec3 {
@@ -52,17 +57,18 @@ export function sunScene(
 ): SunScene | null {
   if (sun == null || !up(sun)) return null
   const at = sunPoint(home, sun.elevation, sun.azimuth)
-  const path = (sun.path ?? []).filter(up).map((point) => sunPoint(home, point.elevation, point.azimuth))
+  const path = (Array.isArray(sun.path) ? sun.path : []).filter(up).map((point) => sunPoint(home, point.elevation, point.azimuth))
   return { at, path: [...path, at], label: labelled ? `SUN ${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}` : null }
 }
 
 /**
  * §8.1's readout in three runs: its first word, the elevation and compass point (Main.png sets them in
- * mono), and the sunset; null while the sun is down or unknown (decision 7).
+ * mono), and the sunset, empty when it doesn't parse; null while the sun is down or unknown (decision 7).
  */
 export function sunReadoutRuns(sun: SunInput | null | undefined): readonly [string, string, string] | null {
   if (sun == null || !up(sun)) return null
-  return ['Sun ', `${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}`, ` · sets ${formatTime(new Date(sun.sunset))}`]
+  const sunset = typeof sun.sunset === 'string' ? Date.parse(sun.sunset) : Number.NaN
+  return ['Sun ', `${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}`, Number.isNaN(sunset) ? '' : ` · sets ${formatTime(new Date(sunset))}`]
 }
 
 /** §8.1's readout: the elevation, the compass point and the sunset; null while the sun is down or unknown (decision 7). */

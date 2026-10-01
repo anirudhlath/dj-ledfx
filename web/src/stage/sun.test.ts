@@ -54,6 +54,31 @@ describe('the sun (§7.4)', () => {
     expect(scene.path.length).toBe(HERO_SUN.path!.length + 1)
   })
 
+  // Mi3: engine M6 settles the sun's final shape, so the stage trusts no field of it.
+  it('takes a sun without a finite elevation and azimuth for no sun', () => {
+    const broken = [
+      { ...EVENING, azimuth: undefined },
+      { ...EVENING, azimuth: '250' },
+      { ...EVENING, elevation: Number.POSITIVE_INFINITY },
+      { ...EVENING, elevation: null },
+    ] as unknown as SunInput[]
+    for (const sun of broken) {
+      expect(sunScene(homeFixture, sun)).toBeNull()
+      expect(sunReadout(sun)).toBeNull()
+    }
+  })
+
+  it('draws only the points of the path it can place', () => {
+    const path = [...HERO_SUN.path!, { at: HERO_SUN.sunset, elevation: 5, azimuth: Number.NaN }]
+    expect(sunScene(homeFixture, { ...HERO_SUN, path })!.path.flat().every(Number.isFinite)).toBe(true)
+    expect(sunScene(homeFixture, { ...HERO_SUN, path: 'soon' } as unknown as SunInput)!.path).toHaveLength(1)
+  })
+
+  it("leaves the sunset out of the readout when it doesn't parse", () => {
+    expect(sunReadout({ ...EVENING, sunset: 'soon' })).toBe('Sun 12° · W')
+    expect(sunReadout({ ...EVENING, sunset: null } as unknown as SunInput)).toBe('Sun 12° · W')
+  })
+
   // Review focus 1: engine M2 serves no sun until M6; and at night it's down.
   it('shows no sun and no readout when the server has no sun, or it has set', () => {
     expect(sunScene(homeFixture, null)).toBeNull()
