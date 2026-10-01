@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HERO_NOW, startMockServer } from '@/test/live'
 import { BeatClock } from '../beat'
-import type { Home, Light, Look, Placement, RecentLook, Zone } from '../contract'
+import type { Deck, Home, Inputs, Light, Look, Placement, RecentLook, Zone } from '../contract'
 import { FrameStore, decodeFrame } from '../frames'
 import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
 import type { ClientCommand } from '../ws-messages'
 import { inMemorySockets } from './in-memory-socket'
 import { RECENT_LIMIT, beatMessage, snapshotMessages, statsMessage, type MockServer } from './mock-server'
-import { buildScenario } from './scenarios'
+import { SCENARIOS, buildScenario } from './scenarios'
 
 /** Moves the wall clock on: the mock's times come from Date.now(). */
 const later = (minutes: number) => vi.setSystemTime(HERO_NOW.getTime() + minutes * 60_000)
@@ -269,6 +269,25 @@ describe('the REST API', () => {
     const sub = home.subZones[0]
     const reply = server.handle('PUT', `/api/home/subzones/${sub.id}`, { name: 'Reading nook', room: null, polygon: null })
     expect(reply).toEqual({ status: 200, body: { ...sub, name: 'Reading nook' } })
+  })
+
+  // Mi7: Pro DJ Link as engine M3 serves it, over REST and on the inputs channel alike.
+  it("serves Pro DJ Link as engine M3 does: where it listens, and the decks channel's decks", () => {
+    for (const scenario of SCENARIOS) {
+      const server = startMockServer({ scenario })
+      const heard = connect(server).json()
+      const decks: Deck[] = heard.find((message) => message.channel === 'decks').decks
+      const pushed: Inputs = heard.find((message) => message.channel === 'inputs').inputs
+      const served = server.handle('GET', '/api/inputs').body as Inputs
+      for (const inputs of [served, pushed]) {
+        expect(inputs.prodjlink.interface).toBe('0.0.0.0:50001')
+        expect(inputs.prodjlink.decks).toEqual(decks)
+      }
+      expect(decks.map((deck) => deck.state)).not.toContain('empty') // engine M3 can't tell one
+    }
+    const server = startMockServer({ scenario: 'dj-playing' })
+    server.state.decks = server.state.decks.filter((deck) => deck.master)
+    expect((server.handle('GET', '/api/inputs').body as Inputs).prodjlink.decks).toEqual(server.state.decks)
   })
 
   it('answers what it does not serve with 404 Not Found', () => {

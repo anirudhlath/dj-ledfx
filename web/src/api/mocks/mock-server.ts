@@ -4,8 +4,9 @@
 // deployed today: a bare ack, the v1 beat, v1 frames at 30 fps, an error for any other command, no
 // decks or inputs (decision 9), 404 for the routes M1 doesn't serve, and the PC as a light per part.
 import type {
-  AnchorIn, ApiPath, CreateGroup, FrameStream, HomeSettings, Id, Light, LightShape, LightUpdate, Look, PendingPath, Placement,
-  PlacementIn, PreviewRequest, PreviewUpdate, RecentLook, RunningZone, StartRequest, SubZoneIn, TakeOver, UpdateGroup, Zone,
+  AnchorIn, ApiPath, CreateGroup, FrameStream, HomeSettings, Id, Inputs, Light, LightShape, LightUpdate, Look, PendingPath,
+  Placement, PlacementIn, PreviewRequest, PreviewUpdate, RecentLook, RunningZone, StartRequest, SubZoneIn, TakeOver, UpdateGroup,
+  Zone,
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import { PATH_PARAM } from '../rest'
@@ -101,6 +102,11 @@ function lightUpdate(light: Light): LightUpdate {
 
 type Pushed = 'running' | 'lights' | 'attention' | 'transport'
 
+/** The inputs as engine M3 serves them: Pro DJ Link's decks are the decks channel's. */
+export function inputsOf(state: Pick<ScenarioState, 'inputs' | 'decks'>): Required<Inputs> {
+  return { ...state.inputs, prodjlink: { ...state.inputs.prodjlink, decks: state.decks } }
+}
+
 /** What a new connection hears first: M1's four snapshots, and in v2 the decks and inputs too. */
 export function snapshotMessages(state: ScenarioState, protocol: 1 | 2): ServerMessage[] {
   const messages: ServerMessage[] = [
@@ -109,7 +115,7 @@ export function snapshotMessages(state: ScenarioState, protocol: 1 | 2): ServerM
     { channel: 'attention', items: state.attention },
     { channel: 'transport', state: state.previewOnly ? 'simulating' : 'playing' },
   ]
-  if (protocol === 2) messages.push({ channel: 'decks', decks: state.decks }, { channel: 'inputs', inputs: state.inputs })
+  if (protocol === 2) messages.push({ channel: 'decks', decks: state.decks }, { channel: 'inputs', inputs: inputsOf(state) })
   return messages
 }
 
@@ -595,7 +601,7 @@ export class MockServer {
   /** Engine M3's routes: the tempo clock's inputs. A 404 with protocol 1. */
   private m3Routes(): Route[] {
     return compile<ApiPath>({
-      '/api/inputs': { GET: () => ok(this.state.inputs) },
+      '/api/inputs': { GET: () => ok(inputsOf(this.state)) },
     })
   }
 

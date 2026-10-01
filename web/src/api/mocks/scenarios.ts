@@ -3,7 +3,8 @@
 // renders' times (decision 8). Names come from the fixtures; ids pick things out of them.
 import { formatBpm, formatTime } from '@/lib/format'
 import type {
-  AttentionItem, Deck, Home, Id, Inputs, Light, Look, Overlay, RecentLook, RunningZone, Signal, TempoSource, Zone,
+  AttentionItem, Deck, Home, Id, Inputs, Light, Look, Overlay, ProDjLinkInput, RecentLook, RunningZone, Signal, TempoSource,
+  Zone,
 } from '../contract'
 import {
   HOME_ZONE, homeFixture, lightFixtures, lookFixtures, lookName, partId, roomName, runningZone, zoneFixtures,
@@ -40,6 +41,12 @@ export interface ScenarioBeat {
   stale: boolean
 }
 
+/**
+ * Every input, the ones engine M6 and M7 bring included, but Pro DJ Link's decks: those are
+ * `ScenarioState.decks`, which the mock puts in where it serves the inputs (`inputsOf`), as the server does.
+ */
+export type ScenarioInputs = Omit<Required<Inputs>, 'prodjlink'> & { prodjlink: Omit<ProDjLinkInput, 'decks'> }
+
 export interface ScenarioState {
   name: ScenarioName
   home: Home
@@ -51,8 +58,7 @@ export interface ScenarioState {
   attention: AttentionItem[]
   beat: ScenarioBeat
   decks: Deck[]
-  /** Every input, the ones engine M6 and M7 bring included. */
-  inputs: Required<Inputs>
+  inputs: ScenarioInputs
   signals: Signal[]
   previewOnly: boolean
   /** The mock drops every session this long after the first one connects, and refuses new ones. */
@@ -201,7 +207,7 @@ function musicWentQuiet(state: ScenarioState, now: Date): AttentionItem {
 
 const SPECTRUM = Array.from({ length: 32 }, (_, band) => Math.round(83 * Math.exp(-band / 10)) / 100)
 
-function heroInputs(now: Date): Required<Inputs> {
+function heroInputs(now: Date): ScenarioInputs {
   return {
     tempo: {
       source: 'music',
@@ -214,9 +220,8 @@ function heroInputs(now: Date): Required<Inputs> {
     },
     prodjlink: {
       state: 'idle',
-      interface: 'eth0',
+      interface: '0.0.0.0:50001', // where engine M3 listens, as deployed: host:port (its ruling 13)
       lastSet: { from: after(now, -4114 * MINUTE), to: after(now, -3959 * MINUTE) },
-      decks: [],
     },
     music: {
       state: 'connected',
@@ -409,11 +414,9 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
     state.decks = [
       { number: 1, player: 'Player 1', state: 'cued', bpm: 126, pitch_percent: 0, master: false },
       { number: 2, player: 'Player 2', state: 'playing', bpm: 124, pitch_percent: pitch, master: true },
-      { number: 3, player: 'Player 3', state: 'empty', bpm: null, pitch_percent: 0, master: false },
-      { number: 4, player: 'Player 4', state: 'empty', bpm: null, pitch_percent: 0, master: false },
-    ]
+    ] // engine M3 hears a deck once it plays, and can't tell an empty one (its ruling 6)
     state.inputs.tempo = { ...state.inputs.tempo, source: 'prodjlink', bpm: state.beat.bpm, stale: false }
-    state.inputs.prodjlink = { ...state.inputs.prodjlink, state: 'connected', decks: state.decks }
+    state.inputs.prodjlink = { ...state.inputs.prodjlink, state: 'connected' }
     // "Music Assistant: nothing playing."
     state.inputs.music = {
       ...state.inputs.music,
