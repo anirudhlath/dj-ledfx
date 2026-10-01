@@ -18,7 +18,7 @@ from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.web.app import create_app
 from dj_ledfx.zones.frames import Watchers
-from tests.web.conftest import mock_deps
+from tests.web.conftest import mock_deps, until
 
 Frames = Mapping[str, Mapping[str, NDArray[np.uint8]]]
 
@@ -137,9 +137,9 @@ def test_a_bad_frame_subscription_is_refused_with_the_reason() -> None:
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
         ws.send_json({"action": "subscribe_frames", "protocol": 2, "streams": ["fx"], "id": 8})
         ws.send_json({"action": "subscribe_frames", "protocol": 3, "id": 9})
-        texts, _ = receive(ws, 6)
+        errors = [until(ws, "error"), until(ws, "error")]
 
-    assert [text for text in texts if text["channel"] == "error"] == [
+    assert errors == [
         {
             "channel": "error",
             "id": 8,

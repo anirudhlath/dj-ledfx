@@ -164,28 +164,19 @@ def test_the_inputs_beat_once_a_second(ws_app, monkeypatch: pytest.MonkeyPatch) 
 
 def test_ws_subscribe_beat_command(client):
     with client.websocket_connect("/ws") as ws:
-        # Send subscribe command
         ws.send_text(json.dumps({"action": "subscribe_beat", "fps": 5, "id": 1}))
-        # Read messages until we get an ack
-        for _ in range(10):
-            data = ws.receive_text()
-            msg = json.loads(data)
-            if msg.get("channel") == "ack":
-                assert msg["id"] == 1
-                break
+        ack = until(ws, "ack")
+
+    assert ack == {"channel": "ack", "id": 1, "action": "subscribe_beat"}
 
 
 def test_ws_the_old_deck_and_transport_commands_are_gone(client):
     """set_effect and set_transport went with the global deck and transport (M1)."""
     with client.websocket_connect("/ws") as ws:
         ws.send_json({"action": "set_transport", "id": "t1", "state": "playing"})
-        for _ in range(10):
-            msg = json.loads(ws.receive_text())
-            if msg.get("channel") == "error" and msg.get("id") == "t1":
-                assert msg["detail"] == "Unknown action: set_transport"
-                break
-        else:
-            pytest.fail("no error for set_transport")
+        error = until(ws, "error")
+
+    assert error == {"channel": "error", "id": "t1", "detail": "Unknown action: set_transport"}
 
 
 def test_ws_sessions_close_going_away_when_the_server_stops(ws_app) -> None:
