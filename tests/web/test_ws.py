@@ -72,8 +72,9 @@ def test_the_beat_channel_speaks_v2_and_today_s_ui() -> None:
         0.0,
     )
     assert abs(message["server_time"] - time.time()) < 60  # seconds since the epoch
-    # Today's UI, until F11:
-    assert (message["is_playing"], message["beat_pos"], message["deck_number"]) == (True, 2, None)
+    # Today's UI, until F11; its LIVE badge lights on a deck's name, so none without a DJ:
+    assert (message["is_playing"], message["beat_pos"]) == (True, 2)
+    assert (message["deck_number"], message["deck_name"]) == (None, None)
 
     play(tempo, fake, 4, deck=2)
 
