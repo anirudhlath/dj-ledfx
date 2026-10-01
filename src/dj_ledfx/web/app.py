@@ -13,7 +13,6 @@ from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
 if TYPE_CHECKING:
-    from dj_ledfx.beat.clock import BeatClock
     from dj_ledfx.config import AppConfig
     from dj_ledfx.devices.manager import DeviceManager
     from dj_ledfx.effects.engine import EffectEngine
@@ -23,6 +22,7 @@ if TYPE_CHECKING:
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.scheduler import LookaheadScheduler
+    from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.zones.attention import AttentionFeed
     from dj_ledfx.zones.frames import FrameFeed, Watchers
     from dj_ledfx.zones.lights import LightMonitor
@@ -87,7 +87,7 @@ def _resolve_static_dir(explicit: str | None, config_dir: str | None) -> Path | 
 
 def create_app(
     *,
-    beat_clock: BeatClock,
+    tempo: TempoClock,
     effect_engine: EffectEngine,
     device_manager: DeviceManager,
     scheduler: LookaheadScheduler,
@@ -119,7 +119,7 @@ def create_app(
     )
 
     # Store references for routers
-    app.state.beat_clock = beat_clock
+    app.state.tempo = tempo
     app.state.effect_engine = effect_engine
     app.state.device_manager = device_manager
     app.state.scheduler = scheduler

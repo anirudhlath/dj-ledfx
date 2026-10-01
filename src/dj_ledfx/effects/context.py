@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from dj_ledfx.types import BeatContext
 
 if TYPE_CHECKING:
-    from dj_ledfx.beat.clock import BeatClock
+    from dj_ledfx.tempo.clock import TempoClock
 
 
 class SignalView:
@@ -35,22 +35,22 @@ class RenderContext:
     beat_phase: float  # 0..1
     bar_phase: float  # 0..1
     bpm: float
-    beat_index: int  # 0 until M3 adds the tempo clock's beat counter
-    bar_index: int  # 0 until M3
+    beat_index: int  # beats since the tempo clock started counting
+    bar_index: int
     signals: SignalView
 
 
-def render_context(clock: BeatClock, t: float, dt: float) -> RenderContext:
-    """Sample the beat clock at the frame's target time `t`."""
-    state = clock.get_state_at(t)
+def render_context(clock: TempoClock, t: float, dt: float) -> RenderContext:
+    """Sample the tempo clock at the frame's target time `t` (spec §7.2)."""
+    sample = clock.sample_at(t)
     return RenderContext(
         t=t,
         dt=dt,
-        beat_phase=state.beat_phase,
-        bar_phase=state.bar_phase,
-        bpm=state.bpm,
-        beat_index=0,
-        bar_index=0,
+        beat_phase=sample.beat_phase,
+        bar_phase=sample.bar_phase,
+        bpm=sample.bpm,
+        beat_index=sample.beat_index,
+        bar_index=sample.bar_index,
         signals=NO_SIGNALS,
     )
 

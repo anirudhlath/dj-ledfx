@@ -15,8 +15,6 @@ from loguru import logger
 
 import dj_ledfx.devices  # noqa: F401  # triggers backend auto-registration
 from dj_ledfx import metrics
-from dj_ledfx.beat.clock import BeatClock
-from dj_ledfx.beat.simulator import BeatSimulator
 from dj_ledfx.config import (
     AppConfig,
     DiscoveryConfig,
@@ -38,9 +36,12 @@ from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.store import LookStore
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.persistence.toml_io import migrate_from_toml
-from dj_ledfx.prodjlink.listener import BeatEvent, start_listener
+from dj_ledfx.prodjlink.listener import BeatEvent, ProDJLinkListener, start_listener
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.status import SystemStatus
+from dj_ledfx.tempo.clock import TempoClock
+from dj_ledfx.tempo.model import TempoError
+from dj_ledfx.tempo.store import TempoStore
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.attention import AttentionFeed
 from dj_ledfx.zones.frames import FrameFeed, Watchers
@@ -53,7 +54,11 @@ from dj_ledfx.zones.store import ZoneStore
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="dj-ledfx: Beat-synced LED effects")
-    parser.add_argument("--demo", action="store_true", help="Run with simulated beats")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Run without Pro DJ Link: the internal clock keeps the tempo",
+    )
     parser.add_argument(
         "--config", type=Path, default=Path("config.toml"), help="Config file path"
     )
@@ -69,7 +74,9 @@ def _parse_args() -> argparse.Namespace:
         choices=["TRACE", "DEBUG", "INFO", "WARNING", "ERROR"],
         help="Log level",
     )
-    parser.add_argument("--bpm", type=float, default=128.0, help="Demo mode BPM")
+    parser.add_argument(
+        "--bpm", type=float, default=None, help="Set the internal clock's BPM at start"
+    )
     parser.add_argument(
         "--profile",
         nargs="?",
@@ -177,29 +184,29 @@ async def _run(args: argparse.Namespace) -> None:
         config = load_config(args.config)
 
     event_bus = EventBus()
-    clock = BeatClock()
+    # The tempo clock always runs (spec §7.2): Pro DJ Link drives it while a DJ plays,
+    # its own internal clock otherwise. Its settings live in state.db.
+    tempo_store = TempoStore(state_db)
+    tempo = TempoClock(settings=await tempo_store.load(), store=tempo_store, event_bus=event_bus)
+    if args.bpm is not None:
+        try:
+            tempo.set_tempo(tempo.lock, args.bpm)
+        except TempoError as exc:
+            logger.warning("--bpm {} not used: {}", args.bpm, exc)
 
     def on_beat(event: BeatEvent) -> None:
         metrics.BEATS_RECEIVED.inc()
-        clock.on_beat(
-            bpm=event.bpm,
-            beat_number=event.beat_position,
-            next_beat_ms=event.next_beat_ms,
-            timestamp=event.timestamp,
-            pitch_percent=event.pitch_percent,
-            device_number=event.device_number,
-            device_name=event.device_name,
-        )
+        tempo.on_beat(event)
 
     event_bus.subscribe(BeatEvent, on_beat)
 
-    simulator: BeatSimulator | None = None
+    listener: ProDJLinkListener | None = None
     if args.demo:
-        logger.info("Starting in demo mode at {:.1f} BPM", args.bpm)
-        simulator = BeatSimulator(event_bus=event_bus, bpm=args.bpm)
+        logger.info("Demo mode: no Pro DJ Link; the internal clock keeps the tempo")
     else:
         logger.info("Starting Pro DJ Link listener")
-        await start_listener(event_bus=event_bus)
+        listener = await start_listener(event_bus=event_bus)
+        tempo.listening_on = listener.address
 
     device_manager = DeviceManager()
     registered_devices = await state_db.load_devices()
@@ -253,7 +260,7 @@ async def _run(args: argparse.Namespace) -> None:
         host=engine,
         routes=scheduler,
         event_bus=event_bus,
-        clock=clock,
+        clock=tempo,
         fps=config.engine.fps,
         max_lookahead_s=config.engine.max_lookahead_ms / 1000.0,
         preview_only=config.engine.preview_only is True,
@@ -337,7 +344,7 @@ async def _run(args: argparse.Namespace) -> None:
         await preset_store.load_from_db()
 
         web_app = create_app(
-            beat_clock=clock,
+            tempo=tempo,
             effect_engine=engine,
             device_manager=device_manager,
             scheduler=scheduler,
@@ -424,8 +431,7 @@ async def _run(args: argparse.Namespace) -> None:
         loop.add_signal_handler(sig, _signal_handler)
 
     tasks: list[asyncio.Task[None]] = []
-    if simulator is not None:
-        tasks.append(asyncio.create_task(simulator.run()))
+    tasks.append(asyncio.create_task(tempo.run()))
     tasks.append(asyncio.create_task(engine.run()))
     tasks.append(asyncio.create_task(scheduler.run()))
     tasks.append(asyncio.create_task(light_monitor.run()))
@@ -436,10 +442,9 @@ async def _run(args: argparse.Namespace) -> None:
 
     async def _status_loop() -> None:
         while not stop_event.is_set():
-            beat_state = clock.get_state()
             status = SystemStatus(
-                prodjlink_connected=beat_state.is_playing,
-                current_bpm=beat_state.bpm or None,
+                prodjlink_connected=tempo.dj_playing(),
+                current_bpm=tempo.bpm,
                 connected_devices=[d.adapter.device_info.name for d in device_manager.devices],
                 buffer_fill_level=engine.fill_level,
                 avg_frame_render_time_ms=engine.avg_render_time_ms,
@@ -474,12 +479,14 @@ async def _run(args: argparse.Namespace) -> None:
     engine.stop()
     light_monitor.stop()
     attention_feed.stop()
-    if simulator is not None:
-        simulator.stop()
+    tempo.stop()
+    if listener is not None:
+        listener.close()
 
     for task in [*tasks, *background]:
         task.cancel()
     await asyncio.gather(*tasks, *background, return_exceptions=True)
+    await tempo.save()  # before state.db closes
 
     await discovery_orchestrator.shutdown()
     await device_manager.disconnect_all()

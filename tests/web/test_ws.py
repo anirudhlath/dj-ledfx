@@ -1,34 +1,27 @@
 import json
+import time
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
+from tempo_fakes import PLAYER, START, FakeTime, play, tempo_clock
 
-from dj_ledfx.types import BeatState, DeviceStats
+from dj_ledfx.tempo.clock import TempoClock
+from dj_ledfx.types import DeviceStats
 from dj_ledfx.web.app import create_app
-from dj_ledfx.web.ws import close_all, stats_message
+from dj_ledfx.web.ws import beat_message, close_all, stats_message
 
 
 @pytest.fixture
 def ws_app():
-    clock = MagicMock()
-    clock.get_state.return_value = BeatState(
-        bpm=128.0,
-        beat_phase=0.5,
-        bar_phase=0.25,
-        is_playing=True,
-        next_beat_time=0.0,
-    )
-    clock.pitch_percent = 0.0
-    clock.last_deck_number = 1
-    clock.last_deck_name = "CDJ-3000"
-
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
 
     app = create_app(
-        beat_clock=clock,
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=scheduler,
@@ -46,13 +39,49 @@ def client(ws_app):
     return TestClient(ws_app)
 
 
+def _until(ws: WebSocketTestSession, channel: str) -> dict[str, Any]:
+    """The next message on one channel; the pushed snapshots come first."""
+    for _ in range(20):
+        message: dict[str, Any] = json.loads(ws.receive_text())
+        if message["channel"] == channel:
+            return message
+    pytest.fail(f"no {channel} message")
+
+
 def test_ws_connect_and_receive_beat(client):
     with client.websocket_connect("/ws") as ws:
-        # Should receive a beat message within a reasonable time
-        data = ws.receive_text()
-        msg = json.loads(data)
-        assert msg["channel"] == "beat"
-        assert "bpm" in msg
+        beat = _until(ws, "beat")
+    assert (beat["bpm"], beat["source"], beat["stale"]) == (120.0, "internal", False)
+
+
+def test_the_beat_channel_speaks_v2_and_today_s_ui() -> None:
+    fake = FakeTime()
+    tempo = tempo_clock(fake)  # the internal clock: 120 BPM, beat 0 at START
+    fake.now = START + 2.75  # five and a half beats on: the second bar's second beat
+
+    message = beat_message(tempo)
+
+    assert message["channel"] == "beat"
+    assert (message["bpm"], message["bar"], message["beat_in_bar"]) == (120.0, 2, 2)
+    assert message["beat_phase"] == pytest.approx(0.5)
+    assert message["bar_phase"] == pytest.approx(0.375)
+    assert (message["source"], message["stale"], message["pitch_percent"]) == (
+        "internal",
+        False,
+        0.0,
+    )
+    assert abs(message["server_time"] - time.time()) < 60  # seconds since the epoch
+    # Today's UI, until F11:
+    assert (message["is_playing"], message["beat_pos"], message["deck_number"]) == (True, 2, None)
+
+    play(tempo, fake, 4, deck=2)
+
+    message = beat_message(tempo)
+    assert (message["source"], message["deck_number"], message["deck_name"]) == (
+        "prodjlink",
+        2,
+        PLAYER,
+    )
 
 
 def test_ws_subscribe_beat_command(client):

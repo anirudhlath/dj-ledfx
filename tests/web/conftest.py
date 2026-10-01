@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dj_ledfx.tempo.clock import TempoClock
+
 fastapi = pytest.importorskip("fastapi", reason="web extra not installed (uv sync --extra web)")
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -18,7 +20,7 @@ from dj_ledfx.web.app import create_app  # noqa: E402
 def mock_deps() -> dict[str, Any]:
     """create_app's required arguments, mocked, with no static directory configured."""
     return {
-        "beat_clock": MagicMock(),
+        "tempo": TempoClock(),
         "effect_engine": MagicMock(),
         "device_manager": MagicMock(),
         "scheduler": MagicMock(),

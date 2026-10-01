@@ -9,6 +9,7 @@ from dj_ledfx.spatial.compositor import SpatialCompositor
 from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 from dj_ledfx.spatial.mapping import LinearMapping
 from dj_ledfx.spatial.scene import DevicePlacement, SceneModel
+from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.web.app import create_app
 
 
@@ -27,7 +28,7 @@ def _make_test_app(
     mock_config.scene_config = None
 
     app = create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=MagicMock(),
@@ -152,7 +153,7 @@ class TestSceneEndpoints:
         mock_scheduler = MagicMock()
 
         app = create_app(
-            beat_clock=MagicMock(),
+            tempo=TempoClock(),
             effect_engine=MagicMock(),
             device_manager=MagicMock(),
             scheduler=mock_scheduler,

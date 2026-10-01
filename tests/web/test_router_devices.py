@@ -9,6 +9,7 @@ from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.web.app import create_app
 
@@ -19,7 +20,7 @@ def client():
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
     app = create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,
@@ -55,7 +56,7 @@ def client_with_device():
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
     app = create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,
@@ -102,7 +103,7 @@ def test_scan_endpoint_fallback():
     # Mock manager.rediscover to avoid real network calls
     manager.rediscover = AsyncMock(return_value=[])
     app = create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,
@@ -129,7 +130,7 @@ def test_scan_endpoint_with_orchestrator():
     mock_orchestrator.run_scan = AsyncMock(return_value=2)
 
     app = create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,
@@ -187,7 +188,7 @@ def test_delete_device_persists_to_db(tmp_path):
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
     app = create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=manager,
         scheduler=scheduler,

@@ -8,10 +8,10 @@ import time
 import pytest
 from map_home import seeded_space, seeded_zone_lights
 
-from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.home.seed import handoff_home_json
 from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.looks.model import Look
+from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.zones.runtime import ZoneRuntime
 
 pytestmark = pytest.mark.perf
@@ -25,7 +25,7 @@ def test_a_zone_frame_renders_in_under_5_ms(look: Look) -> None:
         "home",
         look,
         lights,
-        clock=BeatClock(),
+        clock=TempoClock(),
         latency_s=lambda _: 0.05,
         space=seeded_space(),
     )

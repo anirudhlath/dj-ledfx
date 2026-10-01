@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
@@ -15,6 +16,9 @@ from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
 from dj_ledfx.web.state import ClientSubscription, light_index
 from dj_ledfx.zones.frames import STREAMS
 from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
+
+if TYPE_CHECKING:
+    from dj_ledfx.tempo.clock import TempoClock
 
 _GOING_AWAY = 1001  # RFC 6455 close code: the server is going down
 
@@ -220,27 +224,34 @@ async def event_broadcast(app: Any) -> None:
 
 
 async def _beat_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
-    """Poll beat state at client-requested rate."""
-    last_sent: dict[str, Any] = {}
+    """The beat at the client's rate. The clock always runs, so every message is new."""
     while True:
-        interval = 1.0 / max(sub.beat_fps, 1.0)
-        await asyncio.sleep(interval)
-        clock = app.state.beat_clock
-        state = clock.get_state()
-        beat_data = {
-            "channel": "beat",
-            "bpm": state.bpm,
-            "beat_phase": state.beat_phase,
-            "bar_phase": state.bar_phase,
-            "is_playing": state.is_playing,
-            "beat_pos": int(state.bar_phase * 4) % 4 + 1,
-            "pitch_percent": state.pitch_percent,
-            "deck_number": state.deck_number,
-            "deck_name": state.deck_name,
-        }
-        if beat_data != last_sent:
-            await _send_json(ws, beat_data)
-            last_sent = beat_data
+        await asyncio.sleep(1.0 / max(sub.beat_fps, 1.0))
+        await _send_json(ws, beat_message(app.state.tempo))
+
+
+def beat_message(tempo: TempoClock) -> dict[str, Any]:
+    """The beat channel: web spec §12.4's v2 fields, and today's UI's until F11. bar counts
+    from 1, beat_in_bar 1–4, and server_time is seconds since the epoch (F1's decision 2)."""
+    sample = tempo.sample()
+    deck = tempo.followed_deck()
+    return {
+        "channel": "beat",
+        "bpm": sample.bpm,
+        "beat_phase": sample.beat_phase,
+        "bar_phase": sample.bar_phase,
+        "bar": sample.bar_index + 1,
+        "beat_in_bar": sample.beat_in_bar,
+        "pitch_percent": sample.pitch_percent,
+        "source": sample.source,
+        "stale": sample.stale,
+        "server_time": time.time(),
+        # Today's UI (frontend/), until F11:
+        "is_playing": not sample.stale,
+        "beat_pos": sample.beat_in_bar,
+        "deck_number": None if deck is None else deck.number,
+        "deck_name": None if deck is None else deck.player,
+    }
 
 
 async def _stats_poll(ws: WebSocket, app: Any) -> None:

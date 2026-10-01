@@ -16,6 +16,7 @@ from starlette.testclient import WebSocketTestSession
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.web.app import create_app
 from dj_ledfx.zones.frames import Watchers
 
@@ -39,7 +40,7 @@ def ws_app(feed: StubFeed, watchers: Watchers, devices: Any = None) -> FastAPI:
     scheduler = MagicMock()
     scheduler.get_device_stats.return_value = []
     return create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=devices if devices is not None else MagicMock(),
         scheduler=scheduler,

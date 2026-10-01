@@ -54,7 +54,6 @@ from dj_ledfx.zones.runtime import LightMode, ZoneLight, ZoneRuntime
 from dj_ledfx.zones.store import new_group_id
 
 if TYPE_CHECKING:
-    from dj_ledfx.beat.clock import BeatClock
     from dj_ledfx.devices.adapter import DeviceAdapter
     from dj_ledfx.devices.manager import DeviceManager
     from dj_ledfx.effects.field import FieldEffect
@@ -64,6 +63,7 @@ if TYPE_CHECKING:
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.route import DeviceRoute
+    from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.zones.store import ZoneStore
 
 # What a light was last given: its runtime's generation (unique across runtimes) and the
@@ -141,7 +141,7 @@ class ZoneManager:
         host: RuntimeHost,
         routes: RouteTable,
         event_bus: EventBus,
-        clock: BeatClock,
+        clock: TempoClock,
         fps: int = 60,
         max_lookahead_s: float = 1.0,
         preview_only: bool = False,

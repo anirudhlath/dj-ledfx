@@ -5,8 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from conftest import MockDeviceAdapter
+from tempo_fakes import beat_event
 
-from dj_ledfx.beat.clock import BeatClock
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.engine import EffectEngine
@@ -14,6 +14,7 @@ from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
+from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
 
@@ -23,14 +24,15 @@ def _device(name: str, latency_ms: float, led_count: int) -> ManagedDevice:
     return ManagedDevice(adapter=adapter, tracker=tracker, max_fps=60)
 
 
-def _clock() -> BeatClock:
-    clock = BeatClock()
-    clock.on_beat(bpm=120.0, beat_number=1, next_beat_ms=500, timestamp=time.monotonic())
+def _clock() -> TempoClock:
+    """A tempo clock a DJ drives at 120 BPM."""
+    clock = TempoClock()
+    clock.on_beat(beat_event(time.monotonic(), bpm=120.0))
     return clock
 
 
 def _zone(
-    zone_id: str, look_id: str, devices: list[ManagedDevice], clock: BeatClock
+    zone_id: str, look_id: str, devices: list[ManagedDevice], clock: TempoClock
 ) -> ZoneRuntime:
     """A running zone as the zone manager builds one (lights are keyed by name here)."""
     look = next(look for look in builtin_looks() if look.id == look_id)

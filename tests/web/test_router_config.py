@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from dj_ledfx.config import AppConfig
 from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.web.app import create_app
 
 
@@ -13,7 +14,7 @@ from dj_ledfx.web.app import create_app
 def client(tmp_path):
     config = AppConfig()
     app = create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=MagicMock(),
@@ -32,7 +33,7 @@ def client_with_db(tmp_path):
     db = StateDB(tmp_path / "state.db")
     asyncio.run(db.open())
     app = create_app(
-        beat_clock=MagicMock(),
+        tempo=TempoClock(),
         effect_engine=MagicMock(),
         device_manager=MagicMock(),
         scheduler=MagicMock(),

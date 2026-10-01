@@ -44,11 +44,11 @@ from dj_ledfx.zones.model import CrashInfo
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from dj_ledfx.beat.clock import BeatClock
     from dj_ledfx.devices.capabilities import DeviceCapabilities
     from dj_ledfx.effects.context import RenderContext
     from dj_ledfx.effects.field import FieldEffect
     from dj_ledfx.spatial.geometry import DeviceGeometry
+    from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.types import FloatRGB
 
 FRAME_BUDGET_S = 0.005
@@ -102,7 +102,7 @@ class ZoneRuntime:
         look: Look,
         lights: Sequence[ZoneLight],
         *,
-        clock: BeatClock,
+        clock: TempoClock,
         latency_s: Callable[[str], float | None],
         fps: int = 60,
         max_lookahead_s: float = 1.0,
