@@ -1,13 +1,14 @@
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createMemoryRouter, RouterProvider } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import type { SunInput } from '@/api/contract'
 import { decodeFrame, encodeFrame } from '@/api/frames'
 import { frames } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { buildScenario } from '@/api/mocks/scenarios'
+import { ButtonLink } from '@/design/button'
 import { HERO_NOW, pushFrame } from '@/test/live'
+import { linkNames, renderAt } from '@/test/router'
 import { stageBehaviour, type StageOptions } from '../behaviour'
 import { useCadence } from '../cadence'
 import { FIT_VIEW, fitPose, LIVE_PADDING, type CameraPose, type View } from '../camera'
@@ -124,12 +125,26 @@ describe("the stage's controls (§8.1)", () => {
 
   it('links each room with lights to where a click on it goes, and no other room', () => {
     const rooms = hero.home.rooms
-    const element = <RoomLinks rooms={rooms} to={(room) => `/live/put?zone=${room.id}`} />
-    render(<RouterProvider router={createMemoryRouter([{ path: '*', element }])} />)
-    const links = within(screen.getByRole('navigation', { name: 'Rooms' })).getAllByRole('link')
+    renderAt('/live', <RoomLinks rooms={rooms} to={(room) => `/live/put?zone=${room.id}`} />)
+    const nav = screen.getByRole('navigation', { name: 'Rooms' })
     const lit = rooms.filter((room) => room.hasLights)
-    expect(links.map((link) => link.getAttribute('href'))).toEqual(lit.map((room) => `/live/put?zone=${room.id}`))
-    expect(links.map((link) => link.textContent)).toEqual(lit.map((room) => `Put a look on ${room.name}`))
+    expect(within(nav).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(lit.map((room) => `/next/live/put?zone=${room.id}`))
+    expect(linkNames(nav)).toEqual(lit.map((room) => `Put a look on ${room.name}`))
+  })
+
+  // R1: they're the system's small buttons, with their hover, transition and the phone's touch height.
+  it('draws each room link as a small button', () => {
+    renderAt(
+      '/live',
+      <>
+        <RoomLinks rooms={hero.home.rooms} to={() => '/live'} />
+        <ButtonLink to="/live" size="sm">A button</ButtonLink>
+      </>,
+    )
+    const button = screen.getByRole('link', { name: 'A button' })
+    for (const link of within(screen.getByRole('navigation', { name: 'Rooms' })).getAllByRole('link')) {
+      expect(link).toHaveClass(...button.classList)
+    }
   })
 })
 
