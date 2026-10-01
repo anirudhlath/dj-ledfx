@@ -17,6 +17,7 @@ class BeatEvent:
     device_name: str
     timestamp: float  # time.monotonic()
     pitch_percent: float = 0.0
+    track_bpm: float = 0.0  # the track's BPM before pitch; 0 when unknown
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,9 +16,13 @@ class ProDJLinkListener(asyncio.DatagramProtocol):
     def __init__(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus
         self._transport: asyncio.DatagramTransport | None = None
+        self.address: str | None = None  # host:port it listens on, once bound
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         self._transport = transport  # type: ignore[assignment]
+        sockname = transport.get_extra_info("sockname")
+        if sockname:
+            self.address = f"{sockname[0]}:{sockname[1]}"
         logger.info("ProDJLink listener started")
 
     def connection_lost(self, exc: Exception | None) -> None:
@@ -37,6 +41,7 @@ class ProDJLinkListener(asyncio.DatagramProtocol):
             device_name=packet.device_name,
             timestamp=time.monotonic(),
             pitch_percent=packet.pitch_percent,
+            track_bpm=packet.bpm,
         )
         logger.debug(
             "Beat: {} BPM={:.1f} beat={}/4 from {}",
