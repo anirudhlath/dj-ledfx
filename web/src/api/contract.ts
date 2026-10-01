@@ -125,7 +125,20 @@ export interface HomeAssistantInput {
   retryS: number | null
   entities: HomeAssistantEntity[]
 }
-export interface SunInput { elevation: number; azimuth: number; sunrise: string; sunset: string }
+/** A point on the sun's recent path, for the stage's arc (§7.4); F2 asks engine M6 for it (F2 decision 7). */
+export interface SunPathPoint {
+  at: string
+  elevation: number
+  azimuth: number
+}
+export interface SunInput {
+  elevation: number
+  azimuth: number
+  sunrise: string
+  sunset: string
+  /** The last two hours or so, oldest first; without it the stage draws no arc. */
+  path?: SunPathPoint[]
+}
 /** What M6 and M7 add to GET /inputs. */
 export interface PendingInputs { music: MusicInput; homeAssistant: HomeAssistantInput; sun: SunInput }
 /** GET /inputs: the tempo and Pro DJ Link since engine M3; the rest is optional until it's served. */
