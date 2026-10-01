@@ -185,7 +185,7 @@ def _transport_message(app: Any) -> dict[str, Any] | None:
 
 def _decks_message(app: Any) -> dict[str, Any]:
     """The players heard, snake_case like the beat (F1's decision 5)."""
-    decks = [contract.deck_out(view).model_dump(mode="json") for view in app.state.tempo.decks()]
+    decks = [deck.model_dump(mode="json") for deck in contract.decks_out(app.state.tempo)]
     return {"channel": "decks", "decks": decks}
 
 

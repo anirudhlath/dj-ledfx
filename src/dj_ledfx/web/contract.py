@@ -32,7 +32,6 @@ from dj_ledfx.tempo.model import (
     MAX_NUDGE_BEATS,
     MIN_BPM,
     DeckState,
-    DeckView,
     InternalHow,
     TempoLock,
     TempoSource,
@@ -812,19 +811,14 @@ class NudgeRequest(ContractModel):
     delta: float = Field(ge=-MAX_NUDGE_BEATS, le=MAX_NUDGE_BEATS, allow_inf_nan=False)
 
 
-def deck_out(view: DeckView) -> Deck:
-    return Deck.model_validate(view, from_attributes=True)
+def decks_out(tempo: TempoClock) -> list[Deck]:
+    """The players heard, the one the clock follows the master: GET /inputs and the
+    socket's decks channel."""
+    return [Deck.model_validate(view, from_attributes=True) for view in tempo.decks()]
 
 
 def tempo_out(tempo: TempoClock) -> TempoInput:
-    return TempoInput(
-        source=tempo.source,
-        lock=tempo.lock,
-        bpm=tempo.bpm,
-        stale=tempo.stale,
-        held=tempo.held,
-        internal=InternalTempo.model_validate(tempo.internal, from_attributes=True),
-    )
+    return TempoInput.model_validate(tempo, from_attributes=True)
 
 
 def inputs_out(tempo: TempoClock, listening: Listening) -> Inputs:
@@ -841,6 +835,6 @@ def inputs_out(tempo: TempoClock, listening: Listening) -> Inputs:
             state=state,
             interface=listening.address,
             last_set=dj_set,
-            decks=[deck_out(view) for view in tempo.decks()],
+            decks=decks_out(tempo),
         ),
     )
