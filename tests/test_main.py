@@ -1,7 +1,8 @@
 """The real entry point in a subprocess. Shutting dj-ledfx down with a browser connected:
 the web server stops through granian's Server.stop(), so the ASGI lifespan shutdown runs
 and an open /ws closes cleanly. Browser tabs closing their sockets never freeze the app.
-And the app serves the home map, its zones and previews."""
+The app serves the home map, its zones and previews, and its tempo clock follows a DJ and
+keeps its settings."""
 
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from tempo_fakes import beat_packet
 
 from dj_ledfx.home.seed import seed_home
 
@@ -34,9 +36,27 @@ sys.argv = ["dj_ledfx", *sys.argv[1:]]
 dj_ledfx.main.main()
 """
 
+# The same, hearing Pro DJ Link on a loopback port: the deployed app holds 50001 here.
+_LISTENING_DRIVER = """
+import functools
+import os
+import sys
 
-def _free_port() -> int:
-    with socket.socket() as probe:
+import dj_ledfx.main
+from dj_ledfx.devices.backend import DeviceBackend
+from dj_ledfx.prodjlink.listener import start_listener
+
+DeviceBackend._registry.clear()
+dj_ledfx.main.start_listener = functools.partial(
+    start_listener, interface="127.0.0.1", port=int(os.environ["DJ_PORT"])
+)
+sys.argv = ["dj_ledfx", *sys.argv[1:]]
+dj_ledfx.main.main()
+"""
+
+
+def _free_port(kind: socket.SocketKind = socket.SOCK_STREAM) -> int:
+    with socket.socket(socket.AF_INET, kind) as probe:
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
 
@@ -107,12 +127,18 @@ async def _close_code(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         writer.close()
 
 
-async def _start_app(tmp_path: Path, port: int) -> asyncio.subprocess.Process:
+async def _start_app(
+    tmp_path: Path, port: int, *extra: str, dj_port: int | None = None
+) -> asyncio.subprocess.Process:
+    """The app on a web port: in demo mode, or hearing Pro DJ Link on dj_port."""
+    driver, mode = (_DRIVER, ["--demo"]) if dj_port is None else (_LISTENING_DRIVER, [])
+    env = None if dj_port is None else {**os.environ, "DJ_PORT": str(dj_port)}
     return await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
-        _DRIVER,
-        "--demo",
+        driver,
+        *mode,
+        *extra,
         "--web",
         "--web-host",
         "127.0.0.1",
@@ -122,9 +148,16 @@ async def _start_app(tmp_path: Path, port: int) -> asyncio.subprocess.Process:
         str(tmp_path / "config.toml"),
         "--db",
         str(tmp_path / "state.db"),
+        env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
+
+
+async def _stop(app: asyncio.subprocess.Process) -> str:
+    """SIGTERM, as `docker stop` sends; the app's output."""
+    app.send_signal(signal.SIGTERM)
+    return (await asyncio.wait_for(app.communicate(), 30))[0].decode()
 
 
 async def test_shutdown_with_a_browser_connected_is_clean(tmp_path: Path) -> None:
@@ -237,3 +270,44 @@ async def test_the_app_serves_the_home_map_its_zones_and_previews(tmp_path: Path
     assert preview.status_code == 400 and "has no lights" in preview.json()["detail"]
     assert "Traceback" not in output, output
     assert app.returncode == 0
+
+
+async def test_a_dj_on_the_network_drives_the_tempo(tmp_path: Path) -> None:
+    port, dj_port = _free_port(), _free_port(socket.SOCK_DGRAM)
+    app = await _start_app(tmp_path, port, dj_port=dj_port)
+    try:
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+            before = (await _get_when_up(client, "/inputs", app)).json()
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as dj:
+                for beat in range(1, 5):
+                    dj.sendto(beat_packet(beat=beat, bpm=124.0, deck=2), ("127.0.0.1", dj_port))
+                    await asyncio.sleep(0.05)
+            after = (await client.get("/inputs")).json()
+        output = await _stop(app)
+    finally:
+        if app.returncode is None:
+            app.kill()
+            await app.wait()
+
+    assert (before["tempo"]["source"], before["prodjlink"]["state"]) == ("internal", "idle")
+    assert before["prodjlink"]["interface"] == f"127.0.0.1:{dj_port}"
+    assert (after["tempo"]["source"], after["prodjlink"]["state"]) == ("prodjlink", "connected")
+    assert [deck["number"] for deck in after["prodjlink"]["decks"]] == [2]
+    assert "Traceback" not in output, output
+
+
+async def test_a_tempo_set_at_start_is_kept_across_a_restart(tmp_path: Path) -> None:
+    for extra in (["--bpm", "97"], []):  # the second start has no --bpm
+        port = _free_port()
+        app = await _start_app(tmp_path, port, *extra)
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+                tempo = (await _get_when_up(client, "/inputs", app)).json()["tempo"]
+            output = await _stop(app)
+        finally:
+            if app.returncode is None:
+                app.kill()
+                await app.wait()
+        assert "Traceback" not in output, output
+
+    assert (tempo["source"], tempo["bpm"], tempo["internal"]["how"]) == ("internal", 97.0, "set")
