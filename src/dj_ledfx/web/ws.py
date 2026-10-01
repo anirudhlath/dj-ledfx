@@ -14,6 +14,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from dj_ledfx.tempo.model import DecksChanged, TempoChanged, TempoError
+from dj_ledfx.types import is_finite_number
 from dj_ledfx.web import contract
 from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
 from dj_ledfx.web.state import ClientSubscription, light_index
@@ -102,9 +103,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         while (data := await _receive_unless_stopped(websocket, session.stop)) is not None:
             try:
                 msg = json.loads(data)
-                await _handle_command(websocket, app, sub, tasks, msg)
             except json.JSONDecodeError:
                 await _send_json(websocket, {"channel": "error", "detail": "Invalid JSON"})
+                continue
+            if not isinstance(msg, dict):
+                detail = "A command is a JSON object"
+                await _send_json(websocket, {"channel": "error", "detail": detail})
+                continue
+            await _handle_command(websocket, app, sub, tasks, msg)
         await websocket.close(code=_GOING_AWAY)
     except WebSocketDisconnect:
         pass
@@ -386,7 +392,7 @@ def _subscribe_frames(sub: ClientSubscription, msg: dict[str, Any]) -> None:
     if protocol not in (1, 2):
         raise ValueError(f"Unknown frame protocol {protocol!r}; expected 1 or 2")
     if protocol == 1:
-        fps = min(float(msg.get("fps", 10)), 30.0)
+        fps = _fps(msg, 10.0, 30.0)
         sub.frame_devices = [str(device) for device in msg.get("devices") or []]
         sub.frame_protocol, sub.frame_fps, sub.frame_streams = 1, fps, ["live"]
         return
@@ -394,9 +400,18 @@ def _subscribe_frames(sub: ClientSubscription, msg: dict[str, Any]) -> None:
     unknown = [stream for stream in streams if stream not in STREAMS]
     if unknown:
         raise ValueError(f"Unknown frame stream {unknown[0]!r}; expected live or preview")
-    fps = min(float(msg.get("fps", 30)), 60.0)
+    fps = _fps(msg, 30.0, 60.0)
     sub.frame_lights = [str(light) for light in msg.get("lights") or []]
     sub.frame_protocol, sub.frame_fps, sub.frame_streams = 2, fps, streams
+
+
+def _fps(msg: dict[str, Any], default: float, ceiling: float) -> float:
+    """A subscription's rate, at most `ceiling`, or ValueError when it isn't a finite
+    number: a NaN would stop the stream, since asyncio.sleep refuses one."""
+    fps = msg.get("fps", default)
+    if not is_finite_number(fps):
+        raise ValueError("fps must be a finite number")
+    return min(float(fps), ceiling)
 
 
 def _watch(app: Any, sub: ClientSubscription, streams: list[str]) -> None:
@@ -417,7 +432,11 @@ async def _handle_command(
     cmd_id = msg.get("id")
 
     if action == "subscribe_beat":
-        fps = min(float(msg.get("fps", 10)), 30.0)
+        try:
+            fps = _fps(msg, 10.0, 30.0)
+        except ValueError as exc:
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(exc)})
+            return
         sub.beat_fps = max(fps, 1.0)
         await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action})
 

@@ -114,6 +114,29 @@ def test_a_bad_tap_is_answered_and_the_session_lives(ws_app) -> None:
     assert alive["id"] == "alive"
 
 
+# Review Focus 2: a command the hub can't use is refused; the session and its beat go on.
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param('{"action": "subscribe_beat", "id": 7, "fps": NaN}', id="beat-nan"),
+        pytest.param('{"action": "subscribe_frames", "id": 7, "fps": NaN}', id="frames-nan"),
+        pytest.param(
+            '{"action": "subscribe_frames", "id": 7, "fps": Infinity, "protocol": 2}',
+            id="frames-v2-infinity",
+        ),
+        pytest.param("[]", id="not-an-object"),
+    ],
+)
+def test_a_command_the_hub_can_t_use_is_refused_and_the_beat_goes_on(ws_app, command) -> None:
+    with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
+        ws.send_text(command)
+        refused = _until(ws, "error")
+        beats = [_until(ws, "beat"), _until(ws, "beat")]  # at its rate, as before
+
+    assert refused.get("id") == (None if command == "[]" else 7)
+    assert all(beat["bpm"] == 120.0 for beat in beats)
+
+
 def test_the_inputs_beat_once_a_second(ws_app, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hub, "INPUTS_HEARTBEAT_S", 0.01)
     with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
