@@ -8,10 +8,12 @@ time, so its read methods are synchronous and lock-free.
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from collections.abc import Callable
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -45,8 +47,12 @@ from dj_ledfx.tempo.tap import TapTempo
 from dj_ledfx.tempo.timeline import Timeline, nearest_beat
 from dj_ledfx.timing import utcnow
 
+if TYPE_CHECKING:
+    from dj_ledfx.tempo.store import TempoStore
+
 DRIFT_HARD_SNAP_S = 0.005  # today's drift correction: soft under 5 ms, a hard snap above
 SOFT_GAIN = 0.1
+SETTLE_S = 0.25  # how often run() lets the sources change hands and saves
 
 
 class TempoClock:
@@ -54,12 +60,13 @@ class TempoClock:
         self,
         *,
         settings: TempoSettings | None = None,
+        store: TempoStore | None = None,
         event_bus: EventBus | None = None,
         now: Callable[[], float] = time.monotonic,
         wall: Callable[[], datetime] = utcnow,
     ) -> None:
         settings = settings or TempoSettings()
-        self._now, self._wall, self._bus = now, wall, event_bus
+        self._now, self._wall, self._bus, self._store = now, wall, event_bus, store
         self._lock: TempoLock = settings.lock
         self._internal = settings.internal
         self._last_set = settings.last_set
@@ -74,6 +81,7 @@ class TempoClock:
         self._source, self._stale = self._choose(start)
         self._snap = True  # the next beat from a source that took over snaps the phase
         self._dirty = False  # settings changed since they were saved
+        self._running = False
         self._set_started: datetime | None = None  # the DJ set going on, if any
         self._last_beat_wall = wall()  # when the last beat was heard, for the set's end
         self.listening_on: str | None = None  # where Pro DJ Link is heard (main sets it)
@@ -243,6 +251,49 @@ class TempoClock:
             self._last_set = DjSet(self._set_started, self._last_beat_wall)
             self._set_started, self._dirty = None, True
         self._decks.forget(now)
+
+    # --- keeping time, and the settings ---------------------------------------------------
+
+    async def run(self) -> None:
+        """Let the sources change hands as time passes, and save what changed."""
+        self._running = True
+        while self._running:
+            await asyncio.sleep(SETTLE_S)
+            self.settle()
+            await self.save()
+
+    def stop(self) -> None:
+        self._running = False
+
+    async def save(self) -> None:
+        """Write the settings to state.db if they changed since the last save."""
+        if not self._dirty or self._store is None:
+            return
+        self._dirty = False
+        try:
+            await self._store.save(self.settings())
+        except Exception as exc:  # a full disk never stops the clock
+            self._dirty = True
+            logger.warning("Couldn't save the tempo settings: {}", exc)
+
+    async def reload(self) -> None:
+        """Take what state.db holds now: a restored backup's lock, internal BPM and set."""
+        if self._store is None:
+            return
+        settings = await self._store.load()
+        now = self._now()
+        self._lock, self._internal, self._last_set = (
+            settings.lock,
+            settings.internal,
+            settings.last_set,
+        )
+        self._held = False
+        if self._choose(now)[0] == "internal":  # the backup's BPM drives, without a jump
+            self._bpm, self._pitch = self._internal.bpm, 0.0
+            self._line = self._line.moved(now, period=60.0 / self._bpm)
+        self._settle(now)
+        self._dirty = False
+        self._publish(now)
 
     # --- inside ---------------------------------------------------------------------------
 
