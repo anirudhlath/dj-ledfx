@@ -2,7 +2,8 @@
 // meshes when the writer is (which bodies are drawn changed); a `lights` push that changes only what
 // a light shows is written into them in place, and drawn at once. Frames never pass through React:
 // the light layer draws on the stage's cadence (cadence.ts), writing the frame store's latest bytes
-// into the meshes' own arrays, then drawing the canvas in that animation frame.
+// into the meshes' own arrays, then drawing the canvas in that animation frame — unless the write
+// changed nothing (frames with the same bytes), when there's nothing to upload or draw.
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
 import { frames } from '@/api/live'
@@ -41,7 +42,7 @@ export function LightLayer({ writer, entries, mask, pose, cadenceMs }: LightLaye
     invalidate()
   }, [writer, meshes, entries, invalidate])
   useCadence(cadenceMs, (now) => {
-    writer.write(frames)
+    if (!writer.write(frames)) return
     meshes.update()
     advance(now)
   })

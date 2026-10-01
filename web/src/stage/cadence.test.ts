@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { frames } from '@/api/live'
+import { pushFrame } from '@/test/live'
 import { Cadence, useCadence } from './cadence'
 import { SPEC } from './design-numbers'
 
@@ -48,9 +48,10 @@ describe('useCadence', () => {
     vi.useFakeTimers()
   })
 
+  let seq = 0
   /** One animation frame, with a new frame in the store before it; its time. */
   function nextFrame(): number {
-    frames.version += 1
+    pushFrame('rope', (seq += 1), [1, 2, 3])
     vi.advanceTimersToNextFrame()
     return performance.now()
   }
@@ -60,6 +61,20 @@ describe('useCadence', () => {
     renderHook(() => useCadence(1000 / SPEC.target.fps, draw))
     const times = Array.from({ length: 10 }, nextFrame)
     expect(draw.mock.calls.map(([now]) => now)).toEqual(times)
+  })
+
+  // E5: with nothing streaming, no animation frames at all.
+  it('sleeps once it has drawn the latest frames, until the store has another', () => {
+    const draw = vi.fn()
+    renderHook(() => useCadence(1000 / SPEC.target.fps, draw))
+    nextFrame()
+    vi.advanceTimersToNextFrame()
+    expect(draw).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+    pushFrame('rope', (seq += 1), [4, 5, 6])
+    expect(vi.getTimerCount()).toBe(1)
+    vi.advanceTimersToNextFrame()
+    expect(draw).toHaveBeenCalledTimes(2)
   })
 
   it('stops when the stage goes', () => {

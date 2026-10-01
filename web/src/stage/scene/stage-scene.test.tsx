@@ -1,11 +1,12 @@
+import { useThree } from '@react-three/fiber'
 import ReactThreeTestRenderer from '@react-three/test-renderer'
 import { Profiler, type ReactNode } from 'react'
-import { InstancedMesh, type Object3D, OrthographicCamera } from 'three'
+import { InstancedMesh, type Object3D, OrthographicCamera, type WebGLRenderer } from 'three'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { liveStore } from '@/api/live-store'
 import { buildScenario, type ScenarioName } from '@/api/mocks/scenarios'
-import { HERO_NOW, startMockDataLayer } from '@/test/live'
+import { HERO_NOW, pushFrame, startMockDataLayer } from '@/test/live'
 import { stageBodies } from '../bodies'
 import { FIT_VIEW, fitPose } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
@@ -87,6 +88,32 @@ describe('the stage scene (§7.2, §7.5)', () => {
     expect(write.mock.calls.length).toBeLessThanOrEqual(SPEC.target.fps)
     expect(props.writer.leds).toBe(SPEC.target.leds)
     expect(commits).toBe(0)
+  })
+
+  // E5: under ?still the frames keep coming with the same bytes; they upload and render nothing.
+  it('renders nothing for a frame that changes no byte', async () => {
+    const props = stageProps('hero', { cadenceMs: 1000 / SPEC.target.fps })
+    const { lightId, ledCount } = props.entries.find((entry) => entry.streamed)!.body
+    let gl: WebGLRenderer | undefined
+    function Renderer() {
+      gl = useThree((state) => state.gl)
+      return null
+    }
+    await renderScene(
+      <>
+        <StageScene {...props} />
+        <Renderer />
+      </>,
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    const render = vi.spyOn(gl!, 'render')
+    const frame = Array.from({ length: ledCount }, () => [10, 20, 30]).flat()
+    pushFrame(lightId, 1, frame)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(render).toHaveBeenCalledOnce()
+    pushFrame(lightId, 2, frame)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(render).toHaveBeenCalledOnce()
   })
 
   // Review focus 3: the link drops (the reconnecting scenario drops it a second after it connects).

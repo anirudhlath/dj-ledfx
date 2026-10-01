@@ -98,6 +98,21 @@ describe('the frame writer', () => {
   })
 
   // I1: a `lights` push that changes only colours, or what a light shows, reuses the writer's arrays.
+  // E5: under ?still the frames keep coming with the same bytes; nothing needs uploading or drawing.
+  it("says whether a write changed what it draws: a frame with the same bytes doesn't", () => {
+    const frames = new FrameStore()
+    const writer = new FrameWriter([entry(POINT), entry(STRIP, { streamed: false, resting: [255, 0, 0] })])
+    stream(frames, POINT.id, solid(POINT.leds, [0, 51, 102]))
+    expect(writer.write(frames)).toBe(true)
+    stream(frames, POINT.id, solid(POINT.leds, [0, 51, 102]))
+    expect(writer.write(frames)).toBe(false)
+    stream(frames, POINT.id, solid(POINT.leds, [0, 51, 103]))
+    expect(writer.write(frames)).toBe(true)
+    writer.setEntries([entry(POINT), entry(STRIP, { streamed: false, resting: [0, 255, 0] })])
+    expect(writer.write(frames)).toBe(true)
+    expect(writer.write(frames)).toBe(false)
+  })
+
   it('takes new entries in place: the same arrays, written with the new colours', () => {
     const frames = new FrameStore()
     const writer = new FrameWriter([entry(POINT, { streamed: false, resting: [255, 0, 0] })])

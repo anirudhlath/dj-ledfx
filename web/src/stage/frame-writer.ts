@@ -73,6 +73,8 @@ export class FrameWriter {
   /** The LEDs the last write took from frames. */
   leds = 0
   private readonly slots: Slot[] = []
+  /** Whether the write so far has changed a value the meshes draw. */
+  private changed = false
 
   /** Laid out for these entries' bodies and rooms; setEntries() changes the rest in place. */
   constructor(entries: readonly WriterEntry[]) {
@@ -145,9 +147,13 @@ export class FrameWriter {
     })
   }
 
-  /** Every drawn light from the store's latest frames (or its resting colour). Allocates nothing. */
-  write(frames: FrameStore): void {
+  /**
+   * Every drawn light from the store's latest frames (or its resting colour). Allocates nothing, and
+   * says whether it changed anything drawn: frames with the same bytes don't, and need no upload or draw.
+   */
+  write(frames: FrameStore): boolean {
     const { lightOff, stripDark } = STAGE_PALETTE
+    this.changed = false
     let leds = 0
     for (const slot of this.slots) {
       const { body, room, resting, strip } = slot
@@ -190,11 +196,11 @@ export class FrameWriter {
         // Halo and pool: the hue at the light's intensity; the shaders apply the falloff.
         const at = slot.glow + s
         const lit = dark ? 0 : intensity
-        this.glowColours[at * 3] = hr * lit
-        this.glowColours[at * 3 + 1] = hg * lit
-        this.glowColours[at * 3 + 2] = hb * lit
-        this.haloSizes[at] = dark ? 0 : haloRadiusPx(compact, intensity)
-        this.poolRadii[at] = dark || room === 0 ? 0 : poolRadiusM(body.samples[s][2], intensity, count)
+        this.put(this.glowColours, at * 3, hr * lit)
+        this.put(this.glowColours, at * 3 + 1, hg * lit)
+        this.put(this.glowColours, at * 3 + 2, hb * lit)
+        this.put(this.haloSizes, at, dark ? 0 : haloRadiusPx(compact, intensity))
+        this.put(this.poolRadii, at, dark || room === 0 ? 0 : poolRadiusM(body.samples[s][2], intensity, count))
         if (strip !== null) {
           // Visible even when dark: from the dark strip colour toward the hue, by intensity.
           const sr = mix(stripDark[0], hr, intensity)
@@ -202,27 +208,36 @@ export class FrameWriter {
           const sb = mix(stripDark[2], hb, intensity)
           if (s > 0) {
             const end = (slot.segment + s - 1) * 6 + 3
-            strip.colours[end] = sr
-            strip.colours[end + 1] = sg
-            strip.colours[end + 2] = sb
+            this.put(strip.colours, end, sr)
+            this.put(strip.colours, end + 1, sg)
+            this.put(strip.colours, end + 2, sb)
           }
           if (s + 1 < count) {
             const start = (slot.segment + s) * 6
-            strip.colours[start] = sr
-            strip.colours[start + 1] = sg
-            strip.colours[start + 2] = sb
+            this.put(strip.colours, start, sr)
+            this.put(strip.colours, start + 1, sg)
+            this.put(strip.colours, start + 2, sb)
           }
         }
         if (s === slot.coreSample) {
           const at3 = slot.core * 3
-          this.coreSizes[slot.core] = dark ? SPEC.core.darkPx : SPEC.core.px
-          this.coreColours[at3] = dark ? lightOff[0] : coreOf(hr, intensity)
-          this.coreColours[at3 + 1] = dark ? lightOff[1] : coreOf(hg, intensity)
-          this.coreColours[at3 + 2] = dark ? lightOff[2] : coreOf(hb, intensity)
+          this.put(this.coreSizes, slot.core, dark ? SPEC.core.darkPx : SPEC.core.px)
+          this.put(this.coreColours, at3, dark ? lightOff[0] : coreOf(hr, intensity))
+          this.put(this.coreColours, at3 + 1, dark ? lightOff[1] : coreOf(hg, intensity))
+          this.put(this.coreColours, at3 + 2, dark ? lightOff[2] : coreOf(hb, intensity))
         }
       }
     }
     this.leds = leds
+    return this.changed
+  }
+
+  /** Writes a value as the array stores it (a 32-bit float), noting whether it changed. */
+  private put(array: Float32Array, index: number, value: number): void {
+    const stored = Math.fround(value)
+    if (array[index] === stored) return
+    array[index] = stored
+    this.changed = true
   }
 }
 

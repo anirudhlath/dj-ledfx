@@ -118,6 +118,28 @@ describe('FrameStore', () => {
     expect(frames.lastFrameAt).toBe(new Date(2026, 8, 23, 19, 14, 32).getTime())
   })
 
+  // E5: the stage's cadence sleeps while nothing streams, and the store wakes it.
+  it('wakes whoever waits for the next frame, once, and not once they stop waiting', () => {
+    const wake = vi.fn()
+    const stopped = vi.fn()
+    frames.onNextFrame(wake)
+    frames.onNextFrame(stopped)()
+    decodeFrame(encodeFrame(2, 'rope', 1, rgb(1, 2, 3)), 2, frames, 0)
+    decodeFrame(encodeFrame(2, 'rope', 2, rgb(1, 2, 3)), 2, frames, 0)
+    expect(wake).toHaveBeenCalledOnce()
+    expect(stopped).not.toHaveBeenCalled()
+  })
+
+  it('wakes them when the preview ends too, but not for a frame it already has', () => {
+    decodeFrame(encodeFrame(2, 'rope', 1, rgb(1, 2, 3)), 2, frames, 0)
+    const wake = vi.fn()
+    frames.onNextFrame(wake)
+    decodeFrame(encodeFrame(2, 'rope', 1, rgb(1, 2, 3)), 2, frames, 0)
+    expect(wake).not.toHaveBeenCalled()
+    frames.clearPreview()
+    expect(wake).toHaveBeenCalledOnce()
+  })
+
   it('empties, as on a page just opened', () => {
     decodeFrame(encodeFrame(2, 'rope', 1, rgb(0, 0, 0)), 2, frames, 0)
     decodeFrame(encodeFrame(2, 'tube', 1, rgb(0, 0, 0), 'preview'), 2, frames, 0)
