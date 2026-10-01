@@ -125,11 +125,19 @@ def leds_at(
     *,
     ceiling: float | None = 3.0,
     anchors: Mapping[str, Sequence[float]] | None = None,
+    anchor_points: Mapping[str, Sequence[Sequence[float]]] | None = None,
 ) -> LedSet:
-    """One light's LEDs at these map positions, in a zone with this ceiling and anchors."""
+    """One light's LEDs at these map positions, in a zone with this ceiling and anchors;
+    anchor_points gives an anchor more than one point (the speaker pair has two)."""
     space = Space(
         anchors=MappingProxyType(
             {name: np.asarray(p, dtype=np.float32) for name, p in (anchors or {}).items()}
+        ),
+        anchor_points=MappingProxyType(
+            {
+                name: np.asarray(p, dtype=np.float32).reshape(-1, 3)
+                for name, p in (anchor_points or {}).items()
+            }
         ),
         ceiling=ceiling,
     )
