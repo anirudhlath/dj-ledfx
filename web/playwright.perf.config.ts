@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test'
-import base from './playwright.config'
+import base, { MOCK_SERVER } from './playwright.config'
 
 // §14 Performance, measured in the browser: `npm run e2e:perf` runs e2e/stage.perf.ts on e2e's own
 // projects and mock build. The stage's frame rate is a GPU's, so Chromium draws on this machine's GPU
@@ -15,5 +15,5 @@ export default defineConfig({
   workers: 1,
   projects: base.projects?.map((project) => ({ ...project, use: { ...project.use, launchOptions: { args: GPU } } })),
   // The mock build only; the production bundle isn't measured.
-  webServer: [base.webServer ?? []].flat()[0],
+  webServer: MOCK_SERVER,
 })
