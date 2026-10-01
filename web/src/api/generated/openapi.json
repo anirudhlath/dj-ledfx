@@ -3060,6 +3060,7 @@
         "type": "object"
       },
       "TapRequest": {
+        "description": "A tap's time on the client's clock, in seconds since the epoch. It's a hint: one the\nclock can't use (not finite, or more than a day off) times the tap by its arrival.",
         "properties": {
           "clientTime": {
             "anyOf": [

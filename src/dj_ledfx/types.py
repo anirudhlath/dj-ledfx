@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import TypeGuard
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,10 +16,15 @@ def clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-def is_finite_number(value: object) -> bool:
-    """An int or float that isn't a bool, NaN or infinite: what a setting or the map takes
-    as a number."""
-    return not isinstance(value, bool) and isinstance(value, int | float) and math.isfinite(value)
+def is_finite_number(value: object) -> TypeGuard[int | float]:
+    """An int or float that isn't a bool, NaN or infinite, and fits a float: what a setting,
+    the map or the tempo takes as a number."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int too big for a float
+        return False
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,7 +9,6 @@ time, so its read methods are synchronous and lock-free.
 from __future__ import annotations
 
 import asyncio
-import math
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -43,9 +42,10 @@ from dj_ledfx.tempo.model import (
     TempoSource,
     check_bpm,
 )
-from dj_ledfx.tempo.tap import TapTempo
+from dj_ledfx.tempo.tap import TapTempo, usable_client_time
 from dj_ledfx.tempo.timeline import Timeline, nearest_beat
 from dj_ledfx.timing import utcnow
+from dj_ledfx.types import is_finite_number
 
 if TYPE_CHECKING:
     from dj_ledfx.tempo.store import TempoStore
@@ -170,7 +170,7 @@ class TempoClock:
         if self._lock not in UNLOCKED:
             raise TempoLockedError(self._lock)
         now = self._now()
-        tap = self._taps.tap(now, client_time)
+        tap = self._taps.tap(now, usable_client_time(client_time, self._wall().timestamp()))
         if tap is None:
             return  # a double tap, or one stamped before the last
         if tap.bpm is None:
@@ -184,7 +184,7 @@ class TempoClock:
 
     def nudge(self, delta: float) -> None:
         """Move the beat by `delta` beats, -1 to 1: positive brings it sooner. The BPM stays."""
-        if isinstance(delta, bool) or not math.isfinite(delta) or abs(delta) > MAX_NUDGE_BEATS:
+        if not is_finite_number(delta) or abs(delta) > MAX_NUDGE_BEATS:
             raise TempoError(f"A nudge is -{MAX_NUDGE_BEATS:g} to {MAX_NUDGE_BEATS:g} beats")
         if self._lock not in UNLOCKED:
             raise TempoLockedError(self._lock)
@@ -384,8 +384,8 @@ class TempoClock:
 
 def _believable(event: BeatEvent) -> bool:
     return (
-        math.isfinite(event.timestamp)
-        and math.isfinite(event.pitch_percent)
-        and math.isfinite(event.bpm)
+        is_finite_number(event.timestamp)
+        and is_finite_number(event.pitch_percent)
+        and is_finite_number(event.bpm)
         and MIN_BPM <= event.bpm <= MAX_BPM
     )

@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
+from pydantic import ValidationError
 
 from dj_ledfx.tempo.model import DecksChanged, TempoChanged, TempoError
 from dj_ledfx.types import is_finite_number
@@ -461,7 +461,11 @@ async def _handle_command(
     elif action == "tap":
         tempo = app.state.tempo
         try:
-            tempo.tap(_client_time(msg.get("client_time")))
+            tempo.tap(contract.TapRequest.model_validate(msg).client_time)
+        except ValidationError:
+            detail = "A tap's client_time is a number of seconds"
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": detail})
+            return
         except TempoError as exc:  # a lock keeps the internal clock out
             await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": str(exc)})
             return
@@ -472,15 +476,3 @@ async def _handle_command(
         await _send_json(
             ws, {"channel": "error", "id": cmd_id, "detail": f"Unknown action: {action}"}
         )
-
-
-def _client_time(value: object) -> float | None:
-    """A tap's client time in seconds, or None when it isn't a finite number: the tap is
-    then timed by its arrival."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    try:
-        seconds = float(value)
-    except OverflowError:  # an integer too big for a float
-        return None
-    return seconds if math.isfinite(seconds) else None

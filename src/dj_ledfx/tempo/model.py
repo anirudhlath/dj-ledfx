@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
+
+from dj_ledfx.types import is_finite_number
 
 TempoSource = Literal["prodjlink", "music", "internal"]
 TempoLock = Literal["auto", "prodjlink", "music", "internal"]
@@ -45,9 +46,9 @@ class TempoLockedError(TempoError):
 
 def check_bpm(bpm: object) -> float:
     """The BPM as a float, or TempoError when it isn't a finite number from 30 to 300."""
-    if isinstance(bpm, bool) or not isinstance(bpm, int | float):
-        raise TempoError(f"A tempo is a number of BPM, not {bpm!r}")
-    if not math.isfinite(bpm) or not MIN_BPM <= bpm <= MAX_BPM:
+    if not is_finite_number(bpm):
+        raise TempoError("A tempo must be a finite number")
+    if not MIN_BPM <= bpm <= MAX_BPM:
         raise TempoError(f"A tempo is {MIN_BPM:g} to {MAX_BPM:g} BPM, not {bpm:g}")
     return float(bpm)
 

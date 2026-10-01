@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -13,6 +14,7 @@ from dj_ledfx.tempo.clock import TempoClock
 fastapi = pytest.importorskip("fastapi", reason="web extra not installed (uv sync --extra web)")
 
 from fastapi.testclient import TestClient  # noqa: E402
+from starlette.testclient import WebSocketTestSession  # noqa: E402
 
 from dj_ledfx.web.app import create_app  # noqa: E402
 
@@ -44,3 +46,12 @@ def static_client(web_static_dir: Path, next_static_dir: Path | None = None) -> 
     """The old UI served from web_static_dir, and /next from next_static_dir when given."""
     extra = {} if next_static_dir is None else {"next_static_dir": next_static_dir}
     return TestClient(create_app(**mock_deps(), web_static_dir=str(web_static_dir), **extra))
+
+
+def until(ws: WebSocketTestSession, channel: str) -> dict[str, Any]:
+    """The next message on one channel of a /ws session; the pushed snapshots come first."""
+    for _ in range(20):
+        message: dict[str, Any] = json.loads(ws.receive_text())
+        if message["channel"] == channel:
+            return message
+    pytest.fail(f"no {channel} message")

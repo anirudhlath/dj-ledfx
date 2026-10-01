@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from api_home import Api, api_home
-from tempo_fakes import PLAYER, START_WALL, beat_event
+from fastapi.testclient import TestClient
+from tempo_fakes import PLAYER, START_WALL, FakeTime, beat_event, tempo_clock
 
 from dj_ledfx.tempo.model import DjSet, TempoSettings
 from dj_ledfx.tempo.store import TempoStore
+from dj_ledfx.web.app import create_app
+from tests.web.conftest import mock_deps, until
 
 
 @pytest_asyncio.fixture
@@ -74,10 +77,10 @@ async def test_a_bad_tempo_is_refused_and_changes_nothing(api: Api, body: bytes)
 
 
 async def test_taps_set_the_tempo_from_the_client_s_times(api: Api) -> None:
+    sent = time.time()  # the client's clock: within a day of the server's
     for k in range(4):
-        answer = await api.client.post(
-            "/api/inputs/tempo/tap", json={"clientTime": 1_790_000_000.0 + 0.4 * k}
-        )
+        tap = {"clientTime": sent + 0.4 * k}
+        answer = await api.client.post("/api/inputs/tempo/tap", json=tap)
 
     tempo = answer.json()
     assert tempo["bpm"] == pytest.approx(150.0)
@@ -177,3 +180,50 @@ async def test_a_nan_comes_back_as_text_in_the_422(api: Api) -> None:
 
     [error] = answer.json()["detail"]
     assert (error["loc"], error["input"]) == (["body", "bpm"], "nan")
+
+
+# M3 review ruling: a tap's time is a hint. Taps arrive 0.4 s apart (150 BPM), and a
+# client time the clock can use says 0.5 s (120 BPM).
+WALL = START_WALL.timestamp()  # the server's clock at the first tap
+DAY = 86_400.0
+CLIENT_TIMES = [
+    pytest.param(lambda k: "NaN", 150.0, id="nan"),
+    pytest.param(None, 150.0, id="missing"),
+    pytest.param(lambda k: "1e20", 150.0, id="1e20"),
+    pytest.param(lambda k: f"{WALL - 1.5 * DAY + 0.5 * k}", 150.0, id="a-day-and-a-half-off"),
+    pytest.param(lambda k: f"{WALL + 3600.0 + 0.5 * k}", 120.0, id="an-hour-off"),
+]
+
+
+@pytest.mark.parametrize(("client_time", "bpm"), CLIENT_TIMES)
+def test_a_tap_s_time_counts_only_when_the_clock_can_use_it(
+    client_time: Callable[[int], str] | None, bpm: float
+) -> None:
+    fake = FakeTime()
+    app = create_app(**{**mock_deps(), "tempo": tempo_clock(fake)})
+    with TestClient(app) as client:
+        for k in range(4):
+            body = "{}" if client_time is None else f'{{"clientTime": {client_time(k)}}}'
+            answer = client.post(
+                "/api/inputs/tempo/tap", content=body, headers={"content-type": "application/json"}
+            )
+            fake.now += 0.4
+
+    assert answer.status_code == 200
+    assert answer.json()["bpm"] == pytest.approx(bpm)
+
+
+@pytest.mark.parametrize(("client_time", "bpm"), CLIENT_TIMES)
+def test_a_socket_tap_s_time_counts_only_when_the_clock_can_use_it(
+    client_time: Callable[[int], str] | None, bpm: float
+) -> None:
+    fake = FakeTime()
+    app = create_app(**{**mock_deps(), "tempo": tempo_clock(fake)})
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        for k in range(4):
+            sent = "" if client_time is None else f', "client_time": {client_time(k)}'
+            ws.send_text(f'{{"action": "tap", "id": {k}{sent}}}')
+            assert until(ws, "ack")["id"] == k
+            fake.now += 0.4
+
+    assert app.state.tempo.bpm == pytest.approx(bpm)

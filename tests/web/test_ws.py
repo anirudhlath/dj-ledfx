@@ -1,12 +1,10 @@
 import json
 import time
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
-from starlette.testclient import WebSocketTestSession
 from tempo_fakes import PLAYER, START, FakeTime, play, tempo_clock
 
 from dj_ledfx.tempo.clock import TempoClock
@@ -14,6 +12,7 @@ from dj_ledfx.types import DeviceStats
 from dj_ledfx.web import ws as hub
 from dj_ledfx.web.app import create_app
 from dj_ledfx.web.ws import beat_message, close_all, stats_message
+from tests.web.conftest import until
 
 
 @pytest.fixture
@@ -40,18 +39,9 @@ def client(ws_app):
     return TestClient(ws_app)
 
 
-def _until(ws: WebSocketTestSession, channel: str) -> dict[str, Any]:
-    """The next message on one channel; the pushed snapshots come first."""
-    for _ in range(20):
-        message: dict[str, Any] = json.loads(ws.receive_text())
-        if message["channel"] == channel:
-            return message
-    pytest.fail(f"no {channel} message")
-
-
 def test_ws_connect_and_receive_beat(client):
     with client.websocket_connect("/ws") as ws:
-        beat = _until(ws, "beat")
+        beat = until(ws, "beat")
     assert (beat["bpm"], beat["source"], beat["stale"]) == (120.0, "internal", False)
 
 
@@ -88,29 +78,33 @@ def test_the_beat_channel_speaks_v2_and_today_s_ui() -> None:
 
 def test_a_tap_is_acked_and_sets_the_tempo(ws_app) -> None:
     with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
+        sent = time.time()  # the client's clock: within a day of the server's
         for k in range(4):  # 0.4 s apart on the client's clock: 150 BPM
-            ws.send_json({"action": "tap", "id": k, "client_time": 1_790_000_000.0 + 0.4 * k})
-            assert _until(ws, "ack") == {"channel": "ack", "id": k, "action": "tap"}
+            ws.send_json({"action": "tap", "id": k, "client_time": sent + 0.4 * k})
+            assert until(ws, "ack") == {"channel": "ack", "id": k, "action": "tap"}
 
     tempo = ws_app.state.tempo
     assert tempo.bpm == pytest.approx(150.0)
     assert (tempo.source, tempo.internal.how) == ("internal", "tapped")
 
 
-# Review Focus 2: a tap the clock can't use is timed by its arrival or refused; never a crash.
+# Review Focus 2: a tap's time the clock can't use is timed by its arrival, one that isn't
+# a number is refused as REST refuses it; never a crash.
 def test_a_bad_tap_is_answered_and_the_session_lives(ws_app) -> None:
-    times = ['"soon"', "NaN", "-Infinity", "1e400", "1" + "0" * 400, "true", "null", "[]"]
+    arrival = ["NaN", "-Infinity", "1e400", "true", "null"]  # true reads as 1.0: 1970
+    refused = ['"soon"', "1" + "0" * 400, "[]"]  # not a number, or none a float can hold
     with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
-        for k, client_time in enumerate(times):
+        for k, client_time in enumerate(arrival + refused):
             ws.send_text(f'{{"action": "tap", "id": {k}, "client_time": {client_time}}}')
-            assert _until(ws, "ack")["id"] == k  # timed by its arrival instead
+            answer = until(ws, "ack" if k < len(arrival) else "error")
+            assert answer["id"] == k
         ws_app.state.tempo.set_tempo("prodjlink")
         ws.send_json({"action": "tap", "id": "locked", "client_time": 1_790_000_000.0})
-        refused = _until(ws, "error")
+        locked = until(ws, "error")
         ws.send_json({"action": "subscribe_beat", "id": "alive", "fps": 5})
-        alive = _until(ws, "ack")
+        alive = until(ws, "ack")
 
-    assert refused["id"] == "locked" and "Pro DJ Link" in refused["detail"]
+    assert locked["id"] == "locked" and "Pro DJ Link" in locked["detail"]
     assert alive["id"] == "alive"
 
 
@@ -130,8 +124,8 @@ def test_a_bad_tap_is_answered_and_the_session_lives(ws_app) -> None:
 def test_a_command_the_hub_can_t_use_is_refused_and_the_beat_goes_on(ws_app, command) -> None:
     with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
         ws.send_text(command)
-        refused = _until(ws, "error")
-        beats = [_until(ws, "beat"), _until(ws, "beat")]  # at its rate, as before
+        refused = until(ws, "error")
+        beats = [until(ws, "beat"), until(ws, "beat")]  # at its rate, as before
 
     assert refused.get("id") == (None if command == "[]" else 7)
     assert all(beat["bpm"] == 120.0 for beat in beats)
@@ -140,8 +134,8 @@ def test_a_command_the_hub_can_t_use_is_refused_and_the_beat_goes_on(ws_app, com
 def test_the_inputs_beat_once_a_second(ws_app, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hub, "INPUTS_HEARTBEAT_S", 0.01)
     with TestClient(ws_app) as client, client.websocket_connect("/ws") as ws:
-        on_connect = _until(ws, "inputs")
-        heartbeat = _until(ws, "inputs")
+        on_connect = until(ws, "inputs")
+        heartbeat = until(ws, "inputs")
 
     assert on_connect["inputs"]["tempo"]["source"] == "internal"
     assert heartbeat["inputs"] == on_connect["inputs"]

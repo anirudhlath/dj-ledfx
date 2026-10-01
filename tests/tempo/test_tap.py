@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dj_ledfx.tempo.tap import Tap, TapTempo
+from dj_ledfx.tempo.tap import MAX_CLIENT_SKEW_S, Tap, TapTempo, usable_client_time
 
 
 def _taps(taps: TapTempo, times: list[float]) -> list[Tap | None]:
@@ -68,4 +68,13 @@ def test_a_run_never_mixes_client_and_arrival_times() -> None:
     taps.tap(10.5, 1_790_000_000.5)
 
     assert taps.tap(11.0) == Tap(0, 11.0, None)  # no client time: a new run
-    assert taps.tap(11.5, float("nan")) == Tap(1, 11.5, None)  # NaN is no client time
+    assert taps.tap(11.5) == Tap(1, 11.5, None)
+
+
+# M3 review ruling: a tap's time is a hint, never a reason to lose the tap.
+def test_a_client_time_the_clock_can_t_use_times_the_tap_by_its_arrival() -> None:
+    server = 1_790_881_200.0  # the server's clock, seconds since the epoch
+
+    assert usable_client_time(server - 3600.0, server) == server - 3600.0
+    for client_time in (None, float("nan"), float("-inf"), 1e20, server + MAX_CLIENT_SKEW_S + 1):
+        assert usable_client_time(client_time, server) is None, client_time

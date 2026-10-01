@@ -2025,7 +2025,11 @@ export interface components {
             /** Zonename */
             zoneName: string;
         };
-        /** TapRequest */
+        /**
+         * TapRequest
+         * @description A tap's time on the client's clock, in seconds since the epoch. It's a hint: one the
+         *     clock can't use (not finite, or more than a day off) times the tap by its arrival.
+         */
         TapRequest: {
             /** Clienttime */
             clientTime?: number | null;

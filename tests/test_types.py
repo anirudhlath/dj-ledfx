@@ -1,6 +1,6 @@
 import numpy as np
 
-from dj_ledfx.types import RGB, BeatContext, DeviceInfo, RenderedFrame
+from dj_ledfx.types import RGB, BeatContext, DeviceInfo, RenderedFrame, is_finite_number
 
 
 def test_rgb_type_alias() -> None:
@@ -74,3 +74,9 @@ def test_device_info_frozen():
         raise AssertionError("Should have raised")
     except AttributeError:
         pass
+
+
+def test_a_finite_number_is_an_int_or_float_that_fits_a_float() -> None:
+    assert is_finite_number(3) and is_finite_number(-2.5)
+    for value in (float("nan"), float("inf"), True, "3", None, 10**400):
+        assert not is_finite_number(value), value

@@ -797,7 +797,10 @@ class TempoRequest(ContractModel):
 
 
 class TapRequest(ContractModel):
-    client_time: float | None = Field(default=None, allow_inf_nan=False)  # seconds
+    """A tap's time on the client's clock, in seconds since the epoch. It's a hint: one the
+    clock can't use (not finite, or more than a day off) times the tap by its arrival."""
+
+    client_time: float | None = None
 
 
 class NudgeRequest(ContractModel):
