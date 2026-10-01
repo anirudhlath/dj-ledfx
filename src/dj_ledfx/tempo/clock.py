@@ -149,8 +149,10 @@ class TempoClock:
         return self._decks.views(self._now(), master=self._master())
 
     def followed_deck(self) -> DeckView | None:
-        """The deck the clock follows now, if a DJ drives it."""
-        return next((deck for deck in self.decks() if deck.master), None)
+        """The deck the clock follows now, if a DJ drives it: the beat channel reads it on
+        every message, so it builds that deck's view alone."""
+        master = self._master()
+        return None if master is None else self._decks.view(master, self._now(), master=True)
 
     # --- the internal controls (web spec §12.3) -----------------------------------------
 

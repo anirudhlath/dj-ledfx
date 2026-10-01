@@ -67,6 +67,7 @@ def test_two_decks_in_a_mix_never_pull_the_beat_back_and_forth() -> None:
         clock.on_beat(beat_event(time.now, beat=k % 4 + 1, deck=2))
         assert clock.sample_at(start + k * PERIOD).beat_phase == pytest.approx(0.0, abs=1e-9)
     assert [deck.master for deck in clock.decks()] == [True, False]
+    assert clock.followed_deck() == clock.decks()[0]
 
     # Deck 1 stops. Once it has been quiet for 2 s, deck 2 takes the clock.
     deck_2 = start + 15 * PERIOD + 0.1
@@ -75,6 +76,7 @@ def test_two_decks_in_a_mix_never_pull_the_beat_back_and_forth() -> None:
         clock.on_beat(beat_event(time.now, beat=(15 + k) % 4 + 1, deck=2))
     assert clock.sample_at(time.now).beat_phase == pytest.approx(0.0, abs=1e-9)
     assert [deck.master for deck in clock.decks()] == [False, True]
+    assert clock.followed_deck() == clock.decks()[1]
 
 
 # Review Focus 3: a lost packet, a short pause.

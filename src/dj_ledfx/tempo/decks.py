@@ -53,16 +53,25 @@ class DeckTracker:
 
     def views(self, now: float, *, master: int | None) -> tuple[DeckView, ...]:
         return tuple(
-            DeckView(
-                number=deck.number,
-                player=deck.player,
-                state="playing" if _playing(deck, now) else "cued",
-                bpm=deck.track_bpm,
-                pitch_percent=deck.pitch_percent,
-                master=deck.number == master,
-            )
+            _view(deck, now, master=deck.number == master)
             for deck in sorted(self._decks.values(), key=lambda deck: deck.number)
         )
+
+    def view(self, number: int, now: float, *, master: bool) -> DeckView | None:
+        """One deck as views() shows it, without building the others."""
+        deck = self._decks.get(number)
+        return None if deck is None else _view(deck, now, master=master)
+
+
+def _view(deck: _Deck, now: float, *, master: bool) -> DeckView:
+    return DeckView(
+        number=deck.number,
+        player=deck.player,
+        state="playing" if _playing(deck, now) else "cued",
+        bpm=deck.track_bpm,
+        pitch_percent=deck.pitch_percent,
+        master=master,
+    )
 
 
 def _playing(deck: _Deck, now: float) -> bool:
