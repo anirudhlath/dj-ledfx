@@ -4,7 +4,7 @@ from collections import Counter
 
 import numpy as np
 from conftest import tempo_ctx
-from map_home import leds_at, seeded_space, seeded_zone_lights
+from map_home import leds_at, seeded_ledset, seeded_space, seeded_zone_lights
 
 from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.field_tools import distances, height01
@@ -86,3 +86,22 @@ def test_the_kicks_reach_the_far_and_low_lights_of_a_room() -> None:
     for part in (far, low):
         light = bar[:, part.start : part.stop]
         assert (light.max(axis=0) - light.min(axis=0)).max() > 0.1, part.device_id
+
+
+def test_frame_after_frame_it_draws_what_a_new_one_draws() -> None:
+    """What a beat keeps (its sparkles) and the blends it skips never change a frame: one
+    effect across beats, a new sparkle share and a new seed draws what a new one would."""
+    leds = seeded_ledset()
+    effect = SpeakerWaves(anchor="speakers", sparkle=0.3)
+    effect.reseed(5)
+
+    for k in range(8 * 30):  # eight beats at 30 frames a beat
+        sparkle, seed = (0.3 if k < 120 else 0.6), (5 if k < 180 else 6)
+        if k == 120:
+            effect.set_params(sparkle=sparkle)
+        if k == 180:
+            effect.reseed(seed)
+        fresh = SpeakerWaves(anchor="speakers", sparkle=sparkle)
+        fresh.reseed(seed)
+        ctx = tempo_ctx(4.0 + k / 30)
+        assert np.array_equal(effect.render(ctx, leds), fresh.render(ctx, leds)), k

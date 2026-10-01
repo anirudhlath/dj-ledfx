@@ -39,6 +39,9 @@ HIGH_FROM, HIGH_TO = 0.55, 0.85  # where "up high" starts and is full, floor 0 t
 
 
 class SpeakerWaves(ParamField):
+    _sparkled: tuple[int, int, int, float] | None = None  # whose sparkles _lit holds
+    _lit: F32
+
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
@@ -74,23 +77,31 @@ class SpeakerWaves(ParamField):
         each, middle, high, reach = self._per_leds(leds, self._sources)
         fade = np.float32(1.0 - ctx.beat_phase)
         front = reach * ctx.beat_phase / ACROSS_BY  # metres out from each point
-        kick = band(each, front, WAVE_M).max(axis=0) * fade
-        snare = np.zeros_like(middle)
+        out: FloatRGB = np.empty((leds.count, 3), dtype=np.float32)
+        out[:] = self._rest
+        kick = band(each, front, WAVE_M).max(axis=0)
+        kick *= fade
+        _towards(out, self._kick, kick)
         if ctx.beat_index % 2 == 1:  # the second and fourth beats
-            snare = band(middle, 0.0, BLOOM_M) * fade * fade
-        hat = np.zeros_like(high)
+            snare = band(middle, 0.0, BLOOM_M)
+            snare *= fade
+            snare *= fade
+            _towards(out, self._snare, snare)
         if ctx.beat_phase >= 0.5:  # the off-beat, fading by the next beat
-            lit = self._sparkles(ctx.beat_index, leds.count, float(values["sparkle"]))
-            hat = high * lit * np.float32(2.0 * (1.0 - ctx.beat_phase))
-        out = np.repeat(self._rest[None, :], leds.count, axis=0)
-        for amount, colour in ((kick, self._kick), (snare, self._snare), (hat, self._hat)):
-            out += (colour - out) * amount[:, None]
-        frame: FloatRGB = (out * np.float32(values["level"])).astype(np.float32)
-        return frame
+            hat = high * self._sparkles(ctx.beat_index, leds.count, float(values["sparkle"]))
+            hat *= np.float32(2.0 * (1.0 - ctx.beat_phase))
+            _towards(out, self._hat, hat)
+        out *= np.float32(values["level"])
+        return out
 
     def _sparkles(self, beat_index: int, count: int, share: float) -> F32:
-        draws = self._rng(beat_index).random(count)
-        return (draws < share).astype(np.float32)
+        """Which LEDs this beat's hi-hat lights (1) and leaves (0): drawn once a beat, from
+        the seed and the beat alone, and kept for the beat's frames."""
+        key = (self._seed, beat_index, count, share)
+        if self._sparkled != key:
+            self._lit = (self._rng(beat_index).random(count) < share).astype(np.float32)
+            self._sparkled = key
+        return self._lit
 
     def _sources(self, leds: LedSet) -> tuple[F32, F32, F32, float]:
         """Each LED's distance from each of the anchor's points (k, n), from their middle,
@@ -106,3 +117,10 @@ class SpeakerWaves(ParamField):
         farthest = np.maximum(abs(points - low), abs(points - top))  # to each point's far corner
         reach = float(np.linalg.norm(farthest, axis=1).max())
         return each, middle, smoothstep(HIGH_FROM, HIGH_TO, height01(leds)), reach
+
+
+def _towards(out: FloatRGB, colour: F32, amount: F32) -> None:
+    """Move each LED of out towards colour by its amount, 0 to 1, in place."""
+    step = colour - out
+    step *= amount[:, None]
+    out += step
