@@ -127,6 +127,20 @@ def test_taps_set_the_tempo_from_the_third_and_the_first_is_a_downbeat() -> None
     assert (clock.internal.how, clock.held) == ("tapped", True)
 
 
+def test_taps_before_the_run_has_a_tempo_leave_how_the_bpm_was_set() -> None:
+    time = FakeTime()
+    settings = TempoSettings(internal=InternalTempo(95.0, "set", START_WALL))
+    clock = tempo_clock(time, settings=settings)
+    time.now += 60.0
+
+    clock.tap()
+    time.now += 0.5
+    clock.tap()
+
+    assert clock.internal == settings.internal  # still "95.0 · set 19:00": nothing tapped yet
+    assert (clock.bpm, clock.held) == (95.0, True)  # it holds, as a nudge does
+
+
 def test_a_locked_clock_refuses_taps_and_nudges() -> None:
     clock = tempo_clock(FakeTime())
     clock.set_tempo("prodjlink")

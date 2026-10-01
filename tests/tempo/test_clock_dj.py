@@ -130,6 +130,18 @@ def test_tapping_holds_the_internal_clock_until_a_dj_starts_again() -> None:
     assert (clock.source, clock.held, clock.bpm) == ("prodjlink", False, 128.0)
 
 
+def test_a_stray_tap_during_a_set_keeps_the_dj_s_tempo_as_a_nudge_does() -> None:
+    time = FakeTime()
+    clock = tempo_clock(time)
+    *_, last = play(clock, time, 4, bpm=125.0)
+    time.now = last + 0.1
+
+    clock.tap()
+
+    assert (clock.source, clock.held, clock.bpm) == ("internal", True, 125.0)
+    assert clock.internal == InternalTempo(125.0, "kept", time.wall())
+
+
 def test_decks_show_what_the_beats_carry() -> None:
     time = FakeTime()
     clock = tempo_clock(time)

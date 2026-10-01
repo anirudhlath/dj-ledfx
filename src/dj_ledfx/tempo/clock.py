@@ -164,14 +164,18 @@ class TempoClock:
 
     def tap(self, client_time: float | None = None) -> None:
         """A tap: the run's first is a downbeat, each one after it the next beat, and from
-        the third the run's tempo is the internal BPM (web spec §6.2)."""
+        the third the run's tempo is the internal BPM (web spec §6.2). Until then the
+        internal clock takes over as a nudge does, keeping the BPM."""
         if self._lock not in UNLOCKED:
             raise TempoLockedError(self._lock)
         now = self._now()
         tap = self._taps.tap(now, client_time)
         if tap is None:
             return  # a double tap, or one stamped before the last
-        self._take_internal(now, self._bpm if tap.bpm is None else tap.bpm, "tapped")
+        if tap.bpm is None:
+            self._take_over(now)
+        else:
+            self._take_internal(now, tap.bpm, "tapped")
         if tap.index == 0:
             self._tap_origin = nearest_beat(self._line.position(tap.at), 1)
         self._line = Timeline(tap.at, float(self._tap_origin + tap.index), 60.0 / self._bpm)
@@ -184,10 +188,7 @@ class TempoClock:
         if self._lock not in UNLOCKED:
             raise TempoLockedError(self._lock)
         now = self._now()
-        if self._source != "internal":
-            self._take_internal(now, self._bpm, "kept")
-        elif self._lock == "auto":
-            self._held = True
+        self._take_over(now)
         beat = self._line.position(now) + delta
         self._line = self._line.moved(now, beat=beat if beat >= 0 else beat + BEATS_PER_BAR)
         self._publish(now)
@@ -300,6 +301,14 @@ class TempoClock:
         self._publish(now)
 
     # --- inside ---------------------------------------------------------------------------
+
+    def _take_over(self, now: float) -> None:
+        """The internal clock drives from now at the BPM it has, the DJ's kept if one was
+        driving: a nudge, or a tap before its run has a tempo."""
+        if self._source != "internal":
+            self._take_internal(now, self._bpm, "kept")
+        elif self._lock == "auto":
+            self._held = True
 
     def _take_internal(self, now: float, bpm: float, how: InternalHow) -> None:
         """The internal clock drives from now at this BPM, without a jump. Under Auto it
