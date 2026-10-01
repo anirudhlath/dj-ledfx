@@ -188,6 +188,11 @@ export function lightBodies(light: Light): Body[] {
   return bodies
 }
 
+/** The sample a body's core and its marks sit on (§7.3): a compact light's top one, a strip's middle one. */
+export function anchorIndex(body: Pick<Body, 'form' | 'samples'>): number {
+  return body.form === 'compact' ? body.samples.length - 1 : Math.floor(body.samples.length / 2)
+}
+
 /** All the lights' bodies, in the lights' order. */
 export function stageBodies(lights: readonly Light[]): Body[] {
   return lights.flatMap(lightBodies)

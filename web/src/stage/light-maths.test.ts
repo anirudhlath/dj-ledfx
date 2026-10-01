@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { SPEC } from './design-numbers'
 import {
-  coreColour,
-  falloff,
+  coreOf,
   haloRadiusPx,
   hexOf,
   hueOf,
   intensityOf,
   isDark,
+  liftOf,
+  mix,
   parseHex,
   poolRadiusM,
   swatchFill,
@@ -26,8 +27,14 @@ describe('a colour, split into hue and intensity', () => {
 
   it('takes the intensity from the brightest channel, and the hue from the rest', () => {
     expect(intensityOf([0, 51, 102])).toBeCloseTo(0.4)
-    expect(hueOf([0, 51, 102])).toEqual([0, 0.5, 1])
-    expect(hueOf([0, 0, 0])).toEqual([0, 0, 0])
+    expect([0, 51, 102].map((channel) => hueOf(channel, 102))).toEqual([0, 0.5, 1])
+    expect(hueOf(0, 0)).toBe(0)
+  })
+
+  it('mixes one channel toward another', () => {
+    expect(mix(0.2, 1, 0)).toBe(0.2)
+    expect(mix(0.2, 1, 0.5)).toBeCloseTo(0.6)
+    expect(mix(0.2, 1, 1)).toBe(1)
   })
 
   it("calls a light dark at §6.6's line, on the stage too", () => {
@@ -38,10 +45,9 @@ describe('a colour, split into hue and intensity', () => {
 
 describe('§7.3 per sample', () => {
   it('lifts the core toward white by more as the light brightens', () => {
-    const dim = coreColour([1, 0, 0], 0)
-    const bright = coreColour([1, 0, 0], 1)
-    expect(dim).toEqual([1, SPEC.core.liftBase, SPEC.core.liftBase])
-    expect(bright[1]).toBeCloseTo(SPEC.core.liftBase + SPEC.core.liftPerIntensity)
+    expect(liftOf(0)).toBe(SPEC.core.liftBase)
+    expect([1, 0, 0].map((hue) => coreOf(hue, 0))).toEqual([1, SPEC.core.liftBase, SPEC.core.liftBase])
+    expect(coreOf(0, 1)).toBeCloseTo(SPEC.core.liftBase + SPEC.core.liftPerIntensity)
   })
 
   it("sizes a compact light's halo as a single point, and a strip sample's smaller", () => {
@@ -53,14 +59,6 @@ describe('§7.3 per sample', () => {
     const { baseM, perZ, intensityBase, perIntensity, multiSample } = SPEC.pool
     expect(poolRadiusM(1, 1, 1)).toBeCloseTo((baseM + perZ) * (intensityBase + perIntensity))
     expect(poolRadiusM(0, 0, 6)).toBeCloseTo(baseM * intensityBase * multiSample)
-  })
-
-  it('falls off through the mid point to nothing at the edge', () => {
-    const { centre, mid, midAt } = SPEC.halo.falloff
-    expect(falloff(SPEC.halo.falloff, 0)).toBeCloseTo(centre)
-    expect(falloff(SPEC.halo.falloff, midAt)).toBeCloseTo(mid)
-    expect(falloff(SPEC.halo.falloff, (1 + midAt) / 2)).toBeCloseTo(mid / 2)
-    expect(falloff(SPEC.halo.falloff, 1)).toBe(0)
   })
 })
 

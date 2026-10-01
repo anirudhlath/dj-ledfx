@@ -39,11 +39,3 @@ export function roomMask(rooms: readonly Pick<Room, 'polygon'>[], cellM = MASK_C
   })
   return { data, width, height, origin: min, cellM }
 }
-
-/** The room index (1-based; 0 for none) the mask holds under a plan point. */
-export function maskAt(mask: RoomMask, [x, y]: Vec2): number {
-  const col = Math.floor((x - mask.origin[0]) / mask.cellM)
-  const row = Math.floor((y - mask.origin[1]) / mask.cellM)
-  if (col < 0 || row < 0 || col >= mask.width || row >= mask.height) return 0
-  return mask.data[row * mask.width + col]
-}

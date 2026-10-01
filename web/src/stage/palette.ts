@@ -3,7 +3,6 @@
 // takes them as 0–1 sRGB numbers, read from tokens.css itself; CSS and SVG take var(--…).
 import tokensCss from '@/styles/tokens.css?raw'
 import { RENDER } from './design-numbers'
-import type { WriterColours } from './frame-writer'
 import { parseHex, type Colour } from './light-maths'
 
 const TOKENS = new Map([...tokensCss.matchAll(/(--color-[\w-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)].map((m) => [m[1], m[2]]))
@@ -45,5 +44,3 @@ export const STAGE_PALETTE = {
 
 export type StagePalette = typeof STAGE_PALETTE
 
-/** The frame writer's colours for dark lights. */
-export const WRITER_COLOURS: WriterColours = { lightOff: STAGE_PALETTE.lightOff, stripDark: STAGE_PALETTE.stripDark }

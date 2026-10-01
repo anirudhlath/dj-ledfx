@@ -87,15 +87,15 @@ export class LightMeshes {
 
   constructor(writer: FrameWriter, materials: LightMaterials) {
     if (writer.glows > 0) {
+      // A sample's halo and pool share its centre and its colour.
       const centres = attribute(writer.glowCentres, 3)
-      const haloColours = attribute(writer.haloColours, 3)
+      const colours = attribute(writer.glowColours, 3)
       const haloSizes = attribute(writer.haloSizes, 1)
-      const poolColours = attribute(writer.poolColours, 3)
       const poolRadii = attribute(writer.poolRadii, 1)
-      this.dynamic.push(haloColours, haloSizes, poolColours, poolRadii)
+      this.dynamic.push(colours, haloSizes, poolRadii)
       const room = new InstancedBufferAttribute(writer.glowRooms, 1)
-      this.pools = instanced(writer.glows, materials.pool, { centre: centres, colour: poolColours, radius: poolRadii, room })
-      this.lifted.add(instanced(writer.glows, materials.halo, { centre: centres, colour: haloColours, size: haloSizes }))
+      this.pools = instanced(writer.glows, materials.pool, { centre: centres, colour: colours, radius: poolRadii, room })
+      this.lifted.add(instanced(writer.glows, materials.halo, { centre: centres, colour: colours, size: haloSizes }))
     }
     if (writer.cores > 0) {
       const colours = attribute(writer.coreColours, 3)

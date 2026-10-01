@@ -4,7 +4,7 @@
 // ring for one running its own effect; wave marks beside a streamed copy's last sample. They depend
 // on the pose and the lights' status, never on frames or colours, so they're drawn when either changes.
 import type { Id, LightStatus, Vec2 } from '@/api/contract'
-import type { Body } from './bodies'
+import { anchorIndex, type Body } from './bodies'
 import { projectPoint, type CameraPose } from './camera'
 import type { LightState } from './show'
 
@@ -13,9 +13,9 @@ export type Mark =
   | { kind: 'switched-off' | 'offline' | 'own-effect' | 'streamed-copy'; key: string; at: Vec2 }
   | { kind: 'offline-strip'; key: string; points: Vec2[] }
 
-/** Where a light's ring sits: a compact light's top sample, a strip's middle one. */
+/** Where a light's ring sits: its anchor sample, where a compact light's core is (anchorIndex()). */
 export function anchorOf(body: Body): Body['samples'][number] {
-  return body.form === 'compact' ? body.samples[body.samples.length - 1] : body.samples[Math.floor(body.samples.length / 2)]
+  return body.samples[anchorIndex(body)]
 }
 
 /** Each light's status: all the marks read of its state. */

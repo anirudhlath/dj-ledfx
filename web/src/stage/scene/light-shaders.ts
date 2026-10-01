@@ -4,7 +4,6 @@
 // add (additive blending); falloffs are §7.3's, from SPEC.
 import { AdditiveBlending, DataTexture, DoubleSide, NearestFilter, RedFormat, ShaderMaterial, UnsignedByteType, Vector2 } from 'three'
 import { SPEC } from '../design-numbers'
-import type { Falloff } from '../light-maths'
 import type { RoomMask } from '../room-mask'
 
 /** A disc `size` CSS px in radius around `centre`, facing the camera. */
@@ -24,7 +23,7 @@ const DISC_VERTEX = /* glsl */ `
   }
 `
 
-/** §7.3's falloff in GLSL: centre at 0, mid at midAt, 0 at the edge (light-maths.ts's falloff()). */
+/** §7.3's falloff: centre at 0, mid at midAt, 0 at the edge. */
 const FALLOFF = /* glsl */ `
   uniform float falloffCentre;
   uniform float falloffMid;
@@ -36,10 +35,10 @@ const FALLOFF = /* glsl */ `
   }
 `
 
-const falloffUniforms = (f: Falloff) => ({
-  falloffCentre: { value: f.centre },
-  falloffMid: { value: f.mid },
-  falloffMidAt: { value: f.midAt },
+const falloffUniforms = ({ centre, mid, midAt }: Record<'centre' | 'mid' | 'midAt', number>) => ({
+  falloffCentre: { value: centre },
+  falloffMid: { value: mid },
+  falloffMidAt: { value: midAt },
 })
 
 /** §7.3 Halo: additive, the colour (hue × intensity, from the frame writer) times the falloff. */

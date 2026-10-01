@@ -11,7 +11,6 @@ import { FIT_VIEW, fitPose, LIVE_PADDING } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import { FrameWriter, writerEntries } from '../frame-writer'
 import type { RGB } from '../light-maths'
-import { WRITER_COLOURS } from '../palette'
 import { roomMask } from '../room-mask'
 import { lightState } from '../show'
 import { HomeScene } from './home-scene'
@@ -25,7 +24,7 @@ function stageProps(name: ScenarioName = 'hero', overrides: Partial<StageScenePr
   const entries = writerEntries(stageBodies(lights), lights, states, home.rooms)
   return {
     home,
-    writer: new FrameWriter(entries, WRITER_COLOURS),
+    writer: new FrameWriter(entries),
     entries,
     mask: roomMask(home.rooms),
     pose: fitPose(home.outline, STAGE, LIVE_PADDING, FIT_VIEW)!,
@@ -127,7 +126,7 @@ describe('the stage scene (§7.2, §7.5)', () => {
     expect(after.objects.length).toBe(before.objects.length)
     expect(after.objects.every((object, index) => object === before.objects[index])).toBe(true)
     expect(after.materials.every((material, index) => material === before.materials[index])).toBe(true)
-    expect([...props.writer.haloColours.slice(0, 3)]).toEqual([0, 1, 0])
+    expect([...props.writer.glowColours.slice(0, 3)]).toEqual([0, 1, 0])
   })
 
   it('keeps the materials when a light stops being drawn and the meshes are made again', async () => {
@@ -136,7 +135,7 @@ describe('the stage scene (§7.2, §7.5)', () => {
     const scene = renderer.scene.instance as Object3D
     const before = lightLayer(scene)
     const fewer = props.entries.slice(1)
-    await renderer.update(<StageScene {...props} writer={new FrameWriter(fewer, WRITER_COLOURS)} entries={fewer} />)
+    await renderer.update(<StageScene {...props} writer={new FrameWriter(fewer)} entries={fewer} />)
     const after = lightLayer(scene)
     expect(after.objects[0] === before.objects[0]).toBe(false)
     expect(after.materials.every((material) => before.materials.includes(material))).toBe(true)

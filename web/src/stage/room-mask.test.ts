@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
+import type { Vec2 } from '@/api/contract'
 import { homeFixture } from '@/api/mocks/fixtures'
-import { maskAt, roomMask } from './room-mask'
+import { roomMask, type RoomMask } from './room-mask'
+
+/** The room index (1-based; 0 for none) the mask holds under a plan point, as the pool shader reads it. */
+function maskAt(mask: RoomMask, [x, y]: Vec2): number {
+  const col = Math.floor((x - mask.origin[0]) / mask.cellM)
+  const row = Math.floor((y - mask.origin[1]) / mask.cellM)
+  if (col < 0 || row < 0 || col >= mask.width || row >= mask.height) return 0
+  return mask.data[row * mask.width + col]
+}
 
 describe("the pools' room mask (§7.3)", () => {
   const mask = roomMask(homeFixture.rooms)

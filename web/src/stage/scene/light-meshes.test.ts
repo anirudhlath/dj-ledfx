@@ -5,14 +5,13 @@ import { homeFixture, lightFixtures } from '@/api/mocks/fixtures'
 import { stageBodies } from '../bodies'
 import { FIT_VIEW, fitPose, LIVE_PADDING } from '../camera'
 import { FrameWriter, writerEntries } from '../frame-writer'
-import { WRITER_COLOURS } from '../palette'
 import { roomMask } from '../room-mask'
 import { lightState } from '../show'
 import { LIFT_M, LightMaterials, LightMeshes } from './light-meshes'
 
 const LIGHTS = lightFixtures('2026-09-23T18:04:00-05:00').map((light) => ({ ...light, status: 'streaming' as const }))
 const STATES = new Map(LIGHTS.map((light) => [light.id, lightState(light, undefined)]))
-const writer = () => new FrameWriter(writerEntries(stageBodies(LIGHTS), LIGHTS, STATES, homeFixture.rooms), WRITER_COLOURS)
+const writer = () => new FrameWriter(writerEntries(stageBodies(LIGHTS), LIGHTS, STATES, homeFixture.rooms))
 const materials = () => new LightMaterials(roomMask(homeFixture.rooms))
 
 describe("the lights' meshes (§7.5)", () => {
@@ -23,8 +22,10 @@ describe("the lights' meshes (§7.5)", () => {
     expect(instanced.map((mesh) => mesh.count)).toEqual([frames.glows, frames.cores])
     expect(meshes.pools!.count).toBe(frames.glows)
     expect(meshes.lifted.children.filter((child) => child instanceof LineSegments2)).toHaveLength(2)
-    // The writer's arrays are the attributes: a frame is written once.
-    expect(instanced[0].geometry.getAttribute('colour').array).toBe(frames.haloColours)
+    // The writer's arrays are the attributes: a frame is written once, and a sample's halo and pool
+    // share its centre and colour.
+    expect(instanced[0].geometry.getAttribute('colour').array).toBe(frames.glowColours)
+    for (const name of ['centre', 'colour']) expect(meshes.pools!.geometry.getAttribute(name)).toBe(instanced[0].geometry.getAttribute(name))
     meshes.dispose()
   })
 
@@ -80,7 +81,7 @@ describe("the lights' meshes (§7.5)", () => {
   })
 
   it('makes nothing for a home with no placed lights', () => {
-    const empty = new FrameWriter([], WRITER_COLOURS)
+    const empty = new FrameWriter([])
     const meshes = new LightMeshes(empty, materials())
     expect(meshes.lifted.children).toHaveLength(0)
     expect(meshes.pools).toBeNull()

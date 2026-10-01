@@ -31,20 +31,17 @@ export const intensityOf = ([r, g, b]: RGB): number => Math.max(r, g, b) / 255
 /** §6.6: a light at or below this intensity is dark. The stage uses the same line. */
 export const isDark = (intensity: number): boolean => intensity <= SPEC.swatch.darkAt
 
-/** The colour at full brightness: each channel over the brightest. Black stays black. */
-export function hueOf([r, g, b]: RGB): Colour {
-  const max = Math.max(r, g, b)
-  return max === 0 ? [0, 0, 0] : [r / max, g / max, b / max]
-}
+/** A channel of the hue, the colour at full brightness: the channel over the brightest, `max`. Black stays black. */
+export const hueOf = (channel: number, max: number): number => (max > 0 ? channel / max : 0)
+
+/** `a` toward `b` by `t`, a channel at a time. */
+export const mix = (a: number, b: number, t: number): number => a + (b - a) * t
 
 /** §7.3 Core: how far the colour is lifted toward white. */
 export const liftOf = (intensity: number): number => SPEC.core.liftBase + SPEC.core.liftPerIntensity * intensity
 
-/** The core's colour: the hue lifted toward white. */
-export function coreColour(hue: Colour, intensity: number): Colour {
-  const lift = liftOf(intensity)
-  return [hue[0] + (1 - hue[0]) * lift, hue[1] + (1 - hue[1]) * lift, hue[2] + (1 - hue[2]) * lift]
-}
+/** §7.3 Core: a channel of the core's colour, the hue's channel lifted toward white. */
+export const coreOf = (hue: number, intensity: number): number => mix(hue, 1, liftOf(intensity))
 
 /** §7.3 Halo: radius in CSS px; a compact light's is the single-point one, a strip sample's the other. */
 export function haloRadiusPx(compact: boolean, intensity: number): number {
@@ -57,39 +54,25 @@ export function poolRadiusM(z: number, intensity: number, samples: number): numb
   return (baseM + perZ * z) * (intensityBase + perIntensity * intensity) * (samples > 1 ? multiSample : 1)
 }
 
-export interface Falloff {
-  readonly centre: number
-  readonly mid: number
-  readonly midAt: number
-}
-
-/** §7.3's radial falloff at `r` (0 at the centre, 1 at the edge), before intensity: the shaders' formula. */
-export function falloff({ centre, mid, midAt }: Falloff, r: number): number {
-  if (r >= 1) return 0
-  if (r <= midAt) return centre + ((mid - centre) * r) / midAt
-  return mid * (1 - (r - midAt) / (1 - midAt))
-}
-
-/** `a` toward `b` by `t`. */
-export function mix(a: Colour, b: Colour, t: number): Colour {
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-}
-
-const toBytes = (c: Colour): RGB => [c[0] * 255, c[1] * 255, c[2] * 255]
-const toColour = (rgb: RGB): Colour => [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255]
+// §6.6's two swatch colours, read once: the dark fill, and the colour a live fill is mixed from (0–1).
+const DARK_FILL = hexOf(parseHex(SPEC.swatch.darkColour)!)
+const FILL_FROM = parseHex(SPEC.swatch.fromColour)!.map((byte) => byte / 255)
 
 /** §6.6 Live: the fill, mixed from SPEC.swatch.fromColour toward the hue; dark shows SPEC.swatch.darkColour. */
 export function swatchFill(rgb: RGB): string {
   const intensity = intensityOf(rgb)
-  if (isDark(intensity)) return hexOf(parseHex(SPEC.swatch.darkColour)!)
-  const from = toColour(parseHex(SPEC.swatch.fromColour)!)
-  return hexOf(toBytes(mix(from, hueOf(rgb), Math.min(1, SPEC.swatch.mixBase + intensity))))
+  if (isDark(intensity)) return DARK_FILL
+  const max = Math.max(...rgb)
+  const t = Math.min(1, SPEC.swatch.mixBase + intensity)
+  const channel = (c: 0 | 1 | 2) => mix(FILL_FROM[c], hueOf(rgb[c], max), t) * 255
+  return hexOf([channel(0), channel(1), channel(2)])
 }
 
 /** §6.6 Live: the glow, the hue at the intensity's opacity; none when dark. */
 export function swatchGlow(rgb: RGB, px: number): string {
   const intensity = intensityOf(rgb)
   if (isDark(intensity)) return 'none'
-  const [r, g, b] = toBytes(hueOf(rgb)).map(Math.round)
+  const max = Math.max(...rgb)
+  const [r, g, b] = rgb.map((channel) => Math.round(hueOf(channel, max) * 255))
   return `0 0 ${px}px rgba(${r}, ${g}, ${b}, ${Math.round(intensity * 1000) / 1000})`
 }

@@ -4,16 +4,15 @@ import { decodeFrame, encodeFrame, FrameStore } from '@/api/frames'
 import { HOME_TOTALS, homeFixture, lightFixtures } from '@/api/mocks/fixtures'
 import { lightBodies, stageBodies, type Body } from './bodies'
 import { SPEC } from './design-numbers'
-import { FrameWriter, sameLayout, writerEntries, type WriterColours, type WriterEntry } from './frame-writer'
-import { coreColour, haloRadiusPx, liftOf, poolRadiusM } from './light-maths'
+import { FrameWriter, sameLayout, writerEntries, type WriterEntry } from './frame-writer'
+import { haloRadiusPx, poolRadiusM } from './light-maths'
+import { STAGE_PALETTE } from './palette'
 import { lightState } from './show'
 
 const LIGHTS = lightFixtures('2026-09-23T18:04:00-05:00')
 const POINT = LIGHTS.find((light) => light.shape?.kind === 'point')!
 const STRIP = LIGHTS.find((light) => light.shape?.kind === 'bent-line')!
 const GRID = LIGHTS.find((light) => light.shape?.kind === 'grid')!
-// The writer's two dark colours, as the palette would pass them. Any two distinct colours do.
-const COLOURS: WriterColours = { lightOff: [0.1, 0.2, 0.3], stripDark: [0.4, 0.5, 0.6] }
 
 const bodyOf = (light: Light): Body => lightBodies(light)[0]
 const entry = (light: Light, patch: Partial<WriterEntry> = {}): WriterEntry => ({
@@ -34,7 +33,7 @@ const solid = (count: number, rgb: [number, number, number]) => Array.from({ len
 
 describe('the frame writer', () => {
   it('lays out a halo and a pool per sample, a core per compact light, and the segments of each strip', () => {
-    const writer = new FrameWriter([entry(POINT), entry(STRIP), entry(GRID)], COLOURS)
+    const writer = new FrameWriter([entry(POINT), entry(STRIP), entry(GRID)])
     const [point, strip, grid] = [POINT, STRIP, GRID].map((light) => bodyOf(light).samples.length)
     expect(writer.glows).toBe(point + strip + grid)
     expect(writer.cores).toBe(1)
@@ -48,13 +47,14 @@ describe('the frame writer', () => {
   it('draws a streamed sample in its hue at its intensity, and lifts the core toward white', () => {
     const frames = new FrameStore()
     stream(frames, POINT.id, solid(POINT.leds, [0, 51, 102]))
-    const writer = new FrameWriter([entry(POINT)], COLOURS)
+    const writer = new FrameWriter([entry(POINT)])
     writer.write(frames)
     const intensity = 102 / 255
-    expect([...writer.haloColours].map((v) => +v.toFixed(5))).toEqual([0, 0.5 * intensity, intensity].map((v) => +v.toFixed(5)))
+    const lift = SPEC.core.liftBase + SPEC.core.liftPerIntensity * intensity
+    expect([...writer.glowColours].map((v) => +v.toFixed(5))).toEqual([0, 0.5 * intensity, intensity].map((v) => +v.toFixed(5)))
     expect(writer.haloSizes[0]).toBeCloseTo(haloRadiusPx(true, intensity))
     expect(writer.poolRadii[0]).toBeCloseTo(poolRadiusM(bodyOf(POINT).samples[0][2], intensity, 1))
-    expect([...writer.coreColours].map((v) => +v.toFixed(5))).toEqual(coreColour([0, 0.5, 1], intensity).map((v) => +v.toFixed(5)))
+    expect([...writer.coreColours].map((v) => +v.toFixed(5))).toEqual([0, 0.5, 1].map((hue) => +(hue + (1 - hue) * lift).toFixed(5)))
     expect(writer.coreSizes[0]).toBe(Math.fround(SPEC.core.px))
   })
 
@@ -67,32 +67,32 @@ describe('the frame writer', () => {
     expect(first.length).toBeGreaterThan(1)
     rgb[first[0] * 3] = 255
     stream(frames, STRIP.id, rgb)
-    const writer = new FrameWriter([entry(STRIP)], COLOURS)
+    const writer = new FrameWriter([entry(STRIP)])
     writer.write(frames)
-    expect(writer.haloColours[0]).toBeCloseTo(1 / first.length)
+    expect(writer.glowColours[0]).toBeCloseTo(1 / first.length)
   })
 
   it('shows a dark compact light as a light-off dot, with no halo or pool', () => {
     const frames = new FrameStore()
     stream(frames, POINT.id, solid(POINT.leds, [2, 2, 2]))
-    const writer = new FrameWriter([entry(POINT)], COLOURS)
+    const writer = new FrameWriter([entry(POINT)])
     writer.write(frames)
     expect(writer.haloSizes[0]).toBe(0)
     expect(writer.poolRadii[0]).toBe(0)
-    expect([...writer.coreColours]).toEqual(COLOURS.lightOff.map(Math.fround))
+    expect([...writer.coreColours]).toEqual(STAGE_PALETTE.lightOff.map(Math.fround))
     expect(writer.coreSizes[0]).toBe(Math.fround(SPEC.core.darkPx))
   })
 
   it("rests on the light's own colour until its frames come, and draws a light with none dark", () => {
     const frames = new FrameStore()
-    const waiting = new FrameWriter([entry(POINT, { resting: [255, 0, 0] })], COLOURS)
+    const waiting = new FrameWriter([entry(POINT, { resting: [255, 0, 0] })])
     waiting.write(frames)
-    expect(waiting.haloColours[0]).toBeCloseTo(1)
-    const resting = new FrameWriter([entry(POINT, { streamed: false, resting: [255, 0, 0] })], COLOURS)
+    expect(waiting.glowColours[0]).toBeCloseTo(1)
+    const resting = new FrameWriter([entry(POINT, { streamed: false, resting: [255, 0, 0] })])
     stream(frames, POINT.id, solid(POINT.leds, [0, 0, 255]))
     resting.write(frames)
-    expect(resting.haloColours[0]).toBeCloseTo(1)
-    const dark = new FrameWriter([entry(POINT, { streamed: false })], COLOURS)
+    expect(resting.glowColours[0]).toBeCloseTo(1)
+    const dark = new FrameWriter([entry(POINT, { streamed: false })])
     dark.write(frames)
     expect(dark.haloSizes[0]).toBe(0)
   })
@@ -100,23 +100,23 @@ describe('the frame writer', () => {
   // I1: a `lights` push that changes only colours, or what a light shows, reuses the writer's arrays.
   it('takes new entries in place: the same arrays, written with the new colours', () => {
     const frames = new FrameStore()
-    const writer = new FrameWriter([entry(POINT, { streamed: false, resting: [255, 0, 0] })], COLOURS)
+    const writer = new FrameWriter([entry(POINT, { streamed: false, resting: [255, 0, 0] })])
     writer.write(frames)
-    const colours = writer.haloColours
+    const colours = writer.glowColours
     writer.setEntries([entry(POINT, { streamed: false, resting: [0, 255, 0] })])
     writer.write(frames)
-    expect(writer.haloColours).toBe(colours)
-    expect([...writer.haloColours]).toEqual([0, 1, 0])
+    expect(writer.glowColours).toBe(colours)
+    expect([...writer.glowColours]).toEqual([0, 1, 0])
     stream(frames, POINT.id, solid(POINT.leds, [0, 0, 255]))
     writer.setEntries([entry(POINT, { streamed: true, resting: [0, 255, 0] })])
     writer.write(frames)
-    expect([...writer.haloColours]).toEqual([0, 0, 1])
+    expect([...writer.glowColours]).toEqual([0, 0, 1])
   })
 
   it('lights no floor for a light in no room', () => {
     const frames = new FrameStore()
     stream(frames, POINT.id, solid(POINT.leds, [255, 255, 255]))
-    const writer = new FrameWriter([entry(POINT, { room: 0 })], COLOURS)
+    const writer = new FrameWriter([entry(POINT, { room: 0 })])
     writer.write(frames)
     expect(writer.haloSizes[0]).toBeGreaterThan(0)
     expect(writer.poolRadii[0]).toBe(0)
@@ -127,12 +127,12 @@ describe('the frame writer', () => {
     const frames = new FrameStore()
     const half = Math.floor(STRIP.leds / 2)
     stream(frames, STRIP.id, solid(half, [255, 255, 255]))
-    const writer = new FrameWriter([entry(STRIP)], COLOURS)
+    const writer = new FrameWriter([entry(STRIP)])
     writer.write(frames)
     const sizes = [...writer.haloSizes]
     expect(sizes[0]).toBeGreaterThan(0)
     expect(sizes.at(-1)).toBe(0)
-    expect([...writer.haloColours, ...writer.narrow.colours].every(Number.isFinite)).toBe(true)
+    expect([...writer.glowColours, ...writer.narrow.colours].every(Number.isFinite)).toBe(true)
     expect(writer.leds).toBe(half)
 
     stream(frames, STRIP.id, solid(STRIP.leds * 2, [255, 255, 255]))
@@ -144,9 +144,9 @@ describe('the frame writer', () => {
   it('colours a strip from the dark strip colour toward its hue, and keeps it visible when dark', () => {
     const frames = new FrameStore()
     stream(frames, STRIP.id, solid(STRIP.leds, [0, 0, 0]))
-    const writer = new FrameWriter([entry(STRIP)], COLOURS)
+    const writer = new FrameWriter([entry(STRIP)])
     writer.write(frames)
-    expect([...writer.narrow.colours.slice(0, 6)]).toEqual([...COLOURS.stripDark, ...COLOURS.stripDark].map(Math.fround))
+    expect([...writer.narrow.colours.slice(0, 6)]).toEqual([...STAGE_PALETTE.stripDark, ...STAGE_PALETTE.stripDark].map(Math.fround))
     stream(frames, STRIP.id, solid(STRIP.leds, [255, 0, 0]))
     writer.write(frames)
     expect([...writer.narrow.colours.slice(0, 3)]).toEqual([1, 0, 0])
@@ -160,7 +160,7 @@ describe('the frame writer', () => {
     }
     const frames = new FrameStore()
     stream(frames, pc.id, solid(pc.leds, [9, 9, 9]))
-    const writer = new FrameWriter(lightBodies(placed).map((body) => ({ body, streamed: true, resting: null, room: 1 })), COLOURS)
+    const writer = new FrameWriter(lightBodies(placed).map((body) => ({ body, streamed: true, resting: null, room: 1 })))
     writer.write(frames)
     expect(writer.leds).toBe(pc.leds)
     writer.write(new FrameStore())
@@ -171,7 +171,7 @@ describe('the frame writer', () => {
     const frames = new FrameStore()
     for (const light of LIGHTS) stream(frames, light.id, solid(light.leds, [200, 120, 40]))
     const states = new Map(LIGHTS.map((light) => [light.id, lightState({ ...light, status: 'streaming' }, undefined)]))
-    const writer = new FrameWriter(writerEntries(stageBodies(LIGHTS), LIGHTS, states, homeFixture.rooms), COLOURS)
+    const writer = new FrameWriter(writerEntries(stageBodies(LIGHTS), LIGHTS, states, homeFixture.rooms))
     const started = performance.now()
     for (let i = 0; i < 600; i++) writer.write(frames)
     expect(performance.now() - started).toBeLessThan(1000)
@@ -186,7 +186,6 @@ describe('the writer entries', () => {
     const [only] = writerEntries(lightBodies(light), [light], states, homeFixture.rooms)
     expect(only).toMatchObject({ streamed: false, resting: [0, 255, 0] })
     expect(homeFixture.rooms[only.room - 1].id).toBe(light.room)
-    expect(liftOf(0)).toBe(SPEC.core.liftBase)
   })
 
   // §9.1: offline and switched-off lights show only their marks, which are the overlay's.

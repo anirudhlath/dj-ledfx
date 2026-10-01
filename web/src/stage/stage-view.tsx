@@ -25,7 +25,6 @@ import { StageSvg } from './overlays/stage-svg'
 import { StageTools } from './overlays/stage-tools'
 import { SunReadout } from './overlays/sun-readout'
 import { ViewControls } from './overlays/view-controls'
-import { WRITER_COLOURS } from './palette'
 import { pickLight, pickRoom, screenPoints } from './picking'
 import { roomMask } from './room-mask'
 import { StageCanvas } from './stage-canvas'
@@ -75,7 +74,7 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
   // place; the marks, from each light's status alone (I1).
   const entries = useMemo(() => writerEntries(bodies, lights, states, home.rooms), [bodies, lights, states, home.rooms])
   const layout = useStable(entries, sameLayout)
-  const writer = useMemo(() => new FrameWriter(layout, WRITER_COLOURS), [layout])
+  const writer = useMemo(() => new FrameWriter(layout), [layout])
   const mask = useMemo(() => roomMask(home.rooms), [home.rooms])
   const statuses = useStable(useMemo(() => statusesOf(states), [states]), sameEntries)
   const marks = useMemo(() => (pose === null ? [] : lightMarks(pose, bodies, statuses)), [pose, bodies, statuses])
