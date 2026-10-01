@@ -1,16 +1,16 @@
-// §8.1 top right: the sun readout (sun.ts's sunReadoutRuns()), while the sun is up (decision 7). As
-// Main.png sets it, the elevation and compass point are mono in the text colour, between the
-// readout's own words.
+// §8.1 top right: the sun readout, while the sun is up (decision 7): where it stands (sun.ts's
+// sunPosition()) and when it sets. As Main.png sets it, the position is mono in the text colour,
+// between the readout's own words; a sunset that doesn't parse is left out.
 import type { SunInput } from '@/api/contract'
 import { Icon } from '@/design/icon'
 import { RENDER } from '../design-numbers'
 import { cssColour, cssSize } from '../palette'
-import { sunReadoutRuns } from '../sun'
+import { sunPosition, sunsetTime } from '../sun'
 
 export function SunReadout({ sun }: { sun: SunInput | null }) {
-  const runs = sunReadoutRuns(sun)
-  if (runs === null) return null
-  const [before, position, after] = runs
+  const position = sunPosition(sun)
+  if (sun === null || position === null) return null
+  const sets = sunsetTime(sun)
   const { rightPx, topPx, gapPx, font, colour, iconPx, iconColour } = RENDER.readout
   return (
     <p className="absolute flex items-center" style={{ right: rightPx, top: topPx, gap: gapPx, fontSize: cssSize(font), color: cssColour(colour) }}>
@@ -18,9 +18,8 @@ export function SunReadout({ sun }: { sun: SunInput | null }) {
         <Icon name="sun" size={iconPx} />
       </span>
       <span>
-        {before}
-        <span className="num text-text">{position}</span>
-        {after}
+        Sun <span className="num text-text">{position}</span>
+        {sets !== null && ` · sets ${sets}`}
       </span>
     </p>
   )

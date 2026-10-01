@@ -46,29 +46,30 @@ export interface SunScene {
   label: string | null
 }
 
+/**
+ * Where the sun stands, in whole degrees and the nearest compass point ("12° · W"), as §7.4's label
+ * and §8.1's readout say it; null while it's down or unknown (decision 7).
+ */
+export function sunPosition(sun: SunInput | null | undefined): string | null {
+  if (sun == null || !up(sun)) return null
+  return `${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}`
+}
+
+/** When the sun sets, 24 h, for the readout; null when the time doesn't parse. */
+export function sunsetTime(sun: SunInput): string | null {
+  const at = typeof sun.sunset === 'string' ? Date.parse(sun.sunset) : Number.NaN
+  return Number.isNaN(at) ? null : formatTime(new Date(at))
+}
+
 /** What the stage draws of the sun, labelled or not (behaviour.ts), or null while it's down or unknown. */
 export function sunScene(
   home: Pick<Home, 'outline' | 'ceiling' | 'northOffsetDeg'>,
   sun: SunInput | null | undefined,
   labelled = true,
 ): SunScene | null {
-  if (sun == null || !up(sun)) return null
+  const position = sunPosition(sun)
+  if (sun == null || position === null) return null
   const at = sunPoint(home, sun.elevation, sun.azimuth)
   const path = (Array.isArray(sun.path) ? sun.path : []).filter(up).map((point) => sunPoint(home, point.elevation, point.azimuth))
-  return { at, path: [...path, at], label: labelled ? `SUN ${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}` : null }
-}
-
-/**
- * §8.1's readout in three runs: its first word, the elevation and compass point (Main.png sets them in
- * mono), and the sunset, empty when it doesn't parse; null while the sun is down or unknown (decision 7).
- */
-export function sunReadoutRuns(sun: SunInput | null | undefined): readonly [string, string, string] | null {
-  if (sun == null || !up(sun)) return null
-  const sunset = typeof sun.sunset === 'string' ? Date.parse(sun.sunset) : Number.NaN
-  return ['Sun ', `${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}`, Number.isNaN(sunset) ? '' : ` · sets ${formatTime(new Date(sunset))}`]
-}
-
-/** §8.1's readout: the elevation, the compass point and the sunset; null while the sun is down or unknown (decision 7). */
-export function sunReadout(sun: SunInput | null | undefined): string | null {
-  return sunReadoutRuns(sun)?.join('') ?? null
+  return { at, path: [...path, at], label: labelled ? `SUN ${position}` : null }
 }

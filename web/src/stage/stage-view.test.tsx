@@ -17,7 +17,7 @@ import { FIT_VIEW, fitPose, LIVE_PADDING, projectPoint, type View } from './came
 import { RENDER, SPEC } from './design-numbers'
 import { anchorOf } from './marks'
 import type { StageSceneProps } from './scene/stage-scene'
-import { sunReadout, sunReadoutRuns, sunScene } from './sun'
+import { sunPosition, sunScene } from './sun'
 import { readStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
 
@@ -71,7 +71,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     for (const zone of state.running) expect(screen.getAllByText(zone.lookName).length).toBeGreaterThan(0)
     const sun = state.inputs.sun
     expect(screen.getByText(sunScene(state.home, sun)!.label!)).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Home, live' })).toHaveTextContent(sunReadout(sun)!)
+    expect(within(screen.getByRole('region', { name: 'Home, live' })).getByText(sunPosition(sun)!)).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')).toHaveLength(4)
   })
 
@@ -129,7 +129,7 @@ describe('the stage on Live (§7, §8.1)', () => {
       screen.queryByRole('switch', { name: 'Labels' }),
       screen.queryByRole('button', { name: 'Rotate view' }),
       screen.queryByRole('list', { name: 'What the lights show' }),
-      screen.queryByText(sunReadoutRuns(liveStore.getState().inputs!.sun)![1]),
+      screen.queryByText(sunPosition(liveStore.getState().inputs!.sun)!),
     ]
     expect(overlays()).toEqual([null, null, null, null])
     act(() => liveStore.setState({ connection: live }))
@@ -236,7 +236,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     const { state } = await openLive()
     const inputs = liveStore.getState().inputs!
     const sun = state.inputs.sun
-    const sunDrawn = () => screen.queryByText(sunScene(state.home, sun)!.label!) ?? screen.queryByText(sunReadoutRuns(sun)![1])
+    const sunDrawn = () => screen.queryByText(sunScene(state.home, sun)!.label!) ?? screen.queryByText(sunPosition(sun)!)
     expect(sunDrawn()).toBeInTheDocument()
     act(() => applyMessage(liveStore, { channel: 'inputs', inputs: { tempo: inputs.tempo, prodjlink: inputs.prodjlink } }, 0))
     expect(sunDrawn()).not.toBeInTheDocument()

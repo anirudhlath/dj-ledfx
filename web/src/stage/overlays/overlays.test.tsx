@@ -16,7 +16,7 @@ import { RENDER, SPEC } from '../design-numbers'
 import type { StageLabel } from '../labels'
 import type { Mark } from '../marks'
 import { lightState } from '../show'
-import { sunReadout, sunReadoutRuns, sunScene } from '../sun'
+import { sunPosition, sunScene, sunsetTime } from '../sun'
 import { deviceLine, tooltipText } from '../tooltip'
 import { nextRotation, ZOOM_STEPS } from '../view-memory'
 import { Legend } from './legend'
@@ -114,9 +114,11 @@ describe("the stage's controls (§8.1)", () => {
 
   it('reads the sun out while it is up, and says nothing at night or without a sun', () => {
     const { container, rerender } = render(<SunReadout sun={HERO_SUN} />)
-    expect(container).toHaveTextContent(sunReadout(HERO_SUN)!)
+    expect(container).toHaveTextContent(`Sun ${sunPosition(HERO_SUN)} · sets ${sunsetTime(HERO_SUN)}`, { normalizeWhitespace: false })
     // Main.png: the elevation and the compass point in mono and the text colour, the rest in the readout's.
-    expect(screen.getByText(sunReadoutRuns(HERO_SUN)![1])).toHaveClass('num', 'text-text')
+    expect(screen.getByText(sunPosition(HERO_SUN)!)).toHaveClass('num', 'text-text')
+    rerender(<SunReadout sun={{ ...HERO_SUN, sunset: 'soon' }} />)
+    expect(container.textContent).toBe(`Sun ${sunPosition(HERO_SUN)}`)
     rerender(<SunReadout sun={{ ...HERO_SUN, elevation: -1 }} />)
     expect(container).toBeEmptyDOMElement()
     rerender(<SunReadout sun={null} />)
