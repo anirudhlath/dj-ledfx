@@ -5,7 +5,7 @@ from importlib.resources import files
 
 import numpy as np
 import pytest
-from conftest import tempo_ctx
+from conftest import builtin_look, tempo_ctx
 from map_home import DESIGN, handoff_pins, seeded_ledset, tiny_home
 
 from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
@@ -39,10 +39,6 @@ SHOWCASE = [
     *("shockwave", "scanner", "checker", "speakers"),  # M3
     FIRMWARE_LOOK_ID,
 ]
-
-
-def _look(look_id: str) -> Look:
-    return next(look for look in builtin_looks() if look.id == look_id)
 
 
 def test_vendored_looks_json_is_a_byte_copy_of_the_handoff() -> None:
@@ -88,25 +84,16 @@ def test_each_showcase_look_has_its_fields_and_firmware() -> None:
     assert layers["scanner"] == [("field", "scanner_plane")]
     assert layers["checker"] == [("field", "checker_cubes")]
     assert layers["speakers"] == [("field", "speaker_waves")]
-    assert _look("shockwave").layers[1].blend == "add"  # the beam adds onto the shell
-    sunset_flame, aurora_morph = _look("sunset").layers[1], _look("aurora").layers[1]
+    assert builtin_look("shockwave").layers[1].blend == "add"  # the beam adds onto the shell
+    sunset_flame, aurora_morph = builtin_look("sunset").layers[1], builtin_look("aurora").layers[1]
     assert (sunset_flame.lights, sunset_flame.settings) == ((Selector("type", "candle"),), {})
     assert aurora_morph.lights == (Selector("type", "candle"), Selector("type", "tube"))
     assert aurora_morph.settings == {"palette": list(AURORA_PALETTE)}  # the curtains' palette
 
 
-def test_focus_is_calm_around_the_anchor_its_description_names() -> None:
-    focus = _look("focus")
-
-    anchor = seed_home().anchor(focus.layers[0].settings["anchor"])
-
-    assert anchor is not None
-    assert anchor.name.lower() in focus.description.lower()
-
-
-@pytest.mark.parametrize("look_id", ["shockwave", "speakers"])
-def test_m3_looks_start_from_the_anchor_their_description_names(look_id: str) -> None:
-    look = _look(look_id)
+@pytest.mark.parametrize("look_id", ["focus", "shockwave", "speakers"])
+def test_anchored_looks_start_from_the_anchor_their_description_names(look_id: str) -> None:
+    look = builtin_look(look_id)
 
     [anchor_id] = {layer.settings["anchor"] for layer in visible_field_layers(look)}
     anchor = seed_home().anchor(anchor_id)
@@ -129,7 +116,7 @@ def test_the_handoff_layers_seed_the_map_once(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_speaker_waves_plays_on_the_beat_until_m7() -> None:
-    speakers = _look("speakers")
+    speakers = builtin_look("speakers")
 
     assert handoff_looks()["speakers"]["inputs"] == ["music"]  # what M7 brings
     assert (speakers.category, speakers.needs) == ("audio", ("tempo",))
@@ -145,7 +132,7 @@ def test_an_anchor_is_found_by_the_name_a_text_mentions() -> None:
 
 
 def test_the_firmware_showcase_layers_bottom_to_top() -> None:
-    showcase = _look(FIRMWARE_LOOK_ID)
+    showcase = builtin_look(FIRMWARE_LOOK_ID)
     assert [layer.kind for layer in showcase.layers] == [
         "openrgb_mode",
         "lifx_waveform",

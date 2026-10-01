@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from dj_ledfx.events import BeatEvent, EventBus
+from dj_ledfx.events import BeatEvent
 from dj_ledfx.prodjlink.constants import (
     BEAT_PACKET_LEN,
     CAPABILITY_CDJ3000,
@@ -48,13 +48,6 @@ class FakeTime:
 def tempo_clock(time: FakeTime, **kwargs: Any) -> TempoClock:
     """A TempoClock on fake time."""
     return TempoClock(now=time.monotonic, wall=time.wall, **kwargs)
-
-
-def events(bus: EventBus, event_type: type) -> list[Any]:
-    """Every event of this type the bus emits from now on."""
-    seen: list[Any] = []
-    bus.subscribe(event_type, seen.append)
-    return seen
 
 
 def beat_event(

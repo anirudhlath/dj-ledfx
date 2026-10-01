@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from conftest import MockDeviceAdapter
+from conftest import MockDeviceAdapter, builtin_look
 from tempo_fakes import beat_event
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
@@ -12,7 +12,6 @@ from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
-from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
@@ -35,7 +34,7 @@ def _zone(
     zone_id: str, look_id: str, devices: list[ManagedDevice], clock: TempoClock
 ) -> ZoneRuntime:
     """A running zone as the zone manager builds one (lights are keyed by name here)."""
-    look = next(look for look in builtin_looks() if look.id == look_id)
+    look = builtin_look(look_id)
     caps = DeviceCapabilities(protocol="LIFX")
     lights = [ZoneLight(d.adapter.device_info.name, d.adapter.led_count, caps) for d in devices]
     latency = {d.adapter.device_info.name: d.tracker.effective_latency_s for d in devices}

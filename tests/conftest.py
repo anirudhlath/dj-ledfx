@@ -24,6 +24,9 @@ from dj_ledfx.effects.firmware import FirmwareEffect, Params
 from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.ring_buffer import RingBuffer
+from dj_ledfx.events import EventBus
+from dj_ledfx.looks.builtin import builtin_looks
+from dj_ledfx.looks.model import Look
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.spatial.geometry import DeviceGeometry
@@ -86,6 +89,18 @@ class MockDeviceAdapter(DeviceAdapter):
 
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         self.send_frame_calls.append(colors.copy())
+
+
+def events(bus: EventBus, event_type: type) -> list[Any]:
+    """Every event of this type the bus emits from now on."""
+    seen: list[Any] = []
+    bus.subscribe(event_type, seen.append)
+    return seen
+
+
+def builtin_look(look_id: str) -> Look:
+    """The built-in look with this id."""
+    return next(look for look in builtin_looks() if look.id == look_id)
 
 
 @dataclass

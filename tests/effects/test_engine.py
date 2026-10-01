@@ -4,13 +4,12 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from conftest import ring_route
+from conftest import builtin_look, ring_route
 
 import dj_ledfx.metrics as metrics_mod
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.effects.ring_buffer import RingBuffer
-from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
@@ -73,7 +72,7 @@ def test_ring_buffer_empty_returns_none() -> None:
 
 
 def _runtime(zone_id: str, clock: TempoClock) -> ZoneRuntime:
-    look = next(look for look in builtin_looks() if look.id == "classic-breathe")
+    look = builtin_look("classic-breathe")
     light = ZoneLight(f"{zone_id}-light", 4, DeviceCapabilities(protocol="LIFX"))
     return ZoneRuntime(zone_id, look, [light], clock=clock, latency_s=lambda _: 0.05)
 

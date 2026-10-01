@@ -7,7 +7,8 @@ from dataclasses import replace
 from datetime import timedelta
 
 import pytest
-from tempo_fakes import PLAYER, START, START_WALL, FakeTime, beat_event, events, play, tempo_clock
+from conftest import events
+from tempo_fakes import PLAYER, START, START_WALL, FakeTime, beat_event, play, tempo_clock
 
 from dj_ledfx.events import EventBus
 from dj_ledfx.tempo.clock import SOFT_GAIN

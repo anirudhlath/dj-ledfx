@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
-from conftest import span
+from conftest import builtin_look, span
 from loguru import logger
 from tempo_fakes import START, FakeTime, tempo_clock
 
@@ -19,7 +19,7 @@ from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet, PlacedLeds, Space
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.looks.builtin import builtin_looks, classic_look_id
+from dj_ledfx.looks.builtin import classic_look_id
 from dj_ledfx.looks.model import Layer, Look
 from dj_ledfx.looks.selectors import parse_selector
 from dj_ledfx.scheduling.route import to_device_colors
@@ -166,7 +166,7 @@ def test_a_streamed_copy_is_drawn_as_on_the_whole_zone() -> None:
 # Today's gap: with no DJ playing, the classic tempo looks held still. The clock always runs.
 def test_classic_looks_move_without_a_dj() -> None:
     time = FakeTime()
-    look = next(look for look in builtin_looks() if look.id == classic_look_id("beat_pulse"))
+    look = builtin_look(classic_look_id("beat_pulse"))
     runtime = _runtime(look, clock=tempo_clock(time))
     seen = set()
     for step in range(30):  # one beat at 120 BPM

@@ -7,8 +7,9 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
+from conftest import Hold, events
 from loguru import logger
-from tempo_fakes import START_WALL, FakeTime, events, play, tempo_clock
+from tempo_fakes import START_WALL, FakeTime, play, tempo_clock
 
 from dj_ledfx.events import EventBus
 from dj_ledfx.persistence.state_db import StateDB
@@ -126,11 +127,11 @@ class WaitingStore(TempoStore):
 
     def __init__(self, db: StateDB) -> None:
         super().__init__(db)
-        self.waiting, self.go = asyncio.Event(), asyncio.Event()
+        self.hold = Hold()
 
     async def save(self, settings: TempoSettings) -> None:
-        self.waiting.set()
-        await self.go.wait()
+        self.hold.entered.set()
+        await self.hold.release.wait()
         await super().save(settings)
 
 
@@ -140,11 +141,11 @@ async def test_a_change_just_before_shutdown_is_saved(db: StateDB) -> None:
     task = asyncio.create_task(clock.run())
     clock.set_tempo("internal", 90.0)
     async with asyncio.timeout(2.0):
-        await store.waiting.wait()  # run() is saving it, and waits for state.db
+        await store.hold.entered.wait()  # run() is saving it, and waits for state.db
 
     task.cancel()  # shutdown
     await asyncio.wait([task])
-    store.go.set()
+    store.hold.release.set()
     await clock.save()  # main's last save, before state.db closes
 
     assert (await TempoStore(db).load()).internal.bpm == 90.0
@@ -185,11 +186,11 @@ async def test_a_save_that_lands_after_a_restore_is_put_right(db: StateDB) -> No
     clock.set_tempo("internal", 90.0)
     saving = asyncio.create_task(clock.save())
     async with asyncio.timeout(2.0):
-        await store.waiting.wait()  # the save has its settings and waits for state.db
+        await store.hold.entered.wait()  # the save has its settings and waits for state.db
     await TempoStore(db).save(SETTINGS)  # a restore writes the backup's
     await clock.reload()  # and the clock takes them
 
-    store.go.set()
+    store.hold.release.set()
     await saving  # the older settings land over the backup's
     await clock.save()
 

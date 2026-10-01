@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, timedelta
 
 import pytest
-from conftest import FakeLight, device_stats
+from conftest import FakeLight, device_stats, events
 from zone_home import START, Home, HomeFactory, zone_record
 
 from dj_ledfx.effects.base import Effect
@@ -183,18 +183,17 @@ async def test_attention_changed_is_emitted_only_when_the_list_changes(
     home = await make_home([FakeLight("lamp")], [])
     stats: list[DeviceStats] = []
     _, feed = _feed(home, stats=lambda: stats)
-    events: list[AttentionChanged] = []
-    home.bus.subscribe(AttentionChanged, events.append)
+    changed = events(home.bus, AttentionChanged)
 
     feed.update()
     stats.append(device_stats("lamp", dropped_pct=9.0))
     feed.update()  # dropping, but not for a minute yet
-    assert events == []
+    assert changed == []
 
     home.clock[0] += timedelta(minutes=1)
     feed.update()
     feed.update()
-    assert len(events) == 1
+    assert len(changed) == 1
 
 
 async def test_run_updates_until_stopped(make_home: HomeFactory) -> None:

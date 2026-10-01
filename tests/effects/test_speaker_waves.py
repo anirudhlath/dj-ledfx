@@ -3,19 +3,18 @@ from __future__ import annotations
 from collections import Counter
 
 import numpy as np
-from conftest import tempo_ctx
+from conftest import builtin_look, tempo_ctx
 from map_home import leds_at, seeded_ledset, seeded_space, seeded_zone_lights
 
 from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.field_tools import distances, height01
 from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
-from dj_ledfx.effects.speaker_waves import SpeakerWaves
-from dj_ledfx.looks.builtin import builtin_looks
+from dj_ledfx.effects.speaker_waves import KICK_COLOUR, REST_COLOUR, SNARE_COLOUR, SpeakerWaves
 
 # Two speakers 4 m apart, and LEDs 1, 2 and 3 m along the line between them.
 PAIR = {"speakers": [(0.0, 0.0, 1.0), (4.0, 0.0, 1.0)]}
 BETWEEN = [(1.0, 0.0, 1.0), (2.0, 0.0, 1.0), (3.0, 0.0, 1.0)]
-KICK, SNARE, REST = palette_float(["#ff5a1f", "#ffd23f", "#05030a"]) * 0.9
+KICK, SNARE, REST = palette_float([KICK_COLOUR, SNARE_COLOUR, REST_COLOUR]) * 0.9  # level 0.9
 
 
 def test_kicks_send_a_wavefront_out_from_each_speaker() -> None:
@@ -72,7 +71,7 @@ def _busiest_room() -> LedSet:
 
 def test_the_kicks_reach_the_far_and_low_lights_of_a_room() -> None:
     # Task 15's dry run: in the room with the most lights, two of eleven never moved.
-    look = next(look for look in builtin_looks() if look.id == "speakers")
+    look = builtin_look("speakers")
     effect = SpeakerWaves(**look.layers[0].settings)
     leds = _busiest_room()
     speakers = leds.space.anchor_points[look.layers[0].settings["anchor"]]

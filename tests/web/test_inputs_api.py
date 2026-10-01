@@ -6,6 +6,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -18,6 +19,11 @@ from dj_ledfx.tempo.model import DjSet, TempoSettings
 from dj_ledfx.tempo.store import TempoStore
 from dj_ledfx.web.app import create_app
 from tests.web.conftest import mock_deps, until
+
+
+def raw_json(body: str | bytes) -> dict[str, Any]:
+    """A request's JSON body sent as written, NaN and all, which httpx's json= won't send."""
+    return {"content": body, "headers": {"content-type": "application/json"}}
 
 
 @pytest_asyncio.fixture
@@ -69,9 +75,7 @@ async def test_a_bpm_sets_the_internal_clock_and_is_saved(api: Api) -> None:
     ],
 )
 async def test_a_bad_tempo_is_refused_and_changes_nothing(api: Api, body: bytes) -> None:
-    answer = await api.client.put(
-        "/api/inputs/tempo", content=body, headers={"content-type": "application/json"}
-    )
+    answer = await api.client.put("/api/inputs/tempo", **raw_json(body))
 
     assert answer.status_code == 422
     assert api.home.tempo.settings() == TempoSettings()
@@ -105,11 +109,7 @@ async def test_a_nudge_holds_the_internal_clock_and_a_wild_one_is_refused(api: A
     nudged = await api.client.post("/api/inputs/tempo/nudge", json={"delta": 0.25})
     wild = [
         await api.client.post("/api/inputs/tempo/nudge", json={"delta": 2}),
-        await api.client.post(
-            "/api/inputs/tempo/nudge",
-            content=b'{"delta": NaN}',
-            headers={"content-type": "application/json"},
-        ),
+        await api.client.post("/api/inputs/tempo/nudge", **raw_json(b'{"delta": NaN}')),
     ]
 
     assert nudged.status_code == 200 and nudged.json()["held"] is True
@@ -184,11 +184,7 @@ async def test_the_last_dj_set_reads_from_and_to(api: Api) -> None:
 
 
 async def test_a_nan_comes_back_as_text_in_the_422(api: Api) -> None:
-    answer = await api.client.put(
-        "/api/inputs/tempo",
-        content=b'{"lock": "auto", "bpm": NaN}',
-        headers={"content-type": "application/json"},
-    )
+    answer = await api.client.put("/api/inputs/tempo", **raw_json(b'{"lock": "auto", "bpm": NaN}'))
 
     [error] = answer.json()["detail"]
     assert (error["loc"], error["input"]) == (["body", "bpm"], "nan")
@@ -216,9 +212,7 @@ def test_a_tap_s_time_counts_only_when_the_clock_can_use_it(
     with TestClient(app) as client:
         for k in range(4):
             body = "{}" if client_time is None else f'{{"clientTime": {client_time(k)}}}'
-            answer = client.post(
-                "/api/inputs/tempo/tap", content=body, headers={"content-type": "application/json"}
-            )
+            answer = client.post("/api/inputs/tempo/tap", **raw_json(body))
             fake.now += 0.4
 
     assert answer.status_code == 200

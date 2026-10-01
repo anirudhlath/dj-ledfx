@@ -7,7 +7,8 @@ import math
 from unittest.mock import MagicMock
 
 import pytest
-from tempo_fakes import START, START_WALL, FakeTime, events, tempo_clock
+from conftest import events
+from tempo_fakes import START, START_WALL, FakeTime, tempo_clock
 
 from dj_ledfx import metrics
 from dj_ledfx.events import EventBus

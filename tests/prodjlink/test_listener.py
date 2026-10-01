@@ -2,8 +2,9 @@ import asyncio
 import socket
 
 import pytest
+from conftest import events
 from loguru import logger
-from tempo_fakes import beat_packet, events
+from tempo_fakes import beat_packet
 
 from dj_ledfx.events import EventBus
 from dj_ledfx.prodjlink.constants import PRODJLINK_PORT
