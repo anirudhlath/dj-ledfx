@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +27,7 @@ from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.spatial.geometry import DeviceGeometry
+from dj_ledfx.tempo.timeline import beat_and_bar
 from dj_ledfx.types import DeviceInfo, DeviceStats, FloatRGB
 
 
@@ -366,13 +366,12 @@ def render_ctx(
 
 def tempo_ctx(beats: float, *, bpm: float = 120.0) -> RenderContext:
     """The moment `beats` beats after the tempo clock started counting, at a steady bpm."""
-    beat_index = math.floor(beats)
-    bar_index = beat_index // 4
+    beat_index, beat_phase, bar_index, bar_phase = beat_and_bar(beats)
     return RenderContext(
         t=beats * 60.0 / bpm,
         dt=1 / 60,
-        beat_phase=beats - beat_index,
-        bar_phase=(beats - bar_index * 4) / 4,
+        beat_phase=beat_phase,
+        bar_phase=bar_phase,
         bpm=bpm,
         beat_index=beat_index,
         bar_index=bar_index,

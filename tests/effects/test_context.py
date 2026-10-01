@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from tempo_fakes import START, FakeTime, play, tempo_clock
 
 from dj_ledfx.effects.context import (
@@ -34,10 +33,14 @@ def test_render_context_samples_the_clock_at_the_target_time() -> None:
 
     ctx = render_context(clock, target, 1 / 60)
 
-    assert (ctx.t, ctx.dt, ctx.bpm) == (target, 1 / 60, 120.0)
-    assert ctx.beat_phase == pytest.approx(0.5)
-    assert ctx.bar_phase == pytest.approx(0.375)
-    assert (ctx.beat_index, ctx.bar_index) == (5, 1)
+    sample = clock.sample_at(target)  # test_clock.py checks its numbers
+    assert (ctx.t, ctx.dt, ctx.bpm) == (target, 1 / 60, sample.bpm)
+    assert (ctx.beat_index, ctx.beat_phase, ctx.bar_index, ctx.bar_phase) == (
+        sample.beat_index,
+        sample.beat_phase,
+        sample.bar_index,
+        sample.bar_phase,
+    )
     assert ctx.signals is NO_SIGNALS
 
 

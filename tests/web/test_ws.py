@@ -43,10 +43,14 @@ def test_the_beat_channel_speaks_v2_and_today_s_ui() -> None:
 
     message = beat_message(tempo)
 
+    sample = tempo.sample()  # test_clock.py checks its numbers
     assert message["channel"] == "beat"
-    assert (message["bpm"], message["bar"], message["beat_in_bar"]) == (120.0, 2, 2)
-    assert message["beat_phase"] == pytest.approx(0.5)
-    assert message["bar_phase"] == pytest.approx(0.375)
+    assert (message["bpm"], message["beat_phase"], message["bar_phase"]) == (
+        sample.bpm,
+        sample.beat_phase,
+        sample.bar_phase,
+    )
+    assert (message["bar"], message["beat_in_bar"]) == (sample.bar_index + 1, sample.beat_in_bar)
     assert (message["source"], message["stale"], message["pitch_percent"]) == (
         "internal",
         False,
@@ -54,7 +58,7 @@ def test_the_beat_channel_speaks_v2_and_today_s_ui() -> None:
     )
     assert abs(message["server_time"] - time.time()) < 60  # seconds since the epoch
     # Today's UI, until F11; its LIVE badge lights on a deck's name, so none without a DJ:
-    assert (message["is_playing"], message["beat_pos"]) == (True, 2)
+    assert (message["is_playing"], message["beat_pos"]) == (True, sample.beat_in_bar)
     assert (message["deck_number"], message["deck_name"]) == (None, None)
 
     play(tempo, fake, 4, deck=2)
