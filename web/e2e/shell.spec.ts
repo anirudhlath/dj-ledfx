@@ -111,10 +111,11 @@ test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(HERO_TIME)
 })
 
-// Done when (spec §13.1 M0): the chrome matches Main.png at 1440 × 900 and Phone-Live.png at 390 × 844.
-// Since F1 the chrome is the mock's hero, beat held; the pixels are F0's.
-test('Live chrome', async ({ page }) => {
+// Done when (spec §13.1 M0 and M2): the chrome matches Main.png and Phone-Live.png, and so does the stage.
+// The mock's hero, its beat and frames held; the stage drawn.
+test('Live', async ({ page }) => {
   await openStill(page, '/next/live')
+  await expect(page.getByRole('region', { name: 'Home, live' }).locator('canvas')).toBeVisible()
   await expect(page).toHaveScreenshot('live.png')
 })
 
