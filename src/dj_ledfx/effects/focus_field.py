@@ -17,7 +17,7 @@ from dj_ledfx.effects.color import palette_at, palette_float
 from dj_ledfx.effects.field import ParamField
 from dj_ledfx.effects.field_tools import anchor_or_centre, distances, smoothstep
 from dj_ledfx.effects.noise import fbm3
-from dj_ledfx.effects.params import EffectParam, level_param
+from dj_ledfx.effects.params import EffectParam, anchor_param, level_param
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -32,12 +32,7 @@ class FocusField(ParamField):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
-            "anchor": EffectParam(
-                type="anchor",
-                default="",
-                label="Calm around",
-                description="None: the middle of the zone",
-            ),
+            "anchor": anchor_param("Calm around"),
             "calm": EffectParam(type="color", default=CALM_COLOUR, label="Calm colour"),
             "palette": EffectParam(
                 type="color_list", default=list(FOCUS_PALETTE), label="Busy colours"

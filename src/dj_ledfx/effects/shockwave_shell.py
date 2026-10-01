@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.effects.color import palette_float
+from dj_ledfx.effects.color import palette_at, palette_float
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import anchor_or_centre, distances
-from dj_ledfx.effects.params import EffectParam, level_param
+from dj_ledfx.effects.field_tools import anchor_or_centre, band, distances
+from dj_ledfx.effects.params import EffectParam, anchor_param, level_param
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -26,12 +26,7 @@ class ShockwaveShell(ParamField):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
-            "anchor": EffectParam(
-                type="anchor",
-                default="",
-                label="From",
-                description="None: the middle of the zone",
-            ),
+            "anchor": anchor_param("From"),
             "colour": EffectParam(type="color", default=SHELL_COLOUR, label="Shell"),
             "rest": EffectParam(type="color", default=REST_COLOUR, label="Between"),
             "reach_m": EffectParam(
@@ -52,16 +47,17 @@ class ShockwaveShell(ParamField):
 
     def _prepare(self) -> None:
         super()._prepare()
-        self._colour, self._rest = palette_float([self._values["colour"], self._values["rest"]])
+        self._ramp = palette_float([self._values["rest"], self._values["colour"]])
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
         away = self._per_leds(leds, self._away)
-        front = np.float32(float(values["reach_m"]) * ctx.beat_phase)
-        gap = (away - front) / np.float32(values["shell_m"])
-        glow = np.exp(-(gap * gap)) * np.float32((1.0 - ctx.beat_phase) ** 2)
-        out = self._rest + (self._colour - self._rest) * glow[:, None]
-        frame: FloatRGB = (out * np.float32(values["level"])).astype(np.float32)
+        front = float(values["reach_m"]) * ctx.beat_phase
+        glow = band(away, front, float(values["shell_m"]))
+        glow *= np.float32((1.0 - ctx.beat_phase) ** 2)
+        frame: FloatRGB = (palette_at(self._ramp, glow) * np.float32(values["level"])).astype(
+            np.float32
+        )
         return frame
 
     def _away(self, leds: LedSet) -> NDArray[np.float32]:

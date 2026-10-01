@@ -3,7 +3,6 @@ once a bar, on the floor plane; dark elsewhere, so it adds onto the layer below.
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -11,8 +10,8 @@ from numpy.typing import NDArray
 
 from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import anchor_or_centre
-from dj_ledfx.effects.params import EffectParam, level_param
+from dj_ledfx.effects.field_tools import band, bearing
+from dj_ledfx.effects.params import EffectParam, anchor_param, level_param
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -26,12 +25,7 @@ class LighthouseBeam(ParamField):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
-            "anchor": EffectParam(
-                type="anchor",
-                default="",
-                label="Around",
-                description="None: the middle of the zone",
-            ),
+            "anchor": anchor_param("Around"),
             "colour": EffectParam(type="color", default=BEAM_COLOUR, label="Beam"),
             "width_deg": EffectParam(
                 type="float",
@@ -51,17 +45,11 @@ class LighthouseBeam(ParamField):
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
-        bearing = self._per_leds(leds, self._bearing)
-        turn = np.float32(2.0 * math.pi)
-        off = (bearing - turn * np.float32(ctx.bar_phase) + turn / 2) % turn - turn / 2
-        half = np.float32(math.radians(float(values["width_deg"])) / 2.0)
-        beam = np.exp(-np.square(off / half)) * np.float32(values["level"])
+        turns = self._per_leds(leds, self._bearing)
+        off = (turns - ctx.bar_phase + 0.5) % 1.0 - 0.5  # turns from the beam, -0.5 to 0.5
+        beam = band(off, 0.0, float(values["width_deg"]) / 720.0) * np.float32(values["level"])
         frame: FloatRGB = (self._colour * beam[:, None]).astype(np.float32)
         return frame
 
-    def _bearing(self, leds: LedSet) -> NDArray[np.float32]:
-        """Each LED's bearing around the anchor, seen from above: 0 east, π/2 north."""
-        centre = anchor_or_centre(leds, self._values["anchor"])
-        east, north = leds.pos[:, 0] - centre[0], leds.pos[:, 1] - centre[1]
-        bearing: NDArray[np.float32] = np.arctan2(north, east).astype(np.float32)
-        return bearing
+    def _bearing(self, leds: LedSet) -> NDArray[np.float64]:
+        return bearing(leds, self._values["anchor"])

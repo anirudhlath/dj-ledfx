@@ -12,12 +12,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
 
 from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import anchor_or_centre, distances, height01, smoothstep
-from dj_ledfx.effects.params import EffectParam, level_param
+from dj_ledfx.effects.field_tools import (
+    F32,
+    anchor_or_centre,
+    band,
+    distances,
+    height01,
+    smoothstep,
+)
+from dj_ledfx.effects.params import EffectParam, anchor_param, level_param
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -31,17 +37,13 @@ ACROSS_BY = 0.75  # a kick's front reaches the zone's far corner this far into t
 BLOOM_M = 1.5  # a snare's reach from the middle of the speakers
 HIGH_FROM, HIGH_TO = 0.55, 0.85  # where "up high" starts and is full, floor 0 to ceiling 1
 
-F32 = NDArray[np.float32]
-
 
 class SpeakerWaves(ParamField):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
-            "anchor": EffectParam(
-                type="anchor",
-                default="",
-                label="Speakers",
+            "anchor": anchor_param(
+                "Speakers",
                 description="Waves start at each of its points; none: the middle of the zone",
             ),
             "kick": EffectParam(type="color", default=KICK_COLOUR, label="Kick"),
@@ -71,12 +73,11 @@ class SpeakerWaves(ParamField):
         values = self._values
         each, middle, high, reach = self._per_leds(leds, self._sources)
         fade = np.float32(1.0 - ctx.beat_phase)
-        front = np.float32(reach * ctx.beat_phase / ACROSS_BY)  # metres out from each point
-        gap = (each - front) / np.float32(WAVE_M)
-        kick = np.exp(-(gap * gap)).max(axis=0) * fade
+        front = reach * ctx.beat_phase / ACROSS_BY  # metres out from each point
+        kick = band(each, front, WAVE_M).max(axis=0) * fade
         snare = np.zeros_like(middle)
         if ctx.beat_index % 2 == 1:  # the second and fourth beats
-            snare = np.exp(-np.square(middle / np.float32(BLOOM_M))) * fade * fade
+            snare = band(middle, 0.0, BLOOM_M) * fade * fade
         hat = np.zeros_like(high)
         if ctx.beat_phase >= 0.5:  # the off-beat, fading by the next beat
             lit = self._sparkles(ctx.beat_index, leds.count, float(values["sparkle"]))
@@ -88,7 +89,7 @@ class SpeakerWaves(ParamField):
         return frame
 
     def _sparkles(self, beat_index: int, count: int, share: float) -> F32:
-        draws = np.random.default_rng([self._seed % 2**32, beat_index % 2**63]).random(count)
+        draws = self._rng(beat_index).random(count)
         return (draws < share).astype(np.float32)
 
     def _sources(self, leds: LedSet) -> tuple[F32, F32, F32, float]:

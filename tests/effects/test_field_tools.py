@@ -4,7 +4,14 @@ import numpy as np
 from map_home import leds_at
 
 from dj_ledfx.effects.color import palette_at, palette_float
-from dj_ledfx.effects.field_tools import anchor_or_centre, distances, height01, smoothstep
+from dj_ledfx.effects.field_tools import (
+    anchor_or_centre,
+    band,
+    bearing,
+    distances,
+    height01,
+    smoothstep,
+)
 
 POINTS = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 1.5], [4.0, 2.0, 3.0]])
 
@@ -15,6 +22,24 @@ def test_an_anchor_or_the_middle_of_the_zone() -> None:
     assert np.allclose(anchor_or_centre(with_sofa, "gone"), [2.0, 1.0, 1.5])
     assert np.allclose(anchor_or_centre(with_sofa, ""), [2.0, 1.0, 1.5])
     assert np.allclose(distances(with_sofa, np.zeros(3, dtype=np.float32))[1], 2.5)
+
+
+def test_a_bearing_is_in_turns_round_the_anchor_from_the_east() -> None:
+    leds = leds_at(
+        [(3.0, 1.0, 0.0), (1.0, 3.0, 2.0), (-1.0, 1.0, 0.0)], anchors={"lamp": (1.0, 1.0, 0.0)}
+    )
+
+    assert np.allclose(bearing(leds, "lamp"), [0.0, 0.25, 0.5])  # height doesn't count
+
+
+def test_a_band_is_one_at_its_centre_and_e_to_the_minus_one_a_width_out() -> None:
+    x = np.array([2.0, 2.5, 1.5, 4.0], dtype=np.float32)
+
+    glow = band(x, 2.0, 0.5)
+
+    assert glow.dtype == np.float32 and glow is not x
+    assert np.allclose(glow, [1.0, np.exp(-1.0), np.exp(-1.0), np.exp(-16.0)])
+    assert np.array_equal(x, [2.0, 2.5, 1.5, 4.0])  # x is left alone
 
 
 def test_height_is_measured_against_the_ceiling_or_the_zone() -> None:

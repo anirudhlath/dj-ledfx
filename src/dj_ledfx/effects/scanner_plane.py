@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.effects.color import palette_float
+from dj_ledfx.effects.color import palette_at, palette_float
 from dj_ledfx.effects.easing import raised_cosine
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import height01
+from dj_ledfx.effects.field_tools import band, height01
 from dj_ledfx.effects.params import EffectParam, level_param
 
 if TYPE_CHECKING:
@@ -44,15 +44,14 @@ class ScannerPlane(ParamField):
 
     def _prepare(self) -> None:
         super()._prepare()
-        self._colour, self._rest = palette_float([self._values["colour"], self._values["rest"]])
+        self._ramp = palette_float([self._values["rest"], self._values["colour"]])
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
         heights: NDArray[np.float32] = self._per_leds(leds, height01)
         cycle = ((ctx.beat_index % 2) + ctx.beat_phase) / 2.0  # up in one beat, down in the next
-        plane = np.float32(raised_cosine(cycle))
-        gap = (heights - plane) / np.float32(values["width"])
-        glow = np.exp(-(gap * gap))
-        out = self._rest + (self._colour - self._rest) * glow[:, None]
-        frame: FloatRGB = (out * np.float32(values["level"])).astype(np.float32)
+        glow = band(heights, raised_cosine(cycle), float(values["width"]))
+        frame: FloatRGB = (palette_at(self._ramp, glow) * np.float32(values["level"])).astype(
+            np.float32
+        )
         return frame

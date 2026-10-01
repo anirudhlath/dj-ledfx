@@ -17,7 +17,7 @@ from numpy.typing import NDArray
 
 from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import distances
+from dj_ledfx.effects.field_tools import band, distances
 from dj_ledfx.effects.params import EffectParam, level_param
 
 if TYPE_CHECKING:
@@ -75,7 +75,7 @@ class Ripples(ParamField):
         """Drop k's three random numbers: when in its interval, and where."""
         u = self._draws.get(k)
         if u is None:
-            u = self._draws[k] = np.random.default_rng([self._seed % 2**32, k % 2**63]).random(3)
+            u = self._draws[k] = self._rng(k).random(3)
         return u
 
     def _interval(self) -> float:
@@ -108,8 +108,8 @@ class Ripples(ParamField):
             age = ctx.t - when
             if not 0.0 <= age <= life:
                 continue
-            gap = (distances(leds, where) - np.float32(speed * age)) / np.float32(RING_WIDTH_M)
-            ring = np.exp(-(gap * gap)) * np.float32(math.exp(-age / fade))
+            ring = band(distances(leds, where), speed * age, RING_WIDTH_M)
+            ring *= np.float32(math.exp(-age / fade))
             np.maximum(wave, ring, out=wave)
         colours = palette_at(self._palette, wave)
         return (colours * np.float32(values["level"])).astype(np.float32)
