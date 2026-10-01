@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import Literal, get_args
 
 from dj_ledfx.types import is_finite_number
 
@@ -13,9 +13,9 @@ TempoLock = Literal["auto", "prodjlink", "music", "internal"]
 InternalHow = Literal["default", "set", "tapped", "kept"]
 DeckState = Literal["empty", "cued", "playing"]
 
-LOCKS: tuple[TempoLock, ...] = ("auto", "prodjlink", "music", "internal")
+LOCKS: tuple[TempoLock, ...] = get_args(TempoLock)
 UNLOCKED: frozenset[TempoLock] = frozenset({"auto", "internal"})  # the internal controls work
-HOWS: tuple[InternalHow, ...] = ("default", "set", "tapped", "kept")
+HOWS: tuple[InternalHow, ...] = get_args(InternalHow)
 SOURCE_NAMES: dict[str, str] = {
     "prodjlink": "Pro DJ Link",
     "music": "Music",
