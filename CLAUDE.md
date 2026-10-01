@@ -125,7 +125,7 @@ src/dj_ledfx/ layout:
 - `devices/discovery.py` — DiscoveryOrchestrator: multi-wave scanning, fast reconnect, ghost promote/demote
 - `devices/ghost.py` — GhostAdapter: placeholder for offline devices (is_connected=False, send_frame no-op)
 - `status.py` — SystemStatus health tracking
-- `main.py` — Application coordinator (startup/shutdown orchestration; stops the web server through `_WebServer.stop()`: close the websockets, then granian's `Server.stop()`)
+- `main.py` — Application coordinator (startup/shutdown orchestration; serves the web app with granian's embedded server, on the app's own event loop, and stops it through `_WebServer.stop()`: close the websockets, then granian's `Server.stop()`)
 
 frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - `src/lib/ws-client.ts` — Multiplexed WS client with reconnection
@@ -227,7 +227,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - Every test starts from the app's effect registry (an autouse fixture in conftest); a test effect defined with `register=False` never leaks
 - `tests/map_home.py`: `tiny_home()` (a two-room plan) and points on it (`DESK_CORNER`, `IN_THE_DESK_CORNER`, `IN_THE_EAST_ROOM`), `open_map()` (a real `HomeMap` over state.db and some lights), `leds_at()`, `handoff_pins()` and `design_home_json()` (the design files), and `seeded_zone_lights()`/`seeded_space()`/`seeded_ledset()` (this home's seeded LEDs, for perf); `build_home(plan=...)` and `api_home(plan=...)` wire a real `HomeMap`; `FakeHome` stands in for the map's zones (a test edits it, then calls `manager.home_changed()`)
 - Web tests use `httpx.AsyncClient` with FastAPI's `TestClient` pattern; `tests/web/conftest.py` shares `mock_deps()`, `write_dist()` and `static_client()` for `create_app`
-- `tests/web/` covers all REST routers and WebSocket hub; `tests/test_main.py` runs the app in a subprocess and checks a SIGTERM shutdown logs no traceback
+- `tests/web/` covers all REST routers and WebSocket hub; `tests/test_main.py` runs the app in a subprocess and checks a SIGTERM shutdown logs no traceback, and that browser tabs closing their sockets never freeze it
 - Gates compare with a baseline: no new mypy errors (compare `uv run mypy src/` output with the branch's starting point) and no format findings; perf benchmarks are deselected (`-m perf` runs them)
 - `tests/web/test_openapi_types.py` fails when `web/src/api/generated/openapi.json` isn't the backend's schema; `cd web && npm run api:types` regenerates it
 
@@ -262,6 +262,8 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 - MockDeviceAdapter: never patch `type(adapter).device_info` (class-level property) — leaks to all instances across tests. Use a subclass instead.
 - Web tests: `uv sync --extra web` required in worktrees — web tests skip silently without it
 - Granian's embedded `Server.stop()` abandons open websockets, and a close sent from another task hangs while a receive is pending: each `/ws` session cancels its own receive, then closes (`ws.close_all`)
+- Granian before 2.7.8 can freeze the whole app when a `/ws` client leaves. Its `future_watcher` tears the socket down by blocking on the socket's locks while holding the GIL, and a send still in flight holds one of them and needs the GIL to log its error, so the two wait forever. uv.lock pins 2.8.4, which also has the fix for CVE-2026-42544 (since 2.7.4), and pyproject.toml's floor keeps it there; 2.7.8 and 2.7.9 don't freeze, but often never finish the close handshake
+- Try another version of a locked package in a separate venv: `uv run` re-syncs `.venv` to uv.lock, so `uv pip install granian==X` followed by `uv run` runs the locked version
 - Awaiting cancelled tasks in a `finally`: use `asyncio.wait(tasks)`, not `gather` — gather re-raises a child's CancelledError, which anyio's cancel scope doesn't swallow (a flaky test, not a crash)
 - LIFX: a colour (SetColor) doesn't stop a tile effect on a Candle C; the LIFX app also sends SetTileEffect OFF. `is_running` reads GetTileEffect; bulb waveforms can't say (None)
 - LIFX: a bulb keeps animating its waveform's colour while switched off, so colour reads can't show a re-send
