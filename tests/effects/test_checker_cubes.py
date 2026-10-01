@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from conftest import tempo_ctx
-from map_home import leds_at
+from map_home import leds_at, seeded_ledset
 
 from dj_ledfx.effects.checker_cubes import CheckerCubes
 
@@ -31,3 +31,19 @@ def test_each_beat_flashes_then_falls_by_the_punch() -> None:
 
     assert np.allclose(on_the_beat[0], RED)
     assert np.allclose(halfway[0], RED * 0.8)
+
+
+def test_frame_after_frame_it_draws_what_a_new_one_draws() -> None:
+    """The colourings it keeps for the LEDs never change a frame, across beats and a new
+    palette."""
+    leds = seeded_ledset()
+    effect = CheckerCubes()
+
+    for k in range(6 * 30):  # six beats at 30 frames a beat
+        palette = ["#ff2d95", "#21d4fd"] if k < 90 else ["#ff0000", "#00ff00", "#0000ff"]
+        if k == 90:
+            effect.set_params(palette=palette)
+        ctx = tempo_ctx(4.0 + k / 30)
+        assert np.array_equal(
+            effect.render(ctx, leds), CheckerCubes(palette=palette).render(ctx, leds)
+        ), k

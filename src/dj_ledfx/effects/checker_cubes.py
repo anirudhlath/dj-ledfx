@@ -47,16 +47,18 @@ class CheckerCubes(ParamField):
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
         values = self._values
-        parity = self._per_leds(leds, self._parity)
-        turn = (parity + ctx.beat_index) % len(self._palette)
+        colourings = self._per_leds(leds, self._colourings)
         flash = 1.0 - float(values["punch"]) * ctx.beat_phase
-        frame: FloatRGB = (
-            self._palette[turn] * np.float32(flash * float(values["level"]))
-        ).astype(np.float32)
+        frame: FloatRGB = colourings[ctx.beat_index % len(colourings)] * np.float32(
+            flash * float(values["level"])
+        )
         return frame
 
-    def _parity(self, leds: LedSet) -> NDArray[np.int64]:
-        """0 or 1 for each LED's cube, alternating between neighbours on every axis."""
+    def _colourings(self, leds: LedSet) -> list[FloatRGB]:
+        """The cubes' colours on each beat, one colouring per palette colour: each LED's
+        cube's parity (0 or 1, alternating between neighbours on every axis) moves one step
+        through the palette a beat."""
         cubes = np.floor(leds.pos / np.float32(self._values["size_m"])).astype(np.int64)
         parity: NDArray[np.int64] = cubes.sum(axis=1) % 2
-        return parity
+        stops = len(self._palette)
+        return [self._palette[(parity + shift) % stops] for shift in range(stops)]
