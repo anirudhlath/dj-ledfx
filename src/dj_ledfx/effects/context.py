@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from dj_ledfx.tempo.timeline import beat_and_bar
 from dj_ledfx.types import BeatContext
 
 if TYPE_CHECKING:
@@ -44,17 +45,18 @@ class RenderContext:
 
 
 def render_context(clock: TempoClock, t: float, dt: float) -> RenderContext:
-    """Sample the tempo clock at the frame's target time `t` (spec §7.2)."""
-    sample = clock.sample_at(t)
+    """Read the tempo clock at the frame's target time `t` (spec §7.2): only what a frame
+    draws with, so no whole TempoSample."""
+    beat_index, beat_phase, bar_index, bar_phase = beat_and_bar(clock.position_at(t))
     return RenderContext(
         t=t,
         dt=dt,
-        beat_phase=sample.beat_phase,
-        bar_phase=sample.bar_phase,
-        bpm=sample.bpm,
-        beat_index=sample.beat_index,
-        bar_index=sample.bar_index,
-        signals=_DJ_SIGNALS if sample.source == "prodjlink" and not sample.stale else NO_SIGNALS,
+        beat_phase=beat_phase,
+        bar_phase=bar_phase,
+        bpm=clock.bpm,
+        beat_index=beat_index,
+        bar_index=bar_index,
+        signals=_DJ_SIGNALS if clock.source == "prodjlink" and not clock.stale else NO_SIGNALS,
     )
 
 

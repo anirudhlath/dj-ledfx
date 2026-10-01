@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from dj_ledfx.tempo.model import BEATS_PER_BAR, TempoSample, TempoSource
+from dj_ledfx.tempo.model import BEATS_PER_BAR
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,23 +34,18 @@ class Timeline:
             self.period if period is None else period,
         )
 
-    def sample(
-        self, t: float, *, bpm: float, pitch_percent: float, source: TempoSource, stale: bool
-    ) -> TempoSample:
-        position = self.position(t)
-        beat_index = math.floor(position)
-        bar_index = beat_index // BEATS_PER_BAR
-        return TempoSample(
-            bpm=bpm,
-            beat_phase=position - beat_index,
-            bar_phase=(position - bar_index * BEATS_PER_BAR) / BEATS_PER_BAR,
-            beat_index=beat_index,
-            bar_index=bar_index,
-            beat_in_bar=beat_index - bar_index * BEATS_PER_BAR + 1,
-            pitch_percent=pitch_percent,
-            source=source,
-            stale=stale,
-        )
+
+def beat_and_bar(position: float) -> tuple[int, float, int, float]:
+    """A position on the line as its beat and its bar, each counted from 0: (beat index,
+    beat phase, bar index, bar phase), the phases 0 to 1."""
+    beat_index = math.floor(position)
+    bar_index = beat_index // BEATS_PER_BAR
+    return (
+        beat_index,
+        position - beat_index,
+        bar_index,
+        (position - bar_index * BEATS_PER_BAR) / BEATS_PER_BAR,
+    )
 
 
 def nearest_beat(position: float, beat_in_bar: int) -> int:

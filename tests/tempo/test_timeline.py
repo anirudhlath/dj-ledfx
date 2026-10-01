@@ -2,14 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from dj_ledfx.tempo.model import TempoSample
-from dj_ledfx.tempo.timeline import Timeline, nearest_beat
+from dj_ledfx.tempo.timeline import Timeline, beat_and_bar, nearest_beat
 
 LINE = Timeline(at=100.0, beat=8.0, period=0.5)  # 120 BPM, beat 8 at t=100
-
-
-def _sample(line: Timeline, t: float) -> TempoSample:
-    return line.sample(t, bpm=120.0, pitch_percent=0.0, source="internal", stale=False)
 
 
 def test_the_position_counts_beats_from_the_anchor() -> None:
@@ -18,13 +13,12 @@ def test_the_position_counts_beats_from_the_anchor() -> None:
     assert LINE.time_of(12.0) == 102.0
 
 
-def test_a_sample_says_the_beat_and_the_bar() -> None:
-    sample = _sample(LINE, 101.25)  # beat 10.5: bar 2 (from 0), its third beat
+def test_a_position_is_a_beat_and_a_bar() -> None:
+    beat_index, beat_phase, bar_index, bar_phase = beat_and_bar(LINE.position(101.25))
 
-    assert (sample.beat_index, sample.bar_index, sample.beat_in_bar) == (10, 2, 3)
-    assert sample.beat_phase == pytest.approx(0.5)
-    assert sample.bar_phase == pytest.approx(2.5 / 4)
-    assert (sample.bpm, sample.source, sample.stale) == (120.0, "internal", False)
+    assert (beat_index, bar_index) == (10, 2)  # beat 10.5: bar 2 (from 0), its third beat
+    assert beat_phase == pytest.approx(0.5)
+    assert bar_phase == pytest.approx(2.5 / 4)
 
 
 def test_moving_the_anchor_never_jumps() -> None:

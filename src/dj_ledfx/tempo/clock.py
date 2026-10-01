@@ -43,7 +43,7 @@ from dj_ledfx.tempo.model import (
     check_bpm,
 )
 from dj_ledfx.tempo.tap import TapTempo, usable_client_time
-from dj_ledfx.tempo.timeline import Timeline, nearest_beat
+from dj_ledfx.tempo.timeline import Timeline, beat_and_bar, nearest_beat
 from dj_ledfx.timing import utcnow
 from dj_ledfx.types import is_finite_number
 
@@ -120,10 +120,23 @@ class TempoClock:
     def settings(self) -> TempoSettings:
         return TempoSettings(lock=self._lock, internal=self._internal, last_set=self._last_set)
 
+    def position_at(self, t: float) -> float:
+        """Beats since beat 0 at time t (time.monotonic()): what a frame draws from."""
+        return self._line.position(t)
+
     def sample_at(self, t: float) -> TempoSample:
         """The clock at time t (time.monotonic()), a frame's target time."""
-        return self._line.sample(
-            t, bpm=self._bpm, pitch_percent=self._pitch, source=self._source, stale=self._stale
+        beat_index, beat_phase, bar_index, bar_phase = beat_and_bar(self._line.position(t))
+        return TempoSample(
+            bpm=self._bpm,
+            beat_phase=beat_phase,
+            bar_phase=bar_phase,
+            beat_index=beat_index,
+            bar_index=bar_index,
+            beat_in_bar=beat_index - bar_index * BEATS_PER_BAR + 1,
+            pitch_percent=self._pitch,
+            source=self._source,
+            stale=self._stale,
         )
 
     def sample(self) -> TempoSample:
