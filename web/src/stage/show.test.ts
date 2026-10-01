@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Light, LightUpdate } from '@/api/contract'
 import { lightFixtures } from '@/api/mocks/fixtures'
-import { isDrawn, isStreamed, lightState, lightStates, restingColour } from './show'
+import { buildScenario } from '@/api/mocks/scenarios'
+import { HERO_NOW } from '@/test/live'
+import { isDrawn, isStreamed, lightState, lightStates, newestFirst, restingColour } from './show'
 
 const light = (patch: Partial<Light>): Light => ({ ...lightFixtures('2026-09-23T18:04:00-05:00')[0], ...patch })
 
@@ -32,5 +34,13 @@ describe('what the stage draws for a light', () => {
     expect(restingColour(lightState(light({ power: false, colour: '#102030' }), undefined))).toBeNull()
     expect(restingColour(lightState(light({ power: null, colour: null }), undefined))).toBeNull()
     expect(restingColour(lightState(light({ power: true, colour: 'warm' }), undefined))).toBeNull()
+  })
+
+  it('puts the newest running zone first, and leaves the list it was given alone', () => {
+    const running = buildScenario('hero', HERO_NOW).running
+    const given = [...running]
+    const times = newestFirst(running).map((zone) => Date.parse(zone.since))
+    expect(times).toEqual([...given].map((zone) => Date.parse(zone.since)).sort((a, b) => b - a))
+    expect(running).toEqual(given)
   })
 })

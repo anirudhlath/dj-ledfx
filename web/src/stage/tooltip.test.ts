@@ -5,7 +5,7 @@ import { HOME_ZONE, roomName } from '@/api/mocks/fixtures'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { formatTime } from '@/lib/format'
 import { HERO_NOW } from '@/test/live'
-import { lightState } from './show'
+import { lightState, newestFirst } from './show'
 import { colourLine, currentColour, deviceLine, tooltipText } from './tooltip'
 
 const hero = buildScenario('hero', HERO_NOW)
@@ -15,7 +15,7 @@ const ZONE_NAMES = new Map(hero.zones.map((zone) => [zone.id, zone.name]))
 describe('the light tooltip (§7.6)', () => {
   it('names the light, the newest look running on it with its zone, and the model with its latency', () => {
     const light = hero.lights.find((candidate) => hero.running.some((zone) => zone.zoneId !== HOME_ZONE && zone.lights.includes(candidate.id)))!
-    const zone = hero.running.filter((candidate) => candidate.lights.includes(light.id)).sort((a, b) => Date.parse(b.since) - Date.parse(a.since))[0]
+    const zone = newestFirst(hero.running).find((candidate) => candidate.lights.includes(light.id))!
     expect(tooltipText(light, hero.running, ZONE_NAMES)).toEqual({ name: light.name, running: `${zone.lookName} · ${ZONE_NAMES.get(zone.zoneId)}` })
     expect(deviceLine({ ...light, latency: { estimated: false, measuredMs: 51.6 } }, null)).toBe(`${light.model} · 52 ms`)
   })

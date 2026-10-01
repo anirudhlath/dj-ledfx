@@ -4,7 +4,7 @@ import type { Id, Light, RunningZone } from '@/api/contract'
 import type { LightFrame } from '@/api/frames'
 import { formatLatency, formatTime } from '@/lib/format'
 import { hexOf, intensityOf, type RGB } from './light-maths'
-import { isStreamed, restingColour, type LightState } from './show'
+import { isStreamed, newestFirst, restingColour, type LightState } from './show'
 
 export interface TooltipText {
   name: string
@@ -13,9 +13,7 @@ export interface TooltipText {
 }
 
 export function tooltipText(light: Light, running: readonly RunningZone[], zoneNames: ReadonlyMap<Id, string>): TooltipText {
-  const zone = [...running]
-    .sort((a, b) => Date.parse(b.since) - Date.parse(a.since))
-    .find((candidate) => candidate.lights.includes(light.id))
+  const zone = newestFirst(running).find((candidate) => candidate.lights.includes(light.id))
   const where = zone === undefined ? undefined : zoneNames.get(zone.zoneId)
   return {
     name: light.name,

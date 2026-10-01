@@ -1,7 +1,7 @@
 // What the stage draws for a light (§7.3, §9.1), from its REST record and the latest `lights`
 // push. A light being streamed shows its frames; one that is only on shows its own colour; offline
 // and switched-off lights show only their marks (the overlay's rings), never a glow.
-import { STREAMED, type Id, type Light, type LightUpdate } from '@/api/contract'
+import { STREAMED, type Id, type Light, type LightUpdate, type RunningZone } from '@/api/contract'
 import { parseHex, type RGB } from './light-maths'
 
 /** The fields the stage reads, the push's where there is one. */
@@ -28,6 +28,11 @@ export const isStreamed = (state: LightState): boolean => STREAMED.has(state.sta
 
 /** Offline and switched-off lights have only their marks on the stage (§9.1): no glow, no core, no strip. */
 export const isDrawn = (state: LightState): boolean => state.status !== 'offline' && state.status !== 'switched-off'
+
+/** The running zones, the newest first: where two run on a light or a room, the stage shows the newest. */
+export function newestFirst(running: readonly RunningZone[]): RunningZone[] {
+  return [...running].sort((a, b) => Date.parse(b.since) - Date.parse(a.since))
+}
 
 /** The colour to draw without a frame: the light's own while it's on; null draws it dark. */
 export function restingColour(state: LightState): RGB | null {
