@@ -16,12 +16,15 @@ from datetime import datetime
 from loguru import logger
 
 from dj_ledfx import metrics
-from dj_ledfx.events import EventBus
+from dj_ledfx.events import BeatEvent, EventBus
 from dj_ledfx.tempo.decks import DeckTracker
 from dj_ledfx.tempo.model import (
     BEATS_PER_BAR,
     LOCKS,
+    MAX_BPM,
     MAX_NUDGE_BEATS,
+    MIN_BPM,
+    SET_GAP_S,
     SOURCE_NAMES,
     UNLOCKED,
     DecksChanged,
@@ -41,6 +44,9 @@ from dj_ledfx.tempo.model import (
 from dj_ledfx.tempo.tap import TapTempo
 from dj_ledfx.tempo.timeline import Timeline, nearest_beat
 from dj_ledfx.timing import utcnow
+
+DRIFT_HARD_SNAP_S = 0.005  # today's drift correction: soft under 5 ms, a hard snap above
+SOFT_GAIN = 0.1
 
 
 class TempoClock:
@@ -68,6 +74,8 @@ class TempoClock:
         self._source, self._stale = self._choose(start)
         self._snap = True  # the next beat from a source that took over snaps the phase
         self._dirty = False  # settings changed since they were saved
+        self._set_started: datetime | None = None  # the DJ set going on, if any
+        self._last_beat_wall = wall()  # when the last beat was heard, for the set's end
         self.listening_on: str | None = None  # where Pro DJ Link is heard (main sets it)
         self._published = (self._tempo_state(start), self._decks.views(start, master=None))
 
@@ -183,6 +191,59 @@ class TempoClock:
         self._publish(now)
         metrics.BEAT_BPM.set(self._bpm)
 
+    # --- Pro DJ Link ----------------------------------------------------------------------
+
+    def on_beat(self, event: BeatEvent) -> None:
+        """A player's beat (main subscribes this to BeatEvent). The clock follows one deck
+        at a time; the others' beats only update their decks."""
+        if not _believable(event):
+            return  # a player with no track loaded, or a broken packet
+        now = self._now()
+        started = not self._decks.any_playing(now)
+        changed = self._decks.hear(event)
+        self._last_beat_wall = self._wall()
+        if started:
+            self._dj_started()
+        self._settle(now)
+        if self._source == "prodjlink" and event.device_number == self._decks.followed:
+            self._follow(event, snap=self._snap or changed)
+        self._publish(now)
+
+    def _follow(self, event: BeatEvent, *, snap: bool) -> None:
+        """Line the clock up with the followed deck's beat. The phase snaps once when a
+        source takes over; after that, soft correction under 5 ms of drift and a hard
+        snap above, as BeatClock did (spec §7.2)."""
+        period = 60.0 / event.bpm
+        beat = nearest_beat(self._line.position(event.timestamp), event.beat_position)
+        if not snap:
+            drift = event.timestamp - self._line.time_of(beat)
+            if abs(drift) < DRIFT_HARD_SNAP_S:
+                period *= 1.0 + (drift / period) * SOFT_GAIN
+                logger.trace("Beat drift {:.1f} ms: soft correction", drift * 1000.0)
+            else:
+                logger.debug("Beat drift {:.1f} ms: hard snap", drift * 1000.0)
+        self._line = Timeline(event.timestamp, float(beat), period)
+        self._bpm, self._pitch, self._snap = event.bpm, event.pitch_percent, False
+        metrics.BEAT_BPM.set(event.bpm)
+        metrics.BEAT_PHASE.set((event.beat_position - 1) / BEATS_PER_BAR)
+
+    def _dj_started(self) -> None:
+        """A DJ starts playing: a hold ends ("until a higher source starts again"), and a
+        set begins, or goes on if the last one ended less than SET_GAP_S ago."""
+        self._held = False
+        wall, last = self._wall(), self._last_set
+        if last is not None and (wall - last.ended).total_seconds() < SET_GAP_S:
+            self._set_started = last.started
+        else:
+            self._set_started = wall
+
+    def _dj_quiet(self, now: float) -> None:
+        """The last deck went quiet: the set so far is the last set."""
+        if self._set_started is not None and not self._decks.any_playing(now):
+            self._last_set = DjSet(self._set_started, self._last_beat_wall)
+            self._set_started, self._dirty = None, True
+        self._decks.forget(now)
+
     # --- inside ---------------------------------------------------------------------------
 
     def _take_internal(self, now: float, bpm: float, how: InternalHow) -> None:
@@ -207,6 +268,7 @@ class TempoClock:
         return "internal", False
 
     def _settle(self, now: float) -> None:
+        self._dj_quiet(now)
         source, self._stale = self._choose(now)
         if source == self._source:
             return
@@ -249,3 +311,12 @@ class TempoClock:
             self._bus.emit(TempoChanged())
         if decks != published_decks:
             self._bus.emit(DecksChanged())
+
+
+def _believable(event: BeatEvent) -> bool:
+    return (
+        math.isfinite(event.timestamp)
+        and math.isfinite(event.pitch_percent)
+        and math.isfinite(event.bpm)
+        and MIN_BPM <= event.bpm <= MAX_BPM
+    )

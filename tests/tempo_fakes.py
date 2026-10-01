@@ -80,6 +80,35 @@ def beat_event(
     )
 
 
+def play(
+    clock: TempoClock,
+    time: FakeTime,
+    beats: int,
+    *,
+    first: int = 1,
+    bpm: float = 128.0,
+    deck: int = 1,
+    pitch_percent: float = 0.0,
+) -> list[float]:
+    """A deck playing `beats` beats from now, the first `first` (1–4) into its bar: time
+    moves to each beat and the clock hears it. The times of the beats."""
+    period = 60.0 / (bpm * (1.0 + pitch_percent / 100.0))
+    start, times = time.now, []
+    for k in range(beats):
+        time.now = start + k * period
+        clock.on_beat(
+            beat_event(
+                time.now,
+                beat=(first - 1 + k) % 4 + 1,
+                bpm=bpm,
+                deck=deck,
+                pitch_percent=pitch_percent,
+            )
+        )
+        times.append(time.now)
+    return times
+
+
 def beat_packet(
     *,
     beat: int = 1,
