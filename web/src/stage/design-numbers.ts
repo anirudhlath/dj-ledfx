@@ -4,7 +4,6 @@
 // render's own hex.
 export const SPEC = {
   "floorEdgePx": 0.8,
-  "courtyardDotPx": 7,
   "balconyHatchDeg": 45,
   "window": {
     "sillM": 0.45,
@@ -110,8 +109,6 @@ export const SPEC = {
   },
   "quality": {
     "desktopFps": 55,
-    "leds": 412,
-    "streamFps": 60,
     "phoneFps": 30,
     "idle": 0.5
   }

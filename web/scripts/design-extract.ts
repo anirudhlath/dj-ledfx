@@ -4,10 +4,10 @@
 // naming the entry; `npm run design:numbers` writes src/stage/design-numbers.ts from these.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
-/** Reads one file of the handoff: the spec, tokens.css, HANDOFF.sha256 or a reference render. */
+/** Reads one file of docs/design/web-app by its name there: tokens.css, or a render ("reference/Main.html"). */
 export type ReadText = (name: string) => string
 
 interface Entry {
@@ -44,7 +44,6 @@ function same(text: string, entry: Pick<Entry, 'where' | 'pattern'>, compared?: 
 
 const SPEC_ENTRIES: Record<string, Entry> = {
   floorEdgePx: { where: '§7.1 Floors', pattern: /`stage-floor` with a ([\d.]+) px `stage-floor-edge` outline/, take: (m) => n(m[1]) },
-  courtyardDotPx: { where: '§7.1 Courtyard', pattern: /with a faint ([\d.]+) px dot pattern/, take: (m) => n(m[1]) },
   balconyHatchDeg: { where: '§7.1 Balcony', pattern: /\*\*Balcony\*\* \(off the sunroom\): ([\d.]+)° hatch/, take: (m) => n(m[1]) },
   window: {
     where: '§7.1 Windows',
@@ -153,8 +152,8 @@ const SPEC_ENTRIES: Record<string, Entry> = {
   phoneStage: { where: '§8.10 Live', pattern: /stage (\d+) × (\d+) \(no labels\)/, take: (m) => ({ width: n(m[1]), height: n(m[2]) }) },
   quality: {
     where: '§14 Performance',
-    pattern: /stage ≥ (\d+) fps p95 with (\d+) LEDs streaming at (\d+) fps on desktop, ≥ (\d+) fps on a recent phone; main thread idle ≥ (\d+)% on Live/,
-    take: (m) => ({ desktopFps: n(m[1]), leds: n(m[2]), streamFps: n(m[3]), phoneFps: n(m[4]), idle: pct(m[5]) }),
+    pattern: /stage ≥ (\d+) fps p95 with \d+ LEDs streaming at \d+ fps on desktop, ≥ (\d+) fps on a recent phone; main thread idle ≥ (\d+)% on Live/,
+    take: (m) => ({ desktopFps: n(m[1]), phoneFps: n(m[2]), idle: pct(m[3]) }),
   },
 }
 
@@ -205,13 +204,13 @@ function font(tokens: string, px: string): string | number {
 const luminance = (hex: string) => [1, 3, 5].reduce((sum, at) => sum + parseInt(hex.slice(at, at + 2), 16), 0)
 
 /** The renders RENDER reads. */
-export const RENDERS = ['reference/Main.html', 'reference/State-Firmware.html'] as const
+const RENDERS = ['reference/Main.html', 'reference/State-Firmware.html']
 
-/** Fails unless each render is the one HANDOFF.sha256 pins, so RENDER's numbers are the handoff's. */
-export function checkPins(pins: string, readBytes: (name: string) => Uint8Array): void {
-  for (const name of RENDERS) {
+/** Fails unless each named file of docs/design/web-app is the one HANDOFF.sha256 (`pins`) pins. */
+export function checkPins(pins: string, names: readonly string[], readBytes: (name: string) => Uint8Array): void {
+  for (const name of names) {
     const hash = createHash('sha256').update(readBytes(name)).digest('hex')
-    if (!pins.includes(`${hash}  ${name}\n`)) throw new Error(`design numbers: ${name} isn't the render HANDOFF.sha256 pins`)
+    if (!pins.includes(`${hash}  ${name}\n`)) throw new Error(`${name} isn't the file HANDOFF.sha256 pins`)
   }
 }
 
@@ -399,30 +398,36 @@ export const RENDER = ${JSON.stringify(render, null, 2)} as const
 `
 }
 
-/** Where the handoff lives: the spec and design files in this checkout, the renders wherever they are. */
-export interface HandoffDirs {
+/** The handoff the design numbers are read from. */
+export interface Handoff {
+  /** The web app spec. */
   spec: string
-  design: string
-  /** docs/design/web-app/reference here, else in the main checkout (a worktree's are elsewhere); null if neither has them. */
-  renders: string | null
+  /** Reads tokens.css or a render, each render RENDER reads the one HANDOFF.sha256 pins; null where the renders are missing (CI). */
+  read: ReadText | null
+}
+
+/** The main checkout, which `git rev-parse --git-common-dir` names; null outside git. */
+function mainCheckout(repo: string): string | null {
+  try {
+    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    return dirname(common.trim())
+  } catch {
+    return null
+  }
 }
 
 /**
- * The renders aren't in git (CLAUDE.md, "Web App Design"): a worktree reads them from the main
- * checkout, which `git rev-parse --git-common-dir` names.
+ * Reads the handoff: the spec and design files from this checkout, and the renders from here or,
+ * as they aren't in git (CLAUDE.md, "Web App Design"), from the main checkout. Throws if a render
+ * isn't the one HANDOFF.sha256 pins.
  */
-export function handoffDirs(repo: string): HandoffDirs {
+export function readHandoff(repo: string): Handoff {
   const design = resolve(repo, 'docs/design/web-app')
-  const spec = resolve(repo, 'docs/superpowers/specs/2026-09-23-web-app-rebuild-design.md')
-  const here = resolve(design, 'reference')
-  if (existsSync(resolve(here, 'Main.html'))) return { spec, design, renders: here }
-  let main: string | null = null
-  try {
-    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: repo, encoding: 'utf8' })
-    main = dirname(common.trim())
-  } catch {
-    main = null
-  }
-  const there = main === null ? null : resolve(main, 'docs/design/web-app/reference')
-  return { spec, design, renders: there !== null && existsSync(resolve(there, 'Main.html')) ? there : null }
+  const spec = readFileSync(resolve(repo, 'docs/superpowers/specs/2026-09-23-web-app-rebuild-design.md'), 'utf8')
+  const main = existsSync(resolve(design, 'reference/Main.html')) ? repo : mainCheckout(repo)
+  const renders = main === null ? null : resolve(main, 'docs/design/web-app/reference')
+  if (renders === null || !existsSync(resolve(renders, 'Main.html'))) return { spec, read: null }
+  const path = (name: string) => (name.startsWith('reference/') ? resolve(renders, name.slice('reference/'.length)) : resolve(design, name))
+  checkPins(readFileSync(path('HANDOFF.sha256'), 'utf8'), RENDERS, (name) => readFileSync(path(name)))
+  return { spec, read: (name) => readFileSync(path(name), 'utf8') }
 }

@@ -61,7 +61,7 @@ cd web && npm run build          # Type-check and build web/dist; fails if MSW g
 cd web && npm run build:mock     # Build web/dist-mock: the app on its mocks (the hero unless ?scenario=), which e2e serves
 cd web && npm run api:types      # Regenerate web/src/api/generated/ from the backend's code, after any API change
 cd web && npm run api:check      # Fail if the generated types aren't the backend's; `-- --url http://127.0.0.1:8080` also compares a running server (GET only)
-cd web && npm run design:numbers # Regenerate src/stage/design-numbers.ts from the spec and the pinned renders (read from the main checkout); `-- --check` fails if it's stale
+cd web && npm run design:numbers # Regenerate src/stage/design-numbers.ts from the spec and the pinned renders (read from the main checkout); its node test fails while it's stale
 cd web && npm test               # Vitest: unit and component tests
 cd web && npm run lint           # ESLint (npx tsc -b type-checks)
 cd web && npx playwright install chromium  # Once per machine
