@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 
@@ -127,3 +128,43 @@ async def test_restore_brings_back_start_again_and_remembers_nothing_it_stops(
         assert [(entry["zoneId"], entry["lookId"]) for entry in recent] == [
             ("desk", "classic-breathe")
         ]
+
+
+async def test_a_backup_carries_the_tempo_and_restore_applies_it_at_once(tmp_path: Path) -> None:
+    (tmp_path / "old").mkdir()
+    (tmp_path / "new").mkdir()
+    async with api_home(tmp_path / "old", [], []) as old:
+        await old.client.put("/api/inputs/tempo", json={"lock": "internal", "bpm": 96.5})
+        backup = (await old.client.get("/api/state/export")).text
+
+    async with api_home(tmp_path / "new", [], []) as new:
+        resp = await new.client.post("/api/state/import", content=backup)
+
+        assert resp.status_code == 200
+        tempo = (await new.client.get("/api/inputs")).json()["tempo"]
+        assert (tempo["lock"], tempo["bpm"], tempo["internal"]["how"]) == ("internal", 96.5, "set")
+
+
+async def test_a_backup_from_before_m3_leaves_the_tempo_alone(tmp_path: Path) -> None:
+    async with api_home(tmp_path, [], []) as api:
+        backup = (await api.client.get("/api/state/export")).text
+        assert "tempo" not in tomllib.loads(backup).get("config", {})  # nothing saved yet
+        await api.client.put("/api/inputs/tempo", json={"lock": "internal", "bpm": 96.5})
+
+        resp = await api.client.post("/api/state/import", content=backup)
+
+        assert resp.status_code == 200
+        tempo = (await api.client.get("/api/inputs")).json()["tempo"]
+        assert (tempo["lock"], tempo["bpm"]) == ("internal", 96.5)
+
+
+async def test_a_backup_with_a_broken_tempo_restores_the_defaults(tmp_path: Path) -> None:
+    async with api_home(tmp_path, [], []) as api:
+        await api.client.put("/api/inputs/tempo", json={"lock": "internal", "bpm": 96.5})
+        broken = '[config.tempo]\nlock = "sometimes"\ninternal_bpm = "fast"\n'
+
+        resp = await api.client.post("/api/state/import", content=broken)
+
+        assert resp.status_code == 200
+        tempo = (await api.client.get("/api/inputs")).json()["tempo"]
+        assert (tempo["lock"], tempo["bpm"], tempo["source"]) == ("auto", 120.0, "internal")
