@@ -111,11 +111,12 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
                   frozen={frozen}
                   cadenceMs={cadenceMs({ phone, reducedMotion, frozen })}
                 />
-                <StageSvg pose={pose} marks={marks} labels={labels} sun={sunDrawn} />
+                <StageSvg pose={pose} marks={marks} labels={labels} sun={sunDrawn} sunLabel={!phone} />
               </>
             )}
           </div>
-          {!phone && (
+          {/* The phone's stage has no overlays (§8.10), and a frozen one none either (State-Reconnecting.png). */}
+          {!phone && !frozen && (
             <>
               <StageTools
                 mode={view.mode}

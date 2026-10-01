@@ -16,7 +16,7 @@ import { bearingDeg, FIT_VIEW, fitPose, LIVE_PADDING, projectPoint } from './cam
 import { RENDER, SPEC } from './design-numbers'
 import { anchorOf } from './marks'
 import type { StageSceneProps } from './scene/stage-scene'
-import { sunReadout, sunScene } from './sun'
+import { sunReadout, sunReadoutRuns, sunScene } from './sun'
 import { readStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
 
@@ -65,7 +65,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     for (const zone of state.running) expect(screen.getAllByText(zone.lookName).length).toBeGreaterThan(0)
     const sun = state.inputs.sun
     expect(screen.getByText(sunScene(state.home, sun)!.label)).toBeInTheDocument()
-    expect(screen.getByText(sunReadout(sun)!)).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Home, live' })).toHaveTextContent(sunReadout(sun)!)
     expect(within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')).toHaveLength(4)
   })
 
@@ -100,10 +100,19 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(canvas().dataset.cadence).toBe('null')
     expect(picture().style.filter).toBe(`grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`)
     expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
+    // State-Reconnecting.png's stage is the greyed picture alone: "Controls come back when the link does".
+    const overlays = () => [
+      screen.queryByRole('switch', { name: 'Labels' }),
+      screen.queryByRole('button', { name: 'Rotate view' }),
+      screen.queryByRole('list', { name: 'What the lights show' }),
+      screen.queryByText(sunReadoutRuns(liveStore.getState().inputs!.sun)![1]),
+    ]
+    expect(overlays()).toEqual([null, null, null, null])
     act(() => liveStore.setState({ connection: live }))
     expect(canvas().dataset.frozen).toBe('false')
     expect(picture().style.filter).toBe('')
     expect(screen.getByRole('navigation', { name: 'Rooms' })).toBeInTheDocument()
+    for (const overlay of overlays()) expect(overlay).toBeInTheDocument()
   })
 
   it("shows a light's tooltip under the mouse: its name, colour now, look and zone, and model", async () => {
@@ -166,6 +175,8 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(screen.queryByText(state.home.rooms[0].name)).not.toBeInTheDocument()
     expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'What the lights show' })).not.toBeInTheDocument()
+    // §8.10 "(no labels)": Phone-Live.png draws the sun's disc and arc, but not its label.
+    expect(screen.queryByText(sunScene(state.home, state.inputs.sun)!.label)).not.toBeInTheDocument()
     expect(canvas().dataset.cadence).toBe(String(1000 / SPEC.phoneFps))
   })
 
@@ -174,7 +185,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     const { state } = await openLive()
     const inputs = liveStore.getState().inputs!
     const sun = state.inputs.sun
-    const sunDrawn = () => screen.queryByText(sunScene(state.home, sun)!.label) ?? screen.queryByText(sunReadout(sun)!)
+    const sunDrawn = () => screen.queryByText(sunScene(state.home, sun)!.label) ?? screen.queryByText(sunReadoutRuns(sun)![1])
     expect(sunDrawn()).toBeInTheDocument()
     act(() => liveStore.setState({ inputs: null }))
     expect(sunDrawn()).not.toBeInTheDocument()

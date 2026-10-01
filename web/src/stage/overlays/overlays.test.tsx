@@ -12,7 +12,7 @@ import { RENDER, SPEC } from '../design-numbers'
 import type { StageLabel } from '../labels'
 import type { Mark } from '../marks'
 import { lightState } from '../show'
-import { sunReadout, sunScene } from '../sun'
+import { sunReadout, sunReadoutRuns, sunScene } from '../sun'
 import { tooltipText } from '../tooltip'
 import { nextRotation, ZOOM_STEPS } from '../view-memory'
 import { Legend } from './legend'
@@ -106,7 +106,9 @@ describe("the stage's controls (§8.1)", () => {
 
   it('reads the sun out while it is up, and says nothing at night or without a sun', () => {
     const { container, rerender } = render(<SunReadout sun={HERO_SUN} />)
-    expect(screen.getByText(sunReadout(HERO_SUN)!)).toBeInTheDocument()
+    expect(container).toHaveTextContent(sunReadout(HERO_SUN)!)
+    // Main.png: the elevation and the compass point in mono and the text colour, the rest in the readout's.
+    expect(screen.getByText(sunReadoutRuns(HERO_SUN)![1])).toHaveClass('num', 'text-text')
     rerender(<SunReadout sun={{ ...HERO_SUN, elevation: -1 }} />)
     expect(container).toBeEmptyDOMElement()
     rerender(<SunReadout sun={null} />)

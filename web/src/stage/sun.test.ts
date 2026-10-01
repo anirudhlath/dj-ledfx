@@ -4,7 +4,7 @@ import { homeFixture } from '@/api/mocks/fixtures'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { HERO_NOW } from '@/test/live'
 import { bounds } from './plan'
-import { compass, sunPoint, sunReadout, sunScene } from './sun'
+import { compass, sunPoint, sunReadout, sunReadoutRuns, sunScene } from './sun'
 
 const HERO_SUN = buildScenario('hero', HERO_NOW).inputs.sun
 /** A sun of this test's own: well up, south of west, setting at 20:05. */
@@ -38,6 +38,14 @@ describe('the sun (§7.4)', () => {
   it('labels the sun, and writes its readout, in whole degrees with the compass point and the sunset', () => {
     expect(sunScene(homeFixture, EVENING)!.label).toBe('SUN 12° · W')
     expect(sunReadout(EVENING)).toBe('Sun 12° · W · sets 20:05')
+  })
+
+  // Main.html sets the elevation and the compass point in mono, between the readout's own words.
+  it("sets the readout's elevation and compass point apart, as Main.png draws them in mono", () => {
+    expect(sunReadoutRuns(EVENING)).toEqual(['Sun ', '12° · W', ' · sets 20:05'])
+    expect(sunReadoutRuns(EVENING)!.join('')).toBe(sunReadout(EVENING))
+    expect(sunReadoutRuns(null)).toBeNull()
+    expect(sunReadoutRuns({ ...EVENING, elevation: -4 })).toBeNull()
   })
 
   it("draws the hero sun's path above the horizon, ending at the sun", () => {

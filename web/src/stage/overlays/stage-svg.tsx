@@ -16,12 +16,14 @@ export interface StageSvgProps {
   /** Null while the Labels switch is off, and on the phone (§8.10). */
   labels: readonly StageLabel[] | null
   sun: SunScene | null
+  /** The sun's mono label (§7.4). The phone's stage has none (§8.10: "no labels"; Phone-Live.png). */
+  sunLabel?: boolean
 }
 
-export function StageSvg({ pose, marks, labels, sun }: StageSvgProps) {
+export function StageSvg({ pose, marks, labels, sun, sunLabel = true }: StageSvgProps) {
   return (
     <svg aria-hidden="true" className="pointer-events-none absolute inset-0" width={pose.width} height={pose.height}>
-      {sun !== null && <SunMark pose={pose} sun={sun} />}
+      {sun !== null && <SunMark pose={pose} sun={sun} withLabel={sunLabel} />}
       {marks.map((mark) => (
         <MarkShape key={mark.key} mark={mark} />
       ))}
@@ -101,7 +103,7 @@ function RoomLabel({ label, at }: { label: StageLabel; at: Vec2 }) {
 }
 
 /** §7.4: the dashed arc of the sun's recent path, its glow, its disc and its label. */
-function SunMark({ pose, sun }: { pose: CameraPose; sun: SunScene }) {
+function SunMark({ pose, sun, withLabel }: { pose: CameraPose; sun: SunScene; withLabel: boolean }) {
   const glowId = useId()
   const { path, glow, disc, label } = RENDER.sun
   const [x, y] = projectPoint(pose, sun.at)
@@ -118,15 +120,17 @@ function SunMark({ pose, sun }: { pose: CameraPose; sun: SunScene }) {
       {sun.path.length > 1 && <polyline points={points} {...line(path.colour, path.alpha, path.widthPx, [path.dashPx, path.gapPx])} />}
       <circle cx={x} cy={y} r={glow.radiusPx} fill={`url(#${glowId})`} />
       <circle cx={x} cy={y} r={disc.radiusPx} fill={cssColour(disc.colour)} />
-      <text
-        x={x}
-        y={y + label.dyPx}
-        textAnchor="middle"
-        className="font-mono"
-        style={{ fontSize: cssSize(label.font), fontWeight: label.weight, fill: cssColour(label.colour) }}
-      >
-        {sun.label}
-      </text>
+      {withLabel && (
+        <text
+          x={x}
+          y={y + label.dyPx}
+          textAnchor="middle"
+          className="font-mono"
+          style={{ fontSize: cssSize(label.font), fontWeight: label.weight, fill: cssColour(label.colour) }}
+        >
+          {sun.label}
+        </text>
+      )}
     </g>
   )
 }

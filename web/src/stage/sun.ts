@@ -52,8 +52,16 @@ export function sunScene(home: Pick<Home, 'outline' | 'ceiling' | 'northOffsetDe
   return { at, path: [...path, at], label: `SUN ${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}` }
 }
 
+/**
+ * §8.1's readout in three runs: its first word, the elevation and compass point (Main.png sets them in
+ * mono), and the sunset; null while the sun is down or unknown (decision 7).
+ */
+export function sunReadoutRuns(sun: SunInput | null | undefined): readonly [string, string, string] | null {
+  if (sun == null || !up(sun)) return null
+  return ['Sun ', `${Math.round(sun.elevation)}° · ${compass(sun.azimuth)}`, ` · sets ${formatTime(new Date(sun.sunset))}`]
+}
+
 /** §8.1's readout: the elevation, the compass point and the sunset; null while the sun is down or unknown (decision 7). */
 export function sunReadout(sun: SunInput | null | undefined): string | null {
-  if (sun == null || !up(sun)) return null
-  return `Sun ${Math.round(sun.elevation)}° · ${compass(sun.azimuth)} · sets ${formatTime(new Date(sun.sunset))}`
+  return sunReadoutRuns(sun)?.join('') ?? null
 }
