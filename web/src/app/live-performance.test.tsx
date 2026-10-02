@@ -3,17 +3,16 @@ import { Profiler } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { frames } from '@/api/live'
 import { liveStore } from '@/api/live-store'
-import { RENDER } from '@/stage/design-numbers'
-import { STAGE_LABEL } from '@/stage/stage-pending'
 import { renderApp } from '@/test/app'
 import { HERO_NOW, startMockDataLayer } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
 import { seedRest } from '@/test/rest'
+import { loadedStage, MAIN_STAGE } from '@/test/stage'
 
-// jsdom has no WebGL. The stage's canvas has its own no-commit check (stage-scene.test.tsx); here a
-// stand-in takes its place, and the rest of the stage is real.
-vi.mock('@/stage/webgl', () => ({ hasWebGL2: () => true }))
-vi.mock('@/stage/stage-canvas', () => ({ StageCanvas: () => <div data-testid="stage-canvas" /> }))
+// jsdom has no WebGL. The stage's canvas has its own no-commit check (stage-scene.test.tsx); here
+// src/test/stage.ts's stand-in takes its place, and the rest of the stage is real.
+vi.mock('@/stage/webgl', () => import('@/test/stage').then((stage) => stage.webglMock()))
+vi.mock('@/stage/stage-canvas', (importOriginal) => import('@/test/stage').then((stage) => stage.canvasMock(importOriginal)))
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -40,8 +39,8 @@ it('fills the stores from the mock at 60 fps, and React commits nothing', async 
   // in-memory socket delivers in microtasks between the timers. The stage's lazy chunk loads
   // meanwhile; then it gets Main.png's size, and draws.
   await act(() => vi.advanceTimersByTimeAsync(3000))
-  await vi.waitFor(() => expect(screen.getByRole('region', { name: STAGE_LABEL })).not.toHaveAttribute('aria-busy'), { timeout: 10_000 })
-  act(() => resizeObserved(RENDER.stage.widthPx, RENDER.stage.heightPx))
+  await loadedStage()
+  act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
   expect(screen.getByTestId('stage-canvas')).toBeInTheDocument()
   expect(liveStore.getState().connection).toEqual({ status: 'live', fps: 60 })
   const version = frames.version

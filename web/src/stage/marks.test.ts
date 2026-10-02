@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { Light } from '@/api/contract'
-import { homeFixture } from '@/api/mocks/fixtures'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { HERO_NOW } from '@/test/live'
+import { heroPose } from '@/test/stage'
 import { lightBodies, stageBodies } from './bodies'
-import { FIT_VIEW, fitPose, projectPoint } from './camera'
-import { RENDER } from './design-numbers'
-import { anchorOf, lightMarks } from './marks'
+import { projectPoint } from './camera'
+import { anchorOf, lightMarks, statusesOf } from './marks'
+import { lightStates } from './show'
 
-const POSE = fitPose(homeFixture.outline, { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }, FIT_VIEW)!
-const statesOf = (lights: Light[]) => new Map(lights.map((light) => [light.id, light.status]))
+const POSE = heroPose()
+const statesOf = (lights: Light[]) => statusesOf(lightStates(lights))
 
 describe('the marks on the stage (§7.3, §9.1)', () => {
   it("drops a line from every raised compact light to the floor, and none from a strip", () => {

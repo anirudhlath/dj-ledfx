@@ -5,34 +5,13 @@ import { InstancedMesh, type Object3D, OrthographicCamera, type WebGLRenderer } 
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { liveStore } from '@/api/live-store'
-import { buildScenario, type ScenarioName } from '@/api/mocks/scenarios'
 import { HERO_NOW, pushFrame, startMockDataLayer } from '@/test/live'
-import { stageBodies } from '../bodies'
-import { FIT_VIEW, fitPose } from '../camera'
-import { RENDER, SPEC } from '../design-numbers'
-import { FrameWriter, writerEntries } from '../frame-writer'
+import { sceneProps } from '@/test/stage'
+import { SPEC } from '../design-numbers'
+import { FrameWriter } from '../frame-writer'
 import type { RGB } from '../light-maths'
-import { roomMask } from '../room-mask'
-import { lightState } from '../show'
 import { HomeScene } from './home-scene'
-import { StageScene, type StageSceneProps } from './stage-scene'
-
-const STAGE = { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }
-
-function stageProps(name: ScenarioName = 'hero', overrides: Partial<StageSceneProps> = {}): StageSceneProps {
-  const { home, lights } = buildScenario(name, HERO_NOW)
-  const states = new Map(lights.map((light) => [light.id, lightState(light, undefined)]))
-  const entries = writerEntries(stageBodies(lights), lights, states, home.rooms)
-  return {
-    home,
-    writer: new FrameWriter(entries),
-    entries,
-    mask: roomMask(home.rooms),
-    pose: fitPose(home.outline, STAGE, FIT_VIEW)!,
-    cadenceMs: null,
-    ...overrides,
-  }
-}
+import { StageScene } from './stage-scene'
 
 /** The light layer's three objects, and their materials, in the scene's order: all but the home's group, which comes first. */
 function lightLayer(scene: Object3D) {
@@ -60,7 +39,7 @@ beforeEach(() => {
 
 describe('the stage scene (§7.2, §7.5)', () => {
   it('puts the camera where the pose says', async () => {
-    const props = stageProps()
+    const props = sceneProps()
     const { camera } = await renderScene(<StageScene {...props} />)
     expect(camera.zoom).toBe(props.pose.zoom)
     expect(camera.right).toBe(props.pose.width / 2)
@@ -72,7 +51,7 @@ describe('the stage scene (§7.2, §7.5)', () => {
   // so the cadence holds the target and drops the odd frame: §14's desktop rate is the floor.
   it('draws every LED at the target rate for a second, and React commits nothing', async () => {
     startMockDataLayer({ scenario: 'firmware' })
-    const props = stageProps('firmware', { cadenceMs: 1000 / SPEC.target.fps })
+    const props = sceneProps('firmware', { cadenceMs: 1000 / SPEC.target.fps })
     let commits = 0
     await renderScene(
       <Profiler id="stage" onRender={() => void (commits += 1)}>
@@ -92,7 +71,7 @@ describe('the stage scene (§7.2, §7.5)', () => {
 
   // E5: under ?still the frames keep coming with the same bytes; they upload and render nothing.
   it('renders nothing for a frame that changes no byte', async () => {
-    const props = stageProps('hero', { cadenceMs: 1000 / SPEC.target.fps })
+    const props = sceneProps('hero', { cadenceMs: 1000 / SPEC.target.fps })
     const { lightId, ledCount } = props.entries.find((entry) => entry.streamed)!.body
     let gl: WebGLRenderer | undefined
     function Renderer() {
@@ -120,7 +99,7 @@ describe('the stage scene (§7.2, §7.5)', () => {
   // No frame comes while it's down, so the last one stays; a light whose state changed still draws.
   it('keeps the last frame when the link drops, and draws a light whose state changed', async () => {
     startMockDataLayer({ scenario: 'reconnecting' })
-    const props = stageProps('reconnecting', { cadenceMs: 1000 / SPEC.target.fps })
+    const props = sceneProps('reconnecting', { cadenceMs: 1000 / SPEC.target.fps })
     const { renderer } = await renderScene(<StageScene {...props} />)
     await vi.advanceTimersByTimeAsync(1500)
     expect(liveStore.getState().connection.status).toBe('reconnecting')
@@ -140,7 +119,7 @@ describe('the stage scene (§7.2, §7.5)', () => {
   // into the light layer as it is; one that changes what's drawn makes new meshes, but no new
   // materials, so no shader compiles again.
   it('draws a push that changes only colours into the same meshes and materials', async () => {
-    const props = stageProps()
+    const props = sceneProps()
     const { renderer } = await renderScene(<StageScene {...props} />)
     const scene = renderer.scene.instance as Object3D
     const before = lightLayer(scene)
@@ -157,7 +136,7 @@ describe('the stage scene (§7.2, §7.5)', () => {
   })
 
   it('keeps the materials when a light stops being drawn and the meshes are made again', async () => {
-    const props = stageProps()
+    const props = sceneProps()
     const { renderer } = await renderScene(<StageScene {...props} />)
     const scene = renderer.scene.instance as Object3D
     const before = lightLayer(scene)
@@ -170,7 +149,7 @@ describe('the stage scene (§7.2, §7.5)', () => {
 
   it('lets go of the home when the stage goes', async () => {
     const dispose = vi.spyOn(HomeScene.prototype, 'dispose')
-    const { renderer } = await renderScene(<StageScene {...stageProps()} />)
+    const { renderer } = await renderScene(<StageScene {...sceneProps()} />)
     await renderer.unmount()
     expect(dispose).toHaveBeenCalled()
   })

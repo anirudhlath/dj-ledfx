@@ -9,6 +9,8 @@ import { buildScenario, type ScenarioName } from '@/api/mocks/scenarios'
 
 /** The hero moment (§12.5): Wednesday 23 September 2026, 19:14. */
 export const HERO_NOW = new Date(2026, 8, 23, 19, 14)
+/** When the hero's lights took the status they have outside its looks: 70 minutes before HERO_NOW, as its scenario has it. */
+export const HERO_SINCE = new Date(HERO_NOW.getTime() - 70 * 60_000).toISOString()
 
 /** Fills the app's live store as a scenario's server does on connect: snapshots, a beat, and 60 fps. */
 export function seedLive(name: ScenarioName = 'hero', now: Date = HERO_NOW): void {

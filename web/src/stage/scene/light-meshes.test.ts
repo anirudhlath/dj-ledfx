@@ -2,16 +2,14 @@ import { type InstancedBufferAttribute, InstancedMesh, ShaderMaterial } from 'th
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { describe, expect, it, vi } from 'vitest'
 import { homeFixture, lightFixtures } from '@/api/mocks/fixtures'
-import { stageBodies } from '../bodies'
-import { FIT_VIEW, fitPose } from '../camera'
-import { FrameWriter, writerEntries } from '../frame-writer'
+import { HERO_SINCE } from '@/test/live'
+import { heroPose, stageWriter } from '@/test/stage'
+import { FrameWriter } from '../frame-writer'
 import { roomMask } from '../room-mask'
-import { lightState } from '../show'
 import { LIFT_M, LightMaterials, LightMeshes } from './light-meshes'
 
-const LIGHTS = lightFixtures('2026-09-23T18:04:00-05:00').map((light) => ({ ...light, status: 'streaming' as const }))
-const STATES = new Map(LIGHTS.map((light) => [light.id, lightState(light, undefined)]))
-const writer = () => new FrameWriter(writerEntries(stageBodies(LIGHTS), LIGHTS, STATES, homeFixture.rooms))
+const LIGHTS = lightFixtures(HERO_SINCE).map((light) => ({ ...light, status: 'streaming' as const }))
+const writer = () => stageWriter(LIGHTS).writer
 const materials = () => new LightMaterials(roomMask(homeFixture.rooms))
 
 describe("the lights' meshes (§7.5)", () => {
@@ -44,7 +42,7 @@ describe("the lights' meshes (§7.5)", () => {
   it('sizes its discs and lines to the stage and lifts them toward the camera', () => {
     const shared = materials()
     const meshes = new LightMeshes(writer(), shared)
-    const pose = fitPose(homeFixture.outline, { width: 900, height: 700 }, FIT_VIEW)!
+    const pose = heroPose({ width: 900, height: 700 })
     shared.setView(pose)
     meshes.setView(pose)
     const halo = (meshes.lifted.children[0] as InstancedMesh).material as ShaderMaterial

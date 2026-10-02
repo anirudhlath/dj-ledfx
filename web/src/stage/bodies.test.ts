@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Light, LightShape } from '@/api/contract'
 import { lightFixtures } from '@/api/mocks/fixtures'
+import { HERO_SINCE } from '@/test/live'
 import { gridColumns, ledAlong, lightBodies, sampleCount, stageBodies, type Body } from './bodies'
 import { SPEC } from './design-numbers'
 
-const LIGHTS = lightFixtures('2026-09-23T18:04:00-05:00')
+const LIGHTS = lightFixtures(HERO_SINCE)
 const byId = (id: string): Light => LIGHTS.find((light) => light.id === id)!
 const ofKind = (kind: LightShape['kind'], keep: (light: Light) => boolean = () => true): Light =>
   LIGHTS.find((light) => light.shape?.kind === kind && keep(light))!

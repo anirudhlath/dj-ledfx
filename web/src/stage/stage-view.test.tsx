@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decodeFrame, encodeFrame } from '@/api/frames'
@@ -9,53 +9,34 @@ import type { ScenarioName } from '@/api/mocks/scenarios'
 import { LIVE_LAYOUT } from '@/pages/live-numbers'
 import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
-import { seedLive } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
-import { seedRest } from '@/test/rest'
+import { drawn, heroPose, loadedStage, MAIN_STAGE, seedStage } from '@/test/stage'
 import { setReducedMotion, setViewportWidth } from '@/test/viewport'
 import { lightBodies } from './bodies'
-import { FIT_VIEW, fitPose, projectPoint, type View } from './camera'
-import { RENDER, SPEC } from './design-numbers'
+import { FIT_VIEW, projectPoint } from './camera'
+import { SPEC } from './design-numbers'
 import { anchorOf } from './marks'
-import type { StageSceneProps } from './scene/stage-scene'
 import { STAGE_LABEL } from './stage-pending'
 import { sunPosition, sunScene } from './sun'
 import { readStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
 
-// jsdom has no WebGL: the canvas is a stand-in, memoised as the real one is, that shows what it was
-// asked to draw and keeps the props it was given last. The rest of the stage (the SVG layer, the
-// overlays, the pointer) is the real one. The view's, the canvas's and the SVG layer's renders are counted.
-const drawn = vi.hoisted(() => ({ props: null as StageSceneProps | null }))
-vi.mock('./webgl', () => ({ hasWebGL2: vi.fn(() => true) }))
-const { countedExport, countedStandIn } = await vi.hoisted(() => import('@/test/count-renders'))
-vi.mock('./stage-canvas', async (importOriginal: <T>() => Promise<T>) => ({
-  StageCanvas: countedStandIn('canvas', (await importOriginal<typeof import('./stage-canvas')>()).StageCanvas, (props: StageSceneProps) => {
-    drawn.props = props
-    return <div data-testid="stage-canvas" data-cadence={String(props.cadenceMs)} />
-  }),
-}))
+// jsdom has no WebGL: the canvas is src/test/stage.ts's stand-in, which keeps the props it was given
+// last in `drawn`. The rest of the stage (the SVG layer, the overlays, the pointer) is the real one.
+// The view's, the canvas's and the SVG layer's renders are counted.
+vi.mock('./webgl', () => import('@/test/stage').then((stage) => stage.webglMock()))
+vi.mock('./stage-canvas', (importOriginal) => import('@/test/stage').then((stage) => stage.canvasMock(importOriginal)))
+const { countedExport } = await vi.hoisted(() => import('@/test/count-renders'))
 vi.mock('./overlays/stage-svg', countedExport('svg', 'StageSvg'))
 vi.mock('./stage-view', countedExport('view', 'StageView'))
 
-const STAGE = { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }
-
-/** The stage, once its code and data have loaded. */
-async function loadedStage(): Promise<HTMLElement> {
-  // The stage's code is a lazy chunk, and three.js takes a moment to load the first time.
-  await waitFor(() => expect(screen.getByRole('region', { name: STAGE_LABEL })).not.toHaveAttribute('aria-busy'), { timeout: 10_000 })
-  return screen.getByRole('region', { name: STAGE_LABEL })
-}
-
 /** Live on a scenario's data, laid out at Main.png's stage size. */
 async function openLive(name: ScenarioName = 'hero') {
-  const state = seedRest(name)
-  seedLive(name)
+  const state = seedStage(name)
   const router = renderApp('/next/live')
   await loadedStage()
-  act(() => resizeObserved(STAGE.width, STAGE.height))
-  const pose = fitPose(state.home.outline, STAGE, FIT_VIEW)!
-  return { state, router, pose }
+  act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+  return { state, router, pose: heroPose() }
 }
 
 const canvas = () => screen.getByTestId('stage-canvas')
@@ -130,17 +111,16 @@ describe('the stage on Live (§7, §8.1)', () => {
   })
 
   it('turns to Plan, orbits a step at a time, zooms in to the last step, and fits again', async () => {
-    const { state } = await openLive()
-    const poseFor = (view: View) => fitPose(state.home.outline, STAGE, view)
+    await openLive()
     await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
     await userEvent.click(screen.getByRole('button', { name: 'Rotate view' }))
-    expect(drawn.props!.pose).toEqual(poseFor({ mode: 'plan', rotateDeg: SPEC.rotate.stepDeg, zoom: 1 }))
+    expect(drawn.props!.pose).toEqual(heroPose(MAIN_STAGE, { mode: 'plan', rotateDeg: SPEC.rotate.stepDeg, zoom: 1 }))
     const zoomIn = screen.getByRole('button', { name: 'Zoom in' })
     while (!(zoomIn as HTMLButtonElement).disabled) await userEvent.click(zoomIn)
     expect(readStageView(window.localStorage, 'live').view).toEqual({ mode: 'plan', rotateDeg: SPEC.rotate.stepDeg, zoom: 2 })
     await userEvent.click(screen.getByRole('button', { name: 'Fit home' }))
     expect(readStageView(window.localStorage, 'live').view).toEqual({ ...FIT_VIEW, mode: 'plan' })
-    expect(drawn.props!.pose).toEqual(poseFor({ ...FIT_VIEW, mode: 'plan' }))
+    expect(drawn.props!.pose).toEqual(heroPose(MAIN_STAGE, { ...FIT_VIEW, mode: 'plan' }))
   })
 
   // Review focus 3: the link drops, and comes back.
@@ -214,7 +194,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(router.state.location.search).toBe(`?zone=${lit.id}`)
     await act(() => router.navigate('/live'))
     await loadedStage()
-    act(() => resizeObserved(STAGE.width, STAGE.height))
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
     const dark = state.home.rooms.find((room) => !room.hasLights)
     if (dark !== undefined) {
       const [dx, dy] = projectPoint(pose, [...dark.labelAt, 0])
@@ -225,8 +205,7 @@ describe('the stage on Live (§7, §8.1)', () => {
 
   it("says so where WebGL is missing, and keeps the rooms' links", async () => {
     vi.mocked(hasWebGL2).mockReturnValueOnce(false)
-    seedRest()
-    seedLive()
+    seedStage()
     renderApp('/next/live')
     await loadedStage()
     const title = screen.getByText("The home can't be drawn here")

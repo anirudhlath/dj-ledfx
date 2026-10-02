@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { Light, LightUpdate } from '@/api/contract'
 import { lightFixtures } from '@/api/mocks/fixtures'
 import { buildScenario } from '@/api/mocks/scenarios'
-import { HERO_NOW } from '@/test/live'
+import { HERO_NOW, HERO_SINCE } from '@/test/live'
 import { isDrawn, isStreamed, lightState, lightStates, newestFirst, restingColour } from './show'
 
-const light = (patch: Partial<Light>): Light => ({ ...lightFixtures('2026-09-23T18:04:00-05:00')[0], ...patch })
+const light = (patch: Partial<Light>): Light => ({ ...lightFixtures(HERO_SINCE)[0], ...patch })
 
 describe('what the stage draws for a light', () => {
   it.each([

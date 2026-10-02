@@ -2,14 +2,16 @@ import { describe, expect, it } from 'vitest'
 import type { Id, Light } from '@/api/contract'
 import { decodeFrame, encodeFrame, FrameStore } from '@/api/frames'
 import { HOME_TOTALS, homeFixture, lightFixtures } from '@/api/mocks/fixtures'
+import { HERO_SINCE } from '@/test/live'
+import { stageWriter } from '@/test/stage'
 import { lightBodies, stageBodies, type Body } from './bodies'
 import { SPEC } from './design-numbers'
 import { FrameWriter, sameLayout, writerEntries, type WriterEntry } from './frame-writer'
 import { haloRadiusPx, poolRadiusM } from './light-maths'
 import { STAGE_PALETTE } from './palette'
-import { lightState } from './show'
+import { lightStates } from './show'
 
-const LIGHTS = lightFixtures('2026-09-23T18:04:00-05:00')
+const LIGHTS = lightFixtures(HERO_SINCE)
 const POINT = LIGHTS.find((light) => light.shape?.kind === 'point')!
 const STRIP = LIGHTS.find((light) => light.shape?.kind === 'bent-line')!
 const GRID = LIGHTS.find((light) => light.shape?.kind === 'grid')!
@@ -185,8 +187,7 @@ describe('the frame writer', () => {
   it("draws the whole home's LEDs 600 times well inside a second", () => {
     const frames = new FrameStore()
     for (const light of LIGHTS) stream(frames, light.id, solid(light.leds, [200, 120, 40]))
-    const states = new Map(LIGHTS.map((light) => [light.id, lightState({ ...light, status: 'streaming' }, undefined)]))
-    const writer = new FrameWriter(writerEntries(stageBodies(LIGHTS), LIGHTS, states, homeFixture.rooms))
+    const { writer } = stageWriter(LIGHTS.map((light) => ({ ...light, status: 'streaming' as const })))
     const started = performance.now()
     for (let i = 0; i < 600; i++) writer.write(frames)
     expect(performance.now() - started).toBeLessThan(1000)
@@ -197,8 +198,7 @@ describe('the frame writer', () => {
 describe('the writer entries', () => {
   it("give each body whether its light streams, the colour it rests on, and its room", () => {
     const light: Light = { ...POINT, status: 'idle', power: true, colour: '#00ff00' }
-    const states = new Map([[light.id, lightState(light, undefined)]])
-    const [only] = writerEntries(lightBodies(light), [light], states, homeFixture.rooms)
+    const [only] = writerEntries(lightBodies(light), [light], lightStates([light]), homeFixture.rooms)
     expect(only).toMatchObject({ streamed: false, resting: [0, 255, 0] })
     expect(homeFixture.rooms[only.room - 1].id).toBe(light.room)
   })
@@ -206,8 +206,7 @@ describe('the writer entries', () => {
   // §9.1: offline and switched-off lights show only their marks, which are the overlay's.
   it('leave out offline and switched-off lights', () => {
     const lights: Light[] = [{ ...POINT, status: 'offline' }, { ...STRIP, status: 'switched-off' }, { ...GRID, status: 'streaming' }]
-    const states = new Map(lights.map((light) => [light.id, lightState(light, undefined)]))
-    const entries = writerEntries(stageBodies(lights), lights, states, homeFixture.rooms)
+    const { entries } = stageWriter(lights)
     expect(entries.map((e) => e.body.lightId)).toEqual([GRID.id])
     expect(entries[0].streamed).toBe(true)
   })
@@ -216,7 +215,7 @@ describe('the writer entries', () => {
     const light: Light = { ...POINT, status: 'idle', power: true, colour: '#00ff00' }
     const bodies = stageBodies([light])
     const entriesOf = (patch: Partial<Light>) =>
-      writerEntries(bodies, [light], new Map([[light.id, lightState({ ...light, ...patch }, undefined)]]), homeFixture.rooms)
+      writerEntries(bodies, [light], lightStates([{ ...light, ...patch }]), homeFixture.rooms)
     const green = entriesOf({})
     expect(sameLayout(green, entriesOf({ colour: '#ff0000' }))).toBe(true)
     expect(sameLayout(green, entriesOf({ status: 'streaming' }))).toBe(true)

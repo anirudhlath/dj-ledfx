@@ -9,9 +9,10 @@ import { buildScenario } from '@/api/mocks/scenarios'
 import { ButtonLink } from '@/design/button'
 import { HERO_NOW, pushFrame } from '@/test/live'
 import { linkNames, renderAt } from '@/test/router'
+import { heroPose, MAIN_STAGE } from '@/test/stage'
 import { stageBehaviour, type StageOptions } from '../behaviour'
 import { useCadence } from '../cadence'
-import { FIT_VIEW, fitPose, type CameraPose, type View } from '../camera'
+import { FIT_VIEW, type View } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import type { StageLabel } from '../labels'
 import type { Mark } from '../marks'
@@ -28,8 +29,7 @@ import { SunReadout } from './sun-readout'
 import { ViewControls } from './view-controls'
 
 const hero = buildScenario('hero', HERO_NOW)
-const STAGE = { width: RENDER.stage.widthPx, height: RENDER.stage.heightPx }
-const pose: CameraPose = fitPose(hero.home.outline, STAGE, FIT_VIEW)!
+const pose = heroPose()
 const HERO_SUN: SunInput = hero.inputs.sun
 
 /** One mark of each kind, somewhere on the stage. */
@@ -157,7 +157,7 @@ describe('the light tooltip (§8.1)', () => {
 
   it("names the light and paints its colour now from the frames, with the look and the model", () => {
     decodeFrame(encodeFrame(2, light.id, 1, new Uint8Array(light.leds * 3).fill(128)), 2, frames, 0)
-    render(<LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={STAGE} />)
+    render(<LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={MAIN_STAGE} />)
     const tooltip = screen.getByRole('tooltip')
     expect(tooltip).toHaveTextContent(light.name)
     expect(tooltip).toHaveTextContent('#808080 · 50%')
@@ -176,7 +176,7 @@ describe('the light tooltip (§8.1)', () => {
     render(
       <>
         <DrawTick cadenceMs={cadenceMs} />
-        <LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={STAGE} />
+        <LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={MAIN_STAGE} />
       </>,
     )
     return { tooltip: screen.getByRole('tooltip'), cadenceMs: cadenceMs! }
@@ -228,7 +228,7 @@ describe('the light tooltip (§8.1)', () => {
   })
 
   it("follows its light's latency on the stats channel", () => {
-    render(<LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={STAGE} />)
+    render(<LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={MAIN_STAGE} />)
     const tooltip = screen.getByRole('tooltip')
     expect(tooltip).toHaveTextContent(deviceLine(light, null))
     const stat = { id: light.id, send_fps: 60, latency_ms: 123, dropped_pct: 0 }
@@ -237,8 +237,8 @@ describe('the light tooltip (§8.1)', () => {
   })
 
   it("turns to the light's left near the stage's right edge", () => {
-    const at: [number, number] = [STAGE.width - 4, 100]
-    render(<LightTooltip light={light} state={state} text={text} at={at} stage={STAGE} />)
+    const at: [number, number] = [MAIN_STAGE.width - 4, 100]
+    render(<LightTooltip light={light} state={state} text={text} at={at} stage={MAIN_STAGE} />)
     expect(parseFloat(screen.getByRole('tooltip').style.left)).toBeLessThan(at[0])
   })
 })

@@ -1,18 +1,11 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { openStage } from './helpers'
 
 // The stage in the browser, on the mock (the hero unless the path asks for another scenario): §8.1's
 // room click and §7.6's frozen mode. The phone's stage has no labels or overlays (§8.10), and
 // stage-view.test.tsx covers it, so this needs one project.
 test.describe('the stage', () => {
   test.skip(({ isMobile }) => isMobile)
-
-  /** Live's stage, once its canvas is on the page. */
-  async function openStage(page: Page, path = '/next/live') {
-    await page.goto(path)
-    const stage = page.getByRole('region', { name: 'Home, live' })
-    await expect(stage.locator('canvas')).toBeVisible()
-    return stage
-  }
 
   // §8.1: "Click a room → /live/put?zone=<room>". The rooms' links (the stage's keyboard way in)
   // name a room with lights and where it goes; a click on that room's label on the floor goes there too.

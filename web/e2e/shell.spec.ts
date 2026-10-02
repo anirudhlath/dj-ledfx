@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { open, stageCanvas } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in Dallas (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -29,19 +30,7 @@ function isPhone(page: Page): boolean {
   return (page.viewportSize()?.width ?? 0) < 768
 }
 
-/**
- * Opens a page and waits for the chrome's first data from the mock (the hero, unless the path asks
- * for another scenario): the attention button, whatever it says. A test that measures the tempo
- * waits for it with tempo().
- */
-async function open(page: Page, path: string) {
-  await page.goto(path)
-  // The mock build renders once MSW's worker is up (app/boot.tsx), so the chrome comes first, then its fonts.
-  await expect(page.getByRole('banner').getByRole('button', { name: /needs attention$|^All good$/ })).toBeVisible()
-  await page.evaluate(() => document.fonts.ready)
-}
-
-/** The banner's tempo module, once the first beat has drawn it. */
+/** The banner's tempo module, once the first beat has drawn it: open() doesn't wait for it. */
 async function tempo(page: Page): Promise<Locator> {
   const group = page.getByRole('banner').getByRole('group', { name: 'Tempo' })
   await expect(group).toBeVisible()
@@ -115,7 +104,7 @@ test.beforeEach(async ({ page }) => {
 // The mock's hero, its beat and frames held; the stage drawn.
 test('Live', async ({ page }) => {
   await openStill(page, '/next/live')
-  await expect(page.getByRole('region', { name: 'Home, live' }).locator('canvas')).toBeVisible()
+  await expect(stageCanvas(page)).toBeVisible()
   await expect(page).toHaveScreenshot('live.png')
 })
 
