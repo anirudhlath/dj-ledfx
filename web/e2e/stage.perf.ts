@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { SPEC } from '../src/stage/design-numbers'
-import { openStage } from './helpers'
+import { stageCanvas } from './helpers'
 
 // §14 Performance on Live, against SPEC.quality: the stage's frame rate with every LED streaming
 // (the firmware scenario streams all of the home's LEDs at the mock's full rate: mock-server.test.ts),
@@ -42,7 +42,10 @@ async function measure(page: Page, path: string, cpuSlowdown: number): Promise<M
   const cdp = await page.context().newCDPSession(page)
   await cdp.send('Performance.enable')
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuSlowdown })
-  await openStage(page, path)
+  // Not open(): the phone's header shows no attention button while nothing needs attention, as in the
+  // firmware scenario, so this waits for the stage's canvas alone.
+  await page.goto(path)
+  await expect(stageCanvas(page)).toBeVisible()
   await page.waitForTimeout(SETTLE_MS)
 
   const metrics = async () => new Map((await cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]))
