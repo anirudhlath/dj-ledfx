@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC
 from functools import partial
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import httpx
@@ -49,7 +50,10 @@ async def api_home(
     *,
     plan: HomeModel | None = None,
     listening: Listening | None = None,
+    discovery: Any = None,
 ) -> AsyncIterator[Api]:
+    """discovery stands in for the discovery orchestrator: POST /devices/scan and the lamp
+    outputs ask it."""
     home = await build_home(tmp_path, lights, zones, plan=plan)
     watchers = Watchers()
     previews = PreviewManager(home.manager, partial(watchers.watching, "preview"))
@@ -85,6 +89,7 @@ async def api_home(
         home_map=home.home_map,
         previews=previews,
         listening=listening,
+        discovery_orchestrator=discovery,
     )
     transport = httpx.ASGITransport(app=app)
     try:

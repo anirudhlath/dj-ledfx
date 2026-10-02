@@ -11,20 +11,16 @@ from typing import Any
 
 import pytest
 from api_home import Api, api_home
-from conftest import FakeLight
+from govee_fakes import LAMP, TEST_MODEL, UPRIGHT, govee_lamp, lamp_row
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.govee.sku_registry import SKU_REGISTRY
-from dj_ledfx.devices.govee.types import GoveeDeviceCapability
 
-LAMP = "govee:test-lamp"
 OUTPUT = f"/api/lights/{LAMP}/output"
-UPRIGHT = GoveeDeviceCapability(is_rgbic=True, segment_count=15, razer=True, form="upright")
 
 
 @pytest.fixture(autouse=True)
 def _test_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(SKU_REGISTRY, "test-model", UPRIGHT)
+    monkeypatch.setitem(SKU_REGISTRY, TEST_MODEL, UPRIGHT)
 
 
 class FakeDiscovery:
@@ -41,20 +37,8 @@ class FakeDiscovery:
 
 @asynccontextmanager
 async def _lamp_api(tmp_path: Path, discovery: FakeDiscovery) -> AsyncIterator[Api]:
-    caps = DeviceCapabilities(protocol="Govee")
-    lamp = FakeLight(LAMP, name="Test lamp", led_count=15, caps=caps)
-    async with api_home(tmp_path, [lamp], []) as api:
-        await api.home.db.upsert_device(
-            {
-                "id": LAMP,
-                "name": "Test lamp",
-                "backend": "govee",
-                "ip": "127.0.0.1",
-                "device_id": "test-lamp",
-                "sku": "test-model",
-            }
-        )
-        api.app.state.discovery_orchestrator = discovery
+    async with api_home(tmp_path, [govee_lamp()], [], discovery=discovery) as api:
+        await api.home.db.upsert_device(lamp_row())
         yield api
 
 

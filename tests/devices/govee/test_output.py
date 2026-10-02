@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from govee_fakes import NO_RAZER, UPRIGHT
 
 from dj_ledfx.config import GOVEE_COLOUR_FPS, GOVEE_RAZER_FPS
 from dj_ledfx.devices.govee.output import GoveeOutput, LampPlan, lamp_fps, lamp_plan
 from dj_ledfx.devices.govee.types import GoveeDeviceCapability
 
-UPRIGHT = GoveeDeviceCapability(is_rgbic=True, segment_count=15, razer=True, form="upright")
-NO_RAZER = GoveeDeviceCapability(is_rgbic=True, segment_count=15)
 PLAIN = GoveeDeviceCapability(is_rgbic=False, segment_count=0)
 
 
