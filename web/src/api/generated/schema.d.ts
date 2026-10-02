@@ -470,6 +470,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lights/{light_id}/output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Lamp Output
+         * @description A Govee lamp's output: how it plays now (razer segments or one colour, and how many
+         *     segments), and its own setting, which the config and its model fill in.
+         */
+        get: operations["get_lamp_output_api_lights__light_id__output_get"];
+        /**
+         * Set Lamp Output
+         * @description Set a Govee lamp's own output; a field left null goes back to the default. The lamp
+         *     is reconnected at once to take it. One that doesn't answer goes offline (online is
+         *     false) and takes the output when a scan finds it.
+         */
+        put: operations["set_lamp_output_api_lights__light_id__output_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lights/{light_id}/placement": {
         parameters: {
             query?: never;
@@ -1378,6 +1405,36 @@ export interface components {
              * @enum {string}
              */
             how: "default" | "set" | "tapped" | "kept";
+        };
+        /**
+         * LampOutput
+         * @description How a Govee lamp plays now, and its own setting.
+         */
+        LampOutput: {
+            /** Lightid */
+            lightId: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "segments" | "colour";
+            /** Online */
+            online: boolean;
+            own: components["schemas"]["LampOutputSetting"];
+            /** Segments */
+            segments: number;
+        };
+        /**
+         * LampOutputSetting
+         * @description A Govee lamp's own output (the light-output plan's ruling 17; outside the web spec
+         *     until a design handoff adds it): razer segments or one colour, and its segment count.
+         *     Null leaves either to the config and the lamp's model.
+         */
+        LampOutputSetting: {
+            /** Mode */
+            mode?: ("segments" | "colour") | null;
+            /** Segments */
+            segments?: number | null;
         };
         /** Layer */
         Layer: {
@@ -3080,6 +3137,72 @@ export interface operations {
                     "application/json": {
                         [key: string]: components["schemas"]["Placement"];
                     };
+                };
+            };
+        };
+    };
+    get_lamp_output_api_lights__light_id__output_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                light_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LampOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_lamp_output_api_lights__light_id__output_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                light_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LampOutputSetting"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LampOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

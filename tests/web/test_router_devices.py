@@ -99,8 +99,11 @@ def test_scan_endpoint_with_orchestrator():
     mock_orchestrator = MagicMock()
     mock_orchestrator.run_scan = AsyncMock(return_value=2)
 
-    app = create_app(**mock_deps(device_manager=manager, scheduler=scheduler))
-    app.state.discovery_orchestrator = mock_orchestrator
+    app = create_app(
+        **mock_deps(
+            device_manager=manager, scheduler=scheduler, discovery_orchestrator=mock_orchestrator
+        )
+    )
 
     test_client = TestClient(app)
     resp = test_client.post("/api/devices/scan")

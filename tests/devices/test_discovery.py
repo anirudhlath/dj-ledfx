@@ -1,5 +1,6 @@
 """Tests for DiscoveryOrchestrator."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -557,3 +558,27 @@ async def test_only_a_known_light_with_a_row_is_reconnected(
     assert await orchestrator.reconnect(LAMP) is False
     assert await orchestrator.reconnect("govee:nobody") is False
     backend.connect_known.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_scans_take_turns(config, device_manager, event_bus):
+    """A scan asked for while one runs waits for it (POST /api/devices/scan beside the loop)."""
+    orchestrator = DiscoveryOrchestrator(
+        config=config, device_manager=device_manager, event_bus=event_bus
+    )
+    running = most = 0
+
+    async def discover(*args: object, **kwargs: object) -> None:
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+
+    backend = MagicMock()
+    backend.discover = discover
+    orchestrator._backends = [backend]
+
+    await asyncio.gather(orchestrator.run_scan(), orchestrator.run_scan())
+
+    assert most == 1

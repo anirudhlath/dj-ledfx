@@ -17,6 +17,7 @@ from dj_ledfx.web.errors import unprocessable
 
 if TYPE_CHECKING:
     from dj_ledfx.config import AppConfig
+    from dj_ledfx.devices.discovery import DiscoveryOrchestrator
     from dj_ledfx.devices.manager import DeviceManager
     from dj_ledfx.effects.engine import EffectEngine
     from dj_ledfx.effects.presets import PresetStore
@@ -113,6 +114,7 @@ def create_app(
     home_map: HomeMap | None = None,
     previews: PreviewManager | None = None,
     listening: Listening | None = None,
+    discovery_orchestrator: DiscoveryOrchestrator | None = None,
 ) -> FastAPI:
     # One schema per type, under the contract's name (not Look-Input / Look-Output).
     app = FastAPI(
@@ -148,6 +150,7 @@ def create_app(
     app.state.home_map = home_map
     app.state.previews = previews
     app.state.listening = listening  # where Pro DJ Link is heard; None: not at all
+    app.state.discovery_orchestrator = discovery_orchestrator  # scans and reconnects
     app.state.ws_sessions = set()  # open /ws sessions: pushes go to them, ws.close_all ends them
     app.state.ws_closing = False
 

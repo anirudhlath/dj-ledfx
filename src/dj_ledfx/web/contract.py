@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities, LightProtocol
+from dj_ledfx.devices.govee.output import MAX_SEGMENTS, GoveeMode, GoveeOutput, lamp_plan
+from dj_ledfx.devices.govee.sku_registry import get_device_capability
 from dj_ledfx.devices.lights import LightEntry, LightIndex
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.color import rgb_to_hex
@@ -583,6 +585,38 @@ class LightUpdate(ContractModel):
     own_effect: str | None = None
     power: bool | None = None
     colour: str | None = None
+
+
+class LampOutputSetting(ContractModel):
+    """A Govee lamp's own output (the light-output plan's ruling 17; outside the web spec
+    until a design handoff adds it): razer segments or one colour, and its segment count.
+    Null leaves either to the config and the lamp's model."""
+
+    mode: GoveeMode | None = None
+    segments: int | None = Field(None, ge=2, le=MAX_SEGMENTS)
+
+
+class LampOutput(ContractModel):
+    """How a Govee lamp plays now, and its own setting."""
+
+    light_id: str
+    mode: GoveeMode
+    segments: int  # 1: one colour, with no segments to light
+    own: LampOutputSetting
+    online: bool  # false: it didn't answer, and takes its output when a scan finds it
+
+
+def lamp_output_out(
+    light_id: str, sku: str, own: GoveeOutput, segment_override: int | None, online: bool
+) -> LampOutput:
+    plan = lamp_plan(get_device_capability(sku), own, segment_override)
+    return LampOutput(
+        light_id=light_id,
+        mode="segments" if plan.razer else "colour",
+        segments=plan.segments,
+        own=LampOutputSetting(mode=own.mode, segments=own.segments),
+        online=online,
+    )
 
 
 class AttentionSubject(ContractModel):

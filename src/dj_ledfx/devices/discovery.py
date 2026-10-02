@@ -39,6 +39,9 @@ class DiscoveryOrchestrator:
         self._state_db = state_db
         self._running = False
         self._task: asyncio.Task[None] | None = None
+        # One scan at a time: a Govee scan has one reply handler, so two at once would cut
+        # each other short (POST /api/devices/scan beside the loop)
+        self._scan_lock = asyncio.Lock()
 
         # Instantiate backends once; filter by is_enabled
         self._backends: list[DeviceBackend] = []
@@ -107,10 +110,11 @@ class DiscoveryOrchestrator:
         Returns total new devices found. Each device fires an event via
         the on_found callback as soon as it responds — no batching.
         """
-        results = await asyncio.gather(
-            *(self._discover_backend(b) for b in self._backends),
-            return_exceptions=True,
-        )
+        async with self._scan_lock:
+            results = await asyncio.gather(
+                *(self._discover_backend(b) for b in self._backends),
+                return_exceptions=True,
+            )
         found = 0
         for result in results:
             if isinstance(result, Exception):
