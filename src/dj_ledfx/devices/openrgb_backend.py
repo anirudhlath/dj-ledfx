@@ -9,16 +9,14 @@ from dj_ledfx.config import AppConfig, OpenRGBConfig
 from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
 from dj_ledfx.devices.heuristics import estimate_device_latency_ms
 from dj_ledfx.devices.openrgb import OpenRGBAdapter
-from dj_ledfx.latency.strategies import make_strategy
-from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.latency.tracker import LatencyTracker, tracker_for
 
 
 def _tracker(cfg: OpenRGBConfig, name: str) -> LatencyTracker:
     """A static strategy keeps the configured latency; the others start from the heuristic
     for the device's name (OpenRGB can't be probed)."""
-    seed = cfg.latency_ms if cfg.latency_strategy == "static" else estimate_device_latency_ms(name)
-    strategy = make_strategy(cfg.latency_strategy, seed, cfg.latency_window_size)
-    return LatencyTracker(strategy, cfg.manual_offset_ms)
+    static = cfg.latency_strategy == "static"
+    return tracker_for(cfg, seed_ms=None if static else estimate_device_latency_ms(name))
 
 
 class OpenRGBBackend(DeviceBackend):

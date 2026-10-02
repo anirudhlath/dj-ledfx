@@ -17,8 +17,7 @@ from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
 from dj_ledfx.devices.govee.sku_registry import get_device_capability
 from dj_ledfx.devices.govee.transport import GoveeTransport
 from dj_ledfx.devices.govee.types import GoveeDeviceRecord
-from dj_ledfx.latency.strategies import make_strategy
-from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.latency.tracker import LatencyTracker, tracker_for
 
 
 def _record_of(row: Mapping[str, Any]) -> GoveeDeviceRecord | None:
@@ -178,7 +177,7 @@ class GoveeBackend(DeviceBackend):
         status reads time its round trips. Raises ConnectionError when it doesn't answer."""
         adapter, max_fps = self._adapter(transport, record, config, output)
         await adapter.connect()
-        tracker = self._create_tracker(config)
+        tracker = tracker_for(config.devices.govee)
         return DiscoveredDevice(
             adapter=adapter,
             tracker=tracker,
@@ -219,10 +218,3 @@ class GoveeBackend(DeviceBackend):
             max_fps,
         )
         return adapter, max_fps
-
-    def _create_tracker(self, config: AppConfig) -> LatencyTracker:
-        govee = config.devices.govee
-        strategy = make_strategy(
-            govee.latency_strategy, govee.latency_ms, govee.latency_window_size
-        )
-        return LatencyTracker(strategy, govee.manual_offset_ms)

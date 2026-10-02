@@ -30,8 +30,7 @@ from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter, tile_sizes
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord, TileInfo
-from dj_ledfx.latency.strategies import make_strategy
-from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.latency.tracker import tracker_for
 from dj_ledfx.types import DeviceInfo
 
 LIFX_PORT = 56700
@@ -174,7 +173,7 @@ class LifxBackend(DeviceBackend):
             return None
         if adapter is None:
             return None
-        tracker = self._create_tracker(config, display_ms=adapter.display_ms)
+        tracker = tracker_for(config.devices.lifx, display_ms=adapter.display_ms)
         await adapter.connect()
         max_fps = stream_fps(type(adapter), config.devices.lifx.max_fps)
         # Probed, and its echoes timed for this tracker, once the orchestrator takes it in
@@ -307,8 +306,3 @@ class LifxBackend(DeviceBackend):
             logger.warning("LIFX {} didn't report its zone count; assuming 1", record.ip)
             return 1
         return max(1, count)
-
-    def _create_tracker(self, config: AppConfig, *, display_ms: float = 0.0) -> LatencyTracker:
-        lifx = config.devices.lifx
-        strategy = make_strategy(lifx.latency_strategy, lifx.latency_ms, lifx.latency_window_size)
-        return LatencyTracker(strategy, lifx.manual_offset_ms, display_ms=display_ms)

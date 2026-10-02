@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from typing import Protocol
 
-from dj_ledfx.latency.strategies import ProbeStrategy
+from dj_ledfx.latency.strategies import ProbeStrategy, make_strategy
 
 # A round trip that arrives within this long of a send was measured while the light streamed.
 STREAMING_WINDOW_S = 0.5
@@ -61,3 +62,27 @@ class LatencyTracker:
     def reset(self) -> None:
         self._strategy.reset()
         self._last_send = None
+
+
+class LatencyConfig(Protocol):
+    """A kind of device's latency settings: OpenRGB's, LIFX's and Govee's configs all have them."""
+
+    @property
+    def latency_strategy(self) -> str: ...
+    @property
+    def latency_ms(self) -> float: ...
+    @property
+    def latency_window_size(self) -> int: ...
+    @property
+    def manual_offset_ms(self) -> float: ...
+
+
+def tracker_for(
+    cfg: LatencyConfig, *, seed_ms: float | None = None, display_ms: float = 0.0
+) -> LatencyTracker:
+    """A device's tracker, as its kind's config says: the strategy it names, seeded at
+    seed_ms (else the config's latency_ms), its window and offset, plus how long the light
+    takes to show a frame (display_ms)."""
+    seed = cfg.latency_ms if seed_ms is None else seed_ms
+    strategy = make_strategy(cfg.latency_strategy, seed, cfg.latency_window_size)
+    return LatencyTracker(strategy, cfg.manual_offset_ms, display_ms=display_ms)
