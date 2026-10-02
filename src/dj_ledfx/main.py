@@ -321,6 +321,9 @@ async def _run(args: argparse.Namespace) -> None:
         _spawn(zone_manager.on_device_offline(event.stable_id))
         light_monitor.refresh()
 
+    async def _fit_placements() -> None:
+        await home_map.refit()  # a light back online shows its form (ruling 19)
+
     def _on_device_back(event: DeviceOnlineEvent | DeviceDiscoveredEvent) -> None:
         managed = device_manager.get_by_stable_id(event.stable_id)
         if managed is None:
@@ -332,6 +335,7 @@ async def _run(args: argparse.Namespace) -> None:
         else:
             _spawn(zone_manager.on_device_online(event.stable_id))
         light_monitor.refresh()
+        _spawn(_fit_placements())
 
     event_bus.subscribe(DeviceOfflineEvent, _on_device_offline)
     event_bus.subscribe(DeviceOnlineEvent, _on_device_back)

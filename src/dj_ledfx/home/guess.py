@@ -20,6 +20,7 @@ from dj_ledfx.home.geometry import point_in_polygon, polygon_area
 from dj_ledfx.home.model import Home, Room, Vec3
 from dj_ledfx.home.seed import SeedLight, normalise_name
 from dj_ledfx.home.shapes import (
+    BentLineShape,
     GridShape,
     LightShape,
     LineShape,
@@ -28,10 +29,14 @@ from dj_ledfx.home.shapes import (
     check_led_order,
 )
 from dj_ledfx.home.store import ScenePlacement
+from dj_ledfx.spatial.geometry import DeviceGeometry, MatrixGeometry, StripGeometry
 
 SPREAD_RADIUS_M = 0.8
 GUESS_HEIGHT_M = 1.0
 STANDING = (0.0, 90.0, 0.0)  # a grid tilted up to face south, as the scene hung matrices
+UPRIGHT_BASE_M = 0.1  # an upright lamp's LEDs start this far off the floor
+# A grid stood up with its first row at the top, as a matrix's own frame has it.
+UPRIGHT_GRID = (0.0, -90.0, 0.0)
 
 
 def seed_matches(lights: Iterable[LightEntry], seeds: Sequence[SeedLight]) -> dict[str, SeedLight]:
@@ -65,17 +70,22 @@ def _spread(home: Home, count: int) -> list[Vec3]:
     return points
 
 
+def _no_form(light: LightEntry) -> DeviceGeometry | None:
+    return None
+
+
 def guess_placements(
     home: Home,
     lights: Sequence[LightEntry],
     placed: Collection[str],
     seeds: Sequence[SeedLight],
+    geometry_of: Callable[[LightEntry], DeviceGeometry | None] = _no_form,
 ) -> dict[str, Placement]:
-    """A guess for each light not in `placed`: its seed's placement, or a point spread
-    round the largest room."""
+    """A guess for each light not in `placed`: its seed's placement, or a spot round the
+    largest room, in the light's form there (geometry_of gives a light's geometry)."""
     matches = seed_matches(lights, seeds)
     guesses: dict[str, Placement] = {}
-    loose: list[str] = []
+    loose: list[LightEntry] = []
     for light in lights:
         if light.id in placed:
             continue
@@ -83,9 +93,9 @@ def guess_placements(
         if seed is not None:
             guesses[light.id] = seed.placement
         else:
-            loose.append(light.id)
-    for light_id, point in zip(loose, _spread(home, len(loose)), strict=True):
-        guesses[light_id] = Placement(PointShape(point), check_led_order("point", None))
+            loose.append(light)
+    for light, point in zip(loose, _spread(home, len(loose)), strict=True):
+        guesses[light.id] = placed_in_form(point, light.leds, geometry_of(light))
     return guesses
 
 
@@ -96,6 +106,59 @@ def _to_map(vector: Sequence[float] | NDArray[np.float64]) -> NDArray[np.float64
 
 def _vec(values: NDArray[np.float64]) -> Vec3:
     return (float(values[0]), float(values[1]), float(values[2]))
+
+
+def _rise(geometry: StripGeometry) -> float:
+    """How far up the map a strip runs per metre along it: near ±1 for an upright lamp."""
+    return float(_to_map(geometry.direction)[2])
+
+
+def _matrix_size(geometry: MatrixGeometry) -> tuple[float, float]:
+    """The width and height the matrix's tiles cover, in metres."""
+    pitch = geometry.pixel_pitch
+    left = min(tile.offset_x for tile in geometry.tiles)
+    right = max(tile.offset_x + tile.width * pitch for tile in geometry.tiles)
+    top = min(tile.offset_y for tile in geometry.tiles)
+    bottom = max(tile.offset_y + tile.height * pitch for tile in geometry.tiles)
+    return right - left, bottom - top
+
+
+def placed_in_form(at: Vec3, leds: int, geometry: DeviceGeometry | None) -> Placement:
+    """An unconfirmed placement at `at` that shows the light's form (the light-output plan's
+    ruling 19). An upright lamp stands on the floor below `at`, a vertical line as long as
+    its geometry; a strip lies through `at` along its direction; a matrix stands at `at` as
+    a grid of its tiles' size, first row at the top (a chain of tiles is one grid, in rows).
+    A light of one LED, or of no known form, is a point."""
+    if leds > 1 and isinstance(geometry, StripGeometry):
+        x, y, _ = at
+        if abs(_rise(geometry)) > 0.9:
+            path = ((x, y, UPRIGHT_BASE_M), (x, y, UPRIGHT_BASE_M + geometry.length))
+            order = "along-path" if _rise(geometry) > 0 else "reverse-path"
+            return Placement(LineShape(path), order)
+        half = _to_map(geometry.direction) * geometry.length / 2.0
+        centre = np.asarray(at, dtype=np.float64)
+        return Placement(LineShape((_vec(centre - half), _vec(centre + half))), "along-path")
+    if leds > 1 and isinstance(geometry, MatrixGeometry) and geometry.tiles:
+        width, height = _matrix_size(geometry)
+        return Placement(GridShape(at, width, height, UPRIGHT_GRID), "rows")
+    return Placement(PointShape(at), check_led_order("point", None))
+
+
+def in_form(shape: LightShape, leds: int, geometry: DeviceGeometry | None) -> bool:
+    """Whether a placement shows the light's form. Two things hide it: many LEDs on a
+    point, and an upright lamp lying down. A light of one LED, or of no known form, is
+    always in form."""
+    if leds <= 1 or not isinstance(geometry, StripGeometry | MatrixGeometry):
+        return True
+    if isinstance(shape, PointShape):
+        return False
+    if isinstance(geometry, StripGeometry) and abs(_rise(geometry)) > 0.9:
+        if isinstance(shape, LineShape | BentLineShape):
+            path = np.asarray(shape.path, dtype=np.float64)
+            height = float(path[:, 2].max() - path[:, 2].min())
+            spread = float(np.linalg.norm(path[:, :2].max(axis=0) - path[:, :2].min(axis=0)))
+            return height >= spread
+    return True
 
 
 def _scene_shape(placement: ScenePlacement, at: NDArray[np.float64]) -> LightShape:

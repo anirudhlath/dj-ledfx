@@ -18,10 +18,16 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import numpy as np
 from loguru import logger
 
-from dj_ledfx.devices.lights import LightIndex
+from dj_ledfx.devices.lights import LightEntry, LightIndex
 from dj_ledfx.effects.ledset import PlacedLeds, Space
 from dj_ledfx.home.geometry import point_in_polygon
-from dj_ledfx.home.guess import GUESS_HEIGHT_M, first_placements, guess_placements
+from dj_ledfx.home.guess import (
+    GUESS_HEIGHT_M,
+    first_placements,
+    guess_placements,
+    in_form,
+    placed_in_form,
+)
 from dj_ledfx.home.model import (
     Anchor,
     Home,
@@ -42,6 +48,7 @@ from dj_ledfx.home.shapes import (
     led_positions,
     shape_centre,
 )
+from dj_ledfx.spatial.geometry import DeviceGeometry
 from dj_ledfx.timing import utcnow
 
 if TYPE_CHECKING:
@@ -386,7 +393,11 @@ class HomeMap:
         """Place every light that has no placement (web spec §12.3), unconfirmed."""
         async with self._lock:
             guesses = guess_placements(
-                self._home, self.lights().entries, set(self._placements), self._seeds()
+                self._home,
+                self.lights().entries,
+                set(self._placements),
+                self._seeds(),
+                geometry_of=self._geometry,
             )
             for target_id, placement in guesses.items():
                 await self._store.save_placement(target_id, placement)
@@ -394,6 +405,27 @@ class HomeMap:
         if guesses:
             await self._changed()
         return guesses
+
+    async def refit(self) -> dict[str, Placement]:
+        """Fit each online light's unconfirmed placement to its form where it hides it
+        (the light-output plan's ruling 19): many LEDs on a point, an upright lamp lying
+        down. Confirmed placements, offline lights, forms nobody knows and the PC are left
+        alone. Returns the placements it changed."""
+        fitted: dict[str, Placement] = {}
+        async with self._lock:
+            for light in self.lights().entries:
+                old = self._placements.get(light.id)
+                geometry = self._geometry(light)
+                if old is None or old.confirmed or in_form(old.shape, light.leds, geometry):
+                    continue
+                placement = placed_in_form(shape_centre(old.shape), light.leds, geometry)
+                await self._store.save_placement(light.id, placement)
+                self._placements[light.id] = placement
+                fitted[light.id] = placement
+        if fitted:
+            logger.info("Fitted {} placement(s) to their lights' forms", len(fitted))
+            await self._changed()
+        return fitted
 
     # --- internals -------------------------------------------------------------------
 
@@ -417,6 +449,16 @@ class HomeMap:
         return next(
             (region.id for region in regions if point_in_polygon((x, y), region.polygon)), None
         )
+
+    def _geometry(self, light: LightEntry) -> DeviceGeometry | None:
+        """An online light's geometry: what form it has. None for the PC, whose parts are
+        placed by hand, and for a light that's offline."""
+        if light.is_pc:
+            return None
+        managed = self._devices.get_by_stable_id(light.id)
+        if managed is None or managed.status != "online":
+            return None
+        return managed.adapter.geometry
 
     def _spot(self, target_id: str) -> _Spot:
         """Where the target is on the plan. Kept until the map changes (_save) or the

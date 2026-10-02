@@ -6,7 +6,7 @@ from functools import partial
 import numpy as np
 import pytest
 from conftest import KEYBOARD_AND_MOUSE, SERVER, FakeLight, pc_lights
-from map_home import DESK_CORNER, open_map, tiny_home
+from map_home import DESK_CORNER, devices_of, open_map, tiny_home
 
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.home.map import HomeMap
@@ -14,6 +14,7 @@ from dj_ledfx.home.model import HomeError, HomeNotFoundError
 from dj_ledfx.home.shapes import GridShape, LineShape, Placement, PointShape, ShapeError
 from dj_ledfx.home.store import HomeStore
 from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.spatial.geometry import MatrixGeometry, StripGeometry, TileLayout
 
 NOW = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
 DESK_LAMP = Placement(PointShape(DESK_CORNER), "")
@@ -191,3 +192,68 @@ async def test_a_guess_places_only_unplaced_lights(db: StateDB) -> None:
     await home_map.remove_placement("lamp")
     guesses = await home_map.guess()
     assert list(guesses) == ["lamp"] and not guesses["lamp"].confirmed
+
+
+UPRIGHT_LAMP = StripGeometry((0.0, 1.0, 0.0), 1.4)
+SMALL_MATRIX = MatrixGeometry((TileLayout(0.0, 0.0, 5, 6),), pixel_pitch=0.03)
+ON_THE_DESK = Placement(PointShape(DESK_CORNER), "")
+
+
+async def test_online_lights_on_points_are_fitted_to_their_forms(db: StateDB) -> None:
+    lamp = FakeLight("lamp", led_count=15, geometry=UPRIGHT_LAMP)
+    matrix = FakeLight("matrix", led_count=30, geometry=SMALL_MATRIX)
+    placements = {"lamp": ON_THE_DESK, "matrix": ON_THE_DESK}
+    home_map = await _map(db, [lamp, matrix], placements=placements, seeded=True)
+    changes: list[str] = []
+
+    async def changed() -> None:
+        changes.append("map")
+
+    home_map.on_change(changed)
+
+    fitted = await home_map.refit()
+
+    lamp_shape = fitted["lamp"].shape
+    assert isinstance(lamp_shape, LineShape) and not fitted["lamp"].confirmed
+    (x0, y0, z0), (x1, y1, z1) = lamp_shape.path
+    assert (x0, y0) == (x1, y1) == DESK_CORNER[:2] and z0 < z1
+    assert isinstance(fitted["matrix"].shape, GridShape)
+    assert dict(home_map.placements) == fitted
+    assert await HomeStore(db).load_placements() == fitted
+    assert changes == ["map"]  # told once
+    assert await home_map.refit() == {}  # they fit now
+
+
+async def test_confirmed_offline_fitting_one_led_and_pc_placements_are_left_alone(
+    db: StateDB,
+) -> None:
+    lights = [
+        FakeLight("standing", led_count=15, geometry=UPRIGHT_LAMP),
+        FakeLight("confirmed", led_count=15, geometry=UPRIGHT_LAMP),
+        FakeLight("offline", led_count=15, geometry=UPRIGHT_LAMP),
+        FakeLight("bulb", led_count=1),
+        *pc_lights(*KEYBOARD_AND_MOUSE),
+    ]
+    devices = devices_of(lights)
+    devices.demote_device("offline")
+    standing = Placement(LineShape(((1.0, 3.5, 0.1), (1.0, 3.5, 1.5))), "along-path")
+    placements = {
+        "standing": standing,
+        "confirmed": Placement(PointShape(DESK_CORNER), "", confirmed=True),
+        "offline": ON_THE_DESK,
+        "bulb": ON_THE_DESK,
+        SERVER: ON_THE_DESK,
+    }
+    home_map = await _map(db, devices, placements=placements, seeded=True)
+
+    assert await home_map.refit() == {}
+    assert dict(home_map.placements) == placements
+
+
+async def test_a_guess_places_a_light_in_its_form(db: StateDB) -> None:
+    lamp = FakeLight("lamp", led_count=15, geometry=UPRIGHT_LAMP)
+    home_map = await _map(db, [lamp], seeded=True)
+
+    guesses = await home_map.guess()
+
+    assert isinstance(guesses["lamp"].shape, LineShape)

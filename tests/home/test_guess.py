@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 from map_home import tiny_home
 
@@ -10,16 +11,27 @@ from dj_ledfx.home.geometry import point_in_polygon
 from dj_ledfx.home.guess import (
     GUESS_HEIGHT_M,
     SPREAD_RADIUS_M,
+    UPRIGHT_BASE_M,
     first_placements,
     guess_placements,
+    in_form,
     largest_room,
     moved_scene_placements,
+    placed_in_form,
     seed_matches,
 )
 from dj_ledfx.home.model import Room
 from dj_ledfx.home.seed import SeedLight
-from dj_ledfx.home.shapes import CylinderShape, GridShape, LineShape, Placement, PointShape
+from dj_ledfx.home.shapes import (
+    CylinderShape,
+    GridShape,
+    LineShape,
+    Placement,
+    PointShape,
+    led_positions,
+)
 from dj_ledfx.home.store import ScenePlacement
+from dj_ledfx.spatial.geometry import MatrixGeometry, PointGeometry, StripGeometry, TileLayout
 
 CANDLE = Placement(CylinderShape((1.0, 1.0, 0.8), 0.12, 0.02), "bottom-to-top")
 
@@ -144,3 +156,65 @@ def test_a_bad_scene_placement_is_skipped_and_its_light_is_guessed_instead() -> 
         )
     tile = first["tile"].shape  # a zero-size matrix still hangs as one LED's grid
     assert isinstance(tile, GridShape) and (tile.width, tile.depth) == pytest.approx((0.03, 0.03))
+
+
+UP = StripGeometry((0.0, 1.0, 0.0), 1.4)  # an upright lamp, its first LED at the bottom
+DOWN = StripGeometry((0.0, -1.0, 0.0), 1.4)  # its first LED at the top
+ALONG = StripGeometry((1.0, 0.0, 0.0), 1.0)  # a strip, running east
+TILE = MatrixGeometry((TileLayout(0.0, 0.0, 5, 6),), pixel_pitch=0.03)
+AT = (2.0, 2.0, 1.0)
+
+
+def _many(light_id: str, leds: int) -> LightEntry:
+    return LightEntry(
+        light_id, light_id, (light_id,), leds, (LightPart(light_id, light_id, leds),)
+    )
+
+
+def test_an_upright_lamp_stands_on_the_floor_below_its_spot() -> None:
+    top = UPRIGHT_BASE_M + 1.4
+    up = placed_in_form(AT, 15, UP)
+    assert up == Placement(LineShape(((2.0, 2.0, UPRIGHT_BASE_M), (2.0, 2.0, top))), "along-path")
+    assert placed_in_form(AT, 15, DOWN).led_order == "reverse-path"
+    assert not up.confirmed
+
+
+def test_a_strip_lies_through_its_spot_along_its_length() -> None:
+    strip = placed_in_form(AT, 30, ALONG)
+    assert strip == Placement(LineShape(((1.5, 2.0, 1.0), (2.5, 2.0, 1.0))), "along-path")
+
+
+def test_a_matrix_stands_as_a_grid_with_its_first_row_at_the_top() -> None:
+    matrix = placed_in_form(AT, 30, TILE)
+    assert isinstance(matrix.shape, GridShape) and matrix.led_order == "rows"
+    assert (matrix.shape.width, matrix.shape.depth) == pytest.approx((0.15, 0.18))
+    leds = led_positions(matrix.shape, 30, matrix.led_order).pos
+    assert leds[0][2] > leds[-1][2]  # LED 1 on top, as a matrix's own frame has it
+    assert np.allclose(leds[:, 1], AT[1])  # standing: every LED at one depth
+
+
+def test_a_light_of_one_led_or_of_no_known_form_is_a_point() -> None:
+    for leds, geometry in ((1, UP), (15, None), (15, PointGeometry())):
+        assert placed_in_form(AT, leds, geometry) == Placement(PointShape(AT), "")
+
+
+def test_only_many_leds_on_a_point_or_an_upright_lamp_lying_down_hide_a_form() -> None:
+    point = PointShape(AT)
+    lying = LineShape(((1.0, 2.0, 1.0), (2.4, 2.0, 1.0)))
+    standing = LineShape(((2.0, 2.0, 0.1), (2.0, 2.0, 1.5)))
+    assert not in_form(point, 15, UP) and not in_form(point, 30, TILE)
+    assert not in_form(lying, 15, UP) and in_form(standing, 15, UP)
+    assert in_form(lying, 30, ALONG) and in_form(point, 1, UP) and in_form(point, 15, None)
+
+
+def test_a_guess_puts_each_loose_light_in_its_form() -> None:
+    guesses = guess_placements(
+        tiny_home(),
+        [_many("lamp", 15), _light("bulb")],
+        set(),
+        [],
+        geometry_of=lambda light: UP if light.id == "lamp" else None,
+    )
+    lamp = guesses["lamp"].shape
+    assert isinstance(lamp, LineShape) and lamp.path[0][2] == UPRIGHT_BASE_M
+    assert isinstance(guesses["bulb"].shape, PointShape)
