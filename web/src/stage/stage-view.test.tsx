@@ -1,14 +1,13 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { decodeFrame, encodeFrame } from '@/api/frames'
-import { frames } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { roomName } from '@/api/mocks/fixtures'
 import type { ScenarioName } from '@/api/mocks/scenarios'
 import { LIVE_LAYOUT } from '@/pages/live-numbers'
 import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
+import { pushFrame } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
 import { drawn, heroPose, loadedStage, MAIN_STAGE, seedStage } from '@/test/stage'
 import { setReducedMotion, setViewportWidth } from '@/test/viewport'
@@ -153,9 +152,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     const zone = state.running.find((candidate) => candidate.zoneId !== 'home')!
     const light = state.lights.find((candidate) => zone.lights.includes(candidate.id) && candidate.shape != null)!
     const [x, y] = projectPoint(pose, anchorOf(lightBodies(light)[0]))
-    act(() => {
-      decodeFrame(encodeFrame(2, light.id, 1, new Uint8Array(light.leds * 3).fill(128)), 2, frames, 0)
-    })
+    act(() => pushFrame(light.id, 1, new Uint8Array(light.leds * 3).fill(128)))
     fireEvent.pointerMove(picture(), { clientX: x, clientY: y, pointerType: 'mouse' })
     const tooltip = await screen.findByRole('tooltip')
     expect(tooltip).toHaveTextContent(light.name)

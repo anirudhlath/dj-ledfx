@@ -2,8 +2,6 @@ import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { SunInput } from '@/api/contract'
-import { decodeFrame, encodeFrame } from '@/api/frames'
-import { frames } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { ButtonLink } from '@/design/button'
@@ -154,9 +152,11 @@ describe('the light tooltip (§8.1)', () => {
   const light = hero.lights.find((candidate) => candidate.status === 'streaming')!
   const state = lightState(light, undefined)
   const text = tooltipText(light, hero.running, new Map(hero.zones.map((zone) => [zone.id, zone.name])))
+  /** Every LED of the light one grey. */
+  const grey = (level: number) => new Uint8Array(light.leds * 3).fill(level)
 
   it("names the light and paints its colour now from the frames, with the look and the model", () => {
-    decodeFrame(encodeFrame(2, light.id, 1, new Uint8Array(light.leds * 3).fill(128)), 2, frames, 0)
+    pushFrame(light.id, 1, grey(128))
     render(<LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={MAIN_STAGE} />)
     const tooltip = screen.getByRole('tooltip')
     expect(tooltip).toHaveTextContent(light.name)
@@ -181,9 +181,6 @@ describe('the light tooltip (§8.1)', () => {
     )
     return { tooltip: screen.getByRole('tooltip'), cadenceMs: cadenceMs! }
   }
-
-  /** Every LED of the light one grey. */
-  const grey = (level: number) => new Uint8Array(light.leds * 3).fill(level)
 
   // Mi5: the tooltip shows the light as the stage draws it, so with reduced motion or on a phone it
   // changes no more often than the canvas does (§5.4, §7.5).

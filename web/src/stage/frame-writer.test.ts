@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Id, Light } from '@/api/contract'
-import { decodeFrame, encodeFrame, FrameStore } from '@/api/frames'
+import { FrameStore } from '@/api/frames'
 import { HOME_TOTALS, homeFixture, lightFixtures } from '@/api/mocks/fixtures'
-import { HERO_SINCE } from '@/test/live'
+import { HERO_SINCE, pushFrame } from '@/test/live'
 import { stageWriter } from '@/test/stage'
 import { lightBodies, stageBodies, type Body } from './bodies'
 import { SPEC } from './design-numbers'
@@ -26,10 +26,8 @@ const entry = (light: Light, patch: Partial<WriterEntry> = {}): WriterEntry => (
 })
 
 let seq = 0
-function stream(frames: FrameStore, id: Id, rgb: ArrayLike<number>): void {
-  seq += 1
-  decodeFrame(encodeFrame(2, id, seq, Uint8Array.from(rgb)), 2, frames, 0)
-}
+/** A light's next frame, into `frames`. */
+const stream = (frames: FrameStore, id: Id, rgb: ArrayLike<number>) => pushFrame(id, (seq += 1), rgb, { store: frames })
 /** `count` LEDs, every one `rgb`. */
 const solid = (count: number, rgb: [number, number, number]) => Array.from({ length: count }, () => rgb).flat()
 
