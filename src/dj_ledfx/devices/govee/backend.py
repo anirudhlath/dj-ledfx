@@ -82,9 +82,6 @@ class GoveeBackend(DeviceBackend):
         if not results:
             logger.info("No Govee devices found — ensure LAN control is enabled in Govee app")
 
-        if results:
-            transport.start_probing(interval_s=govee.probe_interval_s)
-
         return results
 
     async def connect_known(
@@ -94,8 +91,6 @@ class GoveeBackend(DeviceBackend):
         govee_rows = [r for r in device_rows if r.get("backend") == "govee"]
         if not govee_rows:
             return []
-
-        govee_cfg = config.devices.govee
 
         # Open transport if not already open
         if self._transport is None or not self._transport.is_open:
@@ -142,21 +137,17 @@ class GoveeBackend(DeviceBackend):
                     "Failed to reconnect known Govee device '{}'", row.get("name", "?")
                 )
 
-        if results:
-            transport.start_probing(interval_s=govee_cfg.probe_interval_s)
-
         return results
 
     async def shutdown(self) -> None:
         if self._transport:
-            self._transport.stop_probing()
             await self._transport.close()
             self._transport = None
 
     async def _setup(
         self, transport: GoveeTransport, record: GoveeDeviceRecord, config: AppConfig
     ) -> DiscoveredDevice:
-        """Connect a lamp as its plan says it plays, and register it for latency probes.
+        """Connect a lamp as its plan says it plays; its status reads time its round trips.
         Raises ConnectionError when it doesn't answer."""
         adapter, max_fps = self._adapter(transport, record, config)
         await adapter.connect()

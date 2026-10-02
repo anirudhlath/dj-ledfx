@@ -5,7 +5,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from govee_fakes import STATUS
+from govee_fakes import STATUS, lamp_record
 
 from dj_ledfx.devices.govee.transport import GoveeTransport
 
@@ -111,3 +111,44 @@ class TestStatusQueries:
 
         assert await again == {**STATUS, "onOff": 1}
         assert transport._send_transport.sendto.call_count == 2
+
+
+class TestRoundTrips:
+    """A lamp's round trips come from the status reads: each matched query and reply."""
+
+    def _timed(self) -> tuple[GoveeTransport, list[float], list[float]]:
+        now = [100.0]
+        transport = GoveeTransport(clock=lambda: now[0])
+        transport._send_transport = MagicMock()
+        rtts: list[float] = []
+        transport.register_device(lamp_record(), rtt_callback=rtts.append)
+        return transport, now, rtts
+
+    async def test_a_status_reply_feeds_the_lamp_s_round_trip(self) -> None:
+        transport, now, rtts = self._timed()
+        query = asyncio.create_task(transport.query_status(LAMP_IP, timeout_s=1.0))
+        await asyncio.sleep(0)
+        now[0] += 0.04
+
+        _reply(transport, STATUS)
+
+        assert await query == STATUS
+        assert rtts == [pytest.approx(40.0)]
+
+    async def test_one_reply_shared_by_two_callers_is_one_round_trip(self) -> None:
+        transport, now, rtts = self._timed()
+        first = asyncio.create_task(transport.query_status(LAMP_IP, timeout_s=1.0))
+        second = asyncio.create_task(transport.query_status(LAMP_IP, timeout_s=1.0))
+        await asyncio.sleep(0)
+        now[0] += 0.03
+        _reply(transport, STATUS)
+        await asyncio.gather(first, second)
+        assert rtts == [pytest.approx(30.0)]
+
+    async def test_a_reply_nobody_waits_for_is_no_round_trip(self) -> None:
+        transport, _now, rtts = self._timed()
+        _reply(transport, STATUS)  # late, or sent to another program's query
+        assert rtts == []
+
+    def test_there_is_no_probe_loop(self) -> None:
+        assert not hasattr(GoveeTransport, "start_probing")

@@ -23,7 +23,7 @@ Direct integration with Govee RGBIC devices over the Govee LAN UDP protocol, sup
 | Transport abstraction | None | Transport is internal to Govee backend. No shared Transport ABC — YAGNI, protocols differ too much. |
 | Default FPS cap | 30 by razer, 10 by `colorwc` | Measured: `colorwc` at 40 a second ran 9 commands behind, and may have hung two lamps for about ten minutes; at 10, 1 behind. The `colorwc` cap holds whatever the config says. |
 | Reconnection | Ghosts and scans | A lamp that misses three status reads goes offline; a scan (every 30 s) brings it back. Setting a lamp's own output reconnects it. |
-| Latency probing | Periodic `devStatus` probe loop in transport | `supports_latency_probing = False` on both adapters. Transport runs a probe loop (like LIFX EchoRequest) measuring `devStatus` round-trip time. Callbacks feed RTT into each device's LatencyTracker. `send_frame` is fire-and-forget UDP — timing it only measures local socket write, not device latency. |
+| Latency probing | The status reads' round trips | `supports_latency_probing = False` on both adapters. The transport times each `devStatus` query to its reply (connect, capture and the light monitor's reads all ask one) and hands the round trip to that lamp's LatencyTracker; there is no probe loop. `send_frame` is fire-and-forget UDP — timing it only measures local socket write, not device latency. |
 | Auto power-on | No | `connect()` queries `devStatus` to verify reachability but does not send `turn(on)`. User controls power state via Govee app. |
 
 ## Govee LAN Protocol Summary
@@ -201,17 +201,14 @@ class GoveeTransport:
     async def send_command(self, ip: str, payload: dict) -> None
     async def query_status(self, ip: str, timeout_s: float = 2.0) -> dict | None
     def register_device(self, record: GoveeDeviceRecord, rtt_callback: Callable[[float], None]) -> None
-    def start_probing(self, interval_s: float = 10.0) -> None
-    def stop_probing(self) -> None
 ```
 
 - Binds receiver socket on port 4002 for responses.
 - Sends discovery to multicast `239.255.255.250:4001`. Sends scan 3 times at 1s intervals to handle UDP loss. Deduplicates responses by `device_id`.
 - `send_command()` JSON-serializes and sends UDP to `ip:4003`. Fire-and-forget.
-- `query_status()` sends devStatus and awaits response on 4002 with timeout. Used during connect to verify device is alive.
-- Response routing: incoming JSON on port 4002 is dispatched via a `dict[str, Callable]` handler registry keyed by `cmd` field — `"scan"` routes to discovery handler, `"devStatus"` routes to status handler (pending query or probe callback). This avoids the LIFX transport's handler-swap pattern which is non-reentrant.
-- `register_device()` registers a device for periodic RTT probing. The `rtt_callback` receives measured RTT in milliseconds.
-- `start_probing()` launches an async task that periodically sends `devStatus` to each registered device and measures round-trip time. Mirrors LIFX's EchoRequest probe pattern.
+- `query_status()` sends devStatus and awaits the reply on 4002, with a timeout; queries to one lamp that overlap share one query and its reply. Connect, capture and the light monitor's reads use it.
+- Response routing: incoming JSON on port 4002 is dispatched via a `dict[str, Callable]` handler registry keyed by `cmd` field — `"scan"` routes to discovery handler, `"devStatus"` routes to status handler (the pending query, whose round trip goes to the lamp's callback). This avoids the LIFX transport's handler-swap pattern which is non-reentrant.
+- `register_device()` names a lamp's `rtt_callback`, which gets the round trip of each status query matched to its reply, in milliseconds.
 - All socket ops use `asyncio.DatagramProtocol` — no blocking.
 
 ### Protocol Module (pure functions)
@@ -294,7 +291,7 @@ class GoveeBackend(DeviceBackend):
     def is_enabled(self, config: AppConfig) -> bool
     async def discover(self, config: AppConfig) -> list[DiscoveredDevice]
     async def shutdown(self) -> None
-        # Must call transport.stop_probing() before transport.close()
+        # Closes the transport
 ```
 
 Discovery flow:
@@ -304,10 +301,9 @@ Discovery flow:
    - Look up SKU capability, choose adapter type (segment or solid).
    - Connect adapter (devStatus reachability check).
    - Create `LatencyTracker` (windowed median, seeded at 100 ms one way).
-   - Register device with transport for RTT probing: `transport.register_device(record, rtt_callback=lambda rtt, t=tracker: t.update(rtt))`.
+   - Register the lamp with the transport, so its status reads' round trips feed the tracker: `transport.register_device(record, rtt_callback=tracker.update_rtt)`.
    - Wrap in `DiscoveredDevice`.
-4. After all devices registered, start probing: `transport.start_probing(interval_s=config.govee_probe_interval_s)`.
-5. Return all successfully connected devices. Log and skip failures.
+4. Return all successfully connected devices. Log and skip failures.
 
 Auto-registered via `DeviceBackend.__init_subclass__()`. The `govee/__init__.py` must re-export `GoveeBackend` using explicit `as` syntax (`from .backend import GoveeBackend as GoveeBackend`) for ruff F401 compliance. The parent `devices/__init__.py` must import `dj_ledfx.devices.govee` to trigger registration.
 
@@ -322,7 +318,7 @@ govee_latency_ms: float = 100.0
 govee_manual_offset_ms: float = 0.0
 govee_max_fps: int = 30  # razer; colorwc is capped at 10 whatever this says
 govee_latency_window_size: int = 9
-govee_probe_interval_s: float = 5.0
+govee_probe_interval_s: float = 5.0  # unread: round trips come from the status reads; kept so configs that carry it load
 govee_segment_override: int | None = None
 ```
 
@@ -334,7 +330,6 @@ TOML section: `[devices.govee]`.
 - `govee_discovery_timeout_s > 0`
 - `govee_latency_ms >= 0`
 - `govee_latency_window_size > 0`
-- `govee_probe_interval_s > 0`
 
 **TOML key mapping** (in `load_config()`, under `raw["devices"]["govee"]`):
 - `enabled` → `govee_enabled`
@@ -344,7 +339,7 @@ TOML section: `[devices.govee]`.
 - `manual_offset_ms` → `govee_manual_offset_ms`
 - `max_fps` → `govee_max_fps`
 - `latency_window_size` → `govee_latency_window_size`
-- `probe_interval_s` → `govee_probe_interval_s`
+- `probe_interval_s` → `govee_probe_interval_s` (unread)
 - `segment_override` → `govee_segment_override`
 
 ## Error Handling

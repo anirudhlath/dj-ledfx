@@ -98,6 +98,9 @@ class GoveeConfig:
     manual_offset_ms: float = 0.0
     max_fps: int = GOVEE_RAZER_FPS  # one colour is capped at GOVEE_COLOUR_FPS
     latency_window_size: int = LATENCY_WINDOW
+    # Unread: a lamp's round trips come from its status reads (the light monitor's polls).
+    # Kept so config files and exports that carry it still load: PUT /config and
+    # POST /config/import refuse a key GoveeConfig doesn't have.
     probe_interval_s: float = 5.0
     segment_override: int | None = None
 
@@ -160,8 +163,6 @@ class AppConfig:
         govee = self.devices.govee
         if govee.discovery_timeout_s <= 0:
             raise ValueError("govee discovery_timeout_s must be positive")
-        if govee.probe_interval_s <= 0:
-            raise ValueError("govee probe_interval_s must be positive")
         if self.web.port < 0 or self.web.port > 65535:
             raise ValueError("web port must be 0-65535")
 

@@ -173,10 +173,6 @@ class TestGoveeConfigValidation:
         with pytest.raises(ValueError, match="govee discovery_timeout_s"):
             AppConfig(devices=DevicesConfig(govee=GoveeConfig(discovery_timeout_s=0)))
 
-    def test_govee_probe_interval_must_be_positive(self) -> None:
-        with pytest.raises(ValueError, match="govee probe_interval_s"):
-            AppConfig(devices=DevicesConfig(govee=GoveeConfig(probe_interval_s=0)))
-
     def test_govee_latency_ms_must_be_non_negative(self) -> None:
         with pytest.raises(ValueError, match="govee latency_ms"):
             AppConfig(devices=DevicesConfig(govee=GoveeConfig(latency_ms=-1)))

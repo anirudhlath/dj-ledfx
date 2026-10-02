@@ -59,18 +59,16 @@ class TestGoveeBackend:
         assert len(results) == 1
         assert isinstance(results[0].adapter, GoveeSolidAdapter)
 
-    @pytest.mark.asyncio
-    async def test_shutdown_stops_probing_and_closes(self) -> None:
+    async def test_shutdown_closes_the_transport(self) -> None:
         backend = GoveeBackend()
         mock_transport = MagicMock()
-        mock_transport.stop_probing = MagicMock()
         mock_transport.close = AsyncMock()
         backend._transport = mock_transport
 
         await backend.shutdown()
 
-        mock_transport.stop_probing.assert_called_once()
         mock_transport.close.assert_awaited_once()
+        assert backend._transport is None
 
 
 async def _connect(
