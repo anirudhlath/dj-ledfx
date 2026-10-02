@@ -73,6 +73,8 @@ describe("the stage's canvas (§7.5)", () => {
     expect(root.canvas).toBe(container.querySelector('canvas'))
     expect(root.canvas).toHaveAttribute('aria-hidden', 'true')
     expect(root.configure).toHaveBeenCalledWith({
+      // E10: the picture is opaque (the scene's background), and the stage needn't wake a discrete GPU.
+      gl: { alpha: false, antialias: true, powerPreference: 'default' },
       orthographic: true,
       camera: { manual: true },
       linear: true,
@@ -94,7 +96,11 @@ describe("the stage's canvas (§7.5)", () => {
     expect(root.configure.mock.lastCall![0]).toMatchObject({ frameloop: 'never' })
     expect(drawnScene().props.cadenceMs).toBeNull()
     expect(state.invalidate).not.toHaveBeenCalled()
+    // An opaque canvas is black until it draws, so it stays hidden until then; the stage's own
+    // background shows through.
+    expect(root.canvas).not.toBeVisible()
     await act(async () => compiled())
+    expect(root.canvas).toBeVisible()
     expect(root.configure.mock.lastCall![0]).toMatchObject({ frameloop: 'demand' })
     expect(drawnScene().props.cadenceMs).toBe(1000 / 60)
     expect(state.invalidate).toHaveBeenCalled()

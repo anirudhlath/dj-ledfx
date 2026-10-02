@@ -6,7 +6,9 @@
 // conversion, no tone mapping), the pixel ratio is capped at SPEC.dprCap, and the canvas draws only
 // when asked (frameloop "demand") — once three has compiled the scene's shaders. Three links a draw's
 // programs synchronously, so until compileAsync() has them ready off the main thread, nothing draws:
-// not on demand (frameloop "never") and not on the cadence (cadenceMs null).
+// not on demand (frameloop "never") and not on the cadence (cadenceMs null). The picture is opaque
+// (the scene's background), so the canvas has no alpha for the page to blend, and it stays hidden
+// until its first draw, as an opaque canvas is black until then.
 import { createRoot, type ReconcilerRoot } from '@react-three/fiber'
 import { Component, memo, useInsertionEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { SPEC } from './design-numbers'
@@ -15,6 +17,9 @@ import { rgb } from './scene/materials'
 import { StageScene, type StageSceneProps } from './scene/stage-scene'
 
 const BACKGROUND = rgb(STAGE_PALETTE.bg)
+
+/** The WebGL context: opaque, and on whichever GPU the browser likes (the stage needn't wake a discrete one). */
+const CONTEXT = { alpha: false, antialias: true, powerPreference: 'default' } as const
 
 /** Hands an error in the canvas's own React root to the page's, whose error boundary shows it. */
 class HandOn extends Component<{ onError: (error: unknown) => void; children: ReactNode }, { failed: boolean }> {
@@ -58,6 +63,7 @@ export const StageCanvas = memo(function StageCanvas(props: StageSceneProps) {
     const { width, height } = props.pose
     root.current
       .configure({
+        gl: CONTEXT,
         orthographic: true,
         camera: { manual: true },
         linear: true,
@@ -83,5 +89,5 @@ export const StageCanvas = memo(function StageCanvas(props: StageSceneProps) {
     }
   })
 
-  return <canvas ref={canvas} aria-hidden="true" className="absolute inset-0" />
+  return <canvas ref={canvas} aria-hidden="true" className="absolute inset-0" style={compiled ? undefined : { visibility: 'hidden' }} />
 })
