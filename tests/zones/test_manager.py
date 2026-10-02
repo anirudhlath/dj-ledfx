@@ -183,7 +183,7 @@ async def test_the_horizon_follows_connected_streaming_lights_without_a_search(
 ) -> None:
     tile, lamp, far = _Counted("tile", caps=TILE), _Counted("lamp"), _Counted("far")
     home = await make_home([tile, lamp, far], [zone_record("z", "tile", "lamp", "far")])
-    for device_id, ms in (("tile", 500.0), ("far", 300.0)):
+    for device_id, ms in (("tile", 500.0), ("far", 100.0)):
         managed = home.devices.get_by_stable_id(device_id)
         assert managed is not None
         managed.tracker = LatencyTracker(strategy=StaticLatency(ms))
@@ -196,7 +196,7 @@ async def test_the_horizon_follows_connected_streaming_lights_without_a_search(
     runtime.tick(100.0)
 
     assert [light.info_reads for light in lights] == [0, 0, 0]
-    assert runtime.horizon_s == pytest.approx(0.3 + 1 / 60)  # the tile runs Glow itself
+    assert runtime.horizon_s == pytest.approx(0.1 + 1 / 60)  # the tile runs Glow itself
     far.connected = False
     assert runtime.horizon_s == pytest.approx(0.02 + 1 / 60)
 

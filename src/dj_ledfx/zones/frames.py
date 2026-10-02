@@ -78,7 +78,7 @@ class FrameFeed:
             if frame is None:
                 continue
             count = runtime.leds.count
-            whole = slice_colors(frame.colors, 0, count, count)
+            whole = slice_colors(frame.colors, 0, count, count, runtime.brightness)
             if whole is None:
                 continue
             for piece in pieces:

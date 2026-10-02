@@ -27,13 +27,17 @@ def to_device_colors(colors: FloatRGB, led_count: int) -> NDArray[np.uint8]:
 
 
 def slice_colors(
-    colors: FloatRGB, start: int, stop: int, led_count: int
+    colors: FloatRGB, start: int, stop: int, led_count: int, scale: float = 1.0
 ) -> NDArray[np.uint8] | None:
-    """LEDs start..stop of a zone frame in 8 bits, for a device of led_count LEDs. None
-    when the frame is shorter: it was rendered for an LED set since rebuilt."""
+    """LEDs start..stop of a zone frame in 8 bits, for a device of led_count LEDs, scaled by
+    the zone's brightness. None when the frame is shorter: it was rendered for an LED set
+    since rebuilt."""
     if colors.shape[0] < stop:
         return None
-    return to_device_colors(colors[start:stop], led_count)
+    part = colors[start:stop]
+    if scale != 1.0:
+        part = part * np.float32(scale)
+    return to_device_colors(part, led_count)
 
 
 class FrameSource(Protocol):
@@ -44,6 +48,9 @@ class FrameSource(Protocol):
 
     @property
     def leds(self) -> LedSet: ...
+
+    @property
+    def brightness(self) -> float: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,4 +70,6 @@ class DeviceRoute:
         frame = self.source.ring.find_nearest(target_time)
         if frame is None:
             return None
-        return slice_colors(frame.colors, piece.start, piece.stop, led_count)
+        return slice_colors(
+            frame.colors, piece.start, piece.stop, led_count, self.source.brightness
+        )

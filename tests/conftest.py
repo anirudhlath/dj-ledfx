@@ -297,14 +297,20 @@ class RingSource:
 
     ring: RingBuffer
     leds: LedSet
+    brightness: float = 1.0
 
 
 def ring_route(
-    ring: RingBuffer, *, start: int = 0, stop: int = 10, streaming: bool = True
+    ring: RingBuffer,
+    *,
+    start: int = 0,
+    stop: int = 10,
+    streaming: bool = True,
+    brightness: float = 1.0,
 ) -> DeviceRoute:
-    """A route to LEDs start..stop of ring's frames."""
+    """A route to LEDs start..stop of ring's frames, sent at this brightness."""
     leds = build_ledset([LedSource("before", start), LedSource("light", stop - start)])
-    return DeviceRoute(RingSource(ring, leds), "light", streaming)
+    return DeviceRoute(RingSource(ring, leds, brightness), "light", streaming)
 
 
 def span(route: DeviceRoute) -> tuple[int, int]:

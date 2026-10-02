@@ -56,6 +56,9 @@ SLOW_RATIO = 0.8
 SLOW_AFTER_S = 30.0
 CRASH_LOG_INTERVAL_S = 60.0
 ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5.2)
+# How far ahead a zone renders at most. A light slower than this gets the newest frame and
+# runs late by the difference; a look starts and reacts within a frame or two.
+HORIZON_CAP_S = 0.12
 
 # Process-wide, so no two runtimes ever share a generation: a light applied for one
 # runtime always sees a new look as new.
@@ -196,15 +199,15 @@ class ZoneRuntime:
     @property
     def horizon_s(self) -> float:
         """The largest latency of the zone's lights that take its frames, plus one frame,
-        within the lookahead. A light running its own effect, or not connected (latency
-        None), takes none."""
+        capped at HORIZON_CAP_S and the lookahead. A light running its own effect, or not
+        connected (latency None), takes none."""
         latency = 0.0
         for light in self._lights:
             if light.device_id not in self._claims:
                 light_s = self._latency_s(light.device_id)
                 if light_s is not None and light_s > latency:
                     latency = light_s
-        return min(latency + 1.0 / self._fps, self._max_lookahead_s)
+        return min(latency + 1.0 / self._fps, HORIZON_CAP_S, self._max_lookahead_s)
 
     def claim_for(self, device_id: str) -> tuple[Layer, FirmwareEffect] | None:
         index = self._claims.get(device_id)
@@ -336,7 +339,6 @@ class ZoneRuntime:
             layer, firmware = self._firmware[index]
             self._rendering = layer.name
             frame[where] = _finite(firmware.emulate(ctx, leds)) * np.float32(layer.opacity)
-        frame *= np.float32(self.brightness)
         return frame
 
     def _compile(self) -> None:
