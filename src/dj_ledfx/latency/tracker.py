@@ -36,10 +36,6 @@ class LatencyTracker:
         self._manual_offset_ms = value
 
     @property
-    def display_ms(self) -> float:
-        return self._display_ms
-
-    @property
     def effective_latency_ms(self) -> float:
         return self._strategy.get_latency() + self._display_ms + self._manual_offset_ms
 
@@ -51,9 +47,9 @@ class LatencyTracker:
         """A one-way sample, taken as it is: a send that returns once the device has it."""
         self._strategy.update(sample_ms)
 
-    def note_send(self, at: float | None = None) -> None:
-        """A frame went out now, or at `at` on this tracker's clock."""
-        self._last_send = self._clock() if at is None else at
+    def note_send(self) -> None:
+        """A frame went out now, on this tracker's clock."""
+        self._last_send = self._clock()
 
     def update_rtt(self, rtt_ms: float) -> None:
         """A probe's round trip. Half of it is the one-way latency, but only while the light

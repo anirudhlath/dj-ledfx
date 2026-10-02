@@ -237,7 +237,7 @@ class LookaheadScheduler:
                         logger.warning("Send failed for '{}'", device_name)
                         continue
                 sent = time.monotonic()
-                device.tracker.note_send(sent)  # its probes' round trips count from now
+                device.tracker.note_send()  # its probes' round trips count from now
                 state.last_route, state.last_adapter = current, device.adapter
                 state.last_colors, state.last_sent_at = colors, sent
                 metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)

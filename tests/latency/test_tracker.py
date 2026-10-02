@@ -23,7 +23,6 @@ def test_tracker_update_delegates() -> None:
 
 def test_the_display_delay_adds_to_the_latency() -> None:
     tracker = LatencyTracker(StaticLatency(10.0), manual_offset_ms=5.0, display_ms=24.0)
-    assert tracker.display_ms == 24.0
     assert tracker.effective_latency_ms == 39.0
 
 
