@@ -4,7 +4,6 @@ from dj_ledfx.devices.govee.sku_registry import (
     DEFAULT_CAPABILITY,
     SKU_REGISTRY,
     get_device_capability,
-    get_segment_count,
 )
 
 
@@ -24,10 +23,3 @@ def test_the_upright_lamp_takes_razer_and_the_strip_does_not() -> None:  # rulin
     upright, strip = SKU_REGISTRY.values()
     assert (upright.razer, upright.form, upright.segments_from_top) == (True, "upright", False)
     assert (strip.razer, strip.form) == (False, "strip")
-
-
-def test_the_config_override_sets_the_segment_count() -> None:  # until Task 7
-    model = next(iter(SKU_REGISTRY))
-    assert get_segment_count(model) == SKU_REGISTRY[model].segment_count
-    assert get_segment_count(model, config_override=10) == 10
-    assert get_segment_count("not-a-model") == 0

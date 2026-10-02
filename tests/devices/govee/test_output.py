@@ -1,0 +1,37 @@
+"""How a Govee lamp plays: its segments, razer or one colour, and its rate."""
+
+from __future__ import annotations
+
+import pytest
+
+from dj_ledfx.config import GOVEE_COLOUR_FPS, GOVEE_RAZER_FPS
+from dj_ledfx.devices.govee.output import GoveeOutput, LampPlan, lamp_fps, lamp_plan
+from dj_ledfx.devices.govee.types import GoveeDeviceCapability
+
+UPRIGHT = GoveeDeviceCapability(is_rgbic=True, segment_count=15, razer=True, form="upright")
+NO_RAZER = GoveeDeviceCapability(is_rgbic=True, segment_count=15)
+PLAIN = GoveeDeviceCapability(is_rgbic=False, segment_count=0)
+
+
+@pytest.mark.parametrize(
+    ("capability", "output", "override", "plan"),
+    [
+        (UPRIGHT, GoveeOutput(), None, LampPlan(15, razer=True)),
+        (NO_RAZER, GoveeOutput(), None, LampPlan(15, razer=False)),
+        (UPRIGHT, GoveeOutput(), 10, LampPlan(10, razer=True)),
+        (PLAIN, GoveeOutput(), 10, LampPlan(1, razer=False)),  # the override is for RGBIC
+        (UPRIGHT, GoveeOutput(mode="colour"), None, LampPlan(15, razer=False)),
+        (NO_RAZER, GoveeOutput(mode="segments", segments=20), 10, LampPlan(20, razer=True)),
+        (PLAIN, GoveeOutput(mode="segments"), None, LampPlan(1, razer=False)),  # none to light
+    ],
+)
+def test_a_lamp_s_own_output_then_the_config_then_the_table(
+    capability: GoveeDeviceCapability, output: GoveeOutput, override: int | None, plan: LampPlan
+) -> None:
+    assert lamp_plan(capability, output, override) == plan
+
+
+def test_razer_streams_at_the_configured_rate_and_one_colour_at_ten_at_most() -> None:
+    assert lamp_fps(LampPlan(15, razer=True), GOVEE_RAZER_FPS) == GOVEE_RAZER_FPS
+    assert lamp_fps(LampPlan(15, razer=False), GOVEE_RAZER_FPS) == GOVEE_COLOUR_FPS
+    assert lamp_fps(LampPlan(1, razer=False), 5) == 5

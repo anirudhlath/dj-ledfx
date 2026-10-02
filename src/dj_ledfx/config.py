@@ -19,6 +19,12 @@ LATENCY_WINDOW = 9
 LIFX_STRIP_FPS = 20
 LIFX_MATRIX_FPS = 20
 
+# Govee frames a second: razer frames (one colour per segment), and colorwc (one colour),
+# capped whatever max_fps says: at 40 a second colorwc ran nine commands behind, and two
+# lamps were lost for ten minutes after a minute of it.
+GOVEE_RAZER_FPS = 30
+GOVEE_COLOUR_FPS = 10
+
 
 @dataclass
 class EngineConfig:
@@ -90,7 +96,7 @@ class GoveeConfig:
     latency_strategy: str = "windowed_median"
     latency_ms: float = 100.0
     manual_offset_ms: float = 0.0
-    max_fps: int = 40
+    max_fps: int = GOVEE_RAZER_FPS  # one colour is capped at GOVEE_COLOUR_FPS
     latency_window_size: int = LATENCY_WINDOW
     probe_interval_s: float = 5.0
     segment_override: int | None = None

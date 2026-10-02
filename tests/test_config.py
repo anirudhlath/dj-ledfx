@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from dj_ledfx.config import (
+    GOVEE_RAZER_FPS,
     LATENCY_WINDOW,
     AppConfig,
     DevicesConfig,
@@ -154,7 +155,7 @@ class TestGoveeConfigValidation:
     def test_govee_defaults(self) -> None:
         config = AppConfig()
         assert config.devices.govee.enabled is True
-        assert config.devices.govee.max_fps == 40
+        assert config.devices.govee.max_fps == GOVEE_RAZER_FPS
         assert config.devices.govee.latency_strategy == "windowed_median"
         assert config.devices.govee.latency_window_size == LATENCY_WINDOW
         assert config.devices.govee.latency_ms == 100.0
