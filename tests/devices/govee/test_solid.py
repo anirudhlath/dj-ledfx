@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
 
+from dj_ledfx.devices.govee.adapter_base import STATUS_TIMEOUT_S
 from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
 from dj_ledfx.devices.govee.state import GoveeDeviceState
 from dj_ledfx.devices.govee.types import GoveeDeviceRecord
@@ -55,7 +56,7 @@ class TestGoveeSolidAdapter:
         adapter = GoveeSolidAdapter(mock_transport, record)
         await adapter.connect()
         assert adapter.is_connected is True
-        mock_transport.query_status.assert_awaited_once_with(record.ip)
+        mock_transport.query_status.assert_awaited_once_with(record.ip, timeout_s=STATUS_TIMEOUT_S)
 
     @pytest.mark.asyncio
     async def test_connect_raises_on_unreachable(

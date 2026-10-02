@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from govee_fakes import lamp_record, lamp_transport, sent
+from govee_fakes import STATUS, lamp_record, lamp_transport, sent
 
 from dj_ledfx.devices.capabilities import LightReading, NoAnswer, try_read
 from dj_ledfx.devices.govee.segment import GoveeSegmentAdapter
@@ -53,10 +53,31 @@ async def test_read_light_is_unknown_while_another_program_holds_the_reply_port(
 async def test_a_lamp_that_stops_answering_is_missing_not_unknown(
     record: GoveeDeviceRecord,
 ) -> None:
-    adapter = GoveeSolidAdapter(lamp_transport(None), record)
+    transport = lamp_transport()
+    transport.query_status = AsyncMock(side_effect=[None, None, None, None])  # silent
+    adapter = GoveeSolidAdapter(transport, record)
     with pytest.raises(NoAnswer):
         await adapter.read_light()
+    assert transport.query_status.await_count == 2  # asked again before giving up
     assert await try_read(adapter) is None  # what the light monitor counts as a miss
+
+
+# A streaming lamp answered 9 status queries of 10: one lost reply is asked again, so it
+# isn't a missed read (the light-output fixes' review, Important 1).
+async def test_one_lost_reply_is_not_a_miss(record: GoveeDeviceRecord) -> None:
+    transport = lamp_transport()
+    transport.query_status = AsyncMock(side_effect=[None, STATUS])
+    adapter = GoveeSolidAdapter(transport, record)
+    assert await try_read(adapter) == LightReading(power=False, colour=(10, 20, 30))
+
+
+async def test_connect_and_capture_ask_again_too(record: GoveeDeviceRecord) -> None:
+    transport = lamp_transport()
+    transport.query_status = AsyncMock(side_effect=[None, STATUS, None, STATUS])
+    adapter = GoveeSolidAdapter(transport, record)
+    await adapter.connect()
+    assert adapter.is_connected
+    assert await adapter.capture_state() is not None
 
 
 async def test_capture_reads_the_lamp_now(record: GoveeDeviceRecord) -> None:

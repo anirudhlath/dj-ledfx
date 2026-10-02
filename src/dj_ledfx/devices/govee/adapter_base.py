@@ -16,6 +16,9 @@ if TYPE_CHECKING:
     from dj_ledfx.devices.govee.transport import GoveeTransport
 
 STATUS_TIMEOUT_S = 1.0
+# A reply lost on the LAN isn't a lamp gone (a streaming lamp answered 9 queries of 10), so
+# a status read asks again once before it counts as silence, as LIFX reads do.
+STATUS_TRIES = 2
 
 
 class GoveeAdapterBase(DeviceAdapter):
@@ -44,21 +47,26 @@ class GoveeAdapterBase(DeviceAdapter):
 
     async def connect(self) -> None:
         """Check the lamp answers, when its replies can reach us. Changes nothing on it."""
-        if self._transport.can_receive:
-            status = await self._transport.query_status(self._record.ip)
-            if status is None:
-                msg = f"Govee device {self._record.ip} ({self._record.sku}) not reachable"
-                raise ConnectionError(msg)
+        if self._transport.can_receive and await self._status() is None:
+            msg = f"Govee device {self._record.ip} ({self._record.sku}) not reachable"
+            raise ConnectionError(msg)
         self._is_connected = True
 
     async def disconnect(self) -> None:
         self._is_connected = False
 
     async def _status(self) -> GoveeDeviceState | None:
+        """The lamp's status, asked up to STATUS_TRIES times. None: it stayed silent, or no
+        reply can reach us."""
         if not self._transport.can_receive:
             return None
-        status = await self._transport.query_status(self._record.ip, timeout_s=STATUS_TIMEOUT_S)
-        return GoveeDeviceState.from_status(status) if status is not None else None
+        for _try in range(STATUS_TRIES):
+            status = await self._transport.query_status(
+                self._record.ip, timeout_s=STATUS_TIMEOUT_S
+            )
+            if status is not None:
+                return GoveeDeviceState.from_status(status)
+        return None
 
     async def read_light(self) -> LightReading:
         """Power and colour from a status query. Unknown while another program holds UDP
