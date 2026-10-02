@@ -805,6 +805,59 @@ async def test_a_new_route_sends_at_once() -> None:
     assert len(device.adapter.send_frame_calls) == 2
 
 
+async def test_a_route_set_again_sends_at_once() -> None:
+    device, buf, scheduler = _still()
+    key = device.adapter.device_info.effective_id
+    route = _route(buf)
+    scheduler.set_route(key, route)
+
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.sleep(0.2)
+    assert len(device.adapter.send_frame_calls) == 1
+    scheduler.set_route(key, route)  # the same route, set again as a readied light's is
+    await asyncio.sleep(0.2)
+    scheduler.stop()
+    await task
+
+    assert len(device.adapter.send_frame_calls) == 2
+
+
+async def test_a_route_set_during_a_send_sends_again() -> None:
+    adapter = _HeldAdapter()
+    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(StaticLatency(10.0)))
+    buf = RingBuffer(capacity=150)
+    _fill_buffer(buf, time.monotonic(), 150, level=0.5)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
+
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.wait_for(adapter.sending.wait(), timeout=1.0)
+    scheduler.set_route(adapter.device_info.effective_id, _route(buf))  # mid-send
+    adapter.release.set()
+    await asyncio.sleep(0.2)
+    scheduler.stop()
+    await task
+
+    assert adapter.log == ["frame", "frame"]
+
+
+async def test_a_light_back_from_a_drop_out_gets_its_frame_at_once() -> None:
+    device, _buf, scheduler = _still()
+    adapter = device.adapter
+    assert isinstance(adapter, MockDeviceAdapter)
+    scheduler._disconnect_backoff_s = 0.01
+
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.sleep(0.2)
+    adapter.is_connected = False
+    await asyncio.sleep(0.1)
+    adapter.is_connected = True
+    await asyncio.sleep(0.2)
+    scheduler.stop()
+    await task
+
+    assert len(adapter.send_frame_calls) == 2
+
+
 async def test_a_light_given_a_new_adapter_gets_its_frame_at_once() -> None:
     device, _buf, scheduler = _still()
 
