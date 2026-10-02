@@ -10,10 +10,10 @@ from loguru import logger
 from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
 from dj_ledfx.devices.govee.adapter_base import GoveeAdapterBase
+from dj_ledfx.devices.govee.colour import GoveeColourAdapter
 from dj_ledfx.devices.govee.output import GoveeOutput, lamp_fps, lamp_plan
-from dj_ledfx.devices.govee.segment import GoveeSegmentAdapter
+from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
 from dj_ledfx.devices.govee.sku_registry import get_device_capability
-from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
 from dj_ledfx.devices.govee.transport import GoveeTransport
 from dj_ledfx.devices.govee.types import GoveeDeviceRecord
 from dj_ledfx.latency.strategies import make_strategy
@@ -158,24 +158,20 @@ class GoveeBackend(DeviceBackend):
     def _adapter(
         self, transport: GoveeTransport, record: GoveeDeviceRecord, config: AppConfig
     ) -> tuple[GoveeAdapterBase, int]:
-        """The adapter a lamp plays through, and its rate: razer segments, one colour across
-        its segments, or one colour on a lamp with fewer than two."""
+        """The adapter a lamp plays through, as its plan says (razer, or one colour on any
+        number of segments), and its rate."""
         govee = config.devices.govee
         capability = get_device_capability(record.sku)
         output = self._outputs.get(f"govee:{record.device_id}", GoveeOutput())
         plan = lamp_plan(capability, output, govee.segment_override)
-        adapter: GoveeAdapterBase
-        if plan.segments < 2:
-            adapter = GoveeSolidAdapter(transport, record)
-        else:
-            adapter = GoveeSegmentAdapter(
-                transport,
-                record,
-                plan.segments,
-                razer=plan.razer,
-                form=capability.form,
-                from_top=capability.segments_from_top,
-            )
+        kind: type[GoveeAdapterBase] = GoveeRazerAdapter if plan.razer else GoveeColourAdapter
+        adapter = kind(
+            transport,
+            record,
+            plan.segments,
+            form=capability.form,
+            from_top=capability.segments_from_top,
+        )
         max_fps = lamp_fps(plan, govee.max_fps)
         logger.info(
             "Govee {} at {}: {} segment(s), {}, {} frames a second",

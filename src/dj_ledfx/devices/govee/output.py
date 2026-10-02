@@ -60,7 +60,7 @@ class GoveeOutput:
 
 @dataclass(frozen=True, slots=True)
 class LampPlan:
-    segments: int  # 1: one colour, through the solid adapter
+    segments: int  # 1: a lamp of one segment, which plays one colour
     razer: bool
 
     @property

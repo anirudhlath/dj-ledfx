@@ -18,7 +18,7 @@ Direct integration with Govee RGBIC devices over the Govee LAN UDP protocol, sup
 | Protocols | Core (`colorwc`) + Segment (razer, DreamView) | The owner's ruling O2 (light-output fixes): a razer frame carries one colour per segment and gets no reply. `ptReal` is removed. `colorwc`, at most 10 a second, is the fallback for a model without razer. The SKU registry says which models take razer, and `scripts/govee_razer_check.py` checks a lamp by eye. |
 | Architecture | Shared transport + typed adapters | Mirrors LIFX pattern. Clean separation of concerns. Extensible for future adapter types. |
 | Discovery | Fully automatic multicast | No manual IP config. Scan sent 3x at 1s intervals to handle UDP loss. |
-| Segment detection | Lamp's own output + config override + SKU registry | A lamp's own output (its device row, set by `PUT /api/lights/{id}/output`) first, then the TOML config's segment override, then the SKU registry, which also says whether a model takes razer, its form and which end its first segment is at. Unknown SKU falls back to solid adapter. |
+| Segment detection | Lamp's own output + config override + SKU registry | A lamp's own output (its device row, set by `PUT /api/lights/{id}/output`) first, then the TOML config's segment override, then the SKU registry, which also says whether a model takes razer, its form and which end its first segment is at. An unknown SKU plays one colour, through the colour adapter. |
 | Latency strategy | Windowed median of 9, seeded at 100 ms | One way: half of each `devStatus` round trip measured while frames stream. Same as LIFX. User can switch to ema, windowed_mean or static. |
 | Transport abstraction | None | Transport is internal to Govee backend. No shared Transport ABC — YAGNI, protocols differ too much. |
 | Default FPS cap | 30 by razer, 10 by `colorwc` | Measured: `colorwc` at 40 a second ran 9 commands behind, and may have hung two lamps for about ten minutes; at 10, 1 behind. The `colorwc` cap holds whatever the config says. |
@@ -150,10 +150,11 @@ Example: segment 0 only → LEFT=`0x01`, RIGHT=`0x00`.
 src/dj_ledfx/devices/govee/
 ├── __init__.py          # Exports GoveeBackend (triggers auto-registration)
 ├── types.py             # GoveeDeviceRecord, GoveeDeviceCapability dataclasses
-├── transport.py         # GoveeTransport — UDP socket management, discovery, probing
+├── transport.py         # GoveeTransport — UDP sockets, discovery, status reads and their round trips
 ├── protocol.py          # Pure functions: razer frames, base64, checksums, JSON builders
-├── solid.py             # GoveeSolidAdapter — whole-device color via colorwc
-├── segment.py           # GoveeSegmentAdapter — per-segment color via razer
+├── adapter_base.py      # GoveeAdapterBase — what both outputs share: reads, capture, restore, segment geometry
+├── razer.py             # GoveeRazerAdapter — one colour per segment by razer
+├── colour.py            # GoveeColourAdapter — one colour by colorwc, on any number of segments
 ├── output.py            # GoveeOutput (a lamp's own output), lamp_plan(), lamp_fps()
 ├── sku_registry.py      # SKU → capability lookup (imports types from types.py)
 └── backend.py           # GoveeBackend(DeviceBackend) — discovery orchestration
@@ -161,8 +162,8 @@ src/dj_ledfx/devices/govee/
 tests/devices/govee/
 ├── test_protocol.py     # Razer frames, checksum, base64 (pure function tests)
 ├── test_transport.py    # UDP socket mocking, discovery flow
-├── test_solid.py        # Solid adapter send_frame
-├── test_segment.py      # Segment adapter: razer frames, one colour
+├── test_colour.py       # Colour adapter: the average by colorwc, razer-off when prepared
+├── test_razer.py        # Razer adapter: razer frames and arming
 ├── test_output.py       # Lamp plans, rates and stored outputs
 ├── test_sku_registry.py # SKU lookups, defaults, unknown SKUs
 └── test_backend.py      # Backend discovery → adapter creation
@@ -229,40 +230,47 @@ def build_status_query() -> dict
 - `build_razer_frame()` packs a header, the segment count, one RGB triple per segment and an XOR checksum, base64-encoded; `build_razer_switch()` turns razer on or off.
 - The light-output fixes removed `ptReal`'s builders (`build_ble_packet`, `encode_segment_mask`, `build_segment_color_packet`, `build_pt_real_message`) and `map_colors_to_segments()`: a lamp's frame already has one colour per segment.
 
-### GoveeSolidAdapter
+### GoveeAdapterBase
 
-For non-RGBIC devices. Whole-device color via `colorwc`.
+What a lamp's two outputs share. The backend picks the adapter on the lamp's `LampPlan`: `razer` true gives `GoveeRazerAdapter`, false gives `GoveeColourAdapter`.
 
 ```python
-class GoveeSolidAdapter(DeviceAdapter):
+class GoveeAdapterBase(DeviceAdapter):
     supports_latency_probing = False
+    razer: ClassVar[bool] = False
 
-    def __init__(self, transport: GoveeTransport, record: GoveeDeviceRecord): ...
+    def __init__(self, transport: GoveeTransport, record: GoveeDeviceRecord, segments: int = 1, *, form: GoveeForm = "strip", from_top: bool = False): ...
 
-    # device_info: device_type="govee_solid", led_count=1
+    # device_info: device_type="govee_segment" for a lamp of segments, "govee_solid" for one,
+    #   as rows and the API have always held them; led_count=segments
+    # geometry: one segment is a point; an upright lamp stands, another lies along its length
     # connect: queries devStatus to verify reachability (does NOT send turn-on)
     # disconnect: sets is_connected=False (UDP is connectionless)
-    # send_frame: takes first pixel color, sends colorwc message via transport
+    # restore_state: razer off first, then colour and brightness (and off, last, if it was off);
+    #   nothing for a lamp switched off elsewhere
 ```
 
-### GoveeSegmentAdapter
+### GoveeRazerAdapter
 
-For RGBIC devices. Per-segment color via razer, or one colour by `colorwc` for a model without it (its `LampPlan`).
+One colour per segment by razer, at the configured rate.
 
 ```python
-class GoveeSegmentAdapter(DeviceAdapter):
-    supports_latency_probing = False
+class GoveeRazerAdapter(GoveeAdapterBase):
+    razer = True
 
-    def __init__(self, transport: GoveeTransport, record: GoveeDeviceRecord, num_segments: int): ...
+    # send_frame: razer on before the first frame, after RAZER_IDLE_S (2 s) without one, and
+    #   after a prepare, restore or power switch; then one razer frame (an RGB triple per
+    #   segment, XOR checksum) to port 4003
+```
 
-    # device_info: device_type="govee_segment", led_count=num_segments
-    # connect: queries devStatus to verify reachability (does NOT send turn-on)
-    # disconnect: sets is_connected=False
-    # send_frame:
-    #   1. The frame has one colour per segment (led_count is the segment count)
-    #   2. Razer: razer on before the first frame and after 2 s without one, then
-    #      one razer frame (an RGB triple per segment, XOR checksum) to port 4003
-    #   3. One colour: the frame's average as one colorwc command
+### GoveeColourAdapter
+
+One colour by `colorwc`, on a lamp of any number of segments: one segment, a model the SKU table doesn't know, or a lamp set to play one colour. At most `GOVEE_COLOUR_FPS` (10) a second.
+
+```python
+class GoveeColourAdapter(GoveeAdapterBase):
+    # send_frame: the frame's average as one colorwc command
+    # prepare_stream: razer off, in case a look left the lamp there, then full brightness
 ```
 
 ### SKU Registry
@@ -298,7 +306,7 @@ Discovery flow:
 1. Create and open `GoveeTransport`.
 2. Run multicast discovery, collect `GoveeDeviceRecord` list.
 3. For each record:
-   - Look up SKU capability, choose adapter type (segment or solid).
+   - Look up SKU capability, plan the lamp's output (`lamp_plan`) and choose the adapter on the plan's `razer`: razer or colour.
    - Connect adapter (devStatus reachability check).
    - Create `LatencyTracker` (windowed median, seeded at 100 ms one way).
    - Register the lamp with the transport, so its status reads' round trips feed the tracker: `transport.register_device(record, rtt_callback=tracker.update_rtt)`.
@@ -352,7 +360,7 @@ TOML section: `[devices.govee]`.
 | send_frame socket error | Set `is_connected = False`, log warning. Scheduler stops sending. |
 | Device goes offline mid-session | Its status reads go unanswered: three missed reads (about 15 s) take it offline (a read asks twice, and a lamp heard from since its last read hasn't missed it), and it gets no frames until a scan finds it. While another program holds UDP 4002 no reply arrives at all, so this can't be told and frames keep going. |
 | Razer frame exceeds MTU | Not possible — at most 255 segments: 772 bytes, about 1.1 KB as base64 in JSON, within the 1472-byte MTU. |
-| Unknown SKU discovered | Falls back to solid adapter with colorwc. Logs suggestion to set segment_override. |
+| Unknown SKU discovered | Plays one colour through the colour adapter. Logs suggestion to set segment_override. |
 
 ## Testing Strategy
 
@@ -360,15 +368,15 @@ TOML section: `[devices.govee]`.
 |-----------|-------|----------|
 | `test_protocol.py` | Razer frames and switches, checksums, base64, JSON builders | Pure function tests. No mocking. Verify known byte sequences from reverse-engineering docs. |
 | `test_transport.py` | UDP socket operations, discovery flow, response parsing | Mock `asyncio.DatagramProtocol`. Verify multicast target, port numbers, JSON serialization. |
-| `test_solid.py` | Solid adapter send_frame, connect/disconnect | Mock transport. Verify colorwc message format, first-pixel extraction. |
-| `test_segment.py` | Segment adapter: razer frames and arming, one colour | Mock transport. Verify razer on and off, frame bytes, the colour fallback. |
+| `test_colour.py` | Colour adapter: send_frame, connect/disconnect, prepare, restore | Mock transport. Verify the colorwc average, razer off when prepared and before a restore. |
+| `test_razer.py` | Razer adapter: razer frames and arming | Mock transport. Verify razer on and off, frame bytes, geometry. |
 | `test_output.py` | Lamp plans, rates and stored outputs | Pure logic. Razer or one colour, segment counts, the colour cap, a stored output read as far as it can be used. |
 | `test_sku_registry.py` | SKU lookups, defaults, config overrides | Pure logic. Test known SKUs, unknown SKUs, override precedence. |
 | `test_backend.py` | Discovery → adapter creation, config-driven behavior | Mock transport discovery. Verify adapter type selection, latency strategy, FPS cap. |
 
 ## Future Extensions (Out of Scope)
 
-- **Razer/DreamView protocol** (`cmd:"razer"`): built by the light-output fixes, in `GoveeSegmentAdapter` rather than a third adapter type, one colour per segment.
+- **Razer/DreamView protocol** (`cmd:"razer"`): built by the light-output fixes: `GoveeRazerAdapter`, one colour per segment, beside `GoveeColourAdapter`, chosen on the lamp's plan.
 - **Reconnection logic**: built: a lamp back from a drop-out rejoins at the next scan, and setting a lamp's own output reconnects it.
 - **Per-device config overrides**: a lamp's own output (razer or one colour, and a segment count) is built, kept in its device row; per-device FPS caps and latency strategies are not.
 - **BLE fallback**: Direct Bluetooth control for devices without LAN API support.

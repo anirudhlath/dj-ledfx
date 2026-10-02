@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from govee_fakes import STATUS, lamp_record
 
-from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
+from dj_ledfx.devices.govee.colour import GoveeColourAdapter
 from dj_ledfx.devices.govee.transport import GoveeTransport
 
 
@@ -174,7 +174,7 @@ class TestHeardFrom:
 
     def test_a_lamp_was_last_heard_when_its_transport_last_heard_it(self) -> None:
         transport = GoveeTransport(clock=lambda: 7.0)
-        lamp = GoveeSolidAdapter(transport, lamp_record())
+        lamp = GoveeColourAdapter(transport, lamp_record())
         assert lamp.last_heard is None
         _reply(transport, STATUS)
         assert lamp.last_heard == 7.0

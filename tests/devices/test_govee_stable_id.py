@@ -2,30 +2,15 @@
 
 from unittest.mock import MagicMock
 
-from dj_ledfx.devices.govee.segment import GoveeSegmentAdapter
-from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
-from dj_ledfx.devices.govee.types import GoveeDeviceRecord
+import pytest
+from govee_fakes import LAMP, lamp_record
+
+from dj_ledfx.devices.govee.adapter_base import GoveeAdapterBase
+from dj_ledfx.devices.govee.colour import GoveeColourAdapter
+from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
 
 
-def _make_record():
-    return GoveeDeviceRecord(
-        ip="192.168.1.10",
-        device_id="1F:80:C5:32:32:36:72:4E",
-        sku="H6159",
-        wifi_version="1.0",
-        ble_version="1.0",
-    )
-
-
-def test_segment_adapter_stable_id():
-    transport = MagicMock()
-    adapter = GoveeSegmentAdapter(transport, _make_record(), num_segments=10)
-    info = adapter.device_info
-    assert info.stable_id == "govee:1F:80:C5:32:32:36:72:4E"
-
-
-def test_solid_adapter_stable_id():
-    transport = MagicMock()
-    adapter = GoveeSolidAdapter(transport, _make_record())
-    info = adapter.device_info
-    assert info.stable_id == "govee:1F:80:C5:32:32:36:72:4E"
+@pytest.mark.parametrize("kind", [GoveeRazerAdapter, GoveeColourAdapter])
+def test_a_lamp_is_known_by_its_device_id(kind: type[GoveeAdapterBase]) -> None:
+    adapter = kind(MagicMock(), lamp_record(), 10)
+    assert adapter.device_info.stable_id == LAMP == "govee:test-lamp"
