@@ -14,7 +14,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities, LightProtocol
-from dj_ledfx.devices.govee.output import MAX_SEGMENTS, GoveeMode, GoveeOutput, lamp_plan
+from dj_ledfx.devices.govee.output import (
+    MAX_SEGMENTS,
+    MIN_SEGMENTS,
+    GoveeMode,
+    GoveeOutput,
+    lamp_plan,
+)
 from dj_ledfx.devices.govee.sku_registry import get_device_capability
 from dj_ledfx.devices.lights import LightEntry, LightIndex
 from dj_ledfx.devices.manager import ManagedDevice
@@ -593,7 +599,7 @@ class LampOutputSetting(ContractModel):
     Null leaves either to the config and the lamp's model."""
 
     mode: GoveeMode | None = None
-    segments: int | None = Field(None, ge=2, le=MAX_SEGMENTS)
+    segments: int | None = Field(None, ge=MIN_SEGMENTS, le=MAX_SEGMENTS)
 
 
 class LampOutput(ContractModel):
@@ -612,7 +618,7 @@ def lamp_output_out(
     plan = lamp_plan(get_device_capability(sku), own, segment_override)
     return LampOutput(
         light_id=light_id,
-        mode="segments" if plan.razer else "colour",
+        mode=plan.mode,
         segments=plan.segments,
         own=LampOutputSetting(mode=own.mode, segments=own.segments),
         online=online,

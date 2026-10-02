@@ -8,6 +8,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
+from loguru import logger
+
 from dj_ledfx.config import GOVEE_COLOUR_FPS
 from dj_ledfx.devices.govee.protocol import MAX_RAZER_SEGMENTS
 from dj_ledfx.devices.govee.types import GoveeDeviceCapability
@@ -15,14 +17,15 @@ from dj_ledfx.devices.govee.types import GoveeDeviceCapability
 GoveeMode = Literal["segments", "colour"]  # razer, one colour per segment; or colorwc
 MODES: tuple[GoveeMode, ...] = get_args(GoveeMode)
 OUTPUT_KEY = "output"  # where a lamp's own output sits in its device row's extra (JSON)
+MIN_SEGMENTS = 2  # fewer has no segments to light: the lamp plays one colour
 MAX_SEGMENTS = MAX_RAZER_SEGMENTS  # razer's limit; one colour keeps to it too
 
 
 def _segment_count(value: object) -> int | None:
-    """A stored segment count a lamp can use, or None."""
+    """A segment count a lamp can use, or None."""
     if isinstance(value, bool) or not isinstance(value, int):
         return None
-    return value if 2 <= value <= MAX_SEGMENTS else None
+    return value if MIN_SEGMENTS <= value <= MAX_SEGMENTS else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,20 +63,33 @@ class LampPlan:
     segments: int  # 1: one colour, through the solid adapter
     razer: bool
 
+    @property
+    def mode(self) -> GoveeMode:
+        return "segments" if self.razer else "colour"
+
 
 def lamp_plan(
     capability: GoveeDeviceCapability, output: GoveeOutput, segment_override: int | None
 ) -> LampPlan:
     """The lamp's segments (its own count, else the config's override for an RGBIC lamp,
     else the table's) and whether it plays razer (its own mode, else the table's). Fewer
-    than two segments plays one colour."""
+    than MIN_SEGMENTS plays one colour. An override no lamp plays is ignored, with a
+    warning, as a stored count is."""
+    override = _segment_count(segment_override)
+    if segment_override is not None and override is None:
+        logger.warning(
+            "Govee segment_override {} isn't {} to {}: ignored",
+            segment_override,
+            MIN_SEGMENTS,
+            MAX_SEGMENTS,
+        )
     if output.segments is not None:
         segments = output.segments
-    elif segment_override is not None and capability.is_rgbic:
-        segments = segment_override
+    elif override is not None and capability.is_rgbic:
+        segments = override
     else:
         segments = capability.segment_count
-    if segments < 2:
+    if segments < MIN_SEGMENTS:
         return LampPlan(1, razer=False)
     razer = capability.razer if output.mode is None else output.mode == "segments"
     return LampPlan(segments, razer)
