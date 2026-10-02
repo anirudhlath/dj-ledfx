@@ -88,6 +88,14 @@ describe("the stage's canvas (§7.5)", () => {
     expect(drawnScene().props).toEqual(props)
   })
 
+  // E10: at a pixel ratio of 2 the edges are fine enough, and multisampling cost a software renderer
+  // (SwiftShader) 40% of its frame rate on Main.png's stage.
+  it('draws without antialiasing at a pixel ratio of 2 or more', () => {
+    vi.stubGlobal('devicePixelRatio', 2)
+    render(<StageCanvas {...stageProps()} />)
+    expect(root.configure.mock.lastCall![0]).toMatchObject({ gl: { antialias: false } })
+  })
+
   // E4: three links the programs it needs at a draw synchronously, so the first draw waits for them.
   it("draws nothing until three has compiled the scene's shaders off the main thread, then draws on demand", async () => {
     const props = { ...stageProps(), cadenceMs: 1000 / 60 }

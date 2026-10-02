@@ -18,8 +18,12 @@ import { StageScene, type StageSceneProps } from './scene/stage-scene'
 
 const BACKGROUND = rgb(STAGE_PALETTE.bg)
 
-/** The WebGL context: opaque, and on whichever GPU the browser likes (the stage needn't wake a discrete one). */
-const CONTEXT = { alpha: false, antialias: true, powerPreference: 'default' } as const
+/**
+ * The WebGL context: opaque, on whichever GPU the browser likes (the stage needn't wake a discrete
+ * one), and antialiased only below a pixel ratio of 2, where edges need it; at 2 multisampling cost
+ * a software renderer 40% of its frame rate on Main.png's stage, and a 4090 nothing it could measure.
+ */
+const contextFor = (pixelRatio: number) => ({ alpha: false, antialias: pixelRatio < 2, powerPreference: 'default' }) as const
 
 /** Hands an error in the canvas's own React root to the page's, whose error boundary shows it. */
 class HandOn extends Component<{ onError: (error: unknown) => void; children: ReactNode }, { failed: boolean }> {
@@ -44,6 +48,8 @@ export const StageCanvas = memo(function StageCanvas(props: StageSceneProps) {
   const root = useRef<ReconcilerRoot<HTMLCanvasElement> | null>(null)
   const compiling = useRef(false)
   const [compiled, setCompiled] = useState(false)
+  // Read once: a context's attributes are fixed when it's made.
+  const [context] = useState(() => contextFor(window.devicePixelRatio))
   const [failure, setFailure] = useState<{ error: unknown } | null>(null)
   if (failure !== null) throw failure.error
   const fail = (error: unknown) => setFailure({ error })
@@ -63,7 +69,7 @@ export const StageCanvas = memo(function StageCanvas(props: StageSceneProps) {
     const { width, height } = props.pose
     root.current
       .configure({
-        gl: CONTEXT,
+        gl: context,
         orthographic: true,
         camera: { manual: true },
         linear: true,
