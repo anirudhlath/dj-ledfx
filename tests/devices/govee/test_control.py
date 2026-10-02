@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from dj_ledfx.devices.capabilities import LightReading
+from dj_ledfx.devices.capabilities import LightReading, NoAnswer, try_read
 from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
 from dj_ledfx.devices.govee.state import GoveeDeviceState
 from dj_ledfx.devices.govee.transport import GoveeTransport
@@ -50,12 +50,24 @@ async def test_read_light_reports_power_and_colour(record: GoveeDeviceRecord) ->
     assert await adapter.read_light() == LightReading(power=False, colour=(10, 20, 30))
 
 
-@pytest.mark.parametrize(("can_receive", "status"), [(False, STATUS), (True, None)])
-async def test_read_light_is_unknown_when_nothing_comes_back(
-    record: GoveeDeviceRecord, can_receive: bool, status: dict[str, Any] | None
+async def test_read_light_is_unknown_while_another_program_holds_the_reply_port(
+    record: GoveeDeviceRecord,
 ) -> None:
-    adapter = GoveeSolidAdapter(_transport(can_receive=can_receive, status=status), record)
-    assert await adapter.read_light() == LightReading(power=None, colour=None)
+    transport = _transport(can_receive=False)
+    adapter = GoveeSolidAdapter(transport, record)
+    assert await adapter.read_light() == LightReading.UNKNOWN
+    transport.query_status.assert_not_awaited()
+
+
+# Review Focus 1: a lamp that stops answering mid-look is a missed read. Three in a row take
+# it offline (zones/lights.py), so it gets no frames until a scan finds it again.
+async def test_a_lamp_that_stops_answering_is_missing_not_unknown(
+    record: GoveeDeviceRecord,
+) -> None:
+    adapter = GoveeSolidAdapter(_transport(status=None), record)
+    with pytest.raises(NoAnswer):
+        await adapter.read_light()
+    assert await try_read(adapter) is None  # what the light monitor counts as a miss
 
 
 async def test_capture_reads_the_lamp_now(record: GoveeDeviceRecord) -> None:

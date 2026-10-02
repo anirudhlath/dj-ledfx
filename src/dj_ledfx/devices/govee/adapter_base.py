@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dj_ledfx.devices.adapter import DeviceAdapter
-from dj_ledfx.devices.capabilities import LightReading
+from dj_ledfx.devices.capabilities import LightReading, NoAnswer
 from dj_ledfx.devices.govee.protocol import (
     build_brightness_message,
     build_solid_color_message,
@@ -51,9 +51,14 @@ class GoveeAdapterBase(DeviceAdapter):
         return GoveeDeviceState.from_status(status) if status is not None else None
 
     async def read_light(self) -> LightReading:
-        state = await self._status()
-        if state is None:  # HA holds UDP 4002, or no status came back: it can't say
+        """Power and colour from a status query. Unknown while another program holds UDP
+        4002, since no reply can reach us; NoAnswer when the lamp stays silent, which the
+        light monitor counts as a missed read."""
+        if not self._transport.can_receive:
             return LightReading.UNKNOWN
+        state = await self._status()
+        if state is None:
+            raise NoAnswer(f"Govee {self._record.ip} didn't answer a status query")
         return LightReading(power=bool(state.on_off), colour=(state.r, state.g, state.b))
 
     async def set_power(self, on: bool) -> None:
