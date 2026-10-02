@@ -360,7 +360,7 @@ TOML section: `[devices.govee]`.
 | send_frame socket error | Set `is_connected = False`, log warning. Scheduler stops sending. |
 | Device goes offline mid-session | Its status reads go unanswered: three missed reads (about 15 s) take it offline (a read asks twice, and a lamp heard from since its last read hasn't missed it), and it gets no frames until a scan finds it. While another program holds UDP 4002 no reply arrives at all, so this can't be told and frames keep going. |
 | Razer frame exceeds MTU | Not possible — at most 255 segments: 772 bytes, about 1.1 KB as base64 in JSON, within the 1472-byte MTU. |
-| Unknown SKU discovered | Plays one colour through the colour adapter. Logs suggestion to set segment_override. |
+| Unknown SKU discovered | Plays one colour through the colour adapter, on one segment. Its own output (`PUT /api/lights/{id}/output`) can give it segments and razer; the config's `segment_override` applies only to a model the SKU table knows is RGBIC. |
 
 ## Testing Strategy
 
