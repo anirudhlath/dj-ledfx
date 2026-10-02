@@ -23,7 +23,7 @@ Direct integration with Govee RGBIC devices over the Govee LAN UDP protocol, sup
 | Transport abstraction | None | Transport is internal to Govee backend. No shared Transport ABC — YAGNI, protocols differ too much. |
 | Default FPS cap | 30 by razer, 10 by `colorwc` | Measured: `colorwc` at 40 a second ran 9 commands behind, and may have hung two lamps for about ten minutes; at 10, 1 behind. The `colorwc` cap holds whatever the config says. |
 | Reconnection | Ghosts and scans | A lamp that misses three status reads goes offline; a scan (every 30 s) brings it back. A lamp's own output, once set, plays at once: an online lamp's adapter is built again from its row, with no network, and an offline lamp takes it when a scan finds it. |
-| Latency probing | The status reads' round trips | `supports_latency_probing = False` on both adapters. The transport times each `devStatus` query to its reply (connect, capture and the light monitor's reads all ask one) and hands the round trip to that lamp's LatencyTracker; there is no probe loop. `send_frame` is fire-and-forget UDP — timing it only measures local socket write, not device latency. |
+| Latency probing | The status reads' round trips | The transport times each `devStatus` query to its reply (connect, capture and the light monitor's reads all ask one) and hands the round trip to that lamp's LatencyTracker; there is no probe loop. `send_frame` is fire-and-forget UDP — timing it only measures local socket write, not device latency. |
 | Auto power-on | No | `connect()` queries `devStatus` to verify reachability but does not send `turn(on)`. User controls power state via Govee app. |
 
 ## Govee LAN Protocol Summary
@@ -236,7 +236,6 @@ What a lamp's two outputs share. The backend picks the adapter on the lamp's `La
 
 ```python
 class GoveeAdapterBase(DeviceAdapter):
-    supports_latency_probing = False
     razer: ClassVar[bool] = False
 
     def __init__(self, transport: GoveeTransport, record: GoveeDeviceRecord, segments: int = 1, *, form: GoveeForm = "strip", from_top: bool = False): ...

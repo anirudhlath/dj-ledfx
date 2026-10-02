@@ -38,7 +38,6 @@ class GoveeAdapterBase(DeviceAdapter):
     """Shared base for Govee adapters: connect, power, reads, capture and restore, and where
     the lamp's segments sit. A subclass streams a frame through `_stream`."""
 
-    supports_latency_probing = False
     razer: ClassVar[bool] = False  # True: each frame lights every segment on its own
 
     def __init__(

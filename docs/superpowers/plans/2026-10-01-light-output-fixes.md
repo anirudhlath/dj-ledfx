@@ -5016,7 +5016,7 @@ Write `$B/body.md` with these sections, in this order.
 
 **Real lights.** Task 8's findings, in words: what each pattern showed on each lamp, by its table entry, and whether a streaming lamp answered status queries. Task 15's table before and after, by kind of light, and the matrix's display delay as set. No names, addresses or model numbers.
 
-**Known issues.** The lowest lights glow dimly in Aurora (a curtain fades in up to its band's middle). A run beside the deployed app can't hear Govee replies, so it can't capture or restore a lamp. A restored backup's lamp outputs apply at the next start. The web app shows LIFX and Govee latency as estimated, because `estimated` follows `supports_latency_probing`, which is False on every real adapter. The Claude Design project still has Aurora's old copy (ruling 20). The Govee outage's cause is unproven.
+**Known issues.** The lowest lights glow dimly in Aurora (a curtain fades in up to its band's middle). A run beside the deployed app can't hear Govee replies, so it can't capture or restore a lamp. A restored backup's lamp outputs apply at the next start. The Claude Design project still has Aurora's old copy (ruling 20). The Govee outage's cause is unproven.
 
 **Test plan.** Step 3's gates with their counts, the perf run, the web gate, Task 8 and Task 15.
 

@@ -67,7 +67,6 @@ def hsbk_from_json(values: object) -> HSBK:
 
 
 class LifxAdapterBase(DeviceAdapter):
-    supports_latency_probing = False
     # The most frames a second this kind of light takes; None: the configured max_fps.
     stream_fps_cap: ClassVar[int | None] = None
     # Where a capture keeps the light's own firmware effect; None: it has none (bulbs).

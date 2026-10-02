@@ -240,7 +240,7 @@ async def test_send_loop_reconnection_sends_frames() -> None:
 
 async def test_send_loop_reconnection_resets_tracker() -> None:
     """When is_connected flips False->True, tracker.reset() must be called."""
-    adapter = MockDeviceAdapter(name="Reconnect", connected=False, supports_probing=False)
+    adapter = MockDeviceAdapter(name="Reconnect", connected=False)
     strategy = WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
     device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy), max_fps=60)
     # Pre-fill strategy with stale samples
@@ -270,41 +270,19 @@ async def test_send_loop_reconnection_resets_tracker() -> None:
     assert strategy.get_latency() == 100.0
 
 
-async def test_send_loop_rtt_not_updated_when_probing_disabled() -> None:
-    """When supports_latency_probing=False, tracker should not get RTT updates."""
-    adapter = MockDeviceAdapter(name="NoProbe", supports_probing=False)
+async def test_sending_never_moves_a_light_s_latency() -> None:
+    """A send returns before the light shows the frame: only a probe's round trip counts."""
+    adapter = MockDeviceAdapter(name="Sent")
     strategy = WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
     device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy), max_fps=60)
     buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
 
-    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
-    task = asyncio.create_task(scheduler.run())
-    await asyncio.sleep(0.15)
-    scheduler.stop()
-    await task
+    await _run_for(_scheduler(ring_buffer=buf, devices=[device], fps=60), 0.15)
 
-    # Strategy should still return initial value (no RTT updates overwrote it)
-    assert strategy.get_latency() == 100.0
-
-
-async def test_send_loop_rtt_updated_when_probing_enabled() -> None:
-    """When supports_latency_probing=True, tracker should receive RTT updates."""
-    adapter = MockDeviceAdapter(name="WithProbe", supports_probing=True)
-    strategy = WindowedMeanLatency(window_size=60, initial_value_ms=100.0)
-    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(strategy=strategy), max_fps=60)
-
-    buf = RingBuffer(capacity=60)
-    _fill_buffer(buf, time.monotonic(), 60)
-
-    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
-    task = asyncio.create_task(scheduler.run())
-    await asyncio.sleep(0.15)
-    scheduler.stop()
-    await task
-
-    # Latency should have shifted from initial (mock send is near-instant, ~0ms RTT)
-    assert strategy.get_latency() < 100.0
+    assert adapter.send_frame_calls
+    assert strategy.get_latency() == 100.0  # its seed: no send duration got in
+    assert not device.tracker.measured
 
 
 async def test_send_loop_buffer_not_ready() -> None:
@@ -778,7 +756,7 @@ async def test_stats_report_the_share_of_frames_a_streaming_light_misses() -> No
 
 
 async def test_a_probe_reply_counts_while_frames_go_out() -> None:
-    adapter = MockDeviceAdapter(name="Probed", led_count=10, supports_probing=False)
+    adapter = MockDeviceAdapter(name="Probed", led_count=10)
     tracker = LatencyTracker(WindowedMedianLatency(LATENCY_WINDOW, initial_value_ms=10.0))
     device = ManagedDevice(adapter=adapter, tracker=tracker, max_fps=60)
     buf = RingBuffer(capacity=60)
@@ -843,7 +821,7 @@ async def test_a_light_given_a_new_adapter_gets_its_frame_at_once() -> None:
 
 # Review Focus 6: a light that never acks or answers a probe keeps its rate.
 async def test_a_light_that_never_acks_keeps_its_rate() -> None:
-    adapter = MockDeviceAdapter(name="Quiet", led_count=10, supports_probing=False)
+    adapter = MockDeviceAdapter(name="Quiet", led_count=10)
     strategy = make_strategy("windowed_median", 10.0, LATENCY_WINDOW)
     tracker = LatencyTracker(strategy, display_ms=24.0)
     device = ManagedDevice(adapter=adapter, tracker=tracker, max_fps=20)

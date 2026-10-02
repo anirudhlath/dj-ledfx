@@ -42,13 +42,11 @@ class MockDeviceAdapter(DeviceAdapter):
         name: str = "TestDevice",
         led_count: int = 10,
         connected: bool = True,
-        supports_probing: bool = True,
         geometry: DeviceGeometry | None = None,
     ) -> None:
         self._name = name
         self._led_count = led_count
         self._connected = connected
-        self.supports_latency_probing = supports_probing
         self._geometry = geometry
         self.send_frame_calls: list[NDArray[np.uint8]] = []
         self.connect_count = 0
@@ -113,8 +111,6 @@ class Hold:
 
 class FakeLight(DeviceAdapter):
     """A light that records what the app asks of it. Power and colour are readable."""
-
-    supports_latency_probing = False
 
     def __init__(
         self,

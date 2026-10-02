@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable
 from typing import Protocol
 
-from dj_ledfx.latency.strategies import ProbeStrategy, make_strategy
+from dj_ledfx.latency.strategies import ProbeStrategy, StaticLatency, make_strategy
 
 # A round trip that arrives within this long of a send was measured while the light streamed.
 STREAMING_WINDOW_S = 0.5
@@ -27,6 +27,7 @@ class LatencyTracker:
         self._display_ms = display_ms
         self._clock = clock
         self._last_send: float | None = None
+        self._measured = False
 
     @property
     def manual_offset_ms(self) -> float:
@@ -44,9 +45,11 @@ class LatencyTracker:
     def effective_latency_s(self) -> float:
         return self.effective_latency_ms / 1000.0
 
-    def update(self, sample_ms: float) -> None:
-        """A one-way sample, taken as it is: a send that returns once the device has it."""
-        self._strategy.update(sample_ms)
+    @property
+    def measured(self) -> bool:
+        """Whether a round trip measured while the light streamed has landed since the last
+        reset. Until one has, the latency is the seed: the config's, or the type's heuristic."""
+        return self._measured
 
     def note_send(self) -> None:
         """A frame went out now, on this tracker's clock."""
@@ -58,10 +61,13 @@ class LatencyTracker:
         if self._last_send is None or self._clock() - self._last_send > STREAMING_WINDOW_S:
             return
         self._strategy.update(rtt_ms / 2.0)
+        # A static latency ignores the sample: it stays the configured one.
+        self._measured = not isinstance(self._strategy, StaticLatency)
 
     def reset(self) -> None:
         self._strategy.reset()
         self._last_send = None
+        self._measured = False
 
 
 class LatencyConfig(Protocol):

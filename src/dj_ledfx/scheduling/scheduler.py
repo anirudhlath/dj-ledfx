@@ -241,8 +241,6 @@ class LookaheadScheduler:
                 state.last_route, state.last_adapter = current, device.adapter
                 state.last_colors, state.last_sent_at = colors, sent
                 metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
-                if device.adapter.supports_latency_probing:
-                    device.tracker.update((sent - send_start) * 1000.0)
                 state.send_count += 1
                 state.sent_at.append(sent)
                 trim_window(state.sent_at, sent)

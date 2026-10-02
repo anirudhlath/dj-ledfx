@@ -74,11 +74,6 @@ async def test_openrgb_truncates_colors() -> None:
         assert len(sent_colors) == 5
 
 
-def test_supports_latency_probing_is_false() -> None:
-    adapter = OpenRGBAdapter()
-    assert adapter.supports_latency_probing is False
-
-
 async def test_send_frame_connection_error_disconnects() -> None:
     """send_frame should set is_connected=False on ConnectionError and re-raise."""
     with patch("dj_ledfx.devices.openrgb.OpenRGBClient") as mock_cls:

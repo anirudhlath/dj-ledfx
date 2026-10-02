@@ -19,7 +19,6 @@ class DeviceAdapter(ABC):
     between device types (TCP for OpenRGB, UDP broadcast for Govee/LIFX).
     """
 
-    supports_latency_probing: bool = True
     _send_lock: asyncio.Lock | None = None
 
     @property

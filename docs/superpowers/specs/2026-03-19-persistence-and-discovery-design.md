@@ -261,7 +261,7 @@ Conflicts are checked at two points:
 
 `ManagedDevice` gains:
 - `status: Literal["online", "offline", "reconnecting"]`
-- `adapter: DeviceAdapter` — uses a `GhostAdapter` when offline instead of `None`. `GhostAdapter` is a concrete `DeviceAdapter` subclass that: provides stored `device_info`/`led_count`/`is_connected=False`, `supports_latency_probing=False`, raises on `send_frame()`. This avoids null-safety refactoring across scheduler, web routers, and all code that accesses `device.adapter.*`.
+- `adapter: DeviceAdapter` — uses a `GhostAdapter` when offline instead of `None`. `GhostAdapter` is a concrete `DeviceAdapter` subclass that: provides stored `device_info`/`led_count`/`is_connected=False`, raises on `send_frame()`. This avoids null-safety refactoring across scheduler, web routers, and all code that accesses `device.adapter.*`.
 - Device info always available (from ghost adapter when offline, from real adapter when online)
 
 Scheduler skips devices where `adapter.is_connected == False` (ghost returns `False`; existing check at `scheduler.py:138` already handles this).
@@ -529,7 +529,7 @@ TOML export/import uses **display names** for devices (human-readable). On impor
 - `persistence/migrations/` — sequential SQL migration scripts (`001_initial.sql`, etc.)
 - `persistence/toml_io.py` — TOML ↔ DB marshaling for import/export (handles `position_x/y/z` ↔ `position = [x,y,z]`, `section+key` ↔ nested tables, display name ↔ stable ID resolution)
 - `devices/discovery.py` — `DiscoveryOrchestrator` (backend lifecycle, multi-wave scanning, subnet probing, reconnect loop, interface resolution for "auto")
-- `devices/ghost.py` — `GhostAdapter(DeviceAdapter)` with `is_connected=False`, `supports_latency_probing=False`, stored `device_info`/`led_count`, raises on `send_frame()`
+- `devices/ghost.py` — `GhostAdapter(DeviceAdapter)` with `is_connected=False`, stored `device_info`/`led_count`, raises on `send_frame()`
 - `spatial/pipeline.py` — `ScenePipeline` dataclass: bundles `EffectDeck`, `RingBuffer`, `SpatialCompositor`, device list, mapping per active scene
 
 ### Files Removed (after migration)

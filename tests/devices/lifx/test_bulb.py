@@ -28,15 +28,6 @@ def test_led_count_is_one(mock_transport: MagicMock) -> None:
     assert adapter.led_count == 1
 
 
-def test_supports_latency_probing_false(mock_transport: MagicMock) -> None:
-    adapter = LifxBulbAdapter(
-        mock_transport,
-        DeviceInfo("Bulb", "lifx", 1, "1.2.3.4:56700"),
-        target_mac=b"\xaa\xbb\xcc\xdd\xee\xff",
-    )
-    assert adapter.supports_latency_probing is False
-
-
 @pytest.mark.asyncio
 async def test_send_frame_sends_set_color(mock_transport: MagicMock) -> None:
     adapter = LifxBulbAdapter(

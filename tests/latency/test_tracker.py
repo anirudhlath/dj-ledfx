@@ -14,13 +14,6 @@ def test_tracker_effective_latency_seconds() -> None:
     assert abs(tracker.effective_latency_s - 0.015) < 0.0001
 
 
-def test_tracker_update_delegates() -> None:
-    strategy = StaticLatency(latency_ms=10.0)
-    tracker = LatencyTracker(strategy=strategy)
-    tracker.update(20.0)
-    assert tracker.effective_latency_ms == 10.0
-
-
 def test_the_display_delay_adds_to_the_latency() -> None:
     tracker = LatencyTracker(StaticLatency(10.0), manual_offset_ms=5.0, display_ms=24.0)
     assert tracker.effective_latency_ms == 39.0
@@ -49,3 +42,23 @@ def test_reset_forgets_that_the_light_streamed() -> None:
     tracker.reset()
     tracker.update_rtt(60.0)
     assert tracker.effective_latency_ms == 10.0
+
+
+def test_a_latency_is_measured_once_a_streaming_round_trip_lands() -> None:
+    now = [100.0]
+    strategy = WindowedMedianLatency(LATENCY_WINDOW, initial_value_ms=10.0)
+    tracker = LatencyTracker(strategy, clock=lambda: now[0])
+    tracker.update_rtt(60.0)  # idle: ignored
+    assert not tracker.measured
+    tracker.note_send()
+    tracker.update_rtt(60.0)
+    assert tracker.measured
+    tracker.reset()  # the light came back: its seed again
+    assert not tracker.measured
+
+
+def test_a_static_latency_is_never_measured() -> None:
+    tracker = LatencyTracker(StaticLatency(10.0))
+    tracker.note_send()
+    tracker.update_rtt(60.0)
+    assert (tracker.effective_latency_ms, tracker.measured) == (10.0, False)  # the config's

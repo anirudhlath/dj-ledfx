@@ -97,17 +97,16 @@ async def test_two_zones_play_their_own_looks() -> None:
 
 
 async def test_rtt_callback_updates_tracker() -> None:
-    """RTT callback from transport updates latency tracker."""
+    """A round trip from the transport, while the light streams, updates its latency."""
     from dj_ledfx.latency.strategies import EMALatency
 
     strategy = EMALatency(initial_value_ms=50.0)
     tracker = LatencyTracker(strategy=strategy)
     initial = tracker.effective_latency_ms
 
-    # Simulate RTT callback (same path as LifxTransport probe callback)
-    tracker.update(25.0)
-    assert tracker.effective_latency_ms != initial
-    # RTT of 25ms should pull EMA down from 50ms initial
+    tracker.note_send()  # a frame went out: the light streams
+    tracker.update_rtt(50.0)  # as LifxTransport's probe callback calls it: 25 ms one way
+    # 25 ms one way pulls the EMA down from its 50 ms seed
     assert tracker.effective_latency_ms < initial
 
 
@@ -119,9 +118,9 @@ async def test_rtt_feedback_shifts_frame_selection() -> None:
     tracker = LatencyTracker(strategy=strategy)
 
     high_latency = tracker.effective_latency_s
-    # Simulate many low-RTT probes
-    for _ in range(20):
-        tracker.update(10.0)
+    tracker.note_send()  # the light streams
+    for _ in range(20):  # many short round trips
+        tracker.update_rtt(20.0)
     low_latency = tracker.effective_latency_s
 
     assert low_latency < high_latency

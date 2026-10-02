@@ -33,10 +33,6 @@ def test_ghost_led_count(ghost):
     assert ghost.led_count == 60
 
 
-def test_ghost_does_not_support_latency_probing(ghost):
-    assert ghost.supports_latency_probing is False
-
-
 @pytest.mark.asyncio
 async def test_ghost_connect_is_noop(ghost):
     await ghost.connect()

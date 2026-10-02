@@ -540,7 +540,7 @@ def _placed(home_map: HomeMap | None, target_id: str) -> dict[str, Any]:
 class LightLatency(ContractModel):
     measured_ms: float | None
     override_ms: float | None = None  # overrides move to PUT /lights/{id}/latency (F6)
-    estimated: bool  # the light can't be probed: the type's heuristic
+    estimated: bool  # nothing measured while it streamed since it came online: the seed
 
 
 class LightPart(ContractModel):
@@ -697,7 +697,7 @@ def light_out(
                     round(m.tracker.effective_latency_ms - m.tracker.manual_offset_ms, 1)
                     for m in parts
                 ),
-                "estimated": any(not m.adapter.supports_latency_probing for m in parts),
+                "estimated": any(not m.tracker.measured for m in parts),
             },
             "send_fps": round(send_fps, 1),
             "dropped_pct": round(dropped_pct, 2),
