@@ -102,11 +102,6 @@ export const SPEC = {
     "offlinePx": 1.5,
     "switchedOffPx": 1.5
   },
-  "widePx": 1200,
-  "phoneStage": {
-    "width": 390,
-    "height": 268
-  },
   "quality": {
     "desktopFps": 55,
     "phoneFps": 30,

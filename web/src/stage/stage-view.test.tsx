@@ -6,6 +6,7 @@ import { frames } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { roomName } from '@/api/mocks/fixtures'
 import type { ScenarioName } from '@/api/mocks/scenarios'
+import { LIVE_LAYOUT } from '@/pages/live-numbers'
 import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
 import { seedLive } from '@/test/live'
@@ -249,7 +250,7 @@ describe('the stage on Live (§7, §8.1)', () => {
   })
 
   it("draws the phone's stage without labels or overlays", async () => {
-    setViewportWidth(SPEC.phoneStage.width)
+    setViewportWidth(LIVE_LAYOUT.phoneStage.width)
     const { state } = await openLive()
     expect(screen.queryByText(state.home.rooms[0].name)).not.toBeInTheDocument()
     expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()

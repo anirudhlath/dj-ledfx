@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Vec2, Vec3 } from '@/api/contract'
 import { homeFixture } from '@/api/mocks/fixtures'
 import { applyPose, FIT_VIEW, fitPadding, fitPose, floorPoint, LIVE_PADDING, projectPoint, type View } from './camera'
+import { LIVE_LAYOUT } from '@/pages/live-numbers'
 import { RENDER, SPEC } from './design-numbers'
 import { toWorld } from './plan'
 
@@ -80,8 +81,8 @@ describe('the camera (§7.2)', () => {
   it("keeps Live's padding at Main.png's stage size, and shrinks it in proportion below", () => {
     expect(fitPadding(STAGE)).toEqual(LIVE_PADDING)
     expect(fitPadding({ width: STAGE.width * 2, height: STAGE.height * 2 })).toEqual(LIVE_PADDING)
-    const phone = fitPadding(SPEC.phoneStage)
-    const k = Math.min(SPEC.phoneStage.width / STAGE.width, SPEC.phoneStage.height / STAGE.height)
+    const phone = fitPadding(LIVE_LAYOUT.phoneStage)
+    const k = Math.min(LIVE_LAYOUT.phoneStage.width / STAGE.width, LIVE_LAYOUT.phoneStage.height / STAGE.height)
     expect(phone.side).toBeCloseTo(LIVE_PADDING.side * k)
     expect(phone.top).toBeCloseTo(LIVE_PADDING.top * k)
     expect(phone.bottom).toBeCloseTo(LIVE_PADDING.bottom * k)
