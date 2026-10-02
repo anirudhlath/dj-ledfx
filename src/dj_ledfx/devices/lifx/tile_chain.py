@@ -35,7 +35,7 @@ DEFAULT_TILE_SIZE = (8, 8)
 PIXEL_PITCH_M = 0.03
 # How much later than half its fade a matrix shows a frame: derived from the 2026-10-01
 # baseline, and corrected by measuring the lights (the light-output plan's Task 15).
-MATRIX_DISPLAY_MS = 40
+MATRIX_DISPLAY_MS = 80
 
 
 def tile_sizes(tiles: Sequence[TileInfo], tile_count: int) -> list[tuple[int, int]]:
