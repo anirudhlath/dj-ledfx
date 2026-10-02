@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import base64
-from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-
-from dj_ledfx.types import RGB
 
 
 def build_scan_message() -> dict[str, Any]:
@@ -43,47 +40,29 @@ def xor_checksum(data: bytes) -> int:
     return result
 
 
-def build_ble_packet(command_type: int, sub_command: int, payload: bytes) -> bytes:
-    buf = bytearray(20)
-    buf[0] = 0x33
-    buf[1] = command_type
-    buf[2] = sub_command
-    end = min(3 + len(payload), 19)
-    buf[3:end] = payload[: end - 3]
-    buf[19] = xor_checksum(bytes(buf[:19]))
-    return bytes(buf)
+# Razer (DreamView) packets, as LedFx 2.1.9's Govee driver sends them to UDP 4003: a frame
+# is the header, the segment count, an RGB triple per segment and an XOR checksum; the
+# switch is its four bytes, 1 or 0, and the checksum. Razer frames get no replies.
+RAZER_HEADER = bytes((0xBB, 0x00, 0xFA, 0xB0, 0x00))
+RAZER_SWITCH = bytes((0xBB, 0x00, 0x01, 0xB1))
+MAX_RAZER_SEGMENTS = 255  # the count is one byte
 
 
-def encode_segment_mask(segment_indices: Sequence[int], total_segments: int = 15) -> bytes:
-    left = 0
-    right = 0
-    for idx in segment_indices:
-        if 0 <= idx < 8:
-            left |= 1 << idx
-        elif 8 <= idx < total_segments:
-            right |= 1 << (idx - 8)
-    return bytes([left, right])
+def _razer(packet: bytes) -> dict[str, Any]:
+    """A razer message: the packet and its XOR checksum, in base64."""
+    framed = packet + bytes((xor_checksum(packet),))
+    return {"msg": {"cmd": "razer", "data": {"pt": base64.b64encode(framed).decode("ascii")}}}
 
 
-def build_segment_color_packet(r: int, g: int, b: int, segment_mask: bytes) -> bytes:
-    payload = bytes([r, g, b, 0x00, 0x00]) + segment_mask
-    return build_ble_packet(0x05, 0x0B, payload)
+def build_razer_switch(on: bool) -> dict[str, Any]:
+    """Switch the lamp's razer mode on (it takes razer frames) or off (its own modes)."""
+    return _razer(RAZER_SWITCH + bytes((1 if on else 0,)))
 
 
-def build_pt_real_message(ble_packets: Sequence[bytes]) -> dict[str, Any]:
-    encoded = [base64.b64encode(pkt).decode("ascii") for pkt in ble_packets]
-    return {"msg": {"cmd": "ptReal", "data": {"command": encoded}}}
-
-
-def map_colors_to_segments(colors: NDArray[np.uint8], num_segments: int) -> list[RGB]:
-    n_leds = len(colors)
-    result: list[RGB] = []
-    for seg in range(num_segments):
-        start = seg * n_leds / num_segments
-        end = (seg + 1) * n_leds / num_segments
-        i_start = int(start)
-        i_end = max(i_start + 1, int(end))
-        segment_slice = colors[i_start:i_end]
-        avg = segment_slice.mean(axis=0).astype(np.uint8)
-        result.append((int(avg[0]), int(avg[1]), int(avg[2])))
-    return result
+def build_razer_frame(colors: NDArray[np.uint8]) -> dict[str, Any]:
+    """One razer frame: a colour for each of the lamp's segments, in segment order."""
+    count = len(colors)
+    if not 0 < count <= MAX_RAZER_SEGMENTS:
+        raise ValueError(f"A razer frame takes 1 to {MAX_RAZER_SEGMENTS} segments, not {count}")
+    rgb = np.ascontiguousarray(colors, dtype=np.uint8).tobytes()
+    return _razer(RAZER_HEADER + bytes((count,)) + rgb)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dj_ledfx.devices.adapter import DeviceAdapter
-from dj_ledfx.devices.capabilities import LightReading, NoAnswer
+from dj_ledfx.devices.capabilities import DeviceCapabilities, LightReading, NoAnswer
 from dj_ledfx.devices.govee.protocol import (
     build_brightness_message,
     build_solid_color_message,
@@ -31,6 +31,16 @@ class GoveeAdapterBase(DeviceAdapter):
     @property
     def is_connected(self) -> bool:
         return self._is_connected
+
+    @property
+    def capabilities(self) -> DeviceCapabilities:
+        """The model is "Govee <model number>"; multizone when it has segments to light."""
+        sku = self._record.sku
+        return DeviceCapabilities(
+            protocol="Govee",
+            model=f"Govee {sku}" if sku else "Govee",
+            multizone=self.led_count > 1,
+        )
 
     async def connect(self) -> None:
         """Check the lamp answers, when its replies can reach us. Changes nothing on it."""

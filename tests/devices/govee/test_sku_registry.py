@@ -2,38 +2,32 @@ from __future__ import annotations
 
 from dj_ledfx.devices.govee.sku_registry import (
     DEFAULT_CAPABILITY,
+    SKU_REGISTRY,
     get_device_capability,
     get_segment_count,
 )
 
 
-class TestGetDeviceCapability:
-    def test_known_sku_h6076(self) -> None:
-        cap = get_device_capability("H6076")
-        assert cap.is_rgbic is True
-        assert cap.segment_count == 15
-
-    def test_known_sku_h61a2(self) -> None:
-        cap = get_device_capability("H61A2")
-        assert cap.is_rgbic is True
-        assert cap.segment_count == 15
-
-    def test_unknown_sku_returns_default(self) -> None:
-        cap = get_device_capability("H9999")
-        assert cap == DEFAULT_CAPABILITY
-        assert cap.is_rgbic is False
-        assert cap.segment_count == 0
+def test_every_entry_has_segments_and_is_found_by_its_model() -> None:
+    for model, capability in SKU_REGISTRY.items():
+        assert capability.is_rgbic and capability.segment_count > 1, model
+        assert get_device_capability(model) is capability
 
 
-class TestGetSegmentCount:
-    def test_known_sku(self) -> None:
-        assert get_segment_count("H6076") == 15
+def test_an_unknown_model_plays_one_colour() -> None:
+    capability = get_device_capability("not-a-model")
+    assert capability == DEFAULT_CAPABILITY
+    assert (capability.is_rgbic, capability.segment_count, capability.razer) == (False, 0, False)
 
-    def test_unknown_sku(self) -> None:
-        assert get_segment_count("H9999") == 0
 
-    def test_config_override_wins(self) -> None:
-        assert get_segment_count("H6076", config_override=10) == 10
+def test_the_upright_lamp_takes_razer_and_the_strip_does_not() -> None:  # ruling 12
+    upright, strip = SKU_REGISTRY.values()
+    assert (upright.razer, upright.form, upright.segments_from_top) == (True, "upright", False)
+    assert (strip.razer, strip.form) == (False, "strip")
 
-    def test_config_override_none_uses_registry(self) -> None:
-        assert get_segment_count("H6076", config_override=None) == 15
+
+def test_the_config_override_sets_the_segment_count() -> None:  # until Task 7
+    model = next(iter(SKU_REGISTRY))
+    assert get_segment_count(model) == SKU_REGISTRY[model].segment_count
+    assert get_segment_count(model, config_override=10) == 10
+    assert get_segment_count("not-a-model") == 0

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from dj_ledfx.devices.capabilities import LightReading, NoAnswer, try_read
+from dj_ledfx.devices.govee.segment import GoveeSegmentAdapter
 from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
 from dj_ledfx.devices.govee.state import GoveeDeviceState
 from dj_ledfx.devices.govee.transport import GoveeTransport
@@ -100,3 +101,11 @@ def test_transport_knows_whether_it_can_receive() -> None:
     assert transport.can_receive is False
     transport._recv_transport = MagicMock()
     assert transport.can_receive is True
+
+
+def test_a_lamp_names_its_model_and_its_segments(record: GoveeDeviceRecord) -> None:
+    solid = GoveeSolidAdapter(_transport(), record).capabilities
+    lamp = GoveeSegmentAdapter(_transport(), record, 15, razer=True).capabilities
+    assert (solid.protocol, solid.model) == ("Govee", f"Govee {record.sku}")
+    assert not solid.multizone
+    assert (lamp.model, lamp.multizone) == (solid.model, True)
