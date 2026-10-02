@@ -12,6 +12,7 @@ from dj_ledfx.devices.govee.adapter_base import UPRIGHT_HEIGHT_M
 from dj_ledfx.devices.govee.protocol import build_brightness_message, build_razer_switch
 from dj_ledfx.devices.govee.razer import RAZER_IDLE_S, GoveeRazerAdapter
 from dj_ledfx.devices.govee.state import GoveeDeviceState
+from dj_ledfx.scheduling.scheduler import KEEPALIVE_S
 from dj_ledfx.spatial.geometry import StripGeometry
 
 RAZER_ON, RAZER_OFF = build_razer_switch(on=True), build_razer_switch(on=False)
@@ -114,3 +115,9 @@ async def test_a_failed_send_disconnects_it(transport: MagicMock) -> None:
     transport.send_command.side_effect = OSError("network down")
     await adapter.send_frame(np.zeros((3, 3), dtype=np.uint8))
     assert adapter.is_connected is False
+
+
+def test_a_still_look_keeps_razer_armed() -> None:
+    """The scheduler re-sends an unchanged frame every KEEPALIVE_S, and razer is switched on
+    again after RAZER_IDLE_S without a frame: a still look must come round first."""
+    assert KEEPALIVE_S < RAZER_IDLE_S
