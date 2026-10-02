@@ -24,6 +24,7 @@ class LifxBulbAdapter(LifxAdapterBase):
         kelvin: int = 3500,
         *,
         caps: DeviceCapabilities | None = None,
+        fade_ms: int = 0,
     ) -> None:
         super().__init__(
             transport,
@@ -31,6 +32,7 @@ class LifxBulbAdapter(LifxAdapterBase):
             target_mac,
             kelvin=kelvin,
             caps=caps or DeviceCapabilities(protocol="LIFX"),
+            fade_ms=fade_ms,
         )
 
     @property
@@ -43,4 +45,5 @@ class LifxBulbAdapter(LifxAdapterBase):
 
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         r, g, b = int(colors[0, 0]), int(colors[0, 1]), int(colors[0, 2])
-        self._send(SET_COLOR, build_set_color(rgb_to_hsbk(r, g, b, kelvin=self._kelvin)))
+        hsbk = rgb_to_hsbk(r, g, b, kelvin=self._kelvin)
+        self._send(SET_COLOR, build_set_color(hsbk, self._fade_ms))

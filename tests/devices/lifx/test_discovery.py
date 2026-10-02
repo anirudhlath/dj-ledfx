@@ -6,12 +6,13 @@ from typing import Any
 import pytest
 from lifx_fakes import FakeLifxTransport
 
-from dj_ledfx.config import AppConfig, DevicesConfig, LIFXConfig
+from dj_ledfx.config import LIFX_MATRIX_FPS, AppConfig, DevicesConfig, LIFXConfig
+from dj_ledfx.devices.lifx.base import stream_fade_ms
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.discovery import LifxBackend
 from dj_ledfx.devices.lifx.packet import GET_DEVICE_CHAIN
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
-from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
+from dj_ledfx.devices.lifx.tile_chain import MATRIX_DISPLAY_MS, LifxTileChainAdapter
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
 MAC = b"\xd0\x73\xd5\x00\x00\x01"
@@ -153,3 +154,13 @@ async def test_connect_known_skips_rows_without_an_address() -> None:
     transport = FakeLifxTransport()
     assert await _backend(transport).connect_known([_row(ip=None)], AppConfig()) == []
     assert transport.sent == []
+
+
+async def test_a_matrix_streams_at_its_rate_and_its_latency_counts_its_display() -> None:
+    transport = FakeLifxTransport(product=57, chain=[(5, 6)])
+    device = await _backend(transport)._setup(_record(57), AppConfig())
+    assert device is not None and isinstance(device.adapter, LifxTileChainAdapter)
+    assert device.max_fps == LIFX_MATRIX_FPS
+    display = stream_fade_ms(LIFX_MATRIX_FPS) / 2 + MATRIX_DISPLAY_MS
+    assert device.adapter.display_ms == display
+    assert device.tracker.effective_latency_ms == AppConfig().devices.lifx.latency_ms + display

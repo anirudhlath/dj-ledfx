@@ -14,6 +14,11 @@ from dj_ledfx.latency.strategies import STRATEGIES
 # four spikes and follows a level that holds for five.
 LATENCY_WINDOW = 9
 
+# The most frames a second a LIFX strip or matrix takes: LIFX's documented ceiling per
+# device. Matrices were measured queueing frames above about 30; plain bulbs keep max_fps.
+LIFX_STRIP_FPS = 20
+LIFX_MATRIX_FPS = 20
+
 
 @dataclass
 class EngineConfig:

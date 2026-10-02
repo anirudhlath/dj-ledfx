@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
+from dj_ledfx.config import LIFX_MATRIX_FPS
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.lifx.base import LifxAdapterBase, hsbk_from_json
 from dj_ledfx.devices.lifx.packet import (
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
 PIXELS_PER_PACKET = 64
 DEFAULT_TILE_SIZE = (8, 8)
 PIXEL_PITCH_M = 0.03
+# How much later than half its fade a matrix shows a frame: derived from the 2026-10-01
+# baseline, and corrected by measuring the lights (the light-output plan's Task 15).
+MATRIX_DISPLAY_MS = 40
 
 
 def tile_sizes(tiles: Sequence[TileInfo], tile_count: int) -> list[tuple[int, int]]:
@@ -45,6 +49,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
     """Matrix lights: Tile, Candle, Tube, Spot, Path, Ceiling. Sized from StateDeviceChain."""
 
     _effect_key = "tile_effect"
+    stream_fps_cap = LIFX_MATRIX_FPS
 
     def __init__(
         self,
@@ -56,6 +61,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
         *,
         tiles: Sequence[TileInfo] = (),
         caps: DeviceCapabilities | None = None,
+        fade_ms: int = 0,
     ) -> None:
         super().__init__(
             transport,
@@ -63,6 +69,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
             target_mac,
             kelvin=kelvin,
             caps=caps or DeviceCapabilities(protocol="LIFX", matrix=True),
+            fade_ms=fade_ms,
         )
         self._tiles: list[TileInfo] = list(tiles)
         self._sizes = tile_sizes(self._tiles, tile_count)
@@ -75,6 +82,11 @@ class LifxTileChainAdapter(LifxAdapterBase):
     @property
     def led_count(self) -> int:
         return self._led_count
+
+    @property
+    def display_ms(self) -> float:
+        """Half its fade, plus the time a matrix takes to show a frame it has."""
+        return super().display_ms + MATRIX_DISPLAY_MS
 
     @property
     def geometry(self) -> MatrixGeometry:
@@ -102,7 +114,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
                 values: list[HSBK] = [(int(c[0]), int(c[1]), int(c[2]), int(c[3])) for c in chunk]
                 self._send(
                     SET_TILE_STATE_64,
-                    build_set_tile_state64(tile_index, 1, 0, row, width, 0, values),
+                    build_set_tile_state64(tile_index, 1, 0, row, width, self._fade_ms, values),
                 )
             start += width * height
 

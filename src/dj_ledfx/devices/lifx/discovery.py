@@ -8,7 +8,7 @@ from loguru import logger
 
 from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
-from dj_ledfx.devices.lifx.base import LifxAdapterBase
+from dj_ledfx.devices.lifx.base import LifxAdapterBase, stream_fade_ms, stream_fps
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.packet import (
     GET_COLOR,
@@ -43,6 +43,10 @@ def _label_of(payload: bytes) -> str:
 def _zone_count_of(payload: bytes) -> int:
     zone_count, _index, _colours = parse_state_extended_color_zones(payload)
     return zone_count
+
+
+def _fade_ms(kind: type[LifxAdapterBase], config: AppConfig) -> int:
+    return stream_fade_ms(stream_fps(kind, config.devices.lifx.max_fps))
 
 
 class LifxBackend(DeviceBackend):
@@ -155,12 +159,11 @@ class LifxBackend(DeviceBackend):
         adapter = await self._create_adapter(record, config)
         if adapter is None:
             return None
-        tracker = self._create_tracker(config)
+        tracker = self._create_tracker(config, display_ms=adapter.display_ms)
         await adapter.connect()
         self._transport.register_device(record, rtt_callback=tracker.update_rtt)
-        return DiscoveredDevice(
-            adapter=adapter, tracker=tracker, max_fps=config.devices.lifx.max_fps
-        )
+        max_fps = stream_fps(type(adapter), config.devices.lifx.max_fps)
+        return DiscoveredDevice(adapter=adapter, tracker=tracker, max_fps=max_fps)
 
     async def _create_adapter(
         self, record: LifxDeviceRecord, config: AppConfig
@@ -202,6 +205,7 @@ class LifxBackend(DeviceBackend):
                 kelvin=kelvin,
                 tiles=tiles,
                 caps=caps,
+                fade_ms=_fade_ms(LifxTileChainAdapter, config),
             )
         if caps.multizone and caps.extended_multizone:
             zones = await self._query_zone_count(record)
@@ -212,11 +216,17 @@ class LifxBackend(DeviceBackend):
                 zone_count=zones,
                 kelvin=kelvin,
                 caps=caps,
+                fade_ms=_fade_ms(LifxStripAdapter, config),
             )
         if caps.multizone:
             logger.info("LIFX '{}' has no extended multizone; it plays as one colour", name)
         return LifxBulbAdapter(
-            transport, _info("lifx_bulb", 1), record.mac, kelvin=kelvin, caps=caps
+            transport,
+            _info("lifx_bulb", 1),
+            record.mac,
+            kelvin=kelvin,
+            caps=caps,
+            fade_ms=_fade_ms(LifxBulbAdapter, config),
         )
 
     def _unique_name(self, wanted: str, stable_id: str) -> str:
@@ -259,7 +269,7 @@ class LifxBackend(DeviceBackend):
             return 1
         return max(1, count)
 
-    def _create_tracker(self, config: AppConfig) -> LatencyTracker:
+    def _create_tracker(self, config: AppConfig, *, display_ms: float = 0.0) -> LatencyTracker:
         lifx = config.devices.lifx
         strategy = make_strategy(lifx.latency_strategy, lifx.latency_ms, lifx.latency_window_size)
-        return LatencyTracker(strategy, lifx.manual_offset_ms)
+        return LatencyTracker(strategy, lifx.manual_offset_ms, display_ms=display_ms)

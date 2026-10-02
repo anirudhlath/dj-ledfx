@@ -41,6 +41,14 @@ if TYPE_CHECKING:
 
 CAPTURE_VERSION = 1
 RESTORE_FADE_MS = 500
+STREAM_FADE_MARGIN_MS = 2  # a streamed frame's fade ends this long before the next frame
+
+
+def stream_fade_ms(fps: int) -> int:
+    """The fade a streamed frame asks for at `fps` frames a second: the gap to the next
+    frame, less a margin, so the light moves between frames instead of stepping."""
+    return max(0, round(1000 / fps) - STREAM_FADE_MARGIN_MS)
+
 
 T = TypeVar("T")
 
@@ -60,6 +68,8 @@ def hsbk_from_json(values: object) -> HSBK:
 
 class LifxAdapterBase(DeviceAdapter):
     supports_latency_probing = False
+    # The most frames a second this kind of light takes; None: the configured max_fps.
+    stream_fps_cap: ClassVar[int | None] = None
     # Where a capture keeps the light's own firmware effect; None: it has none (bulbs).
     _effect_key: ClassVar[str | None] = None
 
@@ -71,12 +81,14 @@ class LifxAdapterBase(DeviceAdapter):
         *,
         kelvin: int,
         caps: DeviceCapabilities,
+        fade_ms: int = 0,
     ) -> None:
         self._transport = transport
         self._device_info = device_info
         self._target_mac = target_mac
         self._kelvin = kelvin
         self._caps = caps
+        self._fade_ms = fade_ms  # each streamed frame's fade
         self._is_connected = False
         # Frames count their own sequence: on the transport's shared 8-bit counter they
         # would wrap it every few seconds, and a late reply could match a newer request.
@@ -95,6 +107,11 @@ class LifxAdapterBase(DeviceAdapter):
     @property
     def capabilities(self) -> DeviceCapabilities:
         return self._caps
+
+    @property
+    def display_ms(self) -> float:
+        """How long after a frame lands the light shows it: half-way through its fade."""
+        return self._fade_ms / 2.0
 
     async def connect(self) -> None:
         self._is_connected = True
@@ -259,3 +276,9 @@ class LifxAdapterBase(DeviceAdapter):
 
     async def _restore_colours(self, snapshot: dict[str, Any], hsbk: HSBK) -> None:
         await self._ask(SET_COLOR, build_set_color(hsbk, RESTORE_FADE_MS), LIGHT_STATE)
+
+
+def stream_fps(kind: type[LifxAdapterBase], max_fps: int) -> int:
+    """The rate a kind of LIFX light streams at: the configured rate, within its kind's cap."""
+    cap = kind.stream_fps_cap
+    return max_fps if cap is None else min(max_fps, cap)

@@ -8,7 +8,9 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import numpy as np
 from loguru import logger
+from numpy.typing import NDArray
 
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
@@ -16,9 +18,14 @@ from dj_ledfx.events import DeviceOfflineEvent, EventBus
 from dj_ledfx.timing import paced, trim_window
 from dj_ledfx.types import DeviceStats
 
+# A frame equal to the last one sent on the same route goes out again only this often: the
+# light already shows it, and a lamp that drops a packet gets it back within a second.
+KEEPALIVE_S = 1.0
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from dj_ledfx.devices.adapter import DeviceAdapter
     from dj_ledfx.scheduling.route import DeviceRoute
 
 
@@ -64,6 +71,10 @@ class DeviceSendState:
     send_count: int = 0
     send_task: asyncio.Task[None] | None = None
     sent_at: deque[float] = field(default_factory=deque)  # send times in the last second
+    last_route: DeviceRoute | None = None  # what the last frame sent came through
+    last_adapter: DeviceAdapter | None = None
+    last_colors: NDArray[np.uint8] | None = None
+    last_sent_at: float = 0.0
 
 
 class LookaheadScheduler:
@@ -185,6 +196,7 @@ class LookaheadScheduler:
             if not was_connected:
                 logger.info("Device '{}' reconnected", device.adapter.device_info.name)
                 device.tracker.reset()
+                state.last_route = None  # a light back from a drop-out gets its frame at once
                 was_connected = True
 
             try:
@@ -201,26 +213,41 @@ class LookaheadScheduler:
                 logger.trace("No frame yet for '{}' (target {:.3f})", device_name, target_time)
                 continue
 
-            async with device.adapter.send_lock:
-                current = self._routes.get(key)  # a restore may have run meanwhile
-                if current is None or not current.streaming:
-                    continue
-                send_start = time.monotonic()
-                try:
-                    await device.adapter.send_frame(colors)
-                except Exception:
-                    logger.warning("Send failed for '{}'", device_name)
-                    continue
-            sent = time.monotonic()
-            device.tracker.note_send(sent)  # its probes' round trips count from now
-            metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
-            if device.adapter.supports_latency_probing:
-                device.tracker.update((sent - send_start) * 1000.0)
-            state.send_count += 1
-            state.sent_at.append(sent)
-            trim_window(state.sent_at, sent)
-            metrics.DEVICE_LATENCY.labels(device=key).set(device.tracker.effective_latency_s)
-            metrics.DEVICE_FPS.labels(device=key).set(device.max_fps)
+            now = time.monotonic()
+            if (
+                route is state.last_route
+                and device.adapter is state.last_adapter
+                and state.last_colors is not None
+                and np.array_equal(colors, state.last_colors)
+                and now - state.last_sent_at < KEEPALIVE_S
+            ):
+                # The light shows this already: count it as sent, and send nothing.
+                state.send_count += 1
+                state.sent_at.append(now)
+                trim_window(state.sent_at, now)
+            else:
+                async with device.adapter.send_lock:
+                    current = self._routes.get(key)  # a restore may have run meanwhile
+                    if current is None or not current.streaming:
+                        continue
+                    send_start = time.monotonic()
+                    try:
+                        await device.adapter.send_frame(colors)
+                    except Exception:
+                        logger.warning("Send failed for '{}'", device_name)
+                        continue
+                sent = time.monotonic()
+                device.tracker.note_send(sent)  # its probes' round trips count from now
+                state.last_route, state.last_adapter = current, device.adapter
+                state.last_colors, state.last_sent_at = colors, sent
+                metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
+                if device.adapter.supports_latency_probing:
+                    device.tracker.update((sent - send_start) * 1000.0)
+                state.send_count += 1
+                state.sent_at.append(sent)
+                trim_window(state.sent_at, sent)
+                metrics.DEVICE_LATENCY.labels(device=key).set(device.tracker.effective_latency_s)
+                metrics.DEVICE_FPS.labels(device=key).set(device.max_fps)
 
             last_send_time += 1.0 / device.max_fps
             remaining = last_send_time - time.monotonic()
