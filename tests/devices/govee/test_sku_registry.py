@@ -19,7 +19,11 @@ def test_an_unknown_model_plays_one_colour() -> None:
     assert (capability.is_rgbic, capability.segment_count, capability.razer) == (False, 0, False)
 
 
-def test_the_upright_lamp_takes_razer_and_the_strip_does_not() -> None:  # ruling 12
-    upright, strip = SKU_REGISTRY.values()
-    assert (upright.razer, upright.form, upright.segments_from_top) == (True, "upright", False)
-    assert (strip.razer, strip.form) == (False, "strip")
+# Ruling 12, checked through each model's key wherever its entry sits in the table. The
+# models aren't named here: the repo is public, and the table's own lines name them.
+def test_the_upright_lamp_takes_razer_and_the_strip_does_not() -> None:
+    flags = sorted(
+        (entry.razer, entry.form, entry.segments_from_top)
+        for entry in map(get_device_capability, SKU_REGISTRY)
+    )
+    assert flags == [(False, "strip", False), (True, "upright", False)]
