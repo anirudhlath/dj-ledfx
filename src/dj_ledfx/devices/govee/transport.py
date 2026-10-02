@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -15,6 +16,15 @@ MULTICAST_ADDR = "239.255.255.250"
 DISCOVERY_PORT = 4001
 RESPONSE_PORT = 4002
 COMMAND_PORT = 4003
+
+
+@dataclass
+class _StatusQuery:
+    """A status query in flight to one lamp. Whoever asks the lamp meanwhile shares it: a
+    devStatus reply carries nothing that says which query it answers."""
+
+    reply: asyncio.Future[dict[str, Any]]
+    waiting: int = 0  # callers still waiting for the reply
 
 
 class GoveeTransport:
@@ -31,8 +41,8 @@ class GoveeTransport:
         # Registered devices for probing
         self._devices: dict[str, GoveeDeviceRecord] = {}  # ip → record
         self._rtt_callbacks: dict[str, Callable[[float], None]] = {}  # ip → callback
-        # Pending status queries: ip → (event, result_container)
-        self._pending_status: dict[str, tuple[asyncio.Event, list[dict[str, Any]]]] = {}
+        # Status queries in flight, one per lamp: ip → query
+        self._pending_status: dict[str, _StatusQuery] = {}
         # Probe RTT tracking: ip → send_time (monotonic)
         self._probe_times: dict[str, float] = {}
 
@@ -175,19 +185,24 @@ class GoveeTransport:
         return list(discovered.values())
 
     async def query_status(self, ip: str, timeout_s: float = 2.0) -> dict[str, Any] | None:
-        event = asyncio.Event()
-        result: list[dict[str, Any]] = []
-        self._pending_status[ip] = (event, result)
-
+        """The lamp's status, or None when no reply comes within timeout_s. A query to the
+        lamp already in flight is shared, not sent again: each caller gets its one reply."""
+        query = self._pending_status.get(ip)
+        ask = query is None
+        if query is None:
+            reply: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+            query = self._pending_status[ip] = _StatusQuery(reply)
+        query.waiting += 1
         try:
-            await self.send_command(ip, build_status_query())
-            try:
-                await asyncio.wait_for(event.wait(), timeout=timeout_s)
-            except TimeoutError:
-                return None
-            return result[0] if result else None
+            if ask:
+                await self.send_command(ip, build_status_query())
+            return await asyncio.wait_for(asyncio.shield(query.reply), timeout=timeout_s)
+        except TimeoutError:
+            return None
         finally:
-            self._pending_status.pop(ip, None)
+            query.waiting -= 1
+            if query.waiting == 0 and self._pending_status.get(ip) is query:
+                del self._pending_status[ip]  # nobody waits for it any more
 
     def register_device(
         self, record: GoveeDeviceRecord, rtt_callback: Callable[[float], None]
@@ -261,11 +276,10 @@ class GoveeTransport:
         ip = addr[0]
 
         # Check pending query_status calls first
-        pending = self._pending_status.get(ip)
-        if pending:
-            event, result = pending
-            result.append(msg.get("data", {}))
-            event.set()
+        query = self._pending_status.pop(ip, None)
+        if query is not None:
+            if not query.reply.done():
+                query.reply.set_result(msg.get("data", {}))
             return
 
         # Otherwise, it's a probe response — measure RTT
