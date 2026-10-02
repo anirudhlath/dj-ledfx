@@ -1,6 +1,7 @@
 import { onTestFinished } from 'vitest'
 import type { AttentionItem, Id } from '@/api/contract'
-import { startDataLayer } from '@/api/live'
+import { decodeFrame, encodeFrame, type FrameStore } from '@/api/frames'
+import { frames, startDataLayer } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { inMemorySockets } from '@/api/mocks/in-memory-socket'
 import { beatMessage, MockServer, snapshotMessages, type MockServerOptions } from '@/api/mocks/mock-server'
@@ -8,6 +9,8 @@ import { buildScenario, type ScenarioName } from '@/api/mocks/scenarios'
 
 /** The hero moment (§12.5): Wednesday 23 September 2026, 19:14. */
 export const HERO_NOW = new Date(2026, 8, 23, 19, 14)
+/** When the hero's lights took the status they have outside its looks: 70 minutes before HERO_NOW, as its scenario has it. */
+export const HERO_SINCE = new Date(HERO_NOW.getTime() - 70 * 60_000).toISOString()
 
 /** Fills the app's live store as a scenario's server does on connect: snapshots, a beat, and 60 fps. */
 export function seedLive(name: ScenarioName = 'hero', now: Date = HERO_NOW): void {
@@ -31,6 +34,11 @@ export function startMockDataLayer(options: MockServerOptions = {}): MockServer 
   const server = startMockServer(options)
   startDataLayer({ openSocket: inMemorySockets(server), url: 'mock' })
   return server
+}
+
+/** A light's live frame, `rgb` three bytes an LED, decoded as the socket would: into the app's frame store unless given another. */
+export function pushFrame(id: Id, seq: number, rgb: ArrayLike<number>, { store = frames, at = 0 }: { store?: FrameStore; at?: number } = {}): void {
+  decodeFrame(encodeFrame(2, id, seq, Uint8Array.from(rgb)), 2, store, at)
 }
 
 const KIND = { light: 'light-offline', zone: 'zone-crashed', input: 'input-disconnected' } as const

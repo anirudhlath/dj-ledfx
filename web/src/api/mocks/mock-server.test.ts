@@ -8,6 +8,7 @@ import { createLiveStore } from '../live-store'
 import type { ClientCommand } from '../ws-messages'
 import { inMemorySockets } from './in-memory-socket'
 import { RECENT_LIMIT, beatMessage, snapshotMessages, statsMessage, type MockServer } from './mock-server'
+import { HOME_TOTALS } from './fixtures'
 import { SCENARIOS, buildScenario } from './scenarios'
 
 /** Moves the wall clock on: the mock's times come from Date.now(). */
@@ -71,6 +72,28 @@ describe('a connection', () => {
     expect(frames.preview.size).toBe(0)
   })
 
+  it('streams the lights running their own effect too, as the engine does for the web app', () => {
+    const socket = connect(startMockServer({ scenario: 'firmware' }))
+    socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live'] })
+    vi.advanceTimersByTime(100)
+    const frames = decoded(socket.binary(), 2)
+    // Every light runs its own effect or a streamed copy of one: the whole home streams.
+    expect(frames.live.size).toBe(buildScenario('firmware', HERO_NOW).lights.length)
+    expect([...frames.live.values()].reduce((sum, frame) => sum + frame.count, 0)).toBe(HOME_TOTALS.leds)
+  })
+
+  it('holds the frames for ?still: the same colours, frame after frame', () => {
+    const socket = connect(startMockServer({ still: true }))
+    socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live'] })
+    vi.advanceTimersByTime(20)
+    const first = decoded(socket.binary(), 2)
+    socket.clear()
+    vi.advanceTimersByTime(2000)
+    const after = decoded(socket.binary(), 2)
+    expect(after.live.size).toBe(first.live.size)
+    for (const [id, frame] of after.live) expect(frame.rgb).toEqual(first.live.get(id)!.rgb)
+  })
+
   it('speaks as engine M1 with protocol 1: a bare ack, v1 frames at 30 fps, and errors', () => {
     const socket = connect(startMockServer({ protocol: 1 }))
     socket.clear()
@@ -131,6 +154,35 @@ describe('a connection', () => {
     const signals = socket.json().filter((message) => message.channel === 'signals')
     expect(signals.length).toBeGreaterThanOrEqual(9)
     expect(Object.keys(signals[0].values)).toEqual(['loudness'])
+  })
+
+  // I1: engine zones/lights.py reads each zone light back every 5 s, and pushes `lights` when a
+  // colour moved: while a look plays, that's every 5 s.
+  it('reads the streamed lights back every 5 s and pushes their colours when they moved', () => {
+    const socket = connect(startMockServer())
+    const streamed = new Set(socket.json().find((message) => message.channel === 'lights').lights
+      .filter((light: Light) => light.status === 'streaming').map((light: Light) => light.id))
+    socket.clear()
+    const pushes = () => socket.json().filter((message) => message.channel === 'lights')
+    const colours = (push: { lights: Light[] }) => push.lights.filter((light) => streamed.has(light.id)).map((light) => light.colour)
+    vi.advanceTimersByTime(4900)
+    expect(pushes()).toHaveLength(0)
+    vi.advanceTimersByTime(200)
+    expect(pushes()).toHaveLength(1)
+    const first = colours(pushes()[0])
+    expect(first.length).toBeGreaterThan(0)
+    for (const colour of first) expect(colour).toMatch(/^#[0-9A-F]{6}$/)
+    vi.advanceTimersByTime(5000)
+    expect(pushes()).toHaveLength(2)
+    expect(colours(pushes()[1])).not.toEqual(first)
+  })
+
+  // ?still holds the frames, so the colours read back hold too: one push with them, then none.
+  it('pushes the colours once under ?still, and then holds them', () => {
+    const socket = connect(startMockServer({ still: true }))
+    socket.clear()
+    vi.advanceTimersByTime(20_100)
+    expect(socket.json().filter((message) => message.channel === 'lights')).toHaveLength(1)
   })
 
   it("drops every session after the scenario's dropAfterMs, and refuses new ones", () => {

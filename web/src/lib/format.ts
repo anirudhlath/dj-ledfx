@@ -24,3 +24,8 @@ export function formatDayDateTime(date: Date): string {
 export function formatBpm(bpm: number): string {
   return bpm.toFixed(1)
 }
+
+/** "38 ms"; an estimate reads "~38 ms". */
+export function formatLatency(ms: number, estimated = false): string {
+  return `${estimated ? '~' : ''}${Math.round(ms)} ms`
+}

@@ -3,8 +3,8 @@
 // renders' times (decision 8). Names come from the fixtures; ids pick things out of them.
 import { formatBpm, formatTime } from '@/lib/format'
 import type {
-  AttentionItem, Deck, Home, Id, Inputs, Light, Look, Overlay, ProDjLinkInput, RecentLook, RunningZone, Signal, TempoSource,
-  Zone,
+  AttentionItem, Deck, Home, Id, Inputs, Light, Look, Overlay, ProDjLinkInput, RecentLook, RunningZone, Signal, SunInput,
+  SunPathPoint, TempoSource, Zone,
 } from '../contract'
 import {
   HOME_ZONE, homeFixture, lightFixtures, lookFixtures, lookName, partId, roomName, runningZone, zoneFixtures,
@@ -245,8 +245,21 @@ function heroInputs(now: Date): ScenarioInputs {
         { id: 'sun.sun', state: 'above_horizon', since: after(now, -724 * MINUTE) },
       ],
     },
-    sun: { elevation: 2.1, azimuth: 268, sunrise: after(now, -724 * MINUTE), sunset: after(now, 12 * MINUTE) },
+    sun: withPath(now, { elevation: 2.1, azimuth: 268, sunrise: after(now, -724 * MINUTE), sunset: after(now, 12 * MINUTE) }),
   }
+}
+
+/**
+ * A sun with its last two hours, every 10 minutes, oldest first, ending where the sun is now (F2
+ * decision 7). Rough September evening rates of climb and turn: no design value, only enough for the
+ * stage's arc.
+ */
+function withPath(now: Date, sun: Omit<SunInput, 'path'>): SunInput {
+  const path = Array.from({ length: 12 }, (_, i): SunPathPoint => {
+    const hoursAgo = (12 - i) / 6
+    return { at: after(now, -hoursAgo * 60 * MINUTE), elevation: sun.elevation + 11.5 * hoursAgo, azimuth: sun.azimuth - 6.5 * hoursAgo }
+  })
+  return { ...sun, path }
 }
 
 /** The Inputs render's signals table. `usedBy` holds look ids. */

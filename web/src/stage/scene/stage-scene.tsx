@@ -1,0 +1,38 @@
+// Everything on the stage's canvas: the camera where the pose puts it (§7.2), the static home, and
+// the lights, which draw on the stage's cadence (§7.5).
+import { useThree } from '@react-three/fiber'
+import { useLayoutEffect } from 'react'
+import type { OrthographicCamera } from 'three'
+import type { Home } from '@/api/contract'
+import { applyPose, type CameraPose } from '../camera'
+import type { FrameWriter, WriterEntry } from '../frame-writer'
+import type { RoomMask } from '../room-mask'
+import { LightLayer } from './light-layer'
+import { StaticHome } from './static-home'
+
+export interface StageSceneProps {
+  home: Home
+  writer: FrameWriter
+  /** What each drawn light shows now, laid out as the writer is (frame-writer.ts's sameLayout()). */
+  entries: readonly WriterEntry[]
+  mask: RoomMask
+  pose: CameraPose
+  /** The stage behaviour's (behaviour.ts): null while frames don't redraw the stage. */
+  cadenceMs: number | null
+}
+
+export function StageScene({ home, writer, entries, mask, pose, cadenceMs }: StageSceneProps) {
+  const camera = useThree((state) => state.camera)
+  const invalidate = useThree((state) => state.invalidate)
+  useLayoutEffect(() => {
+    // The canvas is made orthographic (stage-canvas.tsx).
+    applyPose(camera as OrthographicCamera, pose)
+    invalidate()
+  }, [camera, pose, invalidate])
+  return (
+    <>
+      <StaticHome home={home} pose={pose} />
+      <LightLayer writer={writer} entries={entries} mask={mask} pose={pose} cadenceMs={cadenceMs} />
+    </>
+  )
+}

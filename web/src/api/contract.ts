@@ -31,6 +31,11 @@ export type Light = Schemas['Light']
 export type LightPart = Schemas['LightPart']
 /** One light on the socket's `lights` channel. */
 export type LightUpdate = Pick<Light, 'id' | 'status' | 'statusSince' | 'ownEffect' | 'power' | 'colour'>
+/**
+ * The statuses whose lights the engine streams to the web app: a look's, and while anyone watches
+ * the live stream, an approximation of a light's own effect (engine zones/frames.py).
+ */
+export const STREAMED: ReadonlySet<LightStatus> = new Set<LightStatus>(['streaming', 'own-effect', 'streamed-copy'])
 
 // ── Served since engine M2 (home map, preview runtimes, frame protocol v2) ────────────────
 // §12.2's Home, Room, SubZone, Anchor and LightShape, with home.json's names for what §12.2
@@ -125,7 +130,20 @@ export interface HomeAssistantInput {
   retryS: number | null
   entities: HomeAssistantEntity[]
 }
-export interface SunInput { elevation: number; azimuth: number; sunrise: string; sunset: string }
+/** A point on the sun's recent path, for the stage's arc (§7.4); F2 asks engine M6 for it (F2 decision 7). */
+export interface SunPathPoint {
+  at: string
+  elevation: number
+  azimuth: number
+}
+export interface SunInput {
+  elevation: number
+  azimuth: number
+  sunrise: string
+  sunset: string
+  /** The last two hours or so, oldest first; without it the stage draws no arc. */
+  path?: SunPathPoint[]
+}
 /** What M6 and M7 add to GET /inputs. */
 export interface PendingInputs { music: MusicInput; homeAssistant: HomeAssistantInput; sun: SunInput }
 /** GET /inputs: the tempo and Pro DJ Link since engine M3; the rest is optional until it's served. */

@@ -24,6 +24,10 @@ export interface TooltipProps {
   side?: 'top' | 'right' | 'bottom' | 'left'
 }
 
+/** §6.1 Tooltip's box: the stage's light tooltip (F2) draws the same one. */
+export const TOOLTIP_SURFACE =
+  'flex max-w-72 flex-col gap-1.25 rounded-tile border border-line-strong bg-raised/94 px-3 py-2.5 text-meta text-text shadow-tip'
+
 /** §6.1 Tooltip. */
 export function Tooltip({ content, children, side = 'top' }: TooltipProps) {
   return (
@@ -31,10 +35,7 @@ export function Tooltip({ content, children, side = 'top' }: TooltipProps) {
       <BaseTooltip.Trigger render={children} />
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side={side} sideOffset={6} className="z-50">
-          <BaseTooltip.Popup
-            aria-hidden="true"
-            className="flex max-w-72 flex-col gap-1.25 rounded-tile border border-line-strong bg-raised/94 px-3 py-2.5 text-meta text-text shadow-tip"
-          >
+          <BaseTooltip.Popup aria-hidden="true" className={TOOLTIP_SURFACE}>
             {content}
           </BaseTooltip.Popup>
         </BaseTooltip.Positioner>

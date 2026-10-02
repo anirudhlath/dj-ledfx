@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { checkPins } from '../../scripts/design-extract.ts'
 
 // CLAUDE.md "Web App Design": the handoff's files are used byte for byte. If this fails, the
 // handoff changed or a copy was edited. Copy the file again; never edit either side.
@@ -26,8 +26,7 @@ describe('design payload copies', () => {
     })
 
     it(`${HANDOFF}/${name} still matches its HANDOFF.sha256 pin`, () => {
-      const hash = createHash('sha256').update(read(`${HANDOFF}/${name}`)).digest('hex')
-      expect(pins).toContain(`${hash}  ${name}\n`)
+      expect(() => checkPins(pins, [name], (file) => read(`${HANDOFF}/${file}`))).not.toThrow()
     })
   }
 })

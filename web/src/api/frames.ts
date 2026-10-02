@@ -3,7 +3,8 @@
 //   v2 (engine M2): [1B stream: 0x01 live | 0x02 preview][2B id_len LE][id UTF-8][4B seq LE][RGB × leds]
 // Once a light has its buffer, decoding a frame allocates only a view of the message, and React
 // never subscribes to any of this: 60 fps of frames must cost no renders (§13.1). The stage (F2) reads `live` and
-// `preview` on each animation frame, and redraws when `version` has moved.
+// `preview` on its animation frames and redraws when `version` has moved; with nothing streaming it
+// sleeps, and onNextFrame() wakes it.
 import type { FrameStream, Id } from './contract'
 
 export type FrameVersion = 1 | 2
@@ -73,9 +74,25 @@ export class FrameStore {
   lastFrameAt: number | null = null
   /** Binary messages dropped as malformed. */
   malformed = 0
+  private readonly waiting = new Set<() => void>()
 
   get(id: Id, stream: FrameStream = 'live'): LightFrame | undefined {
     return (stream === 'live' ? this.live : this.preview).get(id)
+  }
+
+  /** Calls `wake` once, when the version next moves; returns what stops it waiting. */
+  onNextFrame(wake: () => void): () => void {
+    this.waiting.add(wake)
+    return () => void this.waiting.delete(wake)
+  }
+
+  /** The frames changed: the version moves, and whoever waits for it wakes. */
+  bump(): void {
+    this.version += 1
+    if (this.waiting.size === 0) return
+    const woken = [...this.waiting]
+    this.waiting.clear()
+    for (const wake of woken) wake()
   }
 
   /** Counts a malformed message; decodeFrame returns what this returns. */
@@ -112,7 +129,7 @@ export class FrameStore {
   /** The preview ended (F4): its frames go. */
   clearPreview(): void {
     this.preview.clear()
-    this.version += 1
+    this.bump()
   }
 }
 
@@ -148,8 +165,8 @@ export function decodeFrame(data: ArrayBuffer, version: FrameVersion, frames: Fr
   frame.seq = seq
   frame.at = now
   frame.recent += 1
-  frames.version += 1
   frames.lastFrameAt = Date.now()
+  frames.bump()
   return true
 }
 

@@ -2,6 +2,7 @@
 // has spoken, so nothing claims to know what it hasn't heard (F0 review). Components read it a slice
 // at a time through useLive(selector), so a message re-renders only the components whose slice
 // changed. Frames don't come here: they go to the FrameStore, which React never watches.
+import { useRef } from 'react'
 import { useStore } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { createStore, type StoreApi } from 'zustand/vanilla'
@@ -103,4 +104,18 @@ export function useLive<T>(selector: (state: LiveState) => T): T {
 /** useLive for a selector that builds an object: it re-renders only when one of its fields changed. */
 export function useLiveShallow<T>(selector: (state: LiveState) => T): T {
   return useStore(liveStore, useShallow(selector))
+}
+
+/**
+ * useLive for a slice a message replaces with an equal copy (the inputs heartbeat's sun, say): it
+ * re-renders only when `same` says the slice changed, as useShallow does with its own comparison.
+ */
+export function useLiveBy<T>(selector: (state: LiveState) => T, same: (before: T, after: T) => boolean): T {
+  const last = useRef<{ slice: T } | null>(null)
+  return useStore(liveStore, (state) => {
+    const slice = selector(state)
+    if (last.current !== null && same(last.current.slice, slice)) return last.current.slice
+    last.current = { slice }
+    return slice
+  })
 }

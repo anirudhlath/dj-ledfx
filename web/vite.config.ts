@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vitest/config'
+import { THREE_CHUNK } from './scripts/chunks.ts'
 
 const WORKER = 'mockServiceWorker.js'
 
@@ -42,7 +43,11 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  build: { outDir: mode === 'mock' ? 'dist-mock' : 'dist' },
+  build: {
+    outDir: mode === 'mock' ? 'dist-mock' : 'dist',
+    // three.js in a chunk of its own: §14's first-load budget excludes it (scripts/check-dist.ts).
+    rolldownOptions: { output: { codeSplitting: { groups: [{ name: THREE_CHUNK, test: /[\\/]node_modules[\\/]three[\\/]/ }] } } },
+  },
   server: {
     port: 5174,
     strictPort: true,

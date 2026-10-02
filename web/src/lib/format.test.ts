@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { HERO_NOW } from '@/test/live'
-import { formatBpm, formatDayDateTime, formatDayTime, formatTime } from './format'
+import { formatBpm, formatDayDateTime, formatDayTime, formatLatency, formatTime } from './format'
 
 describe('format', () => {
   const hero = HERO_NOW
@@ -20,5 +20,10 @@ describe('format', () => {
     expect(formatBpm(121.8)).toBe('121.8')
     expect(formatBpm(124)).toBe('124.0')
     expect(formatBpm(125.46)).toBe('125.5')
+  })
+
+  it('writes a latency in whole ms, an estimate with a tilde', () => {
+    expect(formatLatency(38.4)).toBe('38 ms')
+    expect(formatLatency(40, true)).toBe('~40 ms')
   })
 })

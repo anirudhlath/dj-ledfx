@@ -1,14 +1,13 @@
 import { act, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { decodeFrame, encodeFrame } from '@/api/frames'
-import { frames, startDataLayer } from '@/api/live'
+import { startDataLayer } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { beatMessage, statsMessage } from '@/api/mocks/mock-server'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
 import { fakeSockets } from '@/test/fake-socket'
-import { attentionAbout, HERO_NOW, seedLive } from '@/test/live'
+import { attentionAbout, HERO_NOW, pushFrame, seedLive } from '@/test/live'
 import { setViewportWidth } from '@/test/viewport'
 import { countAttention } from './hooks'
 
@@ -48,9 +47,7 @@ describe('the chrome on the live store', () => {
     act(() => {
       applyMessage(liveStore, statsMessage(hero, 2), 0)
       for (let seq = 1; seq <= 60; seq++) {
-        for (const light of hero.lights) {
-          decodeFrame(encodeFrame(2, light.id, seq, new Uint8Array(light.leds * 3)), 2, frames, seq / 60)
-        }
+        for (const light of hero.lights) pushFrame(light.id, seq, new Uint8Array(light.leds * 3), { at: seq / 60 })
       }
     })
     expect(renders).toEqual({})
