@@ -1,7 +1,9 @@
 // Live (§8.1, §8.10): the stage, and beside it (F3) the Running panel. The stage's code loads on
 // demand, keeping three.js out of the first load (§14); its place keeps the stage's background
-// meanwhile.
+// meanwhile, and its REST reads start at once rather than when its code arrives.
+import { usePrefetchQuery } from '@tanstack/react-query'
 import { lazy, Suspense } from 'react'
+import { queries } from '@/api/queries'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
 import { SPEC } from '@/stage/design-numbers'
 import { StagePending } from '@/stage/stage-pending'
@@ -13,6 +15,9 @@ const Stage = lazy(() => import('@/stage/stage'))
 const NARROW_QUERY = `(width < ${SPEC.widePx / 16}rem)`
 
 export function LivePage() {
+  usePrefetchQuery(queries.home())
+  usePrefetchQuery(queries.lights())
+  usePrefetchQuery(queries.zones())
   const phone = useIsPhone()
   const narrow = useMediaQuery(NARROW_QUERY)
   const stage = (
