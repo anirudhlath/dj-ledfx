@@ -3,13 +3,17 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from conftest import FakeLight
 
 from dj_ledfx.config import AppConfig, DiscoveryConfig
+from dj_ledfx.devices.backend import DiscoveredDevice
+from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.discovery import DiscoveryOrchestrator
 from dj_ledfx.devices.manager import DeviceManager
-from dj_ledfx.events import EventBus
+from dj_ledfx.events import DeviceOfflineEvent, DeviceOnlineEvent, EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.persistence.state_db import StateDB
 
 
 @pytest.fixture
@@ -484,3 +488,72 @@ async def test_an_online_namesake_is_not_a_reason_to_promote(config, device_mana
 
     ids = [d.adapter.device_info.stable_id for d in device_manager.devices]
     assert ids == ["openrgb:ram:0", "openrgb:ram:1", "openrgb:ram:9"]
+
+
+LAMP = "govee:test-lamp"
+COLOUR = '{"output": {"mode": "colour"}}'
+
+
+def _lamp(led_count: int = 15) -> FakeLight:
+    caps = DeviceCapabilities(protocol="Govee")
+    return FakeLight(LAMP, name="Test lamp", led_count=led_count, caps=caps)
+
+
+async def _known_lamp(db: StateDB, device_manager: DeviceManager) -> FakeLight:
+    lamp = _lamp()
+    device_manager.add_device(lamp, _make_tracker())
+    await db.upsert_device({"id": LAMP, "name": "Test lamp", "backend": "govee", "extra": COLOUR})
+    return lamp
+
+
+# The light-output plan's ruling 17: a lamp whose output changed is set up again at once.
+async def test_a_reconnect_sets_a_known_light_up_again_from_its_row(
+    config, device_manager, event_bus, db
+) -> None:
+    online: list[DeviceOnlineEvent] = []
+    event_bus.subscribe(DeviceOnlineEvent, online.append)
+    await _known_lamp(db, device_manager)
+    new = _lamp(led_count=10)
+    backend = _backend([DiscoveredDevice(adapter=new, tracker=_make_tracker(), max_fps=10)])
+    orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus, state_db=db)
+    orchestrator._backends = [backend]
+
+    assert await orchestrator.reconnect(LAMP) is True
+
+    rows, _ = backend.connect_known.await_args.args
+    assert [row["extra"] for row in rows] == [COLOUR]
+    managed = device_manager.get_by_stable_id(LAMP)
+    assert managed is not None and managed.adapter is new
+    assert (managed.max_fps, managed.status) == (10, "online")
+    assert [event.stable_id for event in online] == [LAMP]
+    row = await db.load_device(LAMP)
+    assert row is not None and (row["led_count"], row["extra"]) == (10, COLOUR)
+
+
+async def test_a_light_that_misses_its_reconnect_goes_offline(
+    config, device_manager, event_bus, db
+) -> None:
+    offline: list[DeviceOfflineEvent] = []
+    event_bus.subscribe(DeviceOfflineEvent, offline.append)
+    lamp = await _known_lamp(db, device_manager)
+    orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus, state_db=db)
+    orchestrator._backends = [_backend([])]
+
+    assert await orchestrator.reconnect(LAMP) is False
+
+    assert [event.stable_id for event in offline] == [LAMP]  # main demotes it
+    managed = device_manager.get_by_stable_id(LAMP)
+    assert managed is not None and managed.adapter is lamp
+
+
+async def test_only_a_known_light_with_a_row_is_reconnected(
+    config, device_manager, event_bus, db
+) -> None:
+    device_manager.add_device(_lamp(), _make_tracker())  # known, but with no row
+    backend = _backend([])
+    orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus, state_db=db)
+    orchestrator._backends = [backend]
+
+    assert await orchestrator.reconnect(LAMP) is False
+    assert await orchestrator.reconnect("govee:nobody") is False
+    backend.connect_known.assert_not_awaited()

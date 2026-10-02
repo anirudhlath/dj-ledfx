@@ -1,6 +1,7 @@
 # tests/devices/govee/test_backend.py
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -137,8 +138,32 @@ class TestGoveeBackend:
 TEST_MODEL = "test-model"
 
 
-def _lamp_row(sku: str = TEST_MODEL) -> dict[str, Any]:
-    return {
+def _lamp_transport(status: dict[str, Any] | None) -> MagicMock:
+    """A transport that hears the lamp (status: its answer, None for silence), and whose
+    scans find it."""
+    transport = MagicMock()
+    transport.is_open = True
+    transport.can_receive = True
+    transport.query_status = AsyncMock(return_value=status)
+    transport.send_command = AsyncMock()
+
+    async def discover(timeout_s: float = 10.0, on_record: Any = None) -> None:
+        on_record(
+            GoveeDeviceRecord(
+                ip="127.0.0.1",
+                device_id="test-lamp",
+                sku=TEST_MODEL,
+                wifi_version="",
+                ble_version="",
+            )
+        )
+
+    transport.discover = discover
+    return transport
+
+
+def _lamp_row(sku: str = TEST_MODEL, output: dict[str, Any] | None = None) -> dict[str, Any]:
+    row: dict[str, Any] = {
         "id": "govee:test-lamp",
         "name": "Test lamp",
         "backend": "govee",
@@ -146,17 +171,17 @@ def _lamp_row(sku: str = TEST_MODEL) -> dict[str, Any]:
         "device_id": "test-lamp",
         "sku": sku,
     }
+    if output is not None:
+        row["extra"] = json.dumps({"output": output})
+    return row
 
 
-async def _connect(config: AppConfig, sku: str = TEST_MODEL) -> DiscoveredDevice:
-    transport = MagicMock()
-    transport.is_open = True
-    transport.can_receive = True
-    transport.query_status = AsyncMock(return_value={"onOff": 1})
-    transport.send_command = AsyncMock()
+async def _connect(
+    config: AppConfig, sku: str = TEST_MODEL, output: dict[str, Any] | None = None
+) -> DiscoveredDevice:
     backend = GoveeBackend()
-    backend._transport = transport
-    (device,) = await backend.connect_known([_lamp_row(sku)], config)
+    backend._transport = _lamp_transport({"onOff": 1})
+    (device,) = await backend.connect_known([_lamp_row(sku, output)], config)
     return device
 
 
@@ -196,3 +221,35 @@ async def test_the_config_s_segment_count_applies_to_an_rgbic_lamp(
     config = AppConfig(devices=DevicesConfig(govee=GoveeConfig(segment_override=10)))
     device = await _connect(config)
     assert device.adapter.led_count == 10
+
+
+UPRIGHT = GoveeDeviceCapability(is_rgbic=True, segment_count=15, razer=True, form="upright")
+
+
+# Review Focus 5: a lamp whose own output is one colour comes back playing one colour.
+async def test_a_lamp_set_to_one_colour_comes_back_in_colour(
+    monkeypatch: pytest.MonkeyPatch, config: AppConfig
+) -> None:
+    monkeypatch.setitem(SKU_REGISTRY, TEST_MODEL, UPRIGHT)
+    colour = await _connect(config, output={"mode": "colour"})
+    assert isinstance(colour.adapter, GoveeSegmentAdapter) and not colour.adapter.razer
+    assert colour.max_fps == GOVEE_COLOUR_FPS
+    counted = await _connect(config, output={"segments": 10})
+    assert isinstance(counted.adapter, GoveeSegmentAdapter) and counted.adapter.razer
+    assert counted.adapter.led_count == 10
+
+
+async def test_a_lamp_offline_at_the_reconnect_gets_its_output_when_a_scan_finds_it(
+    monkeypatch: pytest.MonkeyPatch, config: AppConfig
+) -> None:
+    monkeypatch.setitem(SKU_REGISTRY, TEST_MODEL, UPRIGHT)
+    backend = GoveeBackend()
+    transport = _lamp_transport(None)  # it doesn't answer
+    backend._transport = transport
+    assert await backend.connect_known([_lamp_row(output={"mode": "colour"})], config) == []
+
+    transport.query_status = AsyncMock(return_value={"onOff": 1})  # it's back
+    (device,) = await backend.discover(config)
+
+    assert isinstance(device.adapter, GoveeSegmentAdapter) and not device.adapter.razer
+    assert device.max_fps == GOVEE_COLOUR_FPS

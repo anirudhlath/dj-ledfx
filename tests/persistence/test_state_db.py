@@ -1,6 +1,7 @@
 """Tests for StateDB — SQLite persistence layer."""
 
 import asyncio
+import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -833,3 +834,35 @@ async def test_a_cancelled_write_keeps_the_lock_until_its_thread_is_done(tmp_pat
     await again.open()
     assert await again.load_config("t") == {"k": "1"}  # the write finished, whole
     await again.close()
+
+
+async def test_a_device_row_is_read_by_its_id(db) -> None:
+    await db.upsert_device({"id": "govee:test-lamp", "name": "Test lamp", "backend": "govee"})
+    row = await db.load_device("govee:test-lamp")
+    assert row is not None and (row["name"], row["extra"]) == ("Test lamp", None)
+    assert await db.load_device("govee:nobody") is None
+
+
+async def test_extra_keys_are_set_and_removed_one_at_a_time(db) -> None:
+    await db.upsert_device({"id": "govee:test-lamp", "name": "Test lamp", "backend": "govee"})
+    await db.set_device_extra("govee:test-lamp", "output", {"mode": "colour"})
+    await db.set_device_extra("govee:test-lamp", "other", [1, 2])
+    await db.set_device_extra("govee:test-lamp", "output", {"segments": 10})
+    row = await db.load_device("govee:test-lamp")
+    assert json.loads(row["extra"]) == {"output": {"segments": 10}, "other": [1, 2]}
+
+    await db.set_device_extra("govee:test-lamp", "output", None)
+
+    row = await db.load_device("govee:test-lamp")
+    assert json.loads(row["extra"]) == {"other": [1, 2]}
+
+
+async def test_an_upsert_leaves_extra_alone(db) -> None:
+    await db.upsert_device({"id": "govee:test-lamp", "name": "Test lamp", "backend": "govee"})
+    await db.set_device_extra("govee:test-lamp", "output", {"mode": "colour"})
+    await db.upsert_device(
+        {"id": "govee:test-lamp", "name": "Renamed", "backend": "govee", "led_count": 10}
+    )
+    row = await db.load_device("govee:test-lamp")
+    assert row["name"] == "Renamed"
+    assert json.loads(row["extra"]) == {"output": {"mode": "colour"}}

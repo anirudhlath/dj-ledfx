@@ -13,6 +13,7 @@ from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.events import (
     DeviceDiscoveredEvent,
+    DeviceOfflineEvent,
     DeviceOnlineEvent,
     EventBus,
 )
@@ -71,6 +72,34 @@ class DiscoveryOrchestrator:
         if promoted:
             logger.info("Fast reconnect: {} device(s) online immediately", promoted)
         return promoted
+
+    async def reconnect(self, stable_id: str) -> bool:
+        """Set a known light up again from its row, at once, so that a changed setting (a
+        Govee lamp's own output) takes effect: the light-output plan's ruling 17. True when
+        it answered. One that doesn't goes offline, and a later scan brings it back."""
+        managed = self._manager.get_by_stable_id(stable_id)
+        row = await self._state_db.load_device(stable_id) if self._state_db else None
+        if managed is None or row is None:
+            return False
+        found: list[DiscoveredDevice] = []
+        for backend in self._backends:
+            try:
+                found += await backend.connect_known([row], self._config)
+            except Exception:
+                logger.exception("Reconnecting {} failed in {}", stable_id, type(backend).__name__)
+        device = next((d for d in found if d.adapter.device_info.effective_id == stable_id), None)
+        name = managed.adapter.device_info.name
+        if device is None:
+            logger.warning("{} didn't answer when reconnected; it's offline until a scan", name)
+            if managed.status == "online":
+                self._event_bus.emit(DeviceOfflineEvent(stable_id=stable_id, name=name))
+            return False
+        self._manager.promote_device(
+            stable_id, device.adapter, tracker=device.tracker, max_fps=device.max_fps
+        )
+        await self._persist_device(device.adapter)
+        self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
+        return True
 
     async def run_scan(self) -> int:
         """Run a single discovery scan across all backends.

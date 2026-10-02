@@ -4,13 +4,25 @@ first, then the config's segment override, then the SKU table."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, get_args
 
 from dj_ledfx.config import GOVEE_COLOUR_FPS
+from dj_ledfx.devices.govee.protocol import MAX_RAZER_SEGMENTS
 from dj_ledfx.devices.govee.types import GoveeDeviceCapability
 
 GoveeMode = Literal["segments", "colour"]  # razer, one colour per segment; or colorwc
+MODES: tuple[GoveeMode, ...] = get_args(GoveeMode)
+OUTPUT_KEY = "output"  # where a lamp's own output sits in its device row's extra (JSON)
+MAX_SEGMENTS = MAX_RAZER_SEGMENTS  # razer's limit; one colour keeps to it too
+
+
+def _segment_count(value: object) -> int | None:
+    """A stored segment count a lamp can use, or None."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 2 <= value <= MAX_SEGMENTS else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +31,28 @@ class GoveeOutput:
 
     mode: GoveeMode | None = None
     segments: int | None = None
+
+    @classmethod
+    def from_extra(cls, extra: str | None) -> GoveeOutput:
+        """The output kept in a device row's extra. What it can't use (JSON it can't read,
+        a mode or a segment count no lamp plays) is left to the config and the table."""
+        try:
+            stored = json.loads(extra) if extra else None
+        except ValueError:
+            return cls()
+        output = stored.get(OUTPUT_KEY) if isinstance(stored, dict) else None
+        if not isinstance(output, dict):
+            return cls()
+        mode = output.get("mode")
+        return cls(
+            mode=mode if mode in MODES else None,
+            segments=_segment_count(output.get("segments")),
+        )
+
+    def to_extra(self) -> dict[str, Any] | None:
+        """What goes under extra's OUTPUT_KEY: None when the lamp has no output of its own."""
+        stored = {"mode": self.mode, "segments": self.segments}
+        return {key: value for key, value in stored.items() if value is not None} or None
 
 
 @dataclass(frozen=True, slots=True)

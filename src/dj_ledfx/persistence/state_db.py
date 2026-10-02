@@ -332,6 +332,23 @@ class StateDB:
         """Insert or replace a device record. Must include 'id', 'name', 'backend'."""
         await self._upsert("devices", self._DEVICE_COLUMNS, data, pk_columns=("id",))
 
+    async def load_device(self, stable_id: str) -> dict[str, Any] | None:
+        """One device row by its stable id, or None."""
+        columns = ", ".join(self._DEVICE_COLUMNS)
+        rows = await self._execute_read(f"SELECT {columns} FROM devices WHERE id=?", (stable_id,))
+        return dict(zip(self._DEVICE_COLUMNS, rows[0], strict=True)) if rows else None
+
+    async def set_device_extra(self, stable_id: str, key: str, value: Any) -> None:
+        """Set one key of a device row's extra, a JSON object, keeping its other keys; None
+        removes the key. An upsert without extra leaves it alone."""
+        path = f"$.{key}"
+        if value is None:
+            sql = "UPDATE devices SET extra=json_remove(COALESCE(extra, '{}'), ?) WHERE id=?"
+            await self._execute_write(sql, (path, stable_id))
+            return
+        sql = "UPDATE devices SET extra=json_set(COALESCE(extra, '{}'), ?, json(?)) WHERE id=?"
+        await self._execute_write(sql, (path, json.dumps(value), stable_id))
+
     async def delete_device(self, device_id: str) -> None:
         """Delete a device by stable ID."""
         await self._execute_write("DELETE FROM devices WHERE id=?", (device_id,))

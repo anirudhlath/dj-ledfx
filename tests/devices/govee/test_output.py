@@ -35,3 +35,29 @@ def test_razer_streams_at_the_configured_rate_and_one_colour_at_ten_at_most() ->
     assert lamp_fps(LampPlan(15, razer=True), GOVEE_RAZER_FPS) == GOVEE_RAZER_FPS
     assert lamp_fps(LampPlan(15, razer=False), GOVEE_RAZER_FPS) == GOVEE_COLOUR_FPS
     assert lamp_fps(LampPlan(1, razer=False), 5) == 5
+
+
+@pytest.mark.parametrize(
+    ("extra", "output"),
+    [
+        (None, GoveeOutput()),
+        ('{"output": {"mode": "colour", "segments": 10}}', GoveeOutput("colour", 10)),
+        ('{"output": {"segments": 20}, "other": 1}', GoveeOutput(segments=20)),
+        ('{"output": {"mode": "rainbow", "segments": 1}}', GoveeOutput()),
+        ('{"output": {"segments": 256}}', GoveeOutput()),
+        ('{"output": {"segments": true}}', GoveeOutput()),
+        ('{"output": "colour"}', GoveeOutput()),
+        ("[1, 2]", GoveeOutput()),
+        ("not JSON", GoveeOutput()),
+    ],
+)
+def test_a_stored_output_is_read_as_far_as_it_can_be_used(
+    extra: str | None, output: GoveeOutput
+) -> None:
+    assert GoveeOutput.from_extra(extra) == output
+
+
+def test_an_output_is_stored_without_its_unset_parts() -> None:
+    assert GoveeOutput().to_extra() is None
+    assert GoveeOutput(mode="colour").to_extra() == {"mode": "colour"}
+    assert GoveeOutput("segments", 10).to_extra() == {"mode": "segments", "segments": 10}

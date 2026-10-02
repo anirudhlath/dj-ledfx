@@ -2,7 +2,7 @@
 
 Export format:
   [config.<section>]          — config key-value pairs
-  [devices."<name>"]          — device records keyed by display name
+  [devices."<name>"]          — device records keyed by display name; extra is JSON text
   [scenes."<id>"]             — scene records
   [scenes."<id>".effect]      — scene effect state
   [scenes."<id>".placements."<device_name>"]  — device placements
@@ -70,6 +70,8 @@ async def export_toml(db: StateDB) -> str:
     all_config = await db.load_all_config()
     config_by_section: dict[str, dict[str, Any]] = {}
     for (section, key), value in all_config.items():
+        if value is None:  # unset (TOML has no null): left out, so it stays unset
+            continue
         config_by_section.setdefault(section, {})[key] = value
 
     if config_by_section:
@@ -95,6 +97,8 @@ async def export_toml(db: StateDB) -> str:
                 entry["sku"] = device["sku"]
             if device.get("last_latency_ms") is not None:
                 entry["last_latency_ms"] = device["last_latency_ms"]
+            if device.get("extra"):
+                entry["extra"] = device["extra"]  # JSON text: a Govee lamp's own output
             devices_doc[name] = entry
         doc["devices"] = devices_doc
 
@@ -202,6 +206,16 @@ def _iso_text(value: object) -> str:
     raise TypeError(f"{type(value).__name__} isn't a config value")
 
 
+def _extra_text(value: object) -> str | None:
+    """A device's extra as state.db keeps it, the JSON text of an object, from a backup's
+    text or table; None for anything else, which the import leaves out."""
+    try:
+        data = json.loads(value) if isinstance(value, str) else value
+        return json.dumps(data, default=_iso_text) if isinstance(data, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def import_toml(db: StateDB, toml_str: str) -> None:
     """Import structured TOML into DB, merging with existing state."""
     data = tomllib.loads(toml_str)
@@ -254,6 +268,9 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
             device_record["sku"] = dinfo["sku"]
         if "last_latency_ms" in dinfo:
             device_record["last_latency_ms"] = dinfo["last_latency_ms"]
+        extra = _extra_text(dinfo.get("extra"))
+        if extra is not None:
+            device_record["extra"] = extra
 
         await db.upsert_device(device_record)
         logger.debug("import_toml: upserted device '{}' ({})", name, stable_id)

@@ -23,6 +23,7 @@ from dj_ledfx.latency.tracker import LatencyTracker
 class GoveeBackend(DeviceBackend):
     def __init__(self) -> None:
         self._transport: GoveeTransport | None = None
+        self._outputs: dict[str, GoveeOutput] = {}  # each known lamp's own, by stable id
 
     def is_enabled(self, config: AppConfig) -> bool:
         return config.devices.govee.enabled
@@ -118,6 +119,9 @@ class GoveeBackend(DeviceBackend):
                     stable_id = row.get("id") or ""
                     if stable_id.startswith("govee:"):
                         device_id = stable_id[len("govee:") :]
+                # Its own output: for now, and for the scan that finds it if it doesn't
+                # answer now (the light-output plan's ruling 17)
+                self._outputs[f"govee:{device_id}"] = GoveeOutput.from_extra(row.get("extra"))
                 name = row.get("name") or f"Govee ({ip})"
 
                 if not ip:
@@ -167,7 +171,8 @@ class GoveeBackend(DeviceBackend):
         its segments, or one colour on a lamp with fewer than two."""
         govee = config.devices.govee
         capability = get_device_capability(record.sku)
-        plan = lamp_plan(capability, GoveeOutput(), govee.segment_override)
+        output = self._outputs.get(f"govee:{record.device_id}", GoveeOutput())
+        plan = lamp_plan(capability, output, govee.segment_override)
         adapter: GoveeAdapterBase
         if plan.segments < 2:
             adapter = GoveeSolidAdapter(transport, record)

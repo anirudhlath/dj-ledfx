@@ -2,6 +2,7 @@
 
 import errno
 import json
+import tomllib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -623,3 +624,59 @@ stopped_at = 2026-09-24T19:05:00Z
     assert await ZoneStore(db).load_recent() == [
         StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=5))
     ]
+
+
+LAMP_OUTPUT = json.dumps({"output": {"mode": "colour", "segments": 10}})
+TABLE_FORM = """
+[devices."Test lamp"]
+backend = "govee"
+device_id = "test-lamp"
+
+[devices."Test lamp".extra.output]
+mode = "segments"
+
+[devices."Other lamp"]
+backend = "govee"
+device_id = "other-lamp"
+extra = "not JSON"
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_lamp_s_own_output_travels_in_the_backup(db, tmp_path: Path) -> None:
+    await db.upsert_device(
+        {
+            "id": "govee:test-lamp",
+            "name": "Test lamp",
+            "backend": "govee",
+            "device_id": "test-lamp",
+            "extra": LAMP_OUTPUT,
+        }
+    )
+    text = await export_toml(db)
+
+    fresh = StateDB(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        await import_toml(fresh, text)
+        row = await fresh.load_device("govee:test-lamp")
+        assert row is not None and json.loads(row["extra"]) == json.loads(LAMP_OUTPUT)
+
+        await import_toml(fresh, TABLE_FORM)  # a hand-edited backup: a table, or bad text
+
+        row = await fresh.load_device("govee:test-lamp")
+        assert row is not None and json.loads(row["extra"]) == {"output": {"mode": "segments"}}
+        other = await fresh.load_device("govee:other-lamp")
+        assert other is not None and other["extra"] is None
+    finally:
+        await fresh.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unset_config_value_is_left_out_of_the_backup(db: StateDB) -> None:
+    await db.save_config_key("web", "static_dir", json.dumps(None))  # as the app saves None
+    await db.save_config_key("web", "port", "8080")
+
+    config = tomllib.loads(await export_toml(db))["config"]
+
+    assert config["web"] == {"port": 8080}
