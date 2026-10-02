@@ -4581,7 +4581,7 @@
     },
     "/api/lights/{light_id}/output": {
       "get": {
-        "description": "A Govee lamp's output: how it plays now (razer segments or one colour, and how many\nsegments), and its own setting, which the config and its model fill in.",
+        "description": "A Govee lamp's output: how it plays (razer segments or one colour, and how many\nsegments), as its adapter plays while it's online and as a scan will set it up while\nit's offline; and its own setting, which the config and its model fill in.",
         "operationId": "get_lamp_output_api_lights__light_id__output_get",
         "parameters": [
           {
@@ -4619,7 +4619,7 @@
         "summary": "Get Lamp Output"
       },
       "put": {
-        "description": "Set a Govee lamp's own output; a field left null goes back to the default. The lamp\nis reconnected at once to take it. One that doesn't answer goes offline (online is\nfalse) and takes the output when a scan finds it.",
+        "description": "Set a Govee lamp's own output; a field left null goes back to the default. A lamp\nthat's online plays it at once; one that's offline (online is false) takes it when a\nscan finds it.",
         "operationId": "set_lamp_output_api_lights__light_id__output_put",
         "parameters": [
           {

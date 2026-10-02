@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from govee_fakes import NO_RAZER, TEST_MODEL, UPRIGHT, lamp_row, lamp_transport, sent
+from loguru import logger
 
 from dj_ledfx.config import (
     GOVEE_COLOUR_FPS,
@@ -151,17 +152,49 @@ async def test_a_lamp_set_to_one_colour_comes_back_in_colour(
     assert counted.adapter.led_count == 10
 
 
-async def test_a_lamp_offline_at_the_reconnect_gets_its_output_when_a_scan_finds_it(
+async def test_a_scan_sets_a_lamp_up_with_the_output_its_row_holds(
     monkeypatch: pytest.MonkeyPatch, config: AppConfig
 ) -> None:
     monkeypatch.setitem(SKU_REGISTRY, TEST_MODEL, UPRIGHT)
     backend = GoveeBackend()
-    transport = lamp_transport(None)  # it doesn't answer
-    backend._transport = transport
-    assert await backend.connect_known([lamp_row(output={"mode": "colour"})], config) == []
+    backend._transport = lamp_transport()
 
-    transport.query_status = AsyncMock(return_value={"onOff": 1})  # it's back
-    (device,) = await backend.discover(config)
+    (own,) = await backend.discover(config, known=[lamp_row(output={"mode": "colour"})])
+    (unknown,) = await backend.discover(config)  # no row: the SKU table's
 
-    assert isinstance(device.adapter, GoveeColourAdapter)
-    assert device.max_fps == GOVEE_COLOUR_FPS
+    assert isinstance(own.adapter, GoveeColourAdapter) and own.max_fps == GOVEE_COLOUR_FPS
+    assert isinstance(unknown.adapter, GoveeRazerAdapter)
+
+
+@pytest.mark.parametrize("path", ["connect_known", "discover"])
+async def test_a_silent_lamp_is_a_warning_without_a_traceback(
+    config: AppConfig, path: str
+) -> None:
+    backend = GoveeBackend()
+    backend._transport = lamp_transport(None)  # it doesn't answer
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        if path == "connect_known":
+            assert await backend.connect_known([lamp_row()], config) == []
+        else:
+            assert await backend.discover(config) == []
+    finally:
+        logger.remove(sink)
+    [warning] = records  # nothing worse
+    assert warning["level"].name == "WARNING" and warning["exception"] is None
+
+
+async def test_a_lamp_is_set_up_again_from_its_row_without_asking_it(config: AppConfig) -> None:
+    backend = GoveeBackend()
+    transport = backend._transport = lamp_transport()
+    tracker = MagicMock()
+
+    device = backend.rebuild(lamp_row(output={"segments": 10}), config, tracker)
+
+    assert device is not None and device.tracker is tracker
+    assert device.adapter.is_connected and device.adapter.led_count == 10
+    transport.query_status.assert_not_awaited()
+    assert backend.rebuild({"id": "lifx:test", "backend": "lifx"}, config, tracker) is None
+    backend._transport = None  # shut down
+    assert backend.rebuild(lamp_row(), config, tracker) is None

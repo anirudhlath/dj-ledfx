@@ -49,13 +49,14 @@ class GoveeAdapterBase(DeviceAdapter):
         *,
         form: GoveeForm = "strip",
         from_top: bool = False,
+        connected: bool = False,  # True: it replaces an adapter of a lamp that answers
     ) -> None:
         self._transport = transport
         self._record = record
         self._segments = segments
         self._form = form
         self._from_top = from_top
-        self._is_connected = False
+        self._is_connected = connected
 
     @property
     def device_info(self) -> DeviceInfo:

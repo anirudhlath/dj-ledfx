@@ -8,20 +8,13 @@ from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities, LightProtocol
-from dj_ledfx.devices.govee.output import (
-    MAX_SEGMENTS,
-    MIN_SEGMENTS,
-    GoveeMode,
-    GoveeOutput,
-    lamp_plan,
-)
-from dj_ledfx.devices.govee.sku_registry import get_device_capability
+from dj_ledfx.devices.govee.output import MAX_SEGMENTS, MIN_SEGMENTS, GoveeMode
 from dj_ledfx.devices.lights import LightEntry, LightIndex
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.color import rgb_to_hex
@@ -56,6 +49,9 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
 )
 from dj_ledfx.zones.runtime import ZoneState
+
+if TYPE_CHECKING:
+    from dj_ledfx.devices.govee.output import LampOutputReport
 
 
 class ContractModel(BaseModel):
@@ -612,16 +608,14 @@ class LampOutput(ContractModel):
     online: bool  # false: it didn't answer, and takes its output when a scan finds it
 
 
-def lamp_output_out(
-    light_id: str, sku: str, own: GoveeOutput, segment_override: int | None, online: bool
-) -> LampOutput:
-    plan = lamp_plan(get_device_capability(sku), own, segment_override)
+def lamp_output_out(report: LampOutputReport) -> LampOutput:
+    own = report.own
     return LampOutput(
-        light_id=light_id,
-        mode=plan.mode,
-        segments=plan.segments,
+        light_id=report.light_id,
+        mode=report.plays.mode,
+        segments=report.plays.segments,
         own=LampOutputSetting(mode=own.mode, segments=own.segments),
-        online=online,
+        online=report.online,
     )
 
 

@@ -150,7 +150,7 @@ def create_app(
     app.state.home_map = home_map
     app.state.previews = previews
     app.state.listening = listening  # where Pro DJ Link is heard; None: not at all
-    app.state.discovery_orchestrator = discovery_orchestrator  # scans and reconnects
+    app.state.discovery_orchestrator = discovery_orchestrator  # scans and lamp outputs
     app.state.ws_sessions = set()  # open /ws sessions: pushes go to them, ws.close_all ends them
     app.state.ws_closing = False
 

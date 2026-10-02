@@ -203,6 +203,7 @@ async def import_state(request: Request) -> dict[str, str]:
     looks = get_looks(request)
     home_map = request.app.state.home_map  # None where the app has no map
     tempo = get_tempo(request.app)  # takes the file's settings; a pre-M3 file has none
+    discovery = getattr(request.app.state, "discovery_orchestrator", None)
 
     async def restore() -> None:
         try:
@@ -212,6 +213,8 @@ async def import_state(request: Request) -> dict[str, str]:
             if home_map is not None:
                 await home_map.load()  # before the zones resume on the backup's map
             await tempo.reload()
+        if discovery is not None:
+            await discovery.apply_outputs()  # the backup's lamp outputs play at once
 
     await get_zones(request).replace_state(restore)  # a preview follows the backup's map
     return {"status": "ok"}

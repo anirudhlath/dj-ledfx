@@ -479,15 +479,16 @@ export interface paths {
         };
         /**
          * Get Lamp Output
-         * @description A Govee lamp's output: how it plays now (razer segments or one colour, and how many
-         *     segments), and its own setting, which the config and its model fill in.
+         * @description A Govee lamp's output: how it plays (razer segments or one colour, and how many
+         *     segments), as its adapter plays while it's online and as a scan will set it up while
+         *     it's offline; and its own setting, which the config and its model fill in.
          */
         get: operations["get_lamp_output_api_lights__light_id__output_get"];
         /**
          * Set Lamp Output
-         * @description Set a Govee lamp's own output; a field left null goes back to the default. The lamp
-         *     is reconnected at once to take it. One that doesn't answer goes offline (online is
-         *     false) and takes the output when a scan finds it.
+         * @description Set a Govee lamp's own output; a field left null goes back to the default. A lamp
+         *     that's online plays it at once; one that's offline (online is false) takes it when a
+         *     scan finds it.
          */
         put: operations["set_lamp_output_api_lights__light_id__output_put"];
         post?: never;

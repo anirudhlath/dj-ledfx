@@ -5,14 +5,20 @@ first, then the config's segment override, then the SKU table."""
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from loguru import logger
 
 from dj_ledfx.config import GOVEE_COLOUR_FPS
+from dj_ledfx.devices.govee.adapter_base import GoveeAdapterBase
 from dj_ledfx.devices.govee.protocol import MAX_RAZER_SEGMENTS
+from dj_ledfx.devices.govee.sku_registry import get_device_capability
 from dj_ledfx.devices.govee.types import GoveeDeviceCapability
+
+if TYPE_CHECKING:
+    from dj_ledfx.devices.adapter import DeviceAdapter
 
 GoveeMode = Literal["segments", "colour"]  # razer, one colour per segment; or colorwc
 MODES: tuple[GoveeMode, ...] = get_args(GoveeMode)
@@ -93,6 +99,36 @@ def lamp_plan(
         return LampPlan(1, razer=False)
     razer = capability.razer if output.mode is None else output.mode == "segments"
     return LampPlan(segments, razer)
+
+
+def planned(row: Mapping[str, Any], segment_override: int | None) -> LampPlan:
+    """How a lamp will play when it's set up from its device row: its own output, the
+    config's override and its model's entry in the SKU table."""
+    capability = get_device_capability(row.get("sku") or "")
+    return lamp_plan(capability, GoveeOutput.from_extra(row.get("extra")), segment_override)
+
+
+@dataclass(frozen=True, slots=True)
+class LampOutputReport:
+    """A lamp's own output, and how it plays: as its live adapter plays while it's online,
+    else as it will be set up from its row when a scan finds it."""
+
+    light_id: str
+    own: GoveeOutput
+    plays: LampPlan
+    online: bool
+
+
+def lamp_report(
+    row: Mapping[str, Any], live: DeviceAdapter | None, segment_override: int | None
+) -> LampOutputReport:
+    """The report for a lamp's row; live is its adapter while it's online, else None."""
+    if isinstance(live, GoveeAdapterBase):
+        plays = LampPlan(live.led_count, razer=live.razer)
+    else:
+        plays = planned(row, segment_override)
+    own = GoveeOutput.from_extra(row.get("extra"))
+    return LampOutputReport(light_id=row["id"], own=own, plays=plays, online=live is not None)
 
 
 def lamp_fps(plan: LampPlan, max_fps: int) -> int:

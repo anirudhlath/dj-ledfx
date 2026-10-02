@@ -246,3 +246,35 @@ def test_a_ghost_without_capabilities_guesses_from_its_type() -> None:
     ghost = GhostAdapter(info, led_count=60)
     assert ghost.capabilities == DeviceCapabilities(protocol="LIFX")
     assert ghost.geometry is None
+
+
+async def test_replace_adapter_disconnects_the_old_one_and_takes_the_new_setup() -> None:
+    import asyncio
+
+    from dj_ledfx.devices.backend import DiscoveredDevice
+
+    mgr = DeviceManager()
+    old = FakeLight("govee:lamp", led_count=15)
+    mgr.add_device(old, _make_tracker(), max_fps=30)
+    new = FakeLight("govee:lamp", led_count=10)
+    tracker = _make_tracker()
+
+    mgr.replace_adapter("govee:lamp", DiscoveredDevice(adapter=new, tracker=tracker, max_fps=10))
+    await asyncio.sleep(0)  # the old adapter's disconnect runs
+
+    device = mgr.get_by_stable_id("govee:lamp")
+    assert device is not None and device.adapter is new
+    assert (device.tracker, device.max_fps, device.status) == (tracker, 10, "online")
+    assert old.connected is False and new.connected is True
+    assert mgr.lights.entries[0].leds == 10  # indexed again
+
+
+async def test_promoting_over_a_live_adapter_disconnects_it() -> None:
+    import asyncio
+
+    mgr = DeviceManager()
+    live = FakeLight("lifx:aabb")
+    mgr.add_device(live, _make_tracker())
+    mgr.promote_device("lifx:aabb", FakeLight("lifx:aabb"))
+    await asyncio.sleep(0)
+    assert live.connected is False

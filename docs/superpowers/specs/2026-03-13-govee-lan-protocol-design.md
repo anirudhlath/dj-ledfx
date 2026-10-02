@@ -22,7 +22,7 @@ Direct integration with Govee RGBIC devices over the Govee LAN UDP protocol, sup
 | Latency strategy | Windowed median of 9, seeded at 100 ms | One way: half of each `devStatus` round trip measured while frames stream. Same as LIFX. User can switch to ema, windowed_mean or static. |
 | Transport abstraction | None | Transport is internal to Govee backend. No shared Transport ABC — YAGNI, protocols differ too much. |
 | Default FPS cap | 30 by razer, 10 by `colorwc` | Measured: `colorwc` at 40 a second ran 9 commands behind, and may have hung two lamps for about ten minutes; at 10, 1 behind. The `colorwc` cap holds whatever the config says. |
-| Reconnection | Ghosts and scans | A lamp that misses three status reads goes offline; a scan (every 30 s) brings it back. Setting a lamp's own output reconnects it. |
+| Reconnection | Ghosts and scans | A lamp that misses three status reads goes offline; a scan (every 30 s) brings it back. A lamp's own output, once set, plays at once: an online lamp's adapter is built again from its row, with no network, and an offline lamp takes it when a scan finds it. |
 | Latency probing | The status reads' round trips | `supports_latency_probing = False` on both adapters. The transport times each `devStatus` query to its reply (connect, capture and the light monitor's reads all ask one) and hands the round trip to that lamp's LatencyTracker; there is no probe loop. `send_frame` is fire-and-forget UDP — timing it only measures local socket write, not device latency. |
 | Auto power-on | No | `connect()` queries `devStatus` to verify reachability but does not send `turn(on)`. User controls power state via Govee app. |
 
@@ -155,7 +155,7 @@ src/dj_ledfx/devices/govee/
 ├── adapter_base.py      # GoveeAdapterBase — what both outputs share: reads, capture, restore, segment geometry
 ├── razer.py             # GoveeRazerAdapter — one colour per segment by razer
 ├── colour.py            # GoveeColourAdapter — one colour by colorwc, on any number of segments
-├── output.py            # GoveeOutput (a lamp's own output), lamp_plan(), lamp_fps()
+├── output.py            # GoveeOutput (a lamp's own output), lamp_plan(), planned(), lamp_report(), lamp_fps()
 ├── sku_registry.py      # SKU → capability lookup (imports types from types.py)
 └── backend.py           # GoveeBackend(DeviceBackend) — discovery orchestration
 
@@ -297,7 +297,11 @@ def get_segment_count(sku: str, config_override: int | None = None) -> int
 ```python
 class GoveeBackend(DeviceBackend):
     def is_enabled(self, config: AppConfig) -> bool
-    async def discover(self, config: AppConfig) -> list[DiscoveredDevice]
+    async def discover(self, config: AppConfig, on_found=None, skip_ids=None, known=()) -> list[DiscoveredDevice]
+        # known: the known devices' rows, each lamp's own output among them
+    async def connect_known(self, device_rows, config: AppConfig) -> list[DiscoveredDevice]
+    def rebuild(self, row, config: AppConfig, tracker: LatencyTracker) -> DiscoveredDevice | None
+        # An online lamp set up again from its row, with no network, keeping its tracker
     async def shutdown(self) -> None
         # Closes the transport
 ```
@@ -306,11 +310,10 @@ Discovery flow:
 1. Create and open `GoveeTransport`.
 2. Run multicast discovery, collect `GoveeDeviceRecord` list.
 3. For each record:
-   - Look up SKU capability, plan the lamp's output (`lamp_plan`) and choose the adapter on the plan's `razer`: razer or colour.
-   - Connect adapter (devStatus reachability check).
+   - Look up SKU capability, plan the lamp's output (`lamp_plan`, from its row's own output in `known`) and choose the adapter on the plan's `razer`: razer or colour.
+   - Connect adapter (devStatus reachability check). A lamp that stays silent is a warning, not an error: a later scan tries it again.
    - Create `LatencyTracker` (windowed median, seeded at 100 ms one way).
-   - Register the lamp with the transport, so its status reads' round trips feed the tracker: `transport.register_device(record, rtt_callback=tracker.update_rtt)`.
-   - Wrap in `DiscoveredDevice`.
+   - Wrap in `DiscoveredDevice`, whose `on_accepted` registers the lamp with the transport, so its status reads' round trips feed the tracker: `transport.register_device(record, tracker.update_rtt)`. The orchestrator calls it once it takes the lamp in, so a duplicate it turns away never takes the round trips from the live tracker.
 4. Return all successfully connected devices. Log and skip failures.
 
 Auto-registered via `DeviceBackend.__init_subclass__()`. The `govee/__init__.py` must re-export `GoveeBackend` using explicit `as` syntax (`from .backend import GoveeBackend as GoveeBackend`) for ruff F401 compliance. The parent `devices/__init__.py` must import `dj_ledfx.devices.govee` to trigger registration.
@@ -377,6 +380,6 @@ TOML section: `[devices.govee]`.
 ## Future Extensions (Out of Scope)
 
 - **Razer/DreamView protocol** (`cmd:"razer"`): built by the light-output fixes: `GoveeRazerAdapter`, one colour per segment, beside `GoveeColourAdapter`, chosen on the lamp's plan.
-- **Reconnection logic**: built: a lamp back from a drop-out rejoins at the next scan, and setting a lamp's own output reconnects it.
+- **Reconnection logic**: built: a lamp back from a drop-out rejoins at the next scan, and a lamp's own output, once set, plays at once.
 - **Per-device config overrides**: a lamp's own output (razer or one colour, and a segment count) is built, kept in its device row; per-device FPS caps and latency strategies are not.
 - **BLE fallback**: Direct Bluetooth control for devices without LAN API support.

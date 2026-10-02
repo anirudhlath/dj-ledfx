@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import inspect
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -17,6 +17,13 @@ class DiscoveredDevice:
     adapter: DeviceAdapter
     tracker: LatencyTracker
     max_fps: int
+    # Hands the tracker the light's round trips. The orchestrator calls it once it takes the
+    # device in, so a duplicate it turns away never takes them from the live tracker.
+    on_accepted: Callable[[], None] | None = None
+
+    def accepted(self) -> None:
+        if self.on_accepted is not None:
+            self.on_accepted()
 
 
 class DeviceBackend(ABC):
@@ -34,6 +41,7 @@ class DeviceBackend(ABC):
         config: AppConfig,
         on_found: Callable[[DiscoveredDevice], Any] | None = None,
         skip_ids: set[str] | None = None,
+        known: Sequence[Mapping[str, Any]] = (),
     ) -> list[DiscoveredDevice]:
         """Discover, connect, and return all devices for this backend.
 
@@ -43,6 +51,9 @@ class DeviceBackend(ABC):
 
         If *skip_ids* is provided, devices whose stable_id is in the set
         should be silently skipped (already managed by the orchestrator).
+
+        *known* holds the known devices' rows, for a setting a light keeps in its row (a
+        Govee lamp's own output).
 
         Post-condition: all returned adapters are connected (is_connected=True).
         """
@@ -60,6 +71,14 @@ class DeviceBackend(ABC):
         Default implementation returns an empty list.
         """
         return []
+
+    def rebuild(
+        self, row: Mapping[str, Any], config: AppConfig, tracker: LatencyTracker
+    ) -> DiscoveredDevice | None:
+        """Set an online light up again from its row, with no network and keeping its
+        tracker, so that a setting kept in the row takes effect (a Govee lamp's own output).
+        None: the light isn't this backend's, or it can't. Default: None."""
+        return None
 
     async def shutdown(self) -> None:
         """Clean up backend resources. Default no-op."""

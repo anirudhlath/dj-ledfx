@@ -10,7 +10,7 @@ from loguru import logger
 
 from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.adapter import DeviceAdapter
-from dj_ledfx.devices.backend import DeviceBackend
+from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
 from dj_ledfx.devices.ghost import GhostAdapter
 from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.latency.tracker import LatencyTracker
@@ -182,7 +182,8 @@ class DeviceManager:
         tracker: LatencyTracker | None = None,
         max_fps: int | None = None,
     ) -> None:
-        """Swap a GhostAdapter for a real adapter and set status to online.
+        """Swap a GhostAdapter, or a live adapter, for a real adapter and set status to
+        online. A live adapter it replaces is disconnected, as demote_device does.
 
         Optionally updates the tracker and max_fps — important when promoting
         from a ghost (StaticLatency placeholder) to a real backend tracker
@@ -191,8 +192,11 @@ class DeviceManager:
         managed = self.get_by_stable_id(stable_id)
         if managed is None:
             raise KeyError(f"Device not found: {stable_id}")
+        old_adapter = managed.adapter
         managed.adapter = adapter
         self._index()
+        if old_adapter is not adapter and not isinstance(old_adapter, GhostAdapter):
+            self._disconnect_later(old_adapter, "a swap")
         if tracker is not None:
             managed.tracker = tracker
         if max_fps is not None:
@@ -204,6 +208,13 @@ class DeviceManager:
             stable_id,
         )
 
+    def replace_adapter(self, stable_id: str, device: DiscoveredDevice) -> None:
+        """Put a set-up device's adapter, tracker and rate in place of a managed device's,
+        online: the adapter it replaces is disconnected, and the devices indexed again."""
+        self.promote_device(
+            stable_id, device.adapter, tracker=device.tracker, max_fps=device.max_fps
+        )
+
     def demote_device(self, stable_id: str) -> None:
         """Swap a real adapter for a GhostAdapter and set status to offline."""
         managed = self.get_by_stable_id(stable_id)
@@ -212,20 +223,7 @@ class DeviceManager:
         info = managed.adapter.device_info
         led_count = managed.adapter.led_count
         old_adapter = managed.adapter
-
-        # Fire-and-forget disconnect of the old adapter (disconnect is async).
-        # Guard against being called outside an event loop (e.g. in sync tests).
-        async def _disconnect_old() -> None:
-            try:
-                await old_adapter.disconnect()
-            except Exception:
-                logger.exception("Error disconnecting adapter for '{}' during demote", info.name)
-
-        try:
-            asyncio.get_running_loop()
-            asyncio.create_task(_disconnect_old())
-        except RuntimeError:
-            logger.debug("demote_device: no running event loop, skipping async disconnect")
+        self._disconnect_later(old_adapter, "demote")
 
         managed.adapter = GhostAdapter(
             info,
@@ -239,6 +237,25 @@ class DeviceManager:
             info.name,
             stable_id,
         )
+
+    @staticmethod
+    def _disconnect_later(adapter: DeviceAdapter, during: str) -> None:
+        """Fire-and-forget disconnect of an adapter that's been replaced (disconnect is
+        async). Guard against being called outside an event loop (e.g. in sync tests)."""
+        name = adapter.device_info.name
+
+        async def _disconnect() -> None:
+            try:
+                await adapter.disconnect()
+            except Exception:
+                logger.exception("Error disconnecting adapter for '{}' during {}", name, during)
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("No running event loop: '{}' isn't disconnected", name)
+            return
+        asyncio.create_task(_disconnect())
 
     def remove_device(self, stable_id: str) -> None:
         """Remove a device by stable_id."""

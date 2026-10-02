@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from loguru import logger
@@ -30,6 +30,7 @@ class OpenRGBBackend(DeviceBackend):
         config: AppConfig,
         on_found: Callable[[DiscoveredDevice], Any] | None = None,
         skip_ids: set[str] | None = None,
+        known: Sequence[Mapping[str, Any]] = (),
     ) -> list[DiscoveredDevice]:
         orgb = config.devices.openrgb
         discovered = await OpenRGBAdapter.discover(host=orgb.host, port=orgb.port)

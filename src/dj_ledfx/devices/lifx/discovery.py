@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -75,6 +76,7 @@ class LifxBackend(DeviceBackend):
         config: AppConfig,
         on_found: Callable[[DiscoveredDevice], Any] | None = None,
         skip_ids: set[str] | None = None,
+        known: Sequence[Mapping[str, Any]] = (),
     ) -> list[DiscoveredDevice]:
         lifx = config.devices.lifx
         transport = await self._open_transport()
@@ -99,9 +101,9 @@ class LifxBackend(DeviceBackend):
             setup_tasks.append(asyncio.create_task(_setup_device(record)))
 
         # Known lights that are online are left out before they're asked anything.
-        known = {sid.removeprefix("lifx:") for sid in skip_ids or () if sid.startswith("lifx:")}
+        online = {sid.removeprefix("lifx:") for sid in skip_ids or () if sid.startswith("lifx:")}
         await transport.discover(
-            timeout_s=lifx.discovery_timeout_s, on_record=_on_record, skip_macs=known
+            timeout_s=lifx.discovery_timeout_s, on_record=_on_record, skip_macs=online
         )
         if setup_tasks:
             await asyncio.gather(*setup_tasks, return_exceptions=True)
@@ -174,9 +176,13 @@ class LifxBackend(DeviceBackend):
             return None
         tracker = self._create_tracker(config, display_ms=adapter.display_ms)
         await adapter.connect()
-        self._transport.register_device(record, rtt_callback=tracker.update_rtt)
         max_fps = stream_fps(type(adapter), config.devices.lifx.max_fps)
-        return DiscoveredDevice(adapter=adapter, tracker=tracker, max_fps=max_fps)
+        # Probed, and its echoes timed for this tracker, once the orchestrator takes it in
+        transport = self._transport
+        register = partial(transport.register_device, record, rtt_callback=tracker.update_rtt)
+        return DiscoveredDevice(
+            adapter=adapter, tracker=tracker, max_fps=max_fps, on_accepted=register
+        )
 
     async def _create_adapter(
         self, record: LifxDeviceRecord, config: AppConfig

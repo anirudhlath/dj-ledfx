@@ -1,17 +1,23 @@
 """Tests for DiscoveryOrchestrator."""
 
 import asyncio
+import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from conftest import FakeLight
-from govee_fakes import LAMP, govee_lamp, lamp_row
+from conftest import events
+from govee_fakes import LAMP, STATUS, TEST_MODEL, UPRIGHT, lamp_record, lamp_row, lamp_transport
 
 from dj_ledfx.config import AppConfig, DiscoveryConfig
-from dj_ledfx.devices.backend import DiscoveredDevice
 from dj_ledfx.devices.discovery import DiscoveryOrchestrator
-from dj_ledfx.devices.manager import DeviceManager
-from dj_ledfx.events import DeviceOfflineEvent, DeviceOnlineEvent, EventBus
+from dj_ledfx.devices.govee.backend import GoveeBackend
+from dj_ledfx.devices.govee.colour import GoveeColourAdapter
+from dj_ledfx.devices.govee.output import OUTPUT_KEY, GoveeOutput, LampOutputReport, LampPlan
+from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
+from dj_ledfx.devices.govee.sku_registry import SKU_REGISTRY
+from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
+from dj_ledfx.events import DeviceOnlineEvent, EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.persistence.state_db import StateDB
@@ -113,7 +119,7 @@ async def test_orchestrator_discovers_new_devices(config, device_manager, event_
 
     mock_backend = MagicMock()
 
-    async def _fake_discover(config, on_found=None, skip_ids=None):
+    async def _fake_discover(config, on_found=None, skip_ids=None, known=()):
         if callable(on_found):
             on_found(discovered_device)
         return [discovered_device]
@@ -201,7 +207,7 @@ async def test_skip_ids_excludes_offline_devices(config, device_manager, event_b
 
     received_skip_ids: set[str] | None = None
 
-    async def _mock_discover(config, on_found=None, skip_ids=None):
+    async def _mock_discover(config, on_found=None, skip_ids=None, known=()):
         nonlocal received_skip_ids
         received_skip_ids = skip_ids
         return []
@@ -260,7 +266,7 @@ async def test_name_fallback_promotes_offline_instead_of_duplicate(
     new_tracker = _make_tracker()
     discovered_device = DiscoveredDevice(adapter=new_adapter, tracker=new_tracker, max_fps=40)
 
-    async def _mock_discover(config, on_found=None, skip_ids=None):
+    async def _mock_discover(config, on_found=None, skip_ids=None, known=()):
         if callable(on_found):
             on_found(discovered_device)
         return [discovered_device]
@@ -322,7 +328,7 @@ async def test_offline_device_repromotion_via_discovery(config, device_manager, 
 
     discovered_device = DiscoveredDevice(adapter=real_adapter, tracker=_make_tracker(), max_fps=30)
 
-    async def _mock_discover(config, on_found=None, skip_ids=None):
+    async def _mock_discover(config, on_found=None, skip_ids=None, known=()):
         if callable(on_found):
             on_found(discovered_device)
         return [discovered_device]
@@ -368,7 +374,7 @@ async def test_devices_that_share_a_name_are_each_managed(config, device_manager
         adapter.is_connected = True
         sticks.append(DiscoveredDevice(adapter=adapter, tracker=_make_tracker(), max_fps=60))
 
-    async def _mock_discover(config, on_found=None, skip_ids=None):
+    async def _mock_discover(config, on_found=None, skip_ids=None, known=()):
         for stick in sticks:
             on_found(stick)
         return sticks
@@ -420,7 +426,7 @@ def _ghost(device_manager, name: str, stable_id: str) -> None:  # type: ignore[n
 
 
 def _backend(found):  # type: ignore[no-untyped-def]
-    async def _discover(config, on_found=None, skip_ids=None):  # type: ignore[no-untyped-def]
+    async def _discover(config, on_found=None, skip_ids=None, known=()):  # type: ignore[no-untyped-def]
         for device in found:
             on_found(device)
         return found
@@ -491,67 +497,196 @@ async def test_an_online_namesake_is_not_a_reason_to_promote(config, device_mana
     assert ids == ["openrgb:ram:0", "openrgb:ram:1", "openrgb:ram:9"]
 
 
-COLOUR = '{"output": {"mode": "colour"}}'
+COLOUR = GoveeOutput(mode="colour")
 
 
-async def _known_lamp(db: StateDB, device_manager: DeviceManager) -> FakeLight:
-    lamp = govee_lamp()
-    device_manager.add_device(lamp, _make_tracker())
-    await db.upsert_device(lamp_row(output={"mode": "colour"}))
-    return lamp
+@pytest.fixture
+def lamp_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(SKU_REGISTRY, TEST_MODEL, UPRIGHT)
 
 
-# The light-output plan's ruling 17: a lamp whose output changed is set up again at once.
-async def test_a_reconnect_sets_a_known_light_up_again_from_its_row(
-    config, device_manager, event_bus, db
-) -> None:
-    online: list[DeviceOnlineEvent] = []
-    event_bus.subscribe(DeviceOnlineEvent, online.append)
-    await _known_lamp(db, device_manager)
-    new = govee_lamp(led_count=10)
-    backend = _backend([DiscoveredDevice(adapter=new, tracker=_make_tracker(), max_fps=10)])
+@pytest.fixture
+def lamps(lamp_model, config, device_manager, event_bus, db):  # type: ignore[no-untyped-def]
+    """An orchestrator whose one backend is Govee's, over a transport that hears the test
+    lamp, and that transport."""
+    govee = GoveeBackend()
+    transport = govee._transport = lamp_transport()
     orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus, state_db=db)
-    orchestrator._backends = [backend]
+    orchestrator._backends = [govee]
+    return orchestrator, transport
 
-    assert await orchestrator.reconnect(LAMP) is True
 
-    rows, _ = backend.connect_known.await_args.args
-    assert [row["extra"] for row in rows] == [COLOUR]
-    managed = device_manager.get_by_stable_id(LAMP)
-    assert managed is not None and managed.adapter is new
-    assert (managed.max_fps, managed.status) == (10, "online")
-    assert [event.stable_id for event in online] == [LAMP]
+async def _online_lamp(
+    orchestrator: DiscoveryOrchestrator, db: StateDB, output: dict[str, Any] | None = None
+) -> ManagedDevice:
+    """The test lamp, known by its row and set up from it, as a start does."""
+    await db.upsert_device(lamp_row(output=output))
+    await orchestrator.connect_known_devices(await db.load_devices())
+    managed = orchestrator._manager.get_by_stable_id(LAMP)
+    assert managed is not None and managed.status == "online"
+    return managed
+
+
+async def _stored(db: StateDB) -> Any:
     row = await db.load_device(LAMP)
-    assert row is not None and (row["led_count"], row["extra"]) == (10, COLOUR)
+    assert row is not None
+    return json.loads(row["extra"]) if row["extra"] is not None else None
 
 
-async def test_a_light_that_misses_its_reconnect_goes_offline(
-    config, device_manager, event_bus, db
-) -> None:
-    offline: list[DeviceOfflineEvent] = []
-    event_bus.subscribe(DeviceOfflineEvent, offline.append)
-    lamp = await _known_lamp(db, device_manager)
-    orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus, state_db=db)
-    orchestrator._backends = [_backend([])]
+# The light-output plan's ruling 17: a lamp whose output changed plays it at once.
+async def test_an_output_change_plays_at_once_without_asking_the_lamp(lamps, event_bus, db):
+    orchestrator, transport = lamps
+    managed = await _online_lamp(orchestrator, db)
+    old, tracker = managed.adapter, managed.tracker
+    online = events(event_bus, DeviceOnlineEvent)
+    transport.query_status.reset_mock()
 
-    assert await orchestrator.reconnect(LAMP) is False
+    report = await orchestrator.set_output(LAMP, COLOUR)
+    await asyncio.sleep(0)  # the old adapter's disconnect
 
-    assert [event.stable_id for event in offline] == [LAMP]  # main demotes it
+    assert report == LampOutputReport(LAMP, COLOUR, LampPlan(15, razer=False), online=True)
+    assert isinstance(managed.adapter, GoveeColourAdapter) and managed.adapter.is_connected
+    assert managed.tracker is tracker  # it keeps the lamp's round trips
+    assert old.is_connected is False
+    transport.query_status.assert_not_awaited()  # no network
+    assert [event.stable_id for event in online] == [LAMP]
+    assert await _stored(db) == {"output": {"mode": "colour"}}
+
+
+async def test_two_quick_output_changes_leave_one_adapter_on_the_newer(
+    lamps, device_manager, event_bus, db
+):
+    orchestrator, _ = lamps
+    await _online_lamp(orchestrator, db)
+    adapters: list[Any] = []
+
+    def _swapped(event: DeviceOnlineEvent) -> None:
+        adapters.append(device_manager.get_by_stable_id(event.stable_id).adapter)
+
+    event_bus.subscribe(DeviceOnlineEvent, _swapped)
+
+    await asyncio.gather(
+        orchestrator.set_output(LAMP, GoveeOutput(segments=10)),
+        orchestrator.set_output(LAMP, GoveeOutput(segments=12)),
+    )
+    await asyncio.sleep(0)
+
+    [managed] = device_manager.devices
+    assert managed.adapter is adapters[-1]
+    assert [adapter.led_count for adapter in adapters] == [10, 12]
+    assert [adapter.is_connected for adapter in adapters] == [False, True]
+    assert await _stored(db) == {"output": {"segments": 12}}
+
+
+async def test_an_output_change_waits_for_a_scan(lamps, device_manager, db):
+    """A scan sets a lamp up from the rows it read when it began, so an output change made
+    meanwhile waits for it: the lamp ends on the newer output."""
+    orchestrator, transport = lamps
+    await db.upsert_device(lamp_row())  # known, and offline
+    held = asyncio.Event()
+
+    async def discover(timeout_s: float = 10.0, on_record: Any = None) -> None:
+        await held.wait()
+        on_record(lamp_record())
+
+    transport.discover = discover
+    scan = asyncio.create_task(orchestrator.run_scan())
+    await asyncio.sleep(0.01)
+    change = asyncio.create_task(orchestrator.set_output(LAMP, COLOUR))
+    await asyncio.sleep(0.01)
+    assert not change.done() and await _stored(db) is None
+    held.set()
+
+    assert await scan == 1
+    report = await change
     managed = device_manager.get_by_stable_id(LAMP)
-    assert managed is not None and managed.adapter is lamp
+    assert managed is not None and isinstance(managed.adapter, GoveeColourAdapter)
+    assert report is not None and (report.plays, report.online) == (LampPlan(15, False), True)
 
 
-async def test_only_a_known_light_with_a_row_is_reconnected(
-    config, device_manager, event_bus, db
-) -> None:
-    device_manager.add_device(govee_lamp(), _make_tracker())  # known, but with no row
-    backend = _backend([])
+async def test_a_duplicate_a_scan_sets_up_never_takes_the_live_tracker(
+    lamps, config, device_manager, db
+):
+    """A scan that began while the lamp was offline sets it up a second time; the light's
+    round trips still go to the tracker of the lamp that's online."""
+    orchestrator, transport = lamps
+    managed = await _online_lamp(orchestrator, db)
+    [govee] = orchestrator._backends
+
+    await govee.discover(config, on_found=orchestrator._merge)
+
+    [registered] = transport.register_device.call_args_list
+    record, rtt = registered.args
+    assert record == lamp_record() and rtt.__self__ is managed.tracker
+    assert len(device_manager.devices) == 1
+
+
+async def test_only_a_known_govee_lamp_takes_an_output(config, device_manager, event_bus, db):
     orchestrator = DiscoveryOrchestrator(config, device_manager, event_bus, state_db=db)
-    orchestrator._backends = [backend]
+    await db.upsert_device({"id": "lifx:test", "name": "Test bulb", "backend": "lifx"})
 
-    assert await orchestrator.reconnect(LAMP) is False
-    assert await orchestrator.reconnect("govee:nobody") is False
-    backend.connect_known.assert_not_awaited()
+    assert await orchestrator.set_output("lifx:test", COLOUR) is None
+    assert await orchestrator.set_output("govee:nobody", COLOUR) is None
+    assert await orchestrator.output_of("lifx:test") is None
+    row = await db.load_device("lifx:test")
+    assert row is not None and row["extra"] is None
+
+
+async def test_an_offline_lamp_takes_its_output_when_a_scan_finds_it(lamps, device_manager, db):
+    orchestrator, transport = lamps
+    await db.upsert_device(lamp_row())
+    transport.query_status.return_value = None  # silent at the start
+    await orchestrator.connect_known_devices(await db.load_devices())
+
+    report = await orchestrator.set_output(LAMP, COLOUR)
+    transport.query_status.return_value = STATUS  # it's back
+    await orchestrator.run_scan()
+
+    assert report == LampOutputReport(LAMP, COLOUR, LampPlan(15, razer=False), online=False)
+    managed = device_manager.get_by_stable_id(LAMP)
+    assert managed is not None and isinstance(managed.adapter, GoveeColourAdapter)
+
+
+async def test_a_deleted_lamp_found_again_plays_as_its_model_says(lamps, device_manager, db):
+    orchestrator, _ = lamps
+    managed = await _online_lamp(orchestrator, db, output={"mode": "colour"})
+    assert isinstance(managed.adapter, GoveeColourAdapter)
+    device_manager.remove_device(LAMP)  # as DELETE /api/devices/{name} does
+    await db.delete_device(LAMP)
+
+    await orchestrator.run_scan()
+
+    found = device_manager.get_by_stable_id(LAMP)
+    assert found is not None and isinstance(found.adapter, GoveeRazerAdapter)
+    assert found.adapter.led_count == 15
+
+
+async def test_a_lamp_no_backend_can_set_up_again_plays_as_it_did(lamps, db):
+    orchestrator, _ = lamps
+    managed = await _online_lamp(orchestrator, db)
+    old = managed.adapter
+    orchestrator._backends = []
+
+    report = await orchestrator.set_output(LAMP, COLOUR)
+
+    assert managed.adapter is old
+    assert report == LampOutputReport(LAMP, COLOUR, LampPlan(15, razer=True), online=True)
+
+
+async def test_outputs_changed_under_the_lamps_apply_at_once(lamps, event_bus, db):
+    """As a restored backup changes them: a lamp is set up again only when its row says
+    otherwise than it plays."""
+    orchestrator, _ = lamps
+    managed = await _online_lamp(orchestrator, db)
+    online = events(event_bus, DeviceOnlineEvent)
+
+    await orchestrator.apply_outputs()
+    assert online == []  # nothing changed
+    await db.set_device_extra(LAMP, OUTPUT_KEY, COLOUR.to_extra())
+    await orchestrator.apply_outputs()
+
+    assert isinstance(managed.adapter, GoveeColourAdapter)
+    assert [event.stable_id for event in online] == [LAMP]
 
 
 @pytest.mark.asyncio
