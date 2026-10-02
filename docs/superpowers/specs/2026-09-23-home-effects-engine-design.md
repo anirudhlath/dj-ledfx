@@ -4,6 +4,8 @@ Turn dj-ledfx from a Pro-DJ-Link-driven LED strip engine into an always-on effec
 
 **Status:** design approved in brainstorming (2026-09-23), then reconciled with the web app's Claude Design handoff the same day. This is the umbrella spec for eight engine milestones; each gets its own implementation plan, M1 first. The web app has its own spec, [`2026-09-23-web-app-rebuild-design.md`](2026-09-23-web-app-rebuild-design.md), and is built as a parallel track (§10).
 
+**Amended 2026-10-01** by [the light-output plan](../plans/2026-10-01-light-output-fixes.md) (the owner's rulings O1–O3, and the plan's rulings 1–22 with 20 replaced by the owner's ruling that no design file changes): a zone renders at most 120 ms ahead; latency is one way, measured while a device streams, plus its display delay; each device is sent at its own rate, and an unchanged frame isn't sent again; brightness applies at send; placements fit each light's form; Govee lamps stream per segment by razer, and each lamp keeps its own output. §3, §4.1, §4.3, §6.1, §6.3 and §8 say how. Aurora's curtains reach the floor by default; the band stays the look's setting.
+
 ## 1. Goals and Scope
 
 **Goals**
@@ -44,7 +46,7 @@ That is 29 looks: 1 + 6 + 4 + 11 + 3 + 4.
 |---|---|
 | Effects render a 1D strip: `render(ctx: BeatContext, led_count)` | Effects render every LED of a zone at its 3D position; 1D effects keep working through a strip adapter |
 | `SpatialCompositor` maps the strip onto devices with `LinearMapping` / `RadialMapping` | Removed, except inside the strip adapter |
-| `EffectEngine.tick()` renders each `ScenePipeline` at `now + max_lookahead_s` (1 s) | Renders each zone at `now + horizon`; the horizon is the zone's slowest device latency plus one frame (~100–150 ms) |
+| `EffectEngine.tick()` renders each `ScenePipeline` at `now + max_lookahead_s` (1 s) | Renders each zone at `now + horizon`; the horizon is the zone's slowest device latency plus one frame, at most 120 ms |
 | `BeatContext`: `beat_phase`, `bar_phase`, `bpm`, `dt` | `RenderContext` adds absolute time, beat and bar index, and signals, all sampled at the frame's target time |
 | Global transport: STOPPED / PLAYING / SIMULATING; devices only receive frames while PLAYING | No global play. Assigning a look starts it; Off stops it. A global preview-only toggle replaces SIMULATING |
 | Scenes with placements; activating a scene is refused while one of its devices is in another active scene | Zones on one home map; a device is in at most one active zone, and the newest assignment takes it over |
@@ -72,8 +74,9 @@ Firmware layers ──► effect start/stop on the device (that device skips str
 ```
 
 - A **zone runtime** owns the look instance, the zone's `LedSet` (every LED of every device in the zone, in a fixed order), the zone's ring buffer, and each device's slice `[offset, offset + led_count)`.
-- The engine renders each zone's frame for `now + horizon`. The horizon is the zone's largest device latency plus one frame, so reactive looks stay responsive while slow devices still get their frames in time. The ring buffer only needs to cover the horizon.
-- Each device's send loop reads the frame nearest `now + its latency`, takes its slice, converts float RGB to the device format and sends it. Devices claimed by a firmware layer skip streaming.
+- The engine renders each zone's frame for `now + horizon`. The horizon is the zone's largest device latency plus one frame, at most 120 ms (`HORIZON_CAP_S`), so reactive looks stay responsive: a device slower than that gets the newest frame and runs late by the difference. The ring buffer only needs to cover the horizon.
+- Each device's send loop reads the frame nearest `now + its latency`, takes its slice, scales it by the zone's brightness, converts float RGB to the device format and sends it, at the device's own rate: LIFX strips and matrices at most 20 a second (LIFX's documented ceiling), a Govee lamp 30 a second by razer and 10 by `colorwc`. A frame equal to the last one sent on the same route isn't sent again for up to a second; a new route always sends. Devices claimed by a firmware layer skip streaming.
+- A device's latency is one way: half of each probe's round trip, counted only within 0.5 s of a frame sent to that device (idle round trips run long under Wi-Fi power save), in a windowed median of 9, plus the device's display delay: half a LIFX fade, and for a matrix `MATRIX_DISPLAY_MS` more, measured on the real lights.
 - A **preview runtime** is a zone runtime whose frames go only to the web app's preview stream. The web app uses one to show a look before it starts and while it is being edited. It never sends to devices and never touches captured state.
 - Colour stays float RGB through the whole layer stack and is clamped and converted once, at send.
 - Everything stays on the single asyncio event loop. Budget: under 5 ms per zone frame on one core. No GPU: the planned Proxmox LXC has none, and the benchmark shows none is needed.
@@ -109,7 +112,7 @@ class RenderContext:
 - Zone kinds: room, sub-zone (inside a room, e.g. the Office desk), whole home, device group.
 - A device belongs to at most one active zone. Assigning a look to a zone that overlaps active zones takes their shared devices over: the newest assignment wins. The other zones keep running on their remaining devices, or stop if none remain. The start response lists the take-overs, and the web app shows them before Start.
 - Assigning a look starts it at once (with the look's transition) and saves a `ZoneAssignment` in `state.db`: the look, its settings, the zone's brightness and the start time. Off stops the look and restores each device's captured state. Stop all does that for every zone.
-- Each running zone has a brightness (0–1) that scales its streamed frames and its firmware effects.
+- Each running zone has a brightness (0–1) that scales its streamed frames, at send (the zone's ring holds its frames before brightness), and its firmware effects.
 - A running zone is in one of five states: running, transition, slow, crashed, or waiting (its look needs an input that isn't there; §5.2). Restart re-creates a crashed zone's look.
 - An **overlay** (M6) is a Home look that plays over every zone for a set time and then gets out of the way. The zones underneath keep running.
 - Captured state is per device. It is taken when dj-ledfx first takes control of a device, kept through hand-overs between zones and across restarts, and released on Off.
@@ -200,7 +203,7 @@ One map in metres on the plan's axes, matching the web app's data contract: x is
 - **Anchors:** named 3D points that looks reference (TV, sofa, speakers, coffee table, …). An anchor can hold more than one point, like the speaker pair.
 - **Placements:** device → shape (point, line, bent line, cylinder or grid; OpenRGB key maps become grids), position, rotation (turn, tilt, roll), size, LED order, and whether the owner has confirmed it.
 
-Placement guessing spreads unplaced devices around their rooms, unconfirmed. Moving a light doesn't confirm it; confirming is explicit. The map lives in `state.db` and joins backup and restore.
+Placement guessing spreads unplaced devices around their rooms, unconfirmed, each in its light's form: an upright lamp stands as a vertical line from 0.1 m, a strip lies along its length, a matrix stands as a grid, and anything else is a point. When a light comes online, an unconfirmed placement that hides its form (many LEDs on a point, an upright lamp lying down) is fitted again. Moving a light doesn't confirm it; confirming is explicit. The map lives in `state.db` and joins backup and restore.
 
 ### 6.2 Seeding This Home (M2)
 
@@ -221,11 +224,11 @@ The method was prototyped during brainstorming; the prototype lives in `.superpo
 
 ### 6.3 Devices and Capabilities
 
-- **LIFX:** capabilities come from a vendored copy of LIFX's `products.json` (colour, temperature range, multizone, extended multizone, matrix, chain) instead of hard-coded product sets. Matrix size comes from `StateDeviceChain` instead of 64 LEDs per tile.
+- **LIFX:** capabilities come from a vendored copy of LIFX's `products.json` (colour, temperature range, multizone, extended multizone, matrix, chain) instead of hard-coded product sets. Matrix size comes from `StateDeviceChain` instead of 64 LEDs per tile. Every streamed frame fades over the gap to the next one, less 2 ms. Discovery skips a known online light before asking it anything, and a light silent to a setup query gives no record that scan, so a silent light is never set up from defaults.
 - **OpenRGB:** Direct mode for streamed looks; the device's own modes for firmware looks. The PC's OpenRGB devices (keyboard, RAM, GPU, motherboard, mouse) appear in the web app as one light with parts, from M2 (in M1 each is its own light). Each part keeps its own adapter, latency and LED order, and can be placed on its own; by default the parts share the PC's placement.
-- **Govee:** streamed only.
+- **Govee:** streamed only. A lamp whose model takes razer (Govee's DreamView protocol) gets one colour per segment by razer; another gets one colour by `colorwc`, at most 10 a second. Each lamp can set its own output (segments or one colour, and a segment count) through `GET` and `PUT /api/lights/{id}/output`; it's kept in the lamp's device row, carried by backups and applied by reconnecting the lamp. A lamp that misses three status reads goes offline and gets no frames until a scan finds it.
 - **Status**, for the web app: streaming, running its own effect, streamed copy, offline, switched off elsewhere, or idle (not in a running zone, with its current power and colour). Switched off elsewhere means reachable but powered off. A light cut at the wall switch is unreachable, so it shows as offline.
-- **Detail**, for the Devices page: model, address, MAC, firmware version, LED count and parts; measured, estimated and overridden latency with a 60 s history; send rate; dropped frames; the last scan time.
+- **Detail**, for the Devices page: model, address, MAC, firmware version, LED count and parts; measured (one way, with the display delay), estimated and overridden latency with a 60 s history; send rate; dropped frames; the last scan time.
 
 ### 6.4 Sharing Policy
 
@@ -296,7 +299,7 @@ Any bindable look parameter can follow a signal: `{signal, in: [lo, hi], out: [l
 
 - **A look raises or produces NaN:** that zone holds its last good frame, the look is marked crashed, and the error is logged once (rate-limited). Other zones keep running. Restart re-creates the look; Off restores the lights.
 - **A zone runs slow:** render time is measured per zone. A zone that keeps exceeding its 5 ms budget drops to a lower frame rate, so it cannot stall the shared event loop. It shows as slow while it stays below 80% of the target frame rate for 30 s.
-- **Devices:** offline devices become ghosts and rejoin on rediscovery, as today. A rejected firmware command falls back to streamed emulation. If a device's state could not be captured, Off leaves that light alone rather than guessing.
+- **Devices:** offline devices become ghosts and rejoin on rediscovery, as today. A Govee lamp that stops answering is taken offline after three missed reads, rather than flooded with frames it can't take. A rejected firmware command falls back to streamed emulation. If a device's state could not be captured, Off leaves that light alone rather than guessing.
 - **Inputs:** if Pro DJ Link drops, the clock carries on at the last tempo. Sendspin and Home Assistant reconnect with backoff, and their signals ease to neutral meanwhile.
 - **Data:** a bad or missing home map, or a bad look, never crashes the app. It starts with what it has and reports the problem.
 - **Attention feed:** the server derives one list, so every screen agrees. Items: a light offline (§6.4), a zone crashed, a zone slow, an input disconnected, an input stale while something depends on it, a device dropping more than 5% of its frames for a minute. Switched off elsewhere, no DJ and nothing playing are never attention items.
