@@ -9,7 +9,7 @@ from conftest import FakeLight, MockDeviceAdapter, ring_route
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.ring_buffer import RingBuffer
-from dj_ledfx.latency.strategies import StaticLatency, WindowedMeanLatency
+from dj_ledfx.latency.strategies import StaticLatency, WindowedMeanLatency, WindowedMedianLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.scheduling.scheduler import FrameSlot, LookaheadScheduler
@@ -768,3 +768,20 @@ async def test_stats_report_the_share_of_frames_a_streaming_light_misses() -> No
     stats = {entry.device_id: entry for entry in scheduler.get_device_stats()}
     assert (stats["starved"].send_fps, stats["starved"].dropped_pct) == (0.0, 100.0)
     assert stats["idle"].dropped_pct == 0.0  # not streaming, so nothing is missed
+
+
+async def test_a_probe_reply_counts_while_frames_go_out() -> None:
+    adapter = MockDeviceAdapter(name="Probed", led_count=10, supports_probing=False)
+    tracker = LatencyTracker(WindowedMedianLatency(window_size=9, initial_value_ms=10.0))
+    device = ManagedDevice(adapter=adapter, tracker=tracker, max_fps=60)
+    buf = RingBuffer(capacity=60)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
+
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.sleep(0.2)
+    tracker.update_rtt(40.0)  # a probe's round trip while the light streams
+    scheduler.stop()
+    await task
+
+    assert tracker.effective_latency_ms == 20.0

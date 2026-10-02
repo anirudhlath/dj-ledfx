@@ -1,4 +1,14 @@
-from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
+import pytest
+
+from dj_ledfx.latency.strategies import (
+    STRATEGIES,
+    EMALatency,
+    ProbeStrategy,
+    StaticLatency,
+    WindowedMeanLatency,
+    WindowedMedianLatency,
+    make_strategy,
+)
 
 
 def test_static_latency() -> None:
@@ -91,3 +101,53 @@ def test_ema_overrides_initial_after_update() -> None:
     s = EMALatency(alpha=0.3, initial_value_ms=50.0)
     s.update(100.0)
     assert s.get_latency() == 100.0  # First sample replaces initial
+
+
+# Review Focus 3: a light whose latency jumps and stays high is followed.
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        EMALatency(initial_value_ms=10.0),
+        WindowedMedianLatency(window_size=9, initial_value_ms=10.0),
+    ],
+    ids=["ema", "windowed_median"],
+)
+def test_a_latency_that_jumps_and_stays_is_followed(strategy: ProbeStrategy) -> None:
+    for _ in range(20):
+        strategy.update(20.0)
+    for _ in range(10):
+        strategy.update(80.0)
+    assert strategy.get_latency() > 70.0
+
+
+def test_the_ema_still_ignores_a_lone_spike() -> None:
+    ema = EMALatency()
+    for _ in range(10):
+        ema.update(20.0)
+    ema.update(300.0)
+    ema.update(20.0)
+    ema.update(300.0)  # never three in a row: still spikes
+    assert ema.get_latency() == pytest.approx(20.0)
+
+
+def test_the_median_shrugs_off_spikes_and_follows_a_level() -> None:
+    median = WindowedMedianLatency(window_size=9, initial_value_ms=10.0)
+    assert median.get_latency() == 10.0
+    for sample in (20.0, 20.0, 300.0, 20.0, 20.0, 250.0, 20.0):
+        median.update(sample)
+    assert median.get_latency() == 20.0
+    for _ in range(5):
+        median.update(60.0)
+    assert median.get_latency() == 60.0
+    median.reset()
+    assert median.get_latency() == 10.0
+
+
+@pytest.mark.parametrize("name", STRATEGIES)
+def test_every_strategy_a_config_names_can_be_made(name: str) -> None:
+    assert make_strategy(name, 12.0, 9).get_latency() == 12.0  # seeded
+
+
+def test_make_strategy_refuses_an_unknown_name() -> None:
+    with pytest.raises(ValueError, match="Unknown latency strategy 'fastest'"):
+        make_strategy("fastest", 10.0, 9)

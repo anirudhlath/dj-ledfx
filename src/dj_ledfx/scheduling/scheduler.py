@@ -212,6 +212,7 @@ class LookaheadScheduler:
                     logger.warning("Send failed for '{}'", device_name)
                     continue
             sent = time.monotonic()
+            device.tracker.note_send(sent)  # its probes' round trips count from now
             metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
             if device.adapter.supports_latency_probing:
                 device.tracker.update((sent - send_start) * 1000.0)

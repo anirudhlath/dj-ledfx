@@ -5,12 +5,20 @@ from typing import Any
 
 from loguru import logger
 
-from dj_ledfx.config import AppConfig
+from dj_ledfx.config import AppConfig, OpenRGBConfig
 from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
 from dj_ledfx.devices.heuristics import estimate_device_latency_ms
 from dj_ledfx.devices.openrgb import OpenRGBAdapter
-from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
+from dj_ledfx.latency.strategies import make_strategy
 from dj_ledfx.latency.tracker import LatencyTracker
+
+
+def _tracker(cfg: OpenRGBConfig, name: str) -> LatencyTracker:
+    """A static strategy keeps the configured latency; the others start from the heuristic
+    for the device's name (OpenRGB can't be probed)."""
+    seed = cfg.latency_ms if cfg.latency_strategy == "static" else estimate_device_latency_ms(name)
+    strategy = make_strategy(cfg.latency_strategy, seed, cfg.latency_window_size)
+    return LatencyTracker(strategy, cfg.manual_offset_ms)
 
 
 class OpenRGBBackend(DeviceBackend):
@@ -40,22 +48,7 @@ class OpenRGBBackend(DeviceBackend):
                 )
                 await adapter.connect()
 
-                heuristic_ms = estimate_device_latency_ms(adapter.device_info.name)
-                strategy: StaticLatency | EMALatency | WindowedMeanLatency
-                if orgb.latency_strategy == "static":
-                    strategy = StaticLatency(orgb.latency_ms)
-                elif orgb.latency_strategy == "ema":
-                    strategy = EMALatency(initial_value_ms=heuristic_ms)
-                else:
-                    strategy = WindowedMeanLatency(
-                        window_size=orgb.latency_window_size,
-                        initial_value_ms=heuristic_ms,
-                    )
-
-                tracker = LatencyTracker(
-                    strategy=strategy,
-                    manual_offset_ms=orgb.manual_offset_ms,
-                )
+                tracker = _tracker(orgb, adapter.device_info.name)
                 device = DiscoveredDevice(
                     adapter=adapter,
                     tracker=tracker,
@@ -98,22 +91,7 @@ class OpenRGBBackend(DeviceBackend):
                 adapter = OpenRGBAdapter(host=host, port=port, device_index=device_index)
                 await adapter.connect()
 
-                heuristic_ms = estimate_device_latency_ms(adapter.device_info.name)
-                strategy: StaticLatency | EMALatency | WindowedMeanLatency
-                if orgb_cfg.latency_strategy == "static":
-                    strategy = StaticLatency(orgb_cfg.latency_ms)
-                elif orgb_cfg.latency_strategy == "ema":
-                    strategy = EMALatency(initial_value_ms=heuristic_ms)
-                else:
-                    strategy = WindowedMeanLatency(
-                        window_size=orgb_cfg.latency_window_size,
-                        initial_value_ms=heuristic_ms,
-                    )
-
-                tracker = LatencyTracker(
-                    strategy=strategy,
-                    manual_offset_ms=orgb_cfg.manual_offset_ms,
-                )
+                tracker = _tracker(orgb_cfg, adapter.device_info.name)
                 results.append(
                     DiscoveredDevice(
                         adapter=adapter,

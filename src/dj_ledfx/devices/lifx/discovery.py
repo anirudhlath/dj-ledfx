@@ -26,7 +26,7 @@ from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter, tile_sizes
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord, TileInfo
-from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
+from dj_ledfx.latency.strategies import make_strategy
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.types import DeviceInfo
 
@@ -157,10 +157,7 @@ class LifxBackend(DeviceBackend):
             return None
         tracker = self._create_tracker(config)
         await adapter.connect()
-        self._transport.register_device(
-            record,
-            rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
-        )
+        self._transport.register_device(record, rtt_callback=tracker.update_rtt)
         return DiscoveredDevice(
             adapter=adapter, tracker=tracker, max_fps=config.devices.lifx.max_fps
         )
@@ -264,14 +261,5 @@ class LifxBackend(DeviceBackend):
 
     def _create_tracker(self, config: AppConfig) -> LatencyTracker:
         lifx = config.devices.lifx
-        strategy: StaticLatency | EMALatency | WindowedMeanLatency
-        if lifx.latency_strategy == "static":
-            strategy = StaticLatency(lifx.latency_ms)
-        elif lifx.latency_strategy == "ema":
-            strategy = EMALatency(initial_value_ms=lifx.latency_ms)
-        else:
-            strategy = WindowedMeanLatency(
-                window_size=lifx.latency_window_size,
-                initial_value_ms=lifx.latency_ms,
-            )
-        return LatencyTracker(strategy=strategy, manual_offset_ms=lifx.manual_offset_ms)
+        strategy = make_strategy(lifx.latency_strategy, lifx.latency_ms, lifx.latency_window_size)
+        return LatencyTracker(strategy, lifx.manual_offset_ms)

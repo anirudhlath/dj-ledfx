@@ -8,6 +8,12 @@ from typing import Any
 
 from loguru import logger
 
+from dj_ledfx.latency.strategies import STRATEGIES
+
+# How many recent samples a windowed latency strategy keeps: a median of nine ignores up to
+# four spikes and follows a level that holds for five.
+LATENCY_WINDOW = 9
+
 
 @dataclass
 class EngineConfig:
@@ -65,22 +71,22 @@ class LIFXConfig:
     discovery_timeout_s: float = 10.0
     default_kelvin: int = 3500
     echo_probe_interval_s: float = 2.0
-    latency_strategy: str = "ema"
-    latency_ms: float = 50.0
+    latency_strategy: str = "windowed_median"
+    latency_ms: float = 10.0
     manual_offset_ms: float = 0.0
     max_fps: int = 60
-    latency_window_size: int = 60
+    latency_window_size: int = LATENCY_WINDOW
 
 
 @dataclass
 class GoveeConfig:
     enabled: bool = True
     discovery_timeout_s: float = 5.0
-    latency_strategy: str = "ema"
+    latency_strategy: str = "windowed_median"
     latency_ms: float = 100.0
     manual_offset_ms: float = 0.0
     max_fps: int = 40
-    latency_window_size: int = 60
+    latency_window_size: int = LATENCY_WINDOW
     probe_interval_s: float = 5.0
     segment_override: int | None = None
 
@@ -125,9 +131,10 @@ class AppConfig:
             if hasattr(dev_cfg, "max_fps") and dev_cfg.max_fps <= 0:
                 raise ValueError(f"{name} max_fps must be positive")
             if hasattr(dev_cfg, "latency_strategy"):
-                valid = {"static", "ema", "windowed_mean"}
-                if dev_cfg.latency_strategy not in valid:
-                    raise ValueError(f"{name} latency_strategy must be one of {valid}")
+                if dev_cfg.latency_strategy not in STRATEGIES:
+                    raise ValueError(
+                        f"{name} latency_strategy must be one of {', '.join(STRATEGIES)}"
+                    )
             if hasattr(dev_cfg, "latency_ms") and dev_cfg.latency_ms < 0:
                 raise ValueError(f"{name} latency_ms must be non-negative")
             if hasattr(dev_cfg, "latency_window_size") and dev_cfg.latency_window_size <= 0:

@@ -14,7 +14,7 @@ from dj_ledfx.devices.govee.sku_registry import get_device_capability, get_segme
 from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
 from dj_ledfx.devices.govee.transport import GoveeTransport
 from dj_ledfx.devices.govee.types import GoveeDeviceRecord
-from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
+from dj_ledfx.latency.strategies import make_strategy
 from dj_ledfx.latency.tracker import LatencyTracker
 
 
@@ -79,10 +79,7 @@ class GoveeBackend(DeviceBackend):
                 await adapter.connect()
                 tracker = self._create_tracker(config)
 
-                transport.register_device(
-                    record,
-                    rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
-                )
+                transport.register_device(record, rtt_callback=tracker.update_rtt)
 
                 device = DiscoveredDevice(
                     adapter=adapter,
@@ -179,10 +176,7 @@ class GoveeBackend(DeviceBackend):
                 await adapter.connect()
                 tracker = self._create_tracker(config)
 
-                self._transport.register_device(
-                    record,
-                    rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
-                )
+                self._transport.register_device(record, rtt_callback=tracker.update_rtt)
 
                 results.append(
                     DiscoveredDevice(
@@ -210,14 +204,7 @@ class GoveeBackend(DeviceBackend):
 
     def _create_tracker(self, config: AppConfig) -> LatencyTracker:
         govee = config.devices.govee
-        strategy: StaticLatency | EMALatency | WindowedMeanLatency
-        if govee.latency_strategy == "static":
-            strategy = StaticLatency(govee.latency_ms)
-        elif govee.latency_strategy == "ema":
-            strategy = EMALatency(initial_value_ms=govee.latency_ms)
-        else:
-            strategy = WindowedMeanLatency(
-                window_size=govee.latency_window_size,
-                initial_value_ms=govee.latency_ms,
-            )
-        return LatencyTracker(strategy=strategy, manual_offset_ms=govee.manual_offset_ms)
+        strategy = make_strategy(
+            govee.latency_strategy, govee.latency_ms, govee.latency_window_size
+        )
+        return LatencyTracker(strategy, govee.manual_offset_ms)
