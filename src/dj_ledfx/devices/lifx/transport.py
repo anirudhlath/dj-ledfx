@@ -248,25 +248,29 @@ class LifxTransport:
         self,
         timeout_s: float = 1.0,
         on_record: Callable[[LifxDeviceRecord], None] | None = None,
+        skip_macs: Collection[str] = (),
     ) -> list[LifxDeviceRecord]:
         """Broadcast GetService, collect responses, query versions.
 
-        If *on_record* is provided it is called as soon as each device's
-        version query completes, rather than waiting for all devices.
+        A light whose MAC (hex) is in `skip_macs` is known and online: it's never asked.
+        A light that doesn't answer GetVersion gives no record; a later scan asks again.
+        If *on_record* is provided it is called as soon as each device's version query
+        completes, rather than waiting for all devices.
         """
         discovered: dict[str, tuple[bytes, str, int]] = {}  # mac_hex -> (mac, ip, port)
-        version_tasks: list[asyncio.Task[LifxDeviceRecord | None]] = []
+        version_tasks: list[asyncio.Task[None]] = []
         results: list[LifxDeviceRecord] = []
 
-        async def _query_version_and_record(
-            mac: bytes, ip: str, port: int
-        ) -> LifxDeviceRecord | None:
-            vendor, product = await self._query_version(mac, ip, port)
+        async def _query_version_and_record(mac: bytes, ip: str, port: int) -> None:
+            version = await self.query_version(mac, ip, port)
+            if version is None:
+                logger.info("LIFX {} didn't answer GetVersion; a later scan asks again", ip)
+                return
+            vendor, product = version
             record = LifxDeviceRecord(mac=mac, ip=ip, port=port, vendor=vendor, product=product)
             results.append(record)
             if on_record is not None:
                 on_record(record)
-            return record
 
         def _on_state_service(pkt: LifxPacket, addr: tuple[str, int]) -> None:
             if pkt.msg_type != 3:
@@ -275,11 +279,12 @@ class LifxTransport:
             if service != 1:  # UDP
                 return
             mac = pkt.target[:6]
-            if mac.hex() not in discovered:
-                discovered[mac.hex()] = (mac, addr[0], port)
-                version_tasks.append(
-                    asyncio.create_task(_query_version_and_record(mac, addr[0], port))
-                )
+            if mac.hex() in skip_macs or mac.hex() in discovered:
+                return
+            discovered[mac.hex()] = (mac, addr[0], port)
+            version_tasks.append(
+                asyncio.create_task(_query_version_and_record(mac, addr[0], port))
+            )
 
         self.add_listener(_on_state_service)
         try:
@@ -332,7 +337,11 @@ class LifxTransport:
 
         results: list[LifxDeviceRecord] = []
         for mac, ip, port in discovered.values():
-            vendor, product = await self._query_version(mac, ip, port)
+            version = await self.query_version(mac, ip, port)
+            if version is None:
+                logger.info("LIFX {} didn't answer GetVersion; a later scan asks again", ip)
+                continue
+            vendor, product = version
             results.append(
                 LifxDeviceRecord(mac=mac, ip=ip, port=port, vendor=vendor, product=product)
             )
@@ -346,14 +355,6 @@ class LifxTransport:
             mac, (ip, port), GET_VERSION, b"", STATE_VERSION, parse_state_version, tries=2
         )
         return None if version is None else (int(version[0]), int(version[1]))
-
-    async def _query_version(self, mac: bytes, ip: str, port: int) -> tuple[int, int]:
-        """Query a device's vendor and product. Returns (1, 0) if it never answers."""
-        version = await self.query_version(mac, ip, port)
-        if version is None:
-            logger.warning("LIFX device {} did not respond to GetVersion, defaulting to bulb", ip)
-            return 1, 0
-        return version
 
     async def query_host_firmware(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
         """(major, minor) of the light's firmware, or None if it doesn't answer."""

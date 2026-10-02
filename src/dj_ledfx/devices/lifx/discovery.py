@@ -14,12 +14,15 @@ from dj_ledfx.devices.lifx.packet import (
     GET_COLOR,
     GET_DEVICE_CHAIN,
     GET_EXTENDED_COLOR_ZONES,
+    GET_HOST_FIRMWARE,
     LIGHT_STATE,
     STATE_DEVICE_CHAIN,
     STATE_EXTENDED_COLOR_ZONES,
+    STATE_HOST_FIRMWARE,
     parse_light_state,
     parse_state_device_chain,
     parse_state_extended_color_zones,
+    parse_state_host_firmware,
 )
 from dj_ledfx.devices.lifx.products import lifx_capabilities
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
@@ -49,6 +52,10 @@ def _fade_ms(kind: type[LifxAdapterBase], config: AppConfig) -> int:
     return stream_fade_ms(stream_fps(kind, config.devices.lifx.max_fps))
 
 
+class _Silent(Exception):
+    """A light stayed silent to a setup query: it's set up when a later scan finds it."""
+
+
 class LifxBackend(DeviceBackend):
     def __init__(self) -> None:
         self._transport: LifxTransport | None = None
@@ -75,8 +82,6 @@ class LifxBackend(DeviceBackend):
         setup_tasks: list[asyncio.Task[None]] = []
 
         async def _setup_device(record: LifxDeviceRecord) -> None:
-            if skip_ids and f"lifx:{record.mac.hex()}" in skip_ids:
-                return
             try:
                 device = await self._setup(record, config)
             except Exception:
@@ -93,7 +98,11 @@ class LifxBackend(DeviceBackend):
         def _on_record(record: LifxDeviceRecord) -> None:
             setup_tasks.append(asyncio.create_task(_setup_device(record)))
 
-        await transport.discover(timeout_s=lifx.discovery_timeout_s, on_record=_on_record)
+        # Known lights that are online are left out before they're asked anything.
+        known = {sid.removeprefix("lifx:") for sid in skip_ids or () if sid.startswith("lifx:")}
+        await transport.discover(
+            timeout_s=lifx.discovery_timeout_s, on_record=_on_record, skip_macs=known
+        )
         if setup_tasks:
             await asyncio.gather(*setup_tasks, return_exceptions=True)
 
@@ -156,7 +165,11 @@ class LifxBackend(DeviceBackend):
 
     async def _setup(self, record: LifxDeviceRecord, config: AppConfig) -> DiscoveredDevice | None:
         assert self._transport is not None
-        adapter = await self._create_adapter(record, config)
+        try:
+            adapter = await self._create_adapter(record, config)
+        except _Silent as silent:
+            logger.info("{}; it's left as it was until a later scan", silent)
+            return None
         if adapter is None:
             return None
         tracker = self._create_tracker(config, display_ms=adapter.display_ms)
@@ -170,7 +183,9 @@ class LifxBackend(DeviceBackend):
     ) -> LifxAdapterBase | None:
         assert self._transport is not None
         transport = self._transport
-        firmware = await transport.query_host_firmware(record.mac, record.ip, record.port)
+        firmware = await self._query(
+            record, GET_HOST_FIRMWARE, STATE_HOST_FIRMWARE, parse_state_host_firmware, 0.5
+        )
         caps, relays = lifx_capabilities(record.product, firmware, record.vendor)
         if relays:
             logger.debug("Skipping LIFX switch {} ({})", record.ip, caps.model)
@@ -245,10 +260,28 @@ class LifxBackend(DeviceBackend):
         parse: Callable[[bytes], T],
         timeout: float,
     ) -> T | None:
+        """Ask the light, twice if it must, and parse its reply. None when it answers that
+        it can't (StateUnhandled) or with a reply that doesn't parse: the caller falls back.
+        Raises _Silent when it doesn't answer: a light set up from silence would be the
+        wrong kind or size."""
         assert self._transport is not None
-        return await self._transport.query(
-            record.mac, (record.ip, record.port), msg_type, b"", reply_type, parse, timeout=timeout
+        reply = await self._transport.ask(
+            record.mac,
+            (record.ip, record.port),
+            msg_type,
+            b"",
+            reply_type,
+            tries=2,
+            timeout=timeout,
         )
+        if reply is None:
+            raise _Silent(f"LIFX {record.ip} didn't answer message {msg_type}")
+        if reply.msg_type != reply_type:
+            return None
+        try:
+            return parse(reply.payload)
+        except ValueError:
+            return None
 
     async def _query_label(self, record: LifxDeviceRecord) -> str | None:
         label = await self._query(record, GET_COLOR, LIGHT_STATE, _label_of, 0.5)

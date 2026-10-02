@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any
 
 import pytest
@@ -10,7 +10,12 @@ from dj_ledfx.config import LIFX_MATRIX_FPS, AppConfig, DevicesConfig, LIFXConfi
 from dj_ledfx.devices.lifx.base import stream_fade_ms
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.discovery import LifxBackend
-from dj_ledfx.devices.lifx.packet import GET_DEVICE_CHAIN
+from dj_ledfx.devices.lifx.packet import (
+    GET_COLOR,
+    GET_DEVICE_CHAIN,
+    GET_EXTENDED_COLOR_ZONES,
+    GET_HOST_FIRMWARE,
+)
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import MATRIX_DISPLAY_MS, LifxTileChainAdapter
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
@@ -119,7 +124,9 @@ async def test_discover_returns_discovered_devices() -> None:
     record = _record(1)
 
     async def _fake_discover(
-        timeout_s: float = 1.0, on_record: Callable[[LifxDeviceRecord], None] | None = None
+        timeout_s: float = 1.0,
+        on_record: Callable[[LifxDeviceRecord], None] | None = None,
+        skip_macs: Collection[str] = (),
     ) -> list[LifxDeviceRecord]:
         if on_record is not None:
             on_record(record)
@@ -164,3 +171,49 @@ async def test_a_matrix_streams_at_its_rate_and_its_latency_counts_its_display()
     display = stream_fade_ms(LIFX_MATRIX_FPS) / 2 + MATRIX_DISPLAY_MS
     assert device.adapter.display_ms == display
     assert device.tracker.effective_latency_ms == AppConfig().devices.lifx.latency_ms + display
+
+
+async def test_a_known_online_light_is_left_out_before_it_is_asked() -> None:
+    transport = FakeLifxTransport(product=1)
+    skipped: list[Collection[str]] = []
+
+    async def _fake_discover(
+        timeout_s: float = 1.0,
+        on_record: Callable[[LifxDeviceRecord], None] | None = None,
+        skip_macs: Collection[str] = (),
+    ) -> list[LifxDeviceRecord]:
+        skipped.append(skip_macs)
+        return []
+
+    transport.discover = _fake_discover  # type: ignore[attr-defined]
+    known = {f"lifx:{MAC.hex()}", "govee:test-lamp"}
+    await _backend(transport).discover(AppConfig(), skip_ids=known)
+    assert skipped == [{MAC.hex()}]
+
+
+# Review Focus 4: a known light that's offline, or half-answers, during discovery keeps its
+# ghost and its row. Set up from a silent reply, it would come back the wrong kind or size.
+@pytest.mark.parametrize(
+    ("product", "quiet"),
+    [
+        (57, GET_HOST_FIRMWARE),
+        (57, GET_COLOR),
+        (57, GET_DEVICE_CHAIN),
+        (141, GET_EXTENDED_COLOR_ZONES),
+    ],
+)
+async def test_a_known_light_offline_during_discovery_keeps_its_row(
+    product: int, quiet: int
+) -> None:
+    zones = [(0, 0, 65535, 3500)] * 36
+    transport = FakeLifxTransport(
+        product=product, chain=[(5, 6)], zones=zones, firmware=(4, 10), quiet={quiet}
+    )
+    assert await _backend(transport)._setup(_record(product), AppConfig()) is None
+    assert transport.types().count(quiet) == 2  # asked twice, then left for a later scan
+
+
+async def test_connect_known_leaves_a_half_answering_light_offline() -> None:
+    transport = FakeLifxTransport(product=57, chain=[(5, 6)], quiet={GET_DEVICE_CHAIN})
+    row = _row(name="Test matrix")
+    assert await _backend(transport).connect_known([row], AppConfig()) == []

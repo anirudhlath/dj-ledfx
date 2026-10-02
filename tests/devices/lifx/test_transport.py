@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from dj_ledfx.devices.lifx.packet import STATE_UNHANDLED, LifxPacket
+from dj_ledfx.devices.lifx.packet import GET_VERSION, STATE_UNHANDLED, STATE_VERSION, LifxPacket
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
@@ -143,6 +143,20 @@ def _reply(transport: LifxTransport, request: LifxPacket, msg_type: int, payload
         sequence=request.sequence,
         msg_type=msg_type,
         payload=payload,
+    ).pack()
+
+
+def _service(transport: LifxTransport, mac: bytes) -> bytes:
+    """A light's StateService: it speaks UDP on 56700."""
+    return LifxPacket(
+        tagged=False,
+        source=transport.source_id,
+        target=mac + b"\x00\x00",
+        ack_required=False,
+        res_required=False,
+        sequence=0,
+        msg_type=3,
+        payload=struct.pack("<BI", 1, 56700),
     ).pack()
 
 
@@ -286,7 +300,35 @@ async def test_query_host_firmware() -> None:
 
 
 @pytest.mark.asyncio
-async def test_query_version_retries_once_then_defaults_to_a_bulb() -> None:
+async def test_query_version_retries_once_then_gives_up() -> None:
     transport, sent = _transport()
-    assert await transport._query_version(b"\xaa" * 6, "10.0.0.1", 56700) == (1, 0)
-    assert [p.msg_type for p, _ in sent.packets] == [32, 32]
+    assert await transport.query_version(b"\xaa" * 6, "127.0.0.1", 56700) is None
+    assert [p.msg_type for p, _ in sent.packets] == [GET_VERSION, GET_VERSION]
+
+
+@pytest.mark.asyncio
+async def test_discovery_skips_known_lights_and_leaves_silent_ones_for_later() -> None:
+    transport, sent = _transport()
+    known, silent, new = (bytes.fromhex(f"d073d500000{i}") for i in (1, 2, 3))
+    found: list[LifxDeviceRecord] = []
+    scan = asyncio.create_task(
+        transport.discover(timeout_s=0.1, on_record=found.append, skip_macs={known.hex()})
+    )
+    await asyncio.sleep(0.01)
+    for mac in (known, silent, new):
+        transport._on_packet_received(_service(transport, mac), ("127.0.0.1", 56700))
+    await asyncio.sleep(0.01)  # every light that isn't skipped is asked its version
+    asked = [p for p, _ in sent.packets if p.msg_type == GET_VERSION]
+    assert {p.target[:6] for p in asked} == {silent, new}
+    request = next(p for p in asked if p.target[:6] == new)
+    transport._on_packet_received(
+        _reply(transport, request, STATE_VERSION, struct.pack("<III", 1, 57, 0)),
+        ("127.0.0.1", 56700),
+    )
+
+    records = await scan
+
+    assert [(r.mac, r.product) for r in records] == [(new, 57)]
+    assert found == records
+    retried = [p for p, _ in sent.packets if p.msg_type == GET_VERSION and p.target[:6] == silent]
+    assert len(retried) == 2  # asked twice, then left for a later scan: no made-up bulb

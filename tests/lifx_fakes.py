@@ -63,6 +63,7 @@ class FakeLifxTransport(LifxTransport):
         chain: Sequence[tuple[int, int]] = (),
         unhandled: Collection[int] = (),
         silent: bool = False,
+        quiet: Collection[int] = (),
     ) -> None:
         super().__init__()
         self._source_id = 4242
@@ -78,6 +79,7 @@ class FakeLifxTransport(LifxTransport):
         self.multizone_effect: tuple[int, int, bool] = (0, 0, False)
         self.unhandled = set(unhandled)
         self.silent = silent
+        self.quiet = set(quiet)  # message types it never answers
         self.sent: list[LifxPacket] = []
 
     def send_packet(self, packet: LifxPacket, addr: tuple[str, int]) -> None:
@@ -92,7 +94,7 @@ class FakeLifxTransport(LifxTransport):
         timeout: float = 1.0,
     ) -> LifxPacket | None:
         self.sent.append(packet)
-        if self.silent:
+        if self.silent or packet.msg_type in self.quiet:
             return None
         if packet.msg_type in self.unhandled:
             return self._reply(STATE_UNHANDLED, struct.pack("<H", packet.msg_type))
