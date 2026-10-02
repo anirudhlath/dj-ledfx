@@ -38,9 +38,10 @@ from dj_ledfx.devices.govee.protocol import (
     build_turn_message,
 )
 from dj_ledfx.devices.govee.transport import COMMAND_PORT, RESPONSE_PORT
+from dj_ledfx.effects.color import hex_to_rgb
+from dj_ledfx.types import RGB
 
 PATTERNS = ("whole", "ends", "stripes", "chase", "gaps", "status")
-RGB = tuple[int, int, int]
 RED: RGB = (255, 0, 0)
 GREEN: RGB = (0, 255, 0)
 BLUE: RGB = (0, 0, 255)
@@ -120,7 +121,7 @@ def main() -> None:
     parser.add_argument("--restore-colour", required=True, help="RRGGBB: its colour before")
     parser.add_argument("--restore-power", choices=("on", "off"), required=True)
     args = parser.parse_args()
-    r, g, b = bytes.fromhex(args.restore_colour)
+    r, g, b = hex_to_rgb(args.restore_colour)
     replies = _bind_replies() if args.pattern == "status" else None
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     before = during = asked = 0
