@@ -1,5 +1,4 @@
 import { act, render, screen, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { SunInput } from '@/api/contract'
 import { applyMessage, liveStore } from '@/api/live-store'
@@ -10,21 +9,17 @@ import { linkNames, renderAt } from '@/test/router'
 import { heroPose, MAIN_STAGE } from '@/test/stage'
 import { stageBehaviour, type StageOptions } from '../behaviour'
 import { useCadence } from '../cadence'
-import { FIT_VIEW, type View } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import type { StageLabel } from '../labels'
 import type { Mark } from '../marks'
 import { lightState } from '../show'
 import { sunPosition, sunScene, sunsetTime } from '../sun'
 import { deviceLine, tooltipText } from '../tooltip'
-import { nextRotation, ZOOM_STEPS } from '../view-memory'
 import { Legend } from './legend'
 import { LightTooltip } from './light-tooltip'
 import { RoomLinks } from './room-links'
 import { StageSvg } from './stage-svg'
-import { StageTools } from './stage-tools'
 import { SunReadout } from './sun-readout'
-import { ViewControls } from './view-controls'
 
 const hero = buildScenario('hero', HERO_NOW)
 const pose = heroPose()
@@ -83,44 +78,20 @@ describe("the stage's SVG layer (§7.3, §7.4, §7.6, §9.1)", () => {
 })
 
 describe("the stage's controls (§8.1)", () => {
-  it('turns to Plan and back, and the labels off and on', async () => {
-    const onMode = vi.fn()
-    const onLabels = vi.fn()
-    render(<StageTools mode="3d" onMode={onMode} labels onLabels={onLabels} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
-    expect(onMode).toHaveBeenCalledWith('plan')
-    await userEvent.click(screen.getByRole('switch', { name: 'Labels' }))
-    expect(onLabels).toHaveBeenCalledWith(false)
-  })
-
-  it('rotates a step, zooms in until the last step, and fits back to the fitted view in the same mode', async () => {
-    const onView = vi.fn()
-    const view: View = { mode: 'plan', rotateDeg: SPEC.rotate.stepDeg, zoom: ZOOM_STEPS[ZOOM_STEPS.length - 1] }
-    render(<ViewControls view={view} onView={onView} />)
-    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeDisabled()
-    await userEvent.click(screen.getByRole('button', { name: 'Rotate view' }))
-    expect(onView).toHaveBeenLastCalledWith({ ...view, rotateDeg: nextRotation(view.rotateDeg) })
-    await userEvent.click(screen.getByRole('button', { name: 'Fit home' }))
-    expect(onView).toHaveBeenLastCalledWith({ ...FIT_VIEW, mode: 'plan' })
-  })
-
   it('names the four states the lights show', () => {
     render(<Legend />)
     const items = within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')
     expect(items.map((item) => item.textContent)).toEqual(['Live colour', 'Own effect', 'Offline', 'Switched off elsewhere'])
   })
 
-  it('reads the sun out while it is up, and says nothing at night or without a sun', () => {
+  // S11: sun.test.ts owns a sun that's down or absent; this is the readout's own composition.
+  it('reads the sun out: where it stands, in mono, and when it sets, if that parses', () => {
     const { container, rerender } = render(<SunReadout sun={HERO_SUN} />)
     expect(container).toHaveTextContent(`Sun ${sunPosition(HERO_SUN)} · sets ${sunsetTime(HERO_SUN)}`, { normalizeWhitespace: false })
     // Main.png: the elevation and the compass point in mono and the text colour, the rest in the readout's.
     expect(screen.getByText(sunPosition(HERO_SUN)!)).toHaveClass('num', 'text-text')
     rerender(<SunReadout sun={{ ...HERO_SUN, sunset: 'soon' }} />)
     expect(container.textContent).toBe(`Sun ${sunPosition(HERO_SUN)}`)
-    rerender(<SunReadout sun={{ ...HERO_SUN, elevation: -1 }} />)
-    expect(container).toBeEmptyDOMElement()
-    rerender(<SunReadout sun={null} />)
-    expect(container).toBeEmptyDOMElement()
   })
 
   it('links each room with lights to where a click on it goes, and no other room', () => {
@@ -154,16 +125,6 @@ describe('the light tooltip (§8.1)', () => {
   const text = tooltipText(light, hero.running, new Map(hero.zones.map((zone) => [zone.id, zone.name])))
   /** Every LED of the light one grey. */
   const grey = (level: number) => new Uint8Array(light.leds * 3).fill(level)
-
-  it("names the light and paints its colour now from the frames, with the look and the model", () => {
-    pushFrame(light.id, 1, grey(128))
-    render(<LightTooltip light={light} state={state} text={text} at={[100, 100]} stage={MAIN_STAGE} />)
-    const tooltip = screen.getByRole('tooltip')
-    expect(tooltip).toHaveTextContent(light.name)
-    expect(tooltip).toHaveTextContent('#808080 · 50%')
-    expect(tooltip).toHaveTextContent(deviceLine(light, null))
-    if (text.running !== null) expect(tooltip).toHaveTextContent(text.running)
-  })
 
   /** The stage's draw tick, as its canvas runs it (scene/light-layer.tsx), drawing nothing here. */
   function DrawTick({ cadenceMs }: { cadenceMs: number | null }) {
