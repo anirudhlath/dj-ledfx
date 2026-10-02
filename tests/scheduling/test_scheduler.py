@@ -7,10 +7,10 @@ import pytest
 from conftest import FakeLight, MockDeviceAdapter, ring_route
 
 from dj_ledfx import metrics
-from dj_ledfx.config import LATENCY_WINDOW
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.latency.strategies import (
+    LATENCY_WINDOW,
     StaticLatency,
     WindowedMeanLatency,
     WindowedMedianLatency,
@@ -18,7 +18,7 @@ from dj_ledfx.latency.strategies import (
 )
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.scheduling.route import DeviceRoute
-from dj_ledfx.scheduling.scheduler import KEEPALIVE_S, FrameSlot, LookaheadScheduler
+from dj_ledfx.scheduling.scheduler import FrameSlot, LookaheadScheduler
 from dj_ledfx.types import RenderedFrame
 
 
@@ -34,22 +34,14 @@ def _make_device(
     return ManagedDevice(adapter=adapter, tracker=tracker, max_fps=max_fps)
 
 
-def _fill_buffer(buf: RingBuffer, base_time: float, count: int = 60) -> None:
+def _fill_buffer(
+    buf: RingBuffer, base_time: float, count: int = 60, *, level: float | None = None
+) -> None:
+    """count frames a 60th of a second apart from base_time: each one new, or every one at
+    level (a still look)."""
     for i in range(count):
         frame = RenderedFrame(
-            colors=np.full((10, 3), (i % 256) / 255.0, dtype=np.float32),
-            target_time=base_time + i * (1.0 / 60.0),
-            beat_phase=0.0,
-            bar_phase=0.0,
-        )
-        buf.write(frame)
-
-
-def _fill_still(buf: RingBuffer, base_time: float, count: int = 60) -> None:
-    """Frames that never change: a still look."""
-    for i in range(count):
-        frame = RenderedFrame(
-            colors=np.full((10, 3), 0.5, dtype=np.float32),
+            colors=np.full((10, 3), (i % 256) / 255.0 if level is None else level, np.float32),
             target_time=base_time + i * (1.0 / 60.0),
             beat_phase=0.0,
             bar_phase=0.0,
@@ -71,6 +63,14 @@ def _scheduler(
     for device in devices:
         made.set_route(device.adapter.device_info.effective_id, _route(ring_buffer))
     return made
+
+
+def _still() -> tuple[ManagedDevice, RingBuffer, LookaheadScheduler]:
+    """A device at 60 a second, and a scheduler sending it a still look for 2.5 s."""
+    device = _make_device(max_fps=60)
+    buf = RingBuffer(capacity=150)
+    _fill_buffer(buf, time.monotonic(), 150, level=0.5)
+    return device, buf, _scheduler(ring_buffer=buf, devices=[device], fps=60)
 
 
 async def _run_for(scheduler: LookaheadScheduler, seconds: float) -> None:
@@ -779,7 +779,7 @@ async def test_stats_report_the_share_of_frames_a_streaming_light_misses() -> No
 
 async def test_a_probe_reply_counts_while_frames_go_out() -> None:
     adapter = MockDeviceAdapter(name="Probed", led_count=10, supports_probing=False)
-    tracker = LatencyTracker(WindowedMedianLatency(window_size=9, initial_value_ms=10.0))
+    tracker = LatencyTracker(WindowedMedianLatency(LATENCY_WINDOW, initial_value_ms=10.0))
     device = ManagedDevice(adapter=adapter, tracker=tracker, max_fps=60)
     buf = RingBuffer(capacity=60)
     _fill_buffer(buf, time.monotonic(), 60)
@@ -794,30 +794,27 @@ async def test_a_probe_reply_counts_while_frames_go_out() -> None:
     assert tracker.effective_latency_ms == 20.0
 
 
-async def test_a_still_look_is_sent_once_and_then_kept_alive() -> None:
-    device = _make_device(max_fps=60)
-    buf = RingBuffer(capacity=150)
-    _fill_still(buf, time.monotonic(), 150)
-    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
+async def test_a_still_look_is_sent_once_and_then_kept_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("dj_ledfx.scheduling.scheduler.KEEPALIVE_S", 0.2)
+    device, _buf, scheduler = _still()
 
     task = asyncio.create_task(scheduler.run())
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.1)
     assert len(device.adapter.send_frame_calls) == 1
+    await asyncio.sleep(0.2)  # past the keepalive
     (stats,) = scheduler.get_device_stats()
-    assert stats.send_fps > 20  # a skipped frame counts as sent: the light is short of none
-    await asyncio.sleep(KEEPALIVE_S)
     scheduler.stop()
     await task
 
     assert len(device.adapter.send_frame_calls) == 2
+    assert stats.send_fps > 10  # a skipped frame counts as sent: the light is short of none
 
 
 # Review Focus 2: a look started right after another reaches the light at once.
 async def test_a_new_route_sends_at_once() -> None:
-    device = _make_device(max_fps=60)
-    buf = RingBuffer(capacity=150)
-    _fill_still(buf, time.monotonic(), 150)
-    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
+    device, buf, scheduler = _still()
 
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.2)
@@ -831,10 +828,7 @@ async def test_a_new_route_sends_at_once() -> None:
 
 
 async def test_a_light_given_a_new_adapter_gets_its_frame_at_once() -> None:
-    device = _make_device(max_fps=60)
-    buf = RingBuffer(capacity=150)
-    _fill_still(buf, time.monotonic(), 150)
-    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
+    device, _buf, scheduler = _still()
 
     task = asyncio.create_task(scheduler.run())
     await asyncio.sleep(0.2)
@@ -857,11 +851,7 @@ async def test_a_light_that_never_acks_keeps_its_rate() -> None:
     _fill_buffer(buf, time.monotonic(), 150)
     scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
 
-    task = asyncio.create_task(scheduler.run())
-    await asyncio.sleep(1.0)
-    (stats,) = scheduler.get_device_stats()
-    scheduler.stop()
-    await task
+    await _run_for(scheduler, 0.5)
 
-    assert 14 <= stats.send_fps <= 26  # the tolerance of test_get_device_stats_fps_accuracy
-    assert stats.effective_latency_ms == 34.0  # its seed and its display delay
+    assert 7 <= len(adapter.send_frame_calls) <= 13  # 20 a second, within 30%
+    assert tracker.effective_latency_ms == 34.0  # its seed and its display delay

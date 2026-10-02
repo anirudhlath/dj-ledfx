@@ -1,6 +1,7 @@
 import pytest
 
 from dj_ledfx.latency.strategies import (
+    LATENCY_WINDOW,
     STRATEGIES,
     EMALatency,
     ProbeStrategy,
@@ -108,7 +109,7 @@ def test_ema_overrides_initial_after_update() -> None:
     "strategy",
     [
         EMALatency(initial_value_ms=10.0),
-        WindowedMedianLatency(window_size=9, initial_value_ms=10.0),
+        WindowedMedianLatency(LATENCY_WINDOW, initial_value_ms=10.0),
     ],
     ids=["ema", "windowed_median"],
 )
@@ -131,7 +132,7 @@ def test_the_ema_still_ignores_a_lone_spike() -> None:
 
 
 def test_the_median_shrugs_off_spikes_and_follows_a_level() -> None:
-    median = WindowedMedianLatency(window_size=9, initial_value_ms=10.0)
+    median = WindowedMedianLatency(LATENCY_WINDOW, initial_value_ms=10.0)
     assert median.get_latency() == 10.0
     for sample in (20.0, 20.0, 300.0, 20.0, 20.0, 250.0, 20.0):
         median.update(sample)
@@ -145,9 +146,9 @@ def test_the_median_shrugs_off_spikes_and_follows_a_level() -> None:
 
 @pytest.mark.parametrize("name", STRATEGIES)
 def test_every_strategy_a_config_names_can_be_made(name: str) -> None:
-    assert make_strategy(name, 12.0, 9).get_latency() == 12.0  # seeded
+    assert make_strategy(name, 12.0, LATENCY_WINDOW).get_latency() == 12.0  # seeded
 
 
 def test_make_strategy_refuses_an_unknown_name() -> None:
     with pytest.raises(ValueError, match="Unknown latency strategy 'fastest'"):
-        make_strategy("fastest", 10.0, 9)
+        make_strategy("fastest", 10.0, LATENCY_WINDOW)

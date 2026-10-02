@@ -1,4 +1,4 @@
-from dj_ledfx.latency.strategies import StaticLatency, WindowedMedianLatency
+from dj_ledfx.latency.strategies import LATENCY_WINDOW, StaticLatency, WindowedMedianLatency
 from dj_ledfx.latency.tracker import STREAMING_WINDOW_S, LatencyTracker
 
 
@@ -28,7 +28,7 @@ def test_the_display_delay_adds_to_the_latency() -> None:
 
 def test_a_round_trip_counts_half_and_only_while_the_light_streams() -> None:
     now = [100.0]
-    strategy = WindowedMedianLatency(window_size=9, initial_value_ms=10.0)
+    strategy = WindowedMedianLatency(LATENCY_WINDOW, initial_value_ms=10.0)
     tracker = LatencyTracker(strategy, clock=lambda: now[0])
     tracker.update_rtt(60.0)  # nothing sent yet: an idle round trip
     assert tracker.effective_latency_ms == 10.0
@@ -43,7 +43,7 @@ def test_a_round_trip_counts_half_and_only_while_the_light_streams() -> None:
 
 def test_reset_forgets_that_the_light_streamed() -> None:
     now = [100.0]
-    strategy = WindowedMedianLatency(window_size=9, initial_value_ms=10.0)
+    strategy = WindowedMedianLatency(LATENCY_WINDOW, initial_value_ms=10.0)
     tracker = LatencyTracker(strategy, clock=lambda: now[0])
     tracker.note_send()
     tracker.reset()
