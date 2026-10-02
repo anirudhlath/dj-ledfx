@@ -77,7 +77,7 @@ The owner's rulings first; the rest are this plan's, where the specs are silent 
 9. **Brightness applies at send.** The ring holds each zone's frames before brightness; the route and the web app's frame feed scale them.
 10. **Govee rates:** razer at up to 30 a second (`GOVEE_RAZER_FPS`, the Govee `max_fps` default); `colorwc` is capped at 10 a second (`GOVEE_COLOUR_FPS`) whatever the config says, from the measurements and the outage above.
 11. **Razer is armed lazily:** razer-on goes before a lamp's first frame and again after 2 s without one (`RAZER_IDLE_S`), and after every prepare, restore or power switch. A restore of a lamp that's on sends razer-off first. A lamp in colour mode is sent razer-off when it's prepared, in case it was left in razer mode. `ptReal` and its helpers are removed.
-12. **The SKU table** (an existing entry changes): the first entry (an upright lamp) plays razer and is upright; the second (a strip) keeps razer off, since nobody here can check one. Each table entry gains `razer`, `form` and `segments_from_top`. Task 8 checks the upright lamps on the real lamps and may change these.
+12. **The SKU table** (an existing entry changes): the first entry (an upright lamp) plays razer and is upright; the second (a strip) keeps razer off until Task 8 checks it: this home has one, and Task 8 plays `whole` on it. Each table entry gains `razer`, `form` and `segments_from_top`. Task 8 checks the upright lamps on the real lamps and may change these.
 13. **A lamp's segment count:** its own stored output, else the config's `segment_override` (for RGBIC lamps, as now), else the table. Fewer than 2 segments plays one colour.
 14. **Govee capabilities:** the model is `Govee <model number>` and multizone means more than one segment.
 15. **A Govee lamp that stops answering is a missed read:** `read_light` raises `NoAnswer`, so three missed 5 s polls (about 15 s) take it offline; it gets no frames until a scan (every 30 s) finds it again. While another program holds UDP 4002 the app can't hear replies at all, can't tell, and keeps sending.
@@ -2805,7 +2805,7 @@ EOF
 
 The first command reads each lamp's model number from the deployed database, read-only and as the app's user, so it changes nothing; the backup export can't be used, since it answers 500 on that database (What exists). The script prints, for each lamp: its id, its address, its segment count (LEDS), its status, its power and colour as last read, and which SKU table entry it is (1, 2 or none). Keep this in the terminal: it's what Step 3 restores. A lamp whose power or colour is `None` couldn't be read: ask the owner what it showed, and restore that. A lamp that isn't `online`, skip, and tell the owner.
 
-Ruling 12 assumed no lamp here is of the second entry (a strip). If one is, play `whole` on it too in Step 3; if it shows the colours, the second entry gets `razer=True` as well (Step 5's first row, the other way round).
+This home has a lamp of the second entry (a strip): play `whole` on it too in Step 3; if it shows the colours, the second entry gets `razer=True` as well (Step 5's first row, the other way round).
 
 - [ ] **Step 3: Play the patterns, one lamp at a time (Owner's go for each lamp)**
 
@@ -4693,7 +4693,7 @@ Rulings 1, 3, 5 and 6. The orchestrator plays the baseline's look on this branch
 - Modify: `src/dj_ledfx/devices/lifx/tile_chain.py` (`MATRIX_DISPLAY_MS`)
 
 **Interfaces:**
-- Consumes: the investigation's `measure.py`, at `/tmp/claude-1000/-home-anirudhlath/0013ac01-f56b-5d60-93f4-913c05072bb4/scratchpad/inv-lag/measure.py` on this host (its `look` command, with its defaults: they are the baseline's look, lights and length). If it's gone, ask the orchestrator who ran the baseline for it; don't write a new one.
+- Consumes: the investigation's `measure.py`, at `~/code/private/dj-ledfx/.superpowers/light-output/measure.py` on this host (the main checkout's git-ignored workspace) (its `look` command, with its defaults: they are the baseline's look, lights and length). If it's gone, ask the orchestrator who ran the baseline for it; don't write a new one.
 - Produces: the after-fix table for the PR, and `MATRIX_DISPLAY_MS` as measured.
 
 - [ ] **Step 1: Check the preconditions (Owner's go)**
@@ -4719,7 +4719,7 @@ curl -s http://127.0.0.1:8080/api/lights -o "$R/lights-before.json"
 docker exec -u 10001 dj-ledfx-app-1 python -c "import sqlite3; src = sqlite3.connect('file:/app/state/state.db?mode=ro', uri=True); dst = sqlite3.connect('/tmp/light-output-copy.db'); src.backup(dst); dst.close(); src.close()"
 docker cp -q dj-ledfx-app-1:/tmp/light-output-copy.db "$R/state.db"
 docker exec -u 10001 dj-ledfx-app-1 rm /tmp/light-output-copy.db
-cp /tmp/claude-1000/-home-anirudhlath/0013ac01-f56b-5d60-93f4-913c05072bb4/scratchpad/inv-lag/measure.py "$R/"
+cp ~/code/private/dj-ledfx/.superpowers/light-output/measure.py "$R/"
 sed -i 's/127\.0\.0\.1:8080/127.0.0.1:8099/g' "$R/measure.py"
 grep -c '127.0.0.1:8099' "$R/measure.py"
 uv run python - "$R" <<'EOF'
@@ -4948,12 +4948,12 @@ Expected:
 
 - [ ] **Step 4: Check that nothing private is in the branch**
 
-The diff's added lines are checked for addresses, MACs, light names, model names, Govee model numbers, product words and AI model names. The names and model numbers are read at run time from `home.json`, the deployed app and the SKU table, and the product and AI model words come from the orchestrator's list (`words.txt` in the scratchpad named below; if it's gone, ask the orchestrator for it), so none of them is typed here, and the greps print counts only. The handoff's own files and their byte copies are left out, and so is the design prompt, whose one changed line is the handoff's description (Task 12): the `--stat` line checks that.
+The diff's added lines are checked for addresses, MACs, light names, model names, Govee model numbers, product words and AI model names. The names and model numbers are read at run time from `home.json`, the deployed app and the SKU table, and the product and AI model words come from the orchestrator's list (`words.txt` in the main checkout's git-ignored `.superpowers/light-output/`, named below; if it's gone, ask the orchestrator for it), so none of them is typed here, and the greps print counts only. The handoff's own files and their byte copies are left out, and so is the design prompt, whose one changed line is the handoff's description (Task 12): the `--stat` line checks that.
 
 ```bash
 B=/tmp/light-output-pr
 mkdir -p "$B"
-cp /tmp/claude-1000/-home-anirudhlath/0013ac01-f56b-5d60-93f4-913c05072bb4/scratchpad/words.txt "$B/"
+cp ~/code/private/dj-ledfx/.superpowers/light-output/words.txt "$B/"
 git diff --stat origin/master -- docs/superpowers/specs/2026-09-23-dashboard-claude-design-prompt.md | tail -1
 git diff origin/master -- . ':!docs/design' ':!src/dj_ledfx/home/data' ':!src/dj_ledfx/looks/data' \
   ':!web/src/api/mocks/looks.json' ':!docs/superpowers/specs/2026-09-23-dashboard-claude-design-prompt.md' \
