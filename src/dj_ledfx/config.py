@@ -8,11 +8,8 @@ from typing import Any
 
 from loguru import logger
 
+from dj_ledfx.latency.strategies import LATENCY_WINDOW as LATENCY_WINDOW
 from dj_ledfx.latency.strategies import STRATEGIES
-
-# How many recent samples a windowed latency strategy keeps: a median of nine ignores up to
-# four spikes and follows a level that holds for five.
-LATENCY_WINDOW = 9
 
 # The most frames a second a LIFX strip or matrix takes: LIFX's documented ceiling per
 # device. Matrices were measured queueing frames above about 30; plain bulbs keep max_fps.

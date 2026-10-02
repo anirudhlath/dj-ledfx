@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import math
-import statistics
+from abc import ABC, abstractmethod
 from collections import deque
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
+# How many recent samples a windowed latency strategy keeps: a median of nine ignores up to
+# four spikes and follows a level that holds for five.
+LATENCY_WINDOW = 9
 # Three samples in a row outside the spread are a new level, not three outliers.
 OUTLIERS_TO_SHIFT = 3
-STRATEGIES = ("static", "ema", "windowed_mean", "windowed_median")
 
 
 class ProbeStrategy(Protocol):
@@ -80,51 +83,63 @@ class EMALatency:
         self._outliers = 0
 
 
-class WindowedMeanLatency:
-    def __init__(self, window_size: int = 10, initial_value_ms: float = 0.0) -> None:
+class WindowedLatency(ABC):
+    """One statistic of the last window_size samples, worked out when a sample lands: the
+    latency is read every frame, and a sample lands every few seconds at most."""
+
+    def __init__(self, window_size: int, initial_value_ms: float = 0.0) -> None:
         self._window: deque[float] = deque(maxlen=window_size)
         self._initial_value_ms = initial_value_ms
+        self._latency = initial_value_ms
+
+    @staticmethod
+    @abstractmethod
+    def _statistic(samples: Sequence[float]) -> float:
+        """The latency the samples give (never empty)."""
 
     def update(self, new_sample: float) -> None:
         self._window.append(new_sample)
+        self._latency = self._statistic(self._window)
 
     def get_latency(self) -> float:
-        if not self._window:
-            return self._initial_value_ms
-        return sum(self._window) / len(self._window)
+        return self._latency
 
     def reset(self) -> None:
         self._window.clear()
+        self._latency = self._initial_value_ms
 
 
-class WindowedMedianLatency:
+class WindowedMeanLatency(WindowedLatency):
+    @staticmethod
+    def _statistic(samples: Sequence[float]) -> float:
+        return sum(samples) / len(samples)
+
+
+class WindowedMedianLatency(WindowedLatency):
     """The median of the last window_size samples: a lone spike doesn't move it, and a
     level that holds for more than half the window moves it all the way."""
 
-    def __init__(self, window_size: int = 9, initial_value_ms: float = 0.0) -> None:
-        self._window: deque[float] = deque(maxlen=window_size)
-        self._initial_value_ms = initial_value_ms
+    @staticmethod
+    def _statistic(samples: Sequence[float]) -> float:
+        ordered = sorted(samples)
+        middle = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[middle]
+        return (ordered[middle - 1] + ordered[middle]) / 2.0
 
-    def update(self, new_sample: float) -> None:
-        self._window.append(new_sample)
 
-    def get_latency(self) -> float:
-        if not self._window:
-            return self._initial_value_ms
-        return float(statistics.median(self._window))
-
-    def reset(self) -> None:
-        self._window.clear()
+# Each strategy a config can name, made from its seed (latency_ms) and its window size.
+STRATEGIES: dict[str, Callable[[float, int], ProbeStrategy]] = {
+    "static": lambda latency_ms, _window: StaticLatency(latency_ms),
+    "ema": lambda latency_ms, _window: EMALatency(initial_value_ms=latency_ms),
+    "windowed_mean": lambda latency_ms, window: WindowedMeanLatency(window, latency_ms),
+    "windowed_median": lambda latency_ms, window: WindowedMedianLatency(window, latency_ms),
+}
 
 
 def make_strategy(name: str, latency_ms: float, window_size: int) -> ProbeStrategy:
     """The strategy a config names, seeded at latency_ms (a static one keeps it)."""
-    if name == "static":
-        return StaticLatency(latency_ms)
-    if name == "ema":
-        return EMALatency(initial_value_ms=latency_ms)
-    if name == "windowed_mean":
-        return WindowedMeanLatency(window_size=window_size, initial_value_ms=latency_ms)
-    if name == "windowed_median":
-        return WindowedMedianLatency(window_size=window_size, initial_value_ms=latency_ms)
-    raise ValueError(f"Unknown latency strategy '{name}': one of {', '.join(STRATEGIES)}")
+    factory = STRATEGIES.get(name)
+    if factory is None:
+        raise ValueError(f"Unknown latency strategy '{name}': one of {', '.join(STRATEGIES)}")
+    return factory(latency_ms, window_size)
