@@ -4,6 +4,7 @@ import { homeFixture } from '@/api/mocks/fixtures'
 import { axes, bearingDeg } from './camera'
 import { SPEC } from './design-numbers'
 import { facesCamera, ghostLines, homePanes, homePrisms, outlineAt, outwardNormals, wallPolygon } from './home-geometry'
+import { contains } from './plan'
 
 const HOME = homeFixture
 const SQUARE: Vec2[] = [
@@ -58,7 +59,7 @@ describe("the home's static geometry (§7.1)", () => {
       polygon.forEach((p, i) => {
         const q = polygon[(i + 1) % polygon.length]
         const middle: Vec2 = [(p[0] + q[0]) / 2 + normals[i][0] * 0.1, (p[1] + q[1]) / 2 + normals[i][1] * 0.1]
-        expect(middle[0] < 0 || middle[0] > 1 || middle[1] < 0 || middle[1] > 1).toBe(true)
+        expect(contains(polygon, middle)).toBe(false)
       })
     }
   })
