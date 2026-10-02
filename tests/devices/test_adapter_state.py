@@ -90,3 +90,8 @@ async def test_default_power_and_stream_hooks_do_nothing() -> None:
     await adapter.set_power(True)
     await adapter.prepare_stream()
     assert adapter.sent_frames == []
+
+
+def test_a_light_is_never_heard_from_by_default() -> None:
+    """A protocol that can't tell when a light last answered says it never has."""
+    assert FakeAdapter().last_heard is None

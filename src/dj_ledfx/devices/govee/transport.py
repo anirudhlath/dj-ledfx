@@ -43,6 +43,7 @@ class GoveeTransport:
         self._rtt_callbacks: dict[str, Callable[[float], None]] = {}  # ip → callback
         # Status queries in flight, one per lamp: ip → query
         self._pending_status: dict[str, _StatusQuery] = {}
+        self._heard: dict[str, float] = {}  # ip → when its last status reply came
 
     @property
     def is_open(self) -> bool:
@@ -194,6 +195,10 @@ class GoveeTransport:
             if query.waiting == 0 and self._pending_status.get(ip) is query:
                 del self._pending_status[ip]  # nobody waits for it any more
 
+    def last_heard(self, ip: str) -> float | None:
+        """When the lamp at ip last sent a status reply, on the transport's clock, or None."""
+        return self._heard.get(ip)
+
     def register_device(
         self, record: GoveeDeviceRecord, rtt_callback: Callable[[float], None]
     ) -> None:
@@ -240,9 +245,11 @@ class GoveeTransport:
             self._handle_status_response(inner, addr)
 
     def _handle_status_response(self, msg: dict[str, Any], addr: tuple[str, int]) -> None:
-        """A status reply answers the query in flight to its lamp, and times its round trip.
-        One that no query waits for (late, or another program's) times nothing."""
+        """A status reply says the lamp was heard, answers the query in flight to it and
+        times its round trip. One that no query waits for (late, or another program's)
+        times nothing."""
         ip = addr[0]
+        self._heard[ip] = self._clock()
         query = self._pending_status.pop(ip, None)
         if query is None:
             return

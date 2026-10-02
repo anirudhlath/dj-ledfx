@@ -57,6 +57,7 @@ def lamp_transport(
     transport.is_open = True
     transport.can_receive = can_receive
     transport.query_status = AsyncMock(return_value=status)
+    transport.last_heard = MagicMock(return_value=None)  # never heard but by its reads
     transport.send_command = AsyncMock()
 
     async def discover(timeout_s: float = 10.0, on_record: Any = None) -> None:

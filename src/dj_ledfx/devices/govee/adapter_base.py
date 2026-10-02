@@ -36,6 +36,10 @@ class GoveeAdapterBase(DeviceAdapter):
         return self._is_connected
 
     @property
+    def last_heard(self) -> float | None:
+        return self._transport.last_heard(self._record.ip)
+
+    @property
     def capabilities(self) -> DeviceCapabilities:
         """The model is "Govee <model number>"; multizone when it has segments to light."""
         sku = self._record.sku

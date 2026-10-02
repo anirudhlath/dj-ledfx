@@ -105,6 +105,10 @@ class LifxAdapterBase(DeviceAdapter):
         return self._is_connected
 
     @property
+    def last_heard(self) -> float | None:
+        return self._transport.last_heard(self._addr[0])
+
+    @property
     def capabilities(self) -> DeviceCapabilities:
         return self._caps
 

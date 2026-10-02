@@ -332,3 +332,30 @@ async def test_discovery_skips_known_lights_and_leaves_silent_ones_for_later() -
     assert found == records
     retried = [p for p, _ in sent.packets if p.msg_type == GET_VERSION and p.target[:6] == silent]
     assert len(retried) == 2  # asked twice, then left for a later scan: no made-up bulb
+
+
+def test_every_reply_stamps_when_the_light_was_heard() -> None:
+    now = [100.0]
+    transport = LifxTransport(clock=lambda: now[0])
+    assert transport.last_heard("127.0.0.1") is None
+
+    transport._on_packet_received(_service(transport, b"\xaa" * 6), ("127.0.0.1", 56700))
+    assert transport.last_heard("127.0.0.1") == 100.0
+
+    now[0] = 102.0
+    echo = LifxPacket(
+        tagged=False,
+        source=transport.source_id,
+        target=b"\xaa" * 6 + b"\x00\x00",
+        ack_required=False,
+        res_required=False,
+        sequence=0,
+        msg_type=59,
+        payload=bytes(64),  # an echo reply to a probe it no longer waits for
+    )
+    transport._on_packet_received(echo.pack(), ("127.0.0.1", 56700))
+    assert transport.last_heard("127.0.0.1") == 102.0
+
+    now[0] = 104.0
+    transport._on_packet_received(b"not a LIFX packet", ("127.0.0.1", 56700))
+    assert transport.last_heard("127.0.0.1") == 102.0

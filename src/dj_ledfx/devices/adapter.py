@@ -43,6 +43,12 @@ class DeviceAdapter(ABC):
     def led_count(self) -> int: ...
 
     @property
+    def last_heard(self) -> float | None:
+        """When the light last answered anything, on time.monotonic's clock. None: never
+        heard, or the protocol can't tell (the default)."""
+        return None
+
+    @property
     def geometry(self) -> DeviceGeometry | None:
         """Optional: report device's physical geometry for spatial mapping."""
         return None

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from govee_fakes import STATUS, lamp_record
 
+from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
 from dj_ledfx.devices.govee.transport import GoveeTransport
 
 
@@ -152,3 +153,28 @@ class TestRoundTrips:
 
     def test_there_is_no_probe_loop(self) -> None:
         assert not hasattr(GoveeTransport, "start_probing")
+
+
+class TestHeardFrom:
+    async def test_every_status_reply_stamps_when_the_lamp_was_heard(self) -> None:
+        now = [100.0]
+        transport = GoveeTransport(clock=lambda: now[0])
+        transport._send_transport = MagicMock()
+        assert transport.last_heard(LAMP_IP) is None
+
+        _reply(transport, STATUS)  # nobody waits for this one: it's late
+        assert transport.last_heard(LAMP_IP) == 100.0
+
+        now[0] = 105.0
+        query = asyncio.create_task(transport.query_status(LAMP_IP, timeout_s=1.0))
+        await asyncio.sleep(0)
+        _reply(transport, STATUS)
+        await query
+        assert transport.last_heard(LAMP_IP) == 105.0
+
+    def test_a_lamp_was_last_heard_when_its_transport_last_heard_it(self) -> None:
+        transport = GoveeTransport(clock=lambda: 7.0)
+        lamp = GoveeSolidAdapter(transport, lamp_record())
+        assert lamp.last_heard is None
+        _reply(transport, STATUS)
+        assert lamp.last_heard == 7.0

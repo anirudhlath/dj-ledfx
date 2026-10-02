@@ -37,7 +37,8 @@ class LifxTransport:
     add_listener() instead of replacing the packet handler.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock  # stamps when each light was last heard
         self._source_id = random.randint(2, 0xFFFFFFFF)
         self._sequence_counter = 0
         self._socket: asyncio.DatagramTransport | None = None
@@ -54,6 +55,7 @@ class LifxTransport:
         # Requests waiting for a reply: (ip, wire sequence) -> (accepted types, future)
         self._waiters: dict[tuple[str, int], _Waiter] = {}
         self._listeners: list[PacketListener] = []
+        self._heard: dict[str, float] = {}  # ip → when it last sent us anything
 
     @property
     def source_id(self) -> int:
@@ -62,6 +64,11 @@ class LifxTransport:
     @property
     def is_open(self) -> bool:
         return self._is_open
+
+    def last_heard(self, ip: str) -> float | None:
+        """When the light at ip last sent any reply, an echo included, on the transport's
+        clock, or None."""
+        return self._heard.get(ip)
 
     def next_sequence(self) -> int:
         self._sequence_counter += 1
@@ -367,6 +374,7 @@ class LifxTransport:
             pkt = LifxPacket.unpack(data)
         except Exception:
             return
+        self._heard[addr[0]] = self._clock()
 
         if pkt.msg_type == 59:  # EchoResponse
             self._handle_echo_response(pkt, addr)
