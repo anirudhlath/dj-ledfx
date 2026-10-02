@@ -8,9 +8,8 @@ from typing import Literal
 import numpy as np
 from loguru import logger
 
-from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.adapter import DeviceAdapter
-from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
+from dj_ledfx.devices.backend import DiscoveredDevice
 from dj_ledfx.devices.ghost import GhostAdapter
 from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.latency.tracker import LatencyTracker
@@ -106,19 +105,6 @@ class DeviceManager:
 
     def get_device_group(self, device_name: str) -> str | None:
         return self._device_groups.get(device_name)
-
-    async def rediscover(self, config: AppConfig) -> list[str]:
-        """Re-run device discovery, adding only newly found devices."""
-        existing_names = {d.adapter.device_info.name for d in self._devices}
-        await DeviceBackend.shutdown_all()
-        discovered = await DeviceBackend.discover_all(config)
-        new_names: list[str] = []
-        for d in discovered:
-            name = d.adapter.device_info.name
-            if name not in existing_names:
-                self.add_device(d.adapter, d.tracker, d.max_fps)
-                new_names.append(name)
-        return new_names
 
     async def identify_device(self, device_name: str, duration_s: float = 3.0) -> None:
         device = self.get_device(device_name)

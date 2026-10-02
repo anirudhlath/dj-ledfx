@@ -75,19 +75,48 @@ def test_groups_crud(client):
     assert resp.status_code == 200
 
 
-def test_scan_endpoint_fallback():
-    """POST /devices/scan with no orchestrator falls back to legacy rediscover."""
+def _light(name: str, stable_id: str) -> MagicMock:
+    adapter = MagicMock(spec=DeviceAdapter)
+    adapter.device_info = DeviceInfo(
+        name=name, device_type="lifx_bulb", led_count=1, address="127.0.0.1", stable_id=stable_id
+    )
+    adapter.led_count = 1
+    adapter.is_connected = True
+    return adapter
+
+
+def test_the_old_discover_runs_a_scan_and_names_what_it_brought_online():
+    """POST /devices/discover, the old UI's: the orchestrator's scan, in the old UI's shape."""
     manager = DeviceManager()
-    scheduler = MagicMock()
-    scheduler.get_device_stats.return_value = []
-    # Mock manager.rediscover to avoid real network calls
-    manager.rediscover = AsyncMock(return_value=[])
-    app = create_app(**mock_deps(device_manager=manager, scheduler=scheduler))
-    test_client = TestClient(app)
-    resp = test_client.post("/api/devices/scan")
+    tracker = LatencyTracker(StaticLatency(50.0))
+    manager.add_device(_light("Strip1", "lifx:strip1"), tracker)  # online already
+    manager.add_device_from_info(
+        _light("Bulb", "lifx:bulb").device_info, tracker=tracker, status="offline"
+    )
+
+    async def scan() -> int:
+        manager.promote_device("lifx:bulb", _light("Bulb", "lifx:bulb"))  # back
+        manager.add_device(_light("Lamp", "lifx:lamp"), tracker)  # new
+        return 2
+
+    orchestrator = MagicMock(run_scan=AsyncMock(side_effect=scan))
+    scheduler = MagicMock(get_device_stats=MagicMock(return_value=[]))
+    app = create_app(
+        **mock_deps(
+            device_manager=manager, scheduler=scheduler, discovery_orchestrator=orchestrator
+        )
+    )
+
+    resp = TestClient(app).post("/api/devices/discover")
+
     assert resp.status_code == 200
-    data = resp.json()
-    assert "discovered" in data
+    assert resp.json() == {"discovered": ["Bulb", "Lamp"]}
+    orchestrator.run_scan.assert_awaited_once()
+
+
+@pytest.mark.parametrize("path", ["/api/devices/scan", "/api/devices/discover"])
+def test_a_scan_needs_the_orchestrator(client, path):
+    assert client.post(path).status_code == 503
 
 
 def test_scan_endpoint_with_orchestrator():

@@ -96,7 +96,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Discover Devices */
+        /**
+         * Discover Devices
+         * @description The old UI's scan: a scan, as POST /devices/scan runs, answered with the names of the
+         *     devices online now that weren't when it was asked.
+         */
         post: operations["discover_devices_api_devices_discover_post"];
         delete?: never;
         options?: never;
@@ -150,7 +154,8 @@ export interface paths {
         put?: never;
         /**
          * Scan Devices
-         * @description Trigger device discovery via DiscoveryOrchestrator if available, else fallback.
+         * @description Run a scan now, beside the discovery loop's: how many devices it found or brought back
+         *     online.
          */
         post: operations["scan_devices_api_devices_scan_post"];
         delete?: never;

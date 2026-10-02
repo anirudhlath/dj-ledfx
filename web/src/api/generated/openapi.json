@@ -3664,6 +3664,7 @@
     },
     "/api/devices/discover": {
       "post": {
+        "description": "The old UI's scan: a scan, as POST /devices/scan runs, answered with the names of the\ndevices online now that weren't when it was asked.",
         "operationId": "discover_devices_api_devices_discover_post",
         "responses": {
           "200": {
@@ -3785,7 +3786,7 @@
     },
     "/api/devices/scan": {
       "post": {
-        "description": "Trigger device discovery via DiscoveryOrchestrator if available, else fallback.",
+        "description": "Run a scan now, beside the discovery loop's: how many devices it found or brought back\nonline.",
         "operationId": "scan_devices_api_devices_scan_post",
         "responses": {
           "200": {

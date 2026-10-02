@@ -272,7 +272,7 @@ Scheduler skips devices where `adapter.is_connected == False` (ghost returns `Fa
 - `promote_device(stable_id, adapter)` — swap ghost for real adapter, set status to online
 - `demote_device(stable_id)` — swap real adapter for ghost, set status to offline
 - `remove_device(stable_id)` — remove from managed list entirely
-- `rediscover()` — deprecated, replaced by DiscoveryOrchestrator
+- `rediscover()` — removed: the DiscoveryOrchestrator replaces it
 - Device list is dynamic: scheduler handles add/remove at runtime (see Scheduler section)
 
 ### Scheduler Dynamic Device Handling
@@ -379,7 +379,7 @@ For offline devices specifically:
 
 ### API Endpoints
 
-- `POST /api/devices/scan` — trigger immediate full multi-wave scan (including subnet sweep). Replaces existing `POST /api/devices/discover`.
+- `POST /api/devices/scan` — trigger immediate full multi-wave scan (including subnet sweep). `POST /api/devices/discover` stays for the old UI: it runs the same scan and names the devices it brought online.
 - `POST /api/devices/scan?wave=1` — single wave (quick check)
 - `DELETE /api/devices/{device_name}` — unregister device from DB (cascades to groups and scene_placements). Resolves display name to stable ID internally.
 - `PUT /api/devices/{device_name}` — edit device metadata (rename, override LED count, etc.)
@@ -501,8 +501,8 @@ TOML export/import uses **display names** for devices (human-readable). On impor
 - `config.py` — `load_config()` reads from StateDB instead of TOML; `AppConfig` gains `DiscoveryConfig` dataclass; `EffectConfig` removed from `AppConfig` (effect state now lives in `scene_effect_state` table, not config)
 - `types.py` — `DeviceInfo` gains `mac: str | None = None` and `stable_id: str | None = None` fields (frozen dataclass, added with defaults so all existing constructors remain valid)
 - `main.py` — new startup flow (DB init → load state → build ScenePipelines → background discovery → reconnect loop)
-- `devices/backend.py` — `discover_all()` deprecated; individual `discover()` methods retained, called by `DiscoveryOrchestrator`
-- `devices/manager.py` — `ManagedDevice` gains `status` field; add `promote_device()`/`demote_device()`; device list becomes dynamic; `rediscover()` deprecated
+- `devices/backend.py` — `discover_all()` removed; individual `discover()` methods retained, called by `DiscoveryOrchestrator`
+- `devices/manager.py` — `ManagedDevice` gains `status` field; add `promote_device()`/`demote_device()`; device list becomes dynamic; `rediscover()` removed
 - `devices/lifx/transport.py` — unicast sweep, increased timeouts (100ms→500ms), broadcast retries (3x)
 - `devices/lifx/discovery.py` — `DeviceInfo(...)` construction calls (at adapter creation time, not @property — LIFX adapters store `device_info` at `__init__`) pass `mac=record.mac.hex()`, `stable_id=f"lifx:{record.mac.hex()}"` for all three adapter types
 - `devices/govee/transport.py` — unicast sweep, port 4002 bind retry with backoff (socket creation), increased window (5s→10s)
@@ -519,7 +519,7 @@ TOML export/import uses **display names** for devices (human-readable). On impor
 - `web/router_config.py` — reads/writes config via StateDB
 - `web/router_effects.py` — effect changes trigger auto-save; scene-aware effect endpoints
 - `web/router_scene.py` — rewritten for multi-scene CRUD, activation/deactivation, per-scene placements/effects/mapping. Routes use display names. Replaces single-scene endpoints.
-- `web/router_devices.py` — `POST /devices/discover` replaced by `POST /devices/scan`; device status field in responses
+- `web/router_devices.py` — `POST /devices/scan` added; `POST /devices/discover` runs the same scan for the old UI; device status field in responses
 - `web/ws.py` — device stats include `status` field; frame channel uses display names (no change to protocol)
 - `events.py` — add event types: `DeviceDiscoveredEvent`, `DeviceOnlineEvent`, `DeviceOfflineEvent`, `DiscoveryWaveCompleteEvent`, `DiscoveryCompleteEvent`, `SceneActivatedEvent`, `SceneDeactivatedEvent`
 

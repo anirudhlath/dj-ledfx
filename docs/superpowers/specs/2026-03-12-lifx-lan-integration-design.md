@@ -91,7 +91,7 @@ Owns the single asyncio UDP socket for all LIFX communication.
 - Created by `LifxBackend.discover()` before any device discovery occurs
 - Passed to all LIFX adapters via constructor injection
 - `LifxBackend.discover()` returns the transport as part of the backend's internal state
-- Shutdown: `LifxTransport.close()` cancels the receive loop and echo probe tasks, then closes the UDP socket. Called from `LifxBackend.shutdown()`, which is invoked by `DeviceBackend.shutdown_all()` (new class method called from `main.py` after `device_manager.disconnect_all()`)
+- Shutdown: `LifxTransport.close()` cancels the receive loop and echo probe tasks, then closes the UDP socket. Called from `LifxBackend.shutdown()`, which `DiscoveryOrchestrator.shutdown()` invokes from `main.py` at shutdown (this design's `DeviceBackend.shutdown_all()` is gone)
 
 **Responsibilities:**
 - UDP socket lifecycle (bind once, talk to all devices on subnet)
@@ -250,6 +250,9 @@ class DeviceBackend(ABC):
         """Clean up backend resources (e.g., shared transport). Default no-op."""
         pass
 
+    # Superseded (2026-10-01): discover_all() and shutdown_all() are gone. The
+    # DiscoveryOrchestrator (devices/discovery.py) instantiates the enabled backends and
+    # calls each one's discover(), connect_known() and shutdown().
     @classmethod
     async def discover_all(cls, config: AppConfig) -> list[DiscoveredDevice]:
         # Note: single-call assumption — calling again overwrites _instances
@@ -311,7 +314,7 @@ class LifxDeviceRecord:
 
 ### Integration with main.py
 
-Discovery collapses to:
+Superseded: `main.py` now hands discovery to the `DiscoveryOrchestrator` (fast reconnect from the device rows, then its scan loop), and `DiscoveryOrchestrator.shutdown()` shuts the backends down. This design's version:
 ```python
 # Startup
 devices = await DeviceBackend.discover_all(config)

@@ -28,7 +28,6 @@ class DiscoveredDevice:
 
 class DeviceBackend(ABC):
     _registry: ClassVar[list[type[DeviceBackend]]] = []
-    _instances: ClassVar[list[DeviceBackend]] = []
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -83,21 +82,3 @@ class DeviceBackend(ABC):
     async def shutdown(self) -> None:
         """Clean up backend resources. Default no-op."""
         return
-
-    @classmethod
-    async def discover_all(cls, config: AppConfig) -> list[DiscoveredDevice]:
-        # Single-call assumption — startup-only code.
-        results: list[DiscoveredDevice] = []
-        cls._instances = []
-        for backend_cls in cls._registry:
-            backend = backend_cls()
-            cls._instances.append(backend)
-            if backend.is_enabled(config):
-                results.extend(await backend.discover(config))
-        return results
-
-    @classmethod
-    async def shutdown_all(cls) -> None:
-        for backend in cls._instances:
-            await backend.shutdown()
-        cls._instances = []

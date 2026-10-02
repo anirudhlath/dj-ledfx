@@ -13,7 +13,7 @@ from dj_ledfx.web.schemas import (
     DeviceResponse,
     GroupRequest,
 )
-from dj_ledfx.web.state import get_db
+from dj_ledfx.web.state import get_db, get_discovery
 
 router = APIRouter()
 
@@ -48,24 +48,21 @@ async def list_devices(request: Request) -> list[DeviceResponse]:
 
 @router.post("/devices/discover")
 async def discover_devices(request: Request) -> dict[str, Any]:
+    """The old UI's scan: a scan, as POST /devices/scan runs, answered with the names of the
+    devices online now that weren't when it was asked."""
     manager = request.app.state.device_manager
-    config = request.app.state.config
-    new_names = await manager.rediscover(config)
-    return {"discovered": new_names}
+    before = {d.adapter.device_info.effective_id for d in manager.devices if d.status == "online"}
+    await get_discovery(request).run_scan()
+    online = [d.adapter.device_info for d in manager.devices if d.status == "online"]
+    return {"discovered": [info.name for info in online if info.effective_id not in before]}
 
 
 @router.post("/devices/scan")
 async def scan_devices(request: Request) -> dict[str, Any]:
-    """Trigger device discovery via DiscoveryOrchestrator if available, else fallback."""
-    orchestrator = getattr(request.app.state, "discovery_orchestrator", None)
-    if orchestrator is not None:
-        found = await orchestrator.run_scan()
-        return {"discovered": found}
-    # Fallback to legacy rediscover
-    manager = request.app.state.device_manager
-    config = request.app.state.config
-    new_names = await manager.rediscover(config)
-    return {"discovered": len(new_names)}
+    """Run a scan now, beside the discovery loop's: how many devices it found or brought back
+    online."""
+    found = await get_discovery(request).run_scan()
+    return {"discovered": found}
 
 
 # --- Group routes registered before parameterized /devices/{name} routes ---
