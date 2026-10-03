@@ -17,7 +17,7 @@ import numpy as np
 from dj_ledfx.effects.color import to_float_rgb
 from dj_ledfx.effects.context import to_beat_context
 from dj_ledfx.effects.field import FieldEffect
-from dj_ledfx.effects.field_tools import anchor_or_centre
+from dj_ledfx.effects.field_tools import anchor_or_centre, reach
 from dj_ledfx.effects.params import EffectParam, check_setting
 
 if TYPE_CHECKING:
@@ -84,23 +84,16 @@ class StripAdapter(FieldEffect, register=False):
 
     def _place(self, leds: LedSet) -> NDArray[np.float64] | None:
         """Each LED's place along the strip, 0..1. None: the strip runs in LED order."""
+        # Both fit the strip to the zone's frame (LedSet.bounds), which a moved set keeps, so
+        # a layer's mirror or transform moves the strip.
         mapping = self._projection["mapping"]
         if mapping == "order":
             return None
-        positions = leds.pos.astype(np.float64)
         if mapping == "radial":
-            centre = anchor_or_centre(leds, self._projection["centre"]).astype(np.float64)
-            along = np.linalg.norm(positions - centre, axis=1)
-            low = 0.0
-            span = float(along.max())
-        else:
-            # Along the zone's bounds, so a layer's mirror or transform moves the strip (a
-            # moved set keeps the bounds it was moved from; LedSet.moved).
-            axis = np.asarray(AXES[self._projection["axis"]], dtype=np.float64)
-            lowest, highest = (float(corner.astype(np.float64) @ axis) for corner in leds.bounds)
-            along = positions @ axis
-            low, span = lowest, highest - lowest
-        if span < MIN_SPAN_M:
+            return reach(leds, anchor_or_centre(leds, self._projection["centre"]), MIN_SPAN_M)
+        axis = np.asarray(AXES[self._projection["axis"]], dtype=np.float64)
+        low, high = leds.bounds
+        if float((high - low).astype(np.float64) @ axis) < MIN_SPAN_M:
             return None
-        place: NDArray[np.float64] = np.clip((along - low) / span, 0.0, 1.0)
+        place: NDArray[np.float64] = np.clip(leds.npos.astype(np.float64) @ axis, 0.0, 1.0)
         return place

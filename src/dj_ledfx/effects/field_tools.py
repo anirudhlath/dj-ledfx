@@ -29,6 +29,23 @@ def distances(leds: LedSet, point: F32) -> F32:
     return np.asarray(np.linalg.norm(leds.pos - point, axis=1), dtype=np.float32)
 
 
+def reach(
+    leds: LedSet, point: NDArray[np.floating[Any]], least: float = 0.0
+) -> NDArray[np.float64] | None:
+    """Each LED's distance from the point as a share of the zone's reach from it, 0..1: 0 at
+    the point, 1 at the zone's frame's farthest corner (LedSet.bounds). A moved set keeps
+    the frame, so a layer's mirror or transform moves the reach with the LEDs rather than
+    fitting it to them again. None: the frame reaches no farther than `least`."""
+    centre = np.asarray(point, dtype=np.float64)
+    low, high = (corner.astype(np.float64) for corner in leds.bounds)
+    radius = float(np.linalg.norm(np.maximum(np.abs(centre - low), np.abs(high - centre))))
+    if radius < max(least, 1e-9):
+        return None
+    away = np.linalg.norm(leds.pos.astype(np.float64) - centre, axis=1)
+    shares: NDArray[np.float64] = np.clip(away / radius, 0.0, 1.0)
+    return shares
+
+
 def bearing(leds: LedSet, anchor: str) -> NDArray[np.float64]:
     """Each LED's bearing around the anchor (the middle of the zone without one), seen from
     above, in turns: 0 east, a quarter north, -0.5 to 0.5."""

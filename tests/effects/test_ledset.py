@@ -184,7 +184,22 @@ def test_a_moved_set_keeps_its_bounds_and_normalisation() -> None:
     assert np.allclose(moved.centre, leds.centre)
     assert np.allclose(moved.npos, [[0.25, 0.5, 1.0], [1.25, 1.5, 2.0]])  # past the bounds
     assert moved.slices == leds.slices and moved.space is leds.space
-    assert leds.frame is None and np.allclose(leds.bounds[1], [4.0, 2.0, 1.0])  # unchanged
+    assert np.allclose(leds.bounds[1], [4.0, 2.0, 1.0])  # unchanged
+
+
+# H2: every set carries its zone's frame: a subset's bounds are the zone's, as its npos are.
+def test_a_subset_keeps_the_zones_bounds() -> None:
+    leds = build_ledset(
+        [
+            LedSource("a", 1, placed=_placed((0.0, 0.0, 0.0))),
+            LedSource("b", 1, placed=_placed((4.0, 2.0, 1.0))),
+        ]
+    )
+
+    _, west = leds.subset({"a"})
+
+    assert all(np.allclose(w, b) for w, b in zip(west.bounds, leds.bounds, strict=True))
+    assert np.allclose(west.centre, [2.0, 1.0, 0.5])
 
 
 def test_spaces_differ_when_an_outline_changes() -> None:

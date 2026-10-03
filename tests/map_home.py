@@ -158,6 +158,20 @@ def leds_at(
     return build_ledset([LedSource("light", len(points), placed=placed)], space)
 
 
+ROW = [[x, 0.0, 1.0] for x in np.linspace(0.0, 4.0, 9)]  # 0.5 m apart, west to east
+
+
+def grown(leds: LedSet) -> LedSet:
+    """The set as a layer's transform with scale 2 shows it: each LED looks at the field
+    half as far from the zone's centre."""
+    return leds.moved(leds.centre + (leds.pos - leds.centre) / np.float32(2.0))
+
+
+def shifted(leds: LedSet) -> LedSet:
+    """The set as a transform's 1 m offset east shows it: each LED looks 1 m west."""
+    return leds.moved(leds.pos - np.array([1.0, 0.0, 0.0], dtype=np.float32))
+
+
 def seeded_zone_lights() -> list[ZoneLight]:
     """This home's lights where home.json places them. Capabilities follow each light's
     protocol and shape: a LIFX cylinder is a matrix, a LIFX line a multizone strip."""

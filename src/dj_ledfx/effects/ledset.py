@@ -149,15 +149,17 @@ class LedSource:
 @dataclass(frozen=True, eq=False)
 class LedSet:
     pos: NDArray[np.float32]  # (N, 3) metres, x east, y south, z up
-    npos: NDArray[np.float32]  # (N, 3) normalised to the zone's bounds
+    npos: NDArray[np.float32]  # (N, 3) normalised to `bounds`
     local: NDArray[np.float32]  # (N, 3) normalised to each device's own bounds
     local_u: NDArray[np.float32]  # (N,) position along the device's LED order
     room: NDArray[np.int32]  # (N,) index into space.rooms, NO_ROOM for none
     device: NDArray[np.int32]  # (N,) index into `slices`
     slices: tuple[DeviceSlice, ...]
+    # The zone's frame: its LEDs' lowest and highest corner (the origin for no LEDs). Every
+    # set carries its zone's: build_ledset works it out, and moved() and subset() keep it,
+    # so an effect fitted to the zone draws a moved set or a subset as it draws the zone.
+    bounds: tuple[NDArray[np.float32], NDArray[np.float32]]
     space: Space = NO_SPACE
-    # The bounds a moved set keeps (moved()); None: the LEDs' own.
-    frame: tuple[NDArray[np.float32], NDArray[np.float32]] | None = None
 
     @property
     def count(self) -> int:
@@ -167,17 +169,6 @@ class LedSet:
     def anchors(self) -> Mapping[str, NDArray[np.float32]]:
         return self.space.anchors
 
-    @cached_property
-    def bounds(self) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-        """The LEDs' lowest and highest corner (a moved set's are the set's it was moved
-        from); the origin for no LEDs."""
-        if self.frame is not None:
-            return self.frame
-        if self.count == 0:
-            origin = np.zeros(3, dtype=np.float32)
-            return origin, origin
-        return self.pos.min(axis=0), self.pos.max(axis=0)
-
     def moved(self, pos: NDArray[np.float32]) -> LedSet:
         """These LEDs at other positions, as a layer's mirror or transform sees them. The
         bounds and the normalisation stay this set's, so an effect that fits itself to the
@@ -185,9 +176,7 @@ class LedSet:
         low, high = self.bounds
         points = np.asarray(pos, dtype=np.float64)
         npos = _normalise(points, low.astype(np.float64), high.astype(np.float64))
-        return replace(
-            self, pos=points.astype(np.float32), npos=npos.astype(np.float32), frame=(low, high)
-        )
+        return replace(self, pos=points.astype(np.float32), npos=npos.astype(np.float32))
 
     @cached_property
     def centre(self) -> NDArray[np.float32]:
@@ -204,9 +193,10 @@ class LedSet:
         return self._by_device.get(device_id)
 
     def subset(self, device_ids: Collection[str]) -> tuple[NDArray[np.intp], LedSet]:
-        """Some devices' LEDs, in this set's order, and where they sit in it. Positions keep
-        this set's normalisation, and a device left out keeps an empty slice, so `device`
-        still indexes `slices`: an effect draws them as it would in the whole set."""
+        """Some devices' LEDs, in this set's order, and where they sit in it. They keep this
+        set's bounds and normalisation, and a device left out keeps an empty slice, so
+        `device` still indexes `slices`: an effect draws them as it would in the whole
+        set."""
         parts: list[NDArray[np.intp]] = []
         slices: list[DeviceSlice] = []
         start = 0
@@ -225,6 +215,7 @@ class LedSet:
             room=self.room[index],
             device=self.device[index],
             slices=tuple(slices),
+            bounds=self.bounds,
             space=self.space,
         )
 
@@ -268,14 +259,18 @@ def build_ledset(
 
     pos = np.concatenate(positions) if positions else np.zeros((0, 3))
     npos = _normalise(pos, pos.min(axis=0), pos.max(axis=0)) if len(pos) else pos
+    pos32 = pos.astype(np.float32)
+    origin = np.zeros(3, dtype=np.float32)
+    bounds = (pos32.min(axis=0), pos32.max(axis=0)) if len(pos) else (origin, origin)
     return LedSet(
-        pos=pos.astype(np.float32),
+        pos=pos32,
         npos=npos.astype(np.float32),
         local=(np.concatenate(locals_) if locals_ else np.zeros((0, 3))).astype(np.float32),
         local_u=(np.concatenate(along) if along else np.zeros(0)).astype(np.float32),
         room=np.concatenate(rooms) if rooms else np.zeros(0, dtype=np.int32),
         device=np.concatenate(owners) if owners else np.zeros(0, dtype=np.int32),
         slices=tuple(slices),
+        bounds=bounds,
         space=space,
     )
 

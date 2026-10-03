@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 from conftest import render_ctx
-from map_home import leds_at
+from map_home import ROW, grown, leds_at, shifted
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.adapter import DeviceAdapter
@@ -177,6 +177,19 @@ def test_a_moved_set_moves_the_strip_along_the_zone() -> None:
     moved = leds.moved(leds.pos - np.array([1.0, 0.0, 0.0], dtype=np.float32))
 
     assert np.allclose(adapter.render(render_ctx(), moved)[:, 0], RAMP[[0, 0, 1, 2]])
+
+
+# H2 = M7: a transform's scale and offset move a radial strip as they move a linear one:
+# each moved LED shows what the unmoved set shows where it now looks.
+@pytest.mark.parametrize("mapping", ["linear", "radial"])
+def test_a_transform_moves_a_radial_strip_as_it_moves_a_linear_one(mapping: str) -> None:
+    leds = leds_at(ROW)
+    adapter = StripAdapter(_Ramp())
+    adapter.set_params(mapping=mapping)
+    plain = adapter.render(render_ctx(), leds)[:, 0]
+
+    assert np.allclose(adapter.render(render_ctx(), grown(leds))[::2, 0], plain[2:7])
+    assert np.allclose(adapter.render(render_ctx(), shifted(leds))[2:, 0], plain[:7])
 
 
 def test_strip_adapter_forwards_parameters() -> None:
