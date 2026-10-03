@@ -116,3 +116,12 @@ async def test_a_restore_leaves_razer_then_puts_colour_and_brightness_back(
     assert colour == build_solid_color_message(10, 20, 30)
     assert brightness == build_brightness_message(50)
     assert [m["msg"]["cmd"] for m in rest] == last  # switched off last, if it was off
+
+
+async def test_a_lamp_on_white_gets_its_white_back(transport: MagicMock) -> None:
+    """Sent its colour alone, a lamp captured on warm white came back in an old colour."""
+    adapter = GoveeColourAdapter(transport, lamp_record())
+    state = GoveeDeviceState(on_off=1, brightness=80, r=0, g=0, b=0, kelvin=2700)
+    await adapter.restore_state(state.to_bytes())
+    colour = next(m for m in sent(transport) if m["msg"]["cmd"] == "colorwc")
+    assert colour["msg"]["data"]["colorTemInKelvin"] == 2700
