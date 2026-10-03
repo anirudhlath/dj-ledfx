@@ -7,13 +7,15 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class GoveeDeviceState:
-    """Captured state of a Govee device for restore on transport stop."""
+    """A Govee lamp as captured, to put it back. On a white its colour means nothing (black
+    from one lamp, white from another): the white is its colour temperature, `kelvin`."""
 
     on_off: int  # 0 or 1
     brightness: int  # 0-100
     r: int
     g: int
     b: int
+    kelvin: int = 0  # 0: the lamp shows its colour
 
     def to_bytes(self) -> bytes:
         return json.dumps(
@@ -21,6 +23,7 @@ class GoveeDeviceState:
                 "onOff": self.on_off,
                 "brightness": self.brightness,
                 "color": {"r": self.r, "g": self.g, "b": self.b},
+                "colorTemInKelvin": self.kelvin,
             }
         ).encode("utf-8")
 
@@ -33,6 +36,7 @@ class GoveeDeviceState:
             r=color.get("r", 255),
             g=color.get("g", 255),
             b=color.get("b", 255),
+            kelvin=d.get("colorTemInKelvin", 0),
         )
 
     @classmethod

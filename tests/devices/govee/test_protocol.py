@@ -58,6 +58,10 @@ class TestBuildSolidColorMessage:
             }
         }
 
+    def test_a_white(self) -> None:
+        msg = build_solid_color_message(0, 0, 0, kelvin=2700)
+        assert msg["msg"]["data"]["colorTemInKelvin"] == 2700
+
 
 class TestBuildStatusQuery:
     def test_status_query_format(self) -> None:

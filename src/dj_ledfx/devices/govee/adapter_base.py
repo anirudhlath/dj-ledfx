@@ -169,14 +169,15 @@ class GoveeAdapterBase(DeviceAdapter):
         return state.to_bytes() if state is not None else None
 
     async def restore_state(self, state: bytes, *, power: bool = True) -> None:
-        """Put the lamp back as captured, out of razer first so it shows the colour it gets
-        back, each command COMMAND_GAP_S after the last. A lamp switched off elsewhere
+        """Put the lamp back as captured, out of razer first so it shows the colour or white
+        it gets back, each command COMMAND_GAP_S after the last. A lamp switched off elsewhere
         (power=False) is left alone: a LAN colour command may switch it on."""
         if not power:
             return
         saved = GoveeDeviceState.from_bytes(state)
         await self._send(build_razer_switch(on=False))
-        await self._after_a_gap(build_solid_color_message(saved.r, saved.g, saved.b))
+        colour = build_solid_color_message(saved.r, saved.g, saved.b, kelvin=saved.kelvin)
+        await self._after_a_gap(colour)
         await self._after_a_gap(build_brightness_message(saved.brightness))
         # Turn off last so colour and brightness are set while the lamp is still on
         if not saved.on_off:

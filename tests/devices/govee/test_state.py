@@ -35,3 +35,26 @@ def test_from_bytes_with_partial_data():
     assert state.on_off == 1
     assert state.brightness == 100
     assert state.r == 255
+
+
+WARM_WHITE = {
+    "onOff": 1,
+    "brightness": 80,
+    "color": {"r": 0, "g": 0, "b": 0},
+    "colorTemInKelvin": 2700,
+}
+
+
+def test_a_lamp_on_white_is_captured_with_its_colour_temperature():
+    """On white, a lamp's colour means nothing (black from one lamp, white from another): the
+    white is its colour temperature."""
+    state = GoveeDeviceState.from_status(WARM_WHITE)
+    assert state.kelvin == 2700
+    assert GoveeDeviceState.from_bytes(state.to_bytes()) == state
+
+
+def test_a_capture_without_a_colour_temperature_is_a_colour():
+    import json
+
+    data = json.dumps({"onOff": 1, "color": {"r": 1, "g": 2, "b": 3}}).encode("utf-8")
+    assert GoveeDeviceState.from_bytes(data).kelvin == 0

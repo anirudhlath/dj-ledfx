@@ -20,11 +20,12 @@ def build_brightness_message(value: int) -> dict[str, Any]:
     return {"msg": {"cmd": "brightness", "data": {"value": clamped}}}
 
 
-def build_solid_color_message(r: int, g: int, b: int) -> dict[str, Any]:
+def build_solid_color_message(r: int, g: int, b: int, kelvin: int = 0) -> dict[str, Any]:
+    """A colour, or with `kelvin` a white at that colour temperature (the colour is ignored)."""
     return {
         "msg": {
             "cmd": "colorwc",
-            "data": {"color": {"r": r, "g": g, "b": b}, "colorTemInKelvin": 0},
+            "data": {"color": {"r": r, "g": g, "b": b}, "colorTemInKelvin": kelvin},
         }
     }
 
