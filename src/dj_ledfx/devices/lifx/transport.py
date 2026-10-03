@@ -301,9 +301,10 @@ class LifxTransport:
             if service != 1:  # UDP
                 return
             mac = pkt.target[:6]
-            if mac.hex() in skip_macs or mac.hex() in discovered:
+            mac_hex = mac.hex()
+            if mac_hex in skip_macs or mac_hex in discovered:
                 return
-            discovered[mac.hex()] = (mac, addr[0], port)
+            discovered[mac_hex] = (mac, addr[0], port)
             version_tasks.append(
                 asyncio.create_task(_query_version_and_record(mac, addr[0], port))
             )
