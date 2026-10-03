@@ -69,10 +69,11 @@ async def list_recent(request: Request) -> list[api.RecentLook]:
 
 @router.post("/zones/{zone_id}/start")
 async def start_zone(request: Request, zone_id: str, body: api.StartRequest) -> api.StartResponse:
-    """Put a look on a zone: a saved look by id, or an unsaved draft."""
+    """Put a look on a zone: a saved look by id, or an unsaved draft, with the transition
+    given, or else the look's own."""
     with answers():
         look = requested_look(request, body.look_id, body.look)
-        result = await get_zones(request).start(zone_id, look)
+        result = await get_zones(request).start(zone_id, look, api.transition_in(body.transition))
     return api.start_out(result, light_index(request.app))
 
 

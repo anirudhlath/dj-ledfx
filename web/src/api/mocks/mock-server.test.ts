@@ -214,6 +214,26 @@ describe('the REST API', () => {
     expect(socket.json().map((message) => message.channel)).toEqual(['running', 'lights'])
   })
 
+  it('plays the transition a start asks for, then runs the look, as engine M4 does', () => {
+    const server = startMockServer()
+    const socket = connect(server)
+    const transition = { kind: 'fade', durationS: 2 } as const
+    const reply = server.handle('POST', '/api/zones/bedroom/start', { lookId: 'sunset', transition })
+    expect(reply.body).toMatchObject({ state: 'transition', transition: { kind: 'fade', progress: 0, durationS: 2 } })
+    socket.clear()
+    vi.advanceTimersByTime(2100)
+    expect(server.state.running.find((zone) => zone.zoneId === 'bedroom')).toMatchObject({ state: 'running', transition: null })
+    expect(socket.json().map((message) => message.channel)).toContain('running')
+  })
+
+  it("plays the look's own transition when a start asks for none", () => {
+    const server = startMockServer()
+    const sunset = server.handle('GET', '/api/looks/sunset').body as Look
+    const look = { ...sunset, transition: { kind: 'wipe', durationS: 1 } } satisfies Look
+    const reply = server.handle('POST', '/api/zones/bedroom/start', { look })
+    expect(reply.body).toMatchObject({ state: 'transition', transition: { kind: 'wipe', durationS: 1 } })
+  })
+
   it('turns a zone off again and again, and says 404 for a zone it does not know', () => {
     const server = startMockServer()
     expect(server.handle('POST', '/api/zones/living/off').status).toBe(204)

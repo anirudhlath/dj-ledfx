@@ -987,7 +987,8 @@ export interface paths {
         put?: never;
         /**
          * Start Zone
-         * @description Put a look on a zone: a saved look by id, or an unsaved draft.
+         * @description Put a look on a zone: a saved look by id, or an unsaved draft, with the transition
+         *     given, or else the look's own.
          */
         post: operations["start_zone_api_zones__zone_id__start_post"];
         delete?: never;
@@ -1984,8 +1985,16 @@ export interface components {
             /** Target */
             target: number;
         };
-        /** RunningZoneTransition */
+        /**
+         * RunningZoneTransition
+         * @description A zone's transition while it plays: the look it replaces ("" when its lights were
+         *     idle), the kind, how far it has got (0..1) when this was sent, and how long it takes in
+         *     all, so a client moves the bar on by itself. The running channel pushes it as the
+         *     transition starts, at its midpoint and as it ends.
+         */
         RunningZoneTransition: {
+            /** Durations */
+            durationS: number;
             /** From */
             from: string;
             /**
@@ -2226,7 +2235,11 @@ export interface components {
              */
             scale: number;
         };
-        /** Transition */
+        /**
+         * Transition
+         * @description How a look comes in (engine spec §5.3): a cut, or a fade, wipe, spread or dissolve
+         *     over `durationS` seconds, at most 10.
+         */
         Transition: {
             /**
              * Durations

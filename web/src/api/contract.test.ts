@@ -1,8 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { components, paths } from './generated/schema'
 import type {
-  ApiPath, Deck, Furniture, Home, InputKind, InputState, Light, LightShape, LightStatus, Location, PendingPath,
-  PendingSchema, Room, RunningZone, TempoLock, TempoSource,
+  ApiPath, Deck, Furniture, Home, InputKind, InputState, Light, LightShape, LightStatus, Location, Mask, PendingPath,
+  PendingSchema, Room, RunningZone, RunningZoneTransition, TempoLock, TempoSource,
 } from './contract'
 
 describe('the contract', () => {
@@ -54,6 +54,16 @@ describe('the contract', () => {
     expectTypeOf<TempoSource>().toEqualTypeOf<'prodjlink' | 'music' | 'internal'>()
     expectTypeOf<TempoLock>().toEqualTypeOf<'auto' | 'prodjlink' | 'music' | 'internal'>()
     expectTypeOf<InputState>().toEqualTypeOf<'connected' | 'stale' | 'disconnected' | 'idle'>()
+  })
+
+  // Engine M4 serves the layer modifiers, and a running zone's transition with its length.
+  it("serves engine M4's modifiers and transitions", () => {
+    expectTypeOf<
+      'HeightMask' | 'RoomMask' | 'SubZoneMask' | 'AnchorMask' | 'Mirror' | 'Transform' | 'RunningZoneTransition'
+    >().toExtend<keyof components['schemas']>()
+    expectTypeOf<Mask['kind']>().toEqualTypeOf<'height' | 'room' | 'sub-zone' | 'anchor'>()
+    expectTypeOf<NonNullable<RunningZone['transition']>>().toEqualTypeOf<RunningZoneTransition>()
+    expectTypeOf<RunningZoneTransition['durationS']>().toEqualTypeOf<number>()
   })
 
   // I1: engine M2 serves the home's size and which rooms hold lights.

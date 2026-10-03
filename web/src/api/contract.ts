@@ -107,6 +107,18 @@ export type TapRequest = Schemas['TapRequest']
 /** POST /inputs/tempo/nudge: a phase shift in beats, -1 to 1; positive brings the beat sooner. */
 export type NudgeRequest = Schemas['NudgeRequest']
 
+// ── Served since engine M4 (modifiers and transitions) ───────────────────────────────────
+/** A layer modifier: where the layer shows (§12.2's mask), and how its field is moved. */
+export type HeightMask = Schemas['HeightMask']
+export type RoomMask = Schemas['RoomMask']
+export type SubZoneMask = Schemas['SubZoneMask']
+export type AnchorMask = Schemas['AnchorMask']
+export type Mask = NonNullable<Layer['mask']>
+export type Mirror = Schemas['Mirror']
+export type Transform = Schemas['Transform']
+/** A running zone's transition: `durationS` lets the bar move on between the running channel's pushes. */
+export type RunningZoneTransition = Schemas['RunningZoneTransition']
+
 // ── Pending: engine M6/M7 (Music Assistant, Home Assistant, the sun, signals) ─────────────
 // Shaped from §12.3–12.4, §9.3 and the Inputs renders; the milestone that serves them owns the
 // final shape (decision 6).

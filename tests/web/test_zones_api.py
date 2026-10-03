@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+import pytest
 import pytest_asyncio
 from api_home import Api, api_home
 from conftest import FakeLight
@@ -172,3 +175,43 @@ def test_a_running_zone_says_which_rooms_it_covers() -> None:
         covers=("Kitchen", "Bedroom"),
     )
     assert running_zone_out(info, LightIndex(())).covers == ["Kitchen", "Bedroom"]
+
+
+async def test_a_start_plays_the_transition_it_asks_for(api: Api) -> None:
+    await api.client.post("/api/zones/desk/start", json={"lookId": "classic-breathe"})
+
+    resp = await api.client.post(
+        "/api/zones/desk/start",
+        json={"lookId": "classic-strobe", "transition": {"kind": "fade", "durationS": 2.0}},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "transition"
+    expected = {"from": "Breathe", "kind": "fade", "progress": 0.0, "durationS": 2.0}
+    assert resp.json()["transition"] == expected
+    [zone] = (await api.client.get("/api/running")).json()["zones"]
+    assert zone["transition"] == expected
+
+
+# Review Focus 4: a garbage transition is refused with the reason, and nothing starts.
+@pytest.mark.parametrize(
+    ("transition", "says"),
+    [
+        ({"kind": "melt", "durationS": 1.0}, "melt"),
+        ({"kind": "fade", "durationS": -1.0}, "greater than or equal to 0"),
+        ({"kind": "fade", "durationS": 11.0}, "less than or equal to 10"),
+        ({"kind": "fade", "durationS": float("nan")}, "nan"),
+        ({"kind": "fade", "durationS": float("inf")}, "inf"),
+    ],
+)
+async def test_a_garbage_transition_is_refused_and_nothing_starts(
+    api: Api, transition: dict[str, Any], says: str
+) -> None:
+    body = json.dumps({"lookId": "classic-breathe", "transition": transition})
+
+    resp = await api.client.post(
+        "/api/zones/desk/start", content=body, headers={"content-type": "application/json"}
+    )
+
+    assert resp.status_code == 422 and says in str(resp.json()["detail"])
+    assert (await api.client.get("/api/running")).json()["zones"] == []

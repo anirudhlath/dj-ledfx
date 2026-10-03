@@ -7,8 +7,8 @@ import {
   STREAMED,
   type AnchorIn, type ApiPath, type CreateGroup, type FrameStream, type HomeSettings, type Id, type Inputs, type Light,
   type LightShape, type LightUpdate, type Look, type PendingPath, type Placement, type PlacementIn, type PreviewRequest,
-  type PreviewUpdate, type RecentLook, type RunningZone, type StartRequest, type SubZoneIn, type TakeOver, type UpdateGroup,
-  type Zone,
+  type PreviewUpdate, type RecentLook, type RunningZone, type StartRequest, type SubZoneIn, type TakeOver, type Transition,
+  type UpdateGroup, type Zone,
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import { PATH_PARAM } from '../rest'
@@ -250,6 +250,8 @@ export class MockServer {
   private readonly seqs: Record<FrameStream, Map<Id, number>> = { live: new Map(), preview: new Map() }
   /** When each light's placement was confirmed; the seed's confirmed lights have no time. */
   private readonly confirmedAt = new Map<Id, string>()
+  /** The zones a start's transition plays on, and when each one's ends (clock ms), as engine M4 plays them. */
+  private readonly transitionsEnd = new Map<Id, number>()
   private frameCount = 0
   private nextFrameAt: number
   private nextStatsAt: number
@@ -419,6 +421,7 @@ export class MockServer {
       this.nextLightsAt += LIGHTS_MS
       this.readLightsBack(now)
     }
+    this.endTransitions(now)
     if (now >= this.nextStatusAt) {
       this.nextStatusAt += STATUS_MS
       this.broadcast({
@@ -428,6 +431,18 @@ export class MockServer {
         avg_render_ms: 1.2,
         transport: this.state.previewOnly ? 'simulating' : 'playing',
       })
+    }
+  }
+
+  /** A transition that has run its time ends: the zone runs its look, and the running channel says so. */
+  private endTransitions(now: number): void {
+    for (const [zoneId, endsAt] of this.transitionsEnd) {
+      if (now < endsAt) continue
+      this.transitionsEnd.delete(zoneId)
+      const zone = this.state.running.find((candidate) => candidate.zoneId === zoneId)
+      if (zone?.state !== 'transition') continue
+      Object.assign(zone, { state: 'running', transition: null } satisfies Partial<RunningZone>)
+      this.changed('running')
     }
   }
 
@@ -764,10 +779,12 @@ export class MockServer {
 
   /** §11.3: the zone takes its lights from any running zone; a zone left with none stops. */
   private startLook(zoneId: Id, body: StartRequest): MockReply {
-    return this.withZone(zoneId, (zone) => this.withLookFor(body, (look) => this.takeOver(zone, look)))
+    return this.withZone(zoneId, (zone) =>
+      this.withLookFor(body, (look) => this.takeOver(zone, look, body.transition ?? look.transition)),
+    )
   }
 
-  private takeOver(zone: Zone, look: Look): MockReply {
+  private takeOver(zone: Zone, look: Look, transition: Transition | undefined): MockReply {
     const taking = new Set(zone.lights)
     const takeOvers: TakeOver[] = []
     const stopped: RunningZone[] = []
@@ -793,6 +810,18 @@ export class MockServer {
       brightness: previous?.brightness ?? 1,
       lights: zone.lights,
     })
+    this.transitionsEnd.delete(zone.id)
+    const kind = transition?.kind ?? 'cut'
+    const durationS = transition?.durationS ?? 0
+    if (kind !== 'cut' && durationS > 0) {
+      // Engine M4 names the look that drove most of the lights; the mock, the zone's own or the first it took from.
+      const from = previous?.lookName ?? takeOvers[0]?.lookName ?? ''
+      Object.assign(running, {
+        state: 'transition',
+        transition: { from, kind, progress: 0, durationS },
+      } satisfies Partial<RunningZone>)
+      this.transitionsEnd.set(zone.id, this.clock() + durationS * 1000)
+    }
     this.state.running.push(running)
     this.changed('running', 'lights')
     return ok({ ...running, takeOvers })

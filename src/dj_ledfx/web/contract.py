@@ -28,6 +28,7 @@ from dj_ledfx.looks import model as looks
 from dj_ledfx.looks.model import (
     MAX_SCALE,
     MAX_TRAILS_S,
+    MAX_TRANSITION_S,
     MIN_SCALE,
     Blend,
     Category,
@@ -179,8 +180,11 @@ class LookModifiers(ContractModel):
 
 
 class Transition(ContractModel):
+    """How a look comes in (engine spec §5.3): a cut, or a fade, wipe, spread or dissolve
+    over `durationS` seconds, at most 10."""
+
     kind: TransitionKind = "cut"
-    duration_s: float = 0.0
+    duration_s: float = Field(default=0.0, ge=0.0, le=MAX_TRANSITION_S, allow_inf_nan=False)
 
 
 class Look(ContractModel):
@@ -213,6 +217,11 @@ def look_in(body: Look) -> looks.Look:
     return looks.look_from_dict(body.model_dump(by_alias=True))
 
 
+def transition_in(body: Transition | None) -> looks.Transition | None:
+    """A start's transition as the engine plays it; None: the look's own."""
+    return None if body is None else looks.Transition(kind=body.kind, duration_s=body.duration_s)
+
+
 # --- zones -------------------------------------------------------------------------
 
 
@@ -224,9 +233,15 @@ class Zone(ContractModel):
 
 
 class RunningZoneTransition(ContractModel):
+    """A zone's transition while it plays: the look it replaces ("" when its lights were
+    idle), the kind, how far it has got (0..1) when this was sent, and how long it takes in
+    all, so a client moves the bar on by itself. The running channel pushes it as the
+    transition starts, at its midpoint and as it ends."""
+
     from_: str = Field(alias="from")
     kind: TransitionKind
     progress: float
+    duration_s: float
 
 
 class RunningZoneFps(ContractModel):
@@ -249,8 +264,8 @@ class RunningZone(ContractModel):
     lights: list[str]  # the lights it owns after take-overs
     # the rooms it still covers, by name, in map order
     covers: list[str] = Field(default_factory=list)
-    state: Literal[ZoneState, "transition"]  # transitions arrive in M4
-    transition: RunningZoneTransition | None = None  # transitions arrive in M4
+    state: ZoneState
+    transition: RunningZoneTransition | None = None  # while its state is "transition"
     fps: RunningZoneFps | None = None
     error: RunningZoneError | None = None
     waiting_for: list[InputKind] | None = None
@@ -292,7 +307,7 @@ class RecentLook(ContractModel):
 class StartRequest(ContractModel):
     look_id: str | None = None
     look: Look | None = None  # an unsaved draft
-    transition: Transition | None = None  # accepted; M1 plays every transition as a cut
+    transition: Transition | None = None  # None: the look's own
 
 
 class StartResponse(RunningZone):
@@ -326,6 +341,14 @@ def _running_fields(info: RunningZoneInfo, index: LightIndex) -> dict[str, Any]:
     error = None
     if info.error is not None:
         error = {"layer": info.error.layer, "message": info.error.message, "at": info.error.at}
+    transition = None
+    if info.transition is not None:
+        transition = {
+            "from": info.transition.from_name,
+            "kind": info.transition.kind,
+            "progress": round(info.transition.progress, 3),
+            "duration_s": info.transition.duration_s,
+        }
     return {
         "zone_id": info.zone_id,
         "look_id": info.look_id,
@@ -335,6 +358,7 @@ def _running_fields(info: RunningZoneInfo, index: LightIndex) -> dict[str, Any]:
         "lights": list(index.collapse(info.lights)),
         "covers": list(info.covers),
         "state": info.state,
+        "transition": transition,
         "fps": fps,
         "error": error,
         "waiting_for": list(info.waiting_for) or None,

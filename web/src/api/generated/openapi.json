@@ -2701,7 +2701,12 @@
         "type": "object"
       },
       "RunningZoneTransition": {
+        "description": "A zone's transition while it plays: the look it replaces (\"\" when its lights were\nidle), the kind, how far it has got (0..1) when this was sent, and how long it takes in\nall, so a client moves the bar on by itself. The running channel pushes it as the\ntransition starts, at its midpoint and as it ends.",
         "properties": {
+          "durationS": {
+            "title": "Durations",
+            "type": "number"
+          },
           "from": {
             "title": "From",
             "type": "string"
@@ -2725,7 +2730,8 @@
         "required": [
           "from",
           "kind",
-          "progress"
+          "progress",
+          "durationS"
         ],
         "title": "RunningZoneTransition",
         "type": "object"
@@ -3417,9 +3423,12 @@
         "type": "object"
       },
       "Transition": {
+        "description": "How a look comes in (engine spec §5.3): a cut, or a fade, wipe, spread or dissolve\nover `durationS` seconds, at most 10.",
         "properties": {
           "durationS": {
             "default": 0.0,
+            "maximum": 10.0,
+            "minimum": 0.0,
             "title": "Durations",
             "type": "number"
           },
@@ -6060,7 +6069,7 @@
     },
     "/api/zones/{zone_id}/start": {
       "post": {
-        "description": "Put a look on a zone: a saved look by id, or an unsaved draft.",
+        "description": "Put a look on a zone: a saved look by id, or an unsaved draft, with the transition\ngiven, or else the look's own.",
         "operationId": "start_zone_api_zones__zone_id__start_post",
         "parameters": [
           {
