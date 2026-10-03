@@ -4,12 +4,13 @@ a soft band and smoothstep (float palettes are in color.py). Pure numpy, no stat
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.easing import ease_in_out
+from dj_ledfx.types import clamp01
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.ledset import LedSet
@@ -75,8 +76,19 @@ def height01(leds: LedSet) -> F32:
     return heights
 
 
-def smoothstep(edge0: float, edge1: float, x: NDArray[np.floating[Any]]) -> F32:
-    """0 below edge0, 1 above edge1, and easing's cubic between."""
+@overload
+def smoothstep(edge0: float, edge1: float, x: float) -> float: ...
+
+
+@overload
+def smoothstep(edge0: float, edge1: float, x: NDArray[np.floating[Any]]) -> F32: ...
+
+
+def smoothstep(edge0: float, edge1: float, x: float | NDArray[np.floating[Any]]) -> float | F32:
+    """0 below edge0, 1 above edge1, and easing's cubic between: the one soft edge, for
+    each LED (float32) or for one number (a transition's, the evening's)."""
     span = edge1 - edge0 if edge1 != edge0 else 1e-9
+    if isinstance(x, float | int):
+        return ease_in_out(clamp01((x - edge0) / span))
     t: NDArray[np.float64] = np.clip((np.asarray(x, dtype=np.float64) - edge0) / span, 0.0, 1.0)
     return np.asarray(ease_in_out(t), dtype=np.float32)

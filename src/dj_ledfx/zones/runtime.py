@@ -40,7 +40,7 @@ from dj_ledfx.looks.model import (
 from dj_ledfx.looks.selectors import selects
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.timing import trim_window, utcnow
-from dj_ledfx.types import RenderedFrame
+from dj_ledfx.types import RenderedFrame, clamp01
 from dj_ledfx.zones.layer_view import LayerView, layer_view
 from dj_ledfx.zones.look_modifiers import Trails, capped, flashed, warmed
 from dj_ledfx.zones.model import CrashInfo, TransitionInfo
@@ -603,7 +603,7 @@ class ZoneRuntime:
         if transition.started is None:
             transition.started = ctx.t
         progress = (ctx.t - transition.started) / transition.duration_s
-        transition.progress = min(max(progress, 0.0), 1.0)
+        transition.progress = clamp01(progress)
         if progress >= 1.0:
             self.end_transition()
             return frame
@@ -619,7 +619,7 @@ class ZoneRuntime:
             )
             self.end_transition()
             return frame
-        share = new_share(transition.kind, transition.order, progress, len(frame))
+        share = new_share(transition.kind, transition.order, transition.progress, len(frame))
         for device_id, rows in transition.held_rows.items():  # firmware lights switch whole
             if device_id in self._claims:  # this look runs it: new once its effect started
                 new = transition.switched and device_id not in self._handover

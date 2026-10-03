@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from astral import Observer, sun
 from loguru import logger
 
-from dj_ledfx.effects.easing import ease_in_out
+from dj_ledfx.effects.field_tools import smoothstep
 from dj_ledfx.timing import utcnow
 
 if TYPE_CHECKING:
@@ -36,10 +36,6 @@ CIVIL_DEG = -6.0  # the sun's centre at civil dusk and dawn
 # Nearer a pole than this the sun circles the sky at about one height all day, skimming
 # the horizon for days around an equinox, and astral's times stop making sense.
 POLE_DEG = 89.7
-
-
-def _ramp(fraction: float) -> float:
-    return ease_in_out(min(max(fraction, 0.0), 1.0))
 
 
 @lru_cache(maxsize=8)
@@ -147,10 +143,10 @@ def evening_amount(lat: float, lon: float, at: datetime) -> float:
     fade = max(dawn or middle or full, full)
     start = _evening_start(sunset, times["sunrise"])
     if at < full:
-        return _ramp((at - start) / (full - start))
+        return smoothstep(0.0, 1.0, (at - start) / (full - start))
     if sunrise is None or at < fade:
         return 1.0
-    return 1.0 - _ramp((at - fade) / (sunrise - fade))
+    return 1.0 - smoothstep(0.0, 1.0, (at - fade) / (sunrise - fade))
 
 
 def _before_any_evening(
@@ -168,7 +164,7 @@ def _before_any_evening(
         return 0.0
     if rise is not None:
         dawn = next((d for d in reversed(times["dawn"]) if d < rise), rise - LEAD)
-        return 1.0 if at < dawn else 1.0 - _ramp((at - dawn) / (rise - dawn))
+        return 1.0 if at < dawn else 1.0 - smoothstep(0.0, 1.0, (at - dawn) / (rise - dawn))
     return 0.0 if _up(Observer(latitude=lat, longitude=lon), at) else 1.0
 
 
@@ -176,7 +172,7 @@ def _at_a_pole(lat: float, lon: float, at: datetime) -> float:
     """At a pole there's one evening a year, and it follows the sun's height: up as the sun
     sinks from the horizon to civil dusk's 6° below it, down as it climbs back."""
     height = sun.elevation(Observer(latitude=lat, longitude=lon), at, with_refraction=False)
-    return _ramp((HORIZON_DEG - height) / (HORIZON_DEG - CIVIL_DEG))
+    return smoothstep(HORIZON_DEG, CIVIL_DEG, height)  # down from the horizon to civil dusk
 
 
 class Evening:

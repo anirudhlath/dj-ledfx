@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from dj_ledfx.effects.context import EVENING
 from dj_ledfx.tempo.model import BEATS_PER_BAR
+from dj_ledfx.types import clamp01
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -72,7 +73,7 @@ def warmed(frame: FloatRGB, ctx: RenderContext) -> FloatRGB:
     amount = ctx.signals.get(EVENING)
     if amount <= 0.0:
         return frame
-    warmed: FloatRGB = frame * _evening_factor(min(amount, 1.0))
+    warmed: FloatRGB = frame * _evening_factor(clamp01(amount))
     return warmed
 
 

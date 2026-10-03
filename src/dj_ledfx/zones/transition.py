@@ -13,8 +13,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from dj_ledfx.effects.easing import ease_in_out
-from dj_ledfx.effects.field_tools import distances
+from dj_ledfx.effects.field_tools import distances, smoothstep
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -63,10 +62,9 @@ def new_share(
 ) -> NDArray[np.float32]:
     """How much of the new look each LED shows at `progress` (0..1), shape (count, 1): an
     LED changes over the kind's edge, from where its place in the order meets the sweep."""
-    p = min(max(progress, 0.0), 1.0)
     if order is None:
-        return np.full((count, 1), ease_in_out(p), dtype=np.float32)
+        return np.full((count, 1), smoothstep(0.0, 1.0, progress), dtype=np.float32)
     edge = EDGES[kind]
-    reached = np.clip((p * (1.0 + edge) - order.astype(np.float64)) / edge, 0.0, 1.0)
-    share: NDArray[np.float32] = ease_in_out(reached).astype(np.float32)[:, None]
+    swept = progress * (1.0 + edge) - order.astype(np.float64)  # how far past each LED
+    share: NDArray[np.float32] = smoothstep(0.0, edge, swept)[:, None]
     return share
