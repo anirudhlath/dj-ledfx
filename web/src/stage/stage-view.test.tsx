@@ -49,12 +49,14 @@ beforeEach(() => {
 describe('the stage on Live (§7, §8.1)', () => {
   it('labels each room with its look, and draws the sun and its readout', async () => {
     const { state } = await openLive()
-    for (const room of state.home.rooms) expect(screen.getByText(room.name)).toBeInTheDocument()
-    expect(screen.getByText(roomName('corridor'))).toBeInTheDocument()
-    for (const zone of state.running) expect(screen.getAllByText(zone.lookName).length).toBeGreaterThan(0)
+    // The stage's own labels: the Running panel beside it names the zones too.
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    for (const room of state.home.rooms) expect(stage.getByText(room.name)).toBeInTheDocument()
+    expect(stage.getByText(roomName('corridor'))).toBeInTheDocument()
+    for (const zone of state.running) expect(stage.getAllByText(zone.lookName).length).toBeGreaterThan(0)
     const sun = state.inputs.sun
-    expect(screen.getByText(sunScene(state.home, sun)!.label!)).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: STAGE_LABEL })).getByText(sunPosition(sun)!)).toBeInTheDocument()
+    expect(stage.getByText(sunScene(state.home, sun)!.label!)).toBeInTheDocument()
+    expect(stage.getByText(sunPosition(sun)!)).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')).toHaveLength(4)
   })
 

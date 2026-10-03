@@ -43,9 +43,11 @@ export const routes: RouteObject[] = [
         errorElement: <AppError />,
         children: [
           { index: true, element: <Navigate to="/live" replace /> },
-          { path: 'live', handle: LIVE, element: <LivePage /> },
+          // F3 decision 23: /live/zones/:zoneId is Live with that zone's card outlined, so the stage
+          // stays mounted between them. LivePage reads the id; the child draws nothing (Task 19 gives it
+          // the phone's Zone detail).
+          { path: 'live', handle: LIVE, element: <LivePage />, children: [{ path: 'zones/:zoneId', element: null }] },
           { path: 'live/put', handle: LIVE, element: <Placeholder name="Put a look on" milestone="F4" /> },
-          { path: 'live/zones/:zoneId', handle: LIVE, element: <Placeholder name="Zone" milestone="F3" /> },
           { path: 'looks', handle: LOOKS, element: <Placeholder name="Looks" milestone="F5" /> },
           { path: 'looks/:lookId', handle: LOOKS, element: <Placeholder name="Look editor" milestone="F8" /> },
           { path: 'map', handle: MAP, element: <Placeholder name="Home map" milestone="F7" /> },

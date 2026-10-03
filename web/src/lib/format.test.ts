@@ -4,10 +4,12 @@ import {
   formatBpm,
   formatDayDateTime,
   formatDayTime,
+  formatDayWord,
   formatDuration,
   formatLatency,
   formatPitch,
   formatSecondsLeft,
+  formatSpan,
   formatTime,
   formatTimeWithSeconds,
   formatTrackBpm,
@@ -60,5 +62,17 @@ describe('format', () => {
     expect(formatSecondsLeft(2_400)).toBe('2.4 s left')
     expect(formatSecondsLeft(-300)).toBe('0.0 s left')
     expect(formatTimeWithSeconds(new Date(2026, 8, 23, 19, 14, 5))).toBe('19:14:05')
+  })
+
+  // State-Nothing-Running's Start again lines; F3 decision 35.
+  it('says a day as Start again does, and a span across days', () => {
+    const now = new Date(2026, 8, 23, 19, 14)
+    expect(formatDayWord(new Date(2026, 8, 23, 7, 0), now)).toBe('')
+    expect(formatDayWord(new Date(2026, 8, 22, 23, 31), now)).toBe('yesterday')
+    expect(formatDayWord(new Date(2026, 8, 18, 12, 0), now)).toBe('Fri')
+    expect(formatDayWord(new Date(2026, 8, 16, 12, 0), now)).toBe('16 Sep')
+    expect(formatSpan(new Date(2026, 8, 22, 18, 2), new Date(2026, 8, 22, 23, 31), now)).toBe('yesterday 18:02 – 23:31')
+    expect(formatSpan(new Date(2026, 8, 22, 23, 31), new Date(2026, 8, 23, 7, 0), now)).toBe('yesterday 23:31 – today 07:00')
+    expect(formatSpan(new Date(2026, 8, 23, 18, 2), new Date(2026, 8, 23, 19, 0), now)).toBe('18:02 – 19:00')
   })
 })

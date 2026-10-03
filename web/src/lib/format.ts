@@ -62,3 +62,28 @@ export function formatDuration(ms: number, minutes: 'm' | 'min' = 'm'): string {
 export function formatSecondsLeft(ms: number): string {
   return `${(Math.max(0, ms) / 1000).toFixed(1)} s left`
 }
+
+const DAY_MS = 86_400_000
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+
+/**
+ * A day as Start again says it (F3 decision 35): '' for today, "yesterday", a weekday within the week
+ * ("Fri"), else "16 Sep". Days are counted between midnights, so a clock change doesn't move them.
+ */
+export function formatDayWord(date: Date, now: Date): string {
+  const days = Math.round((startOfDay(now) - startOfDay(date)) / DAY_MS)
+  if (days <= 0) return ''
+  if (days === 1) return 'yesterday'
+  if (days < 7) return DAYS[date.getDay()]
+  return `${date.getDate()} ${MONTHS[date.getMonth()]}`
+}
+
+/**
+ * "yesterday 18:02 – 23:31" (State-Nothing-Running). An end on another day than the start says its own
+ * day, "today" included: "yesterday 23:31 – today 07:00".
+ */
+export function formatSpan(start: Date, end: Date, now: Date): string {
+  const at = (date: Date, word: string) => (word === '' ? formatTime(date) : `${word} ${formatTime(date)}`)
+  const endWord = startOfDay(start) === startOfDay(end) ? '' : formatDayWord(end, now) || 'today'
+  return `${at(start, formatDayWord(start, now))} – ${at(end, endWord)}`
+}
