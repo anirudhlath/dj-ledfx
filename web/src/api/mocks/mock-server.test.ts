@@ -5,7 +5,7 @@ import type { Deck, Home, Inputs, Light, Look, Placement, RecentLook, Zone } fro
 import { FrameStore, decodeFrame } from '../frames'
 import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
-import type { ClientCommand } from '../ws-messages'
+import type { ClientCommand, RunningMessage } from '../ws-messages'
 import { inMemorySockets } from './in-memory-socket'
 import { RECENT_LIMIT, beatMessage, snapshotMessages, statsMessage, type MockServer } from './mock-server'
 import { HOME_TOTALS } from './fixtures'
@@ -232,6 +232,34 @@ describe('the REST API', () => {
     const look = { ...sunset, transition: { kind: 'wipe', durationS: 1 } } satisfies Look
     const reply = server.handle('POST', '/api/zones/bedroom/start', { look })
     expect(reply.body).toMatchObject({ state: 'transition', transition: { kind: 'wipe', durationS: 1 } })
+  })
+
+  it.each([
+    ['over 10 s', { kind: 'fade', durationS: 12 }, 'Input should be less than or equal to 10'],
+    ['not a number', { kind: 'fade', durationS: 'slow' }, 'Input should be a valid number'],
+  ])('refuses a start whose transition is %s with 422, as engine M4 does, and starts nothing', (_, transition, says) => {
+    const server = startMockServer()
+    const running = structuredClone(server.state.running)
+    const sunset = server.handle('GET', '/api/looks/sunset').body as Look
+    for (const body of [{ lookId: 'sunset', transition }, { look: { ...sunset, transition } }]) {
+      const reply = server.handle('POST', '/api/zones/bedroom/start', body)
+      expect(reply).toMatchObject({ status: 422, body: { detail: [{ msg: says }] } })
+      expect(server.state.running).toEqual(running)
+    }
+  })
+
+  it("pushes the zone at its transition's midpoint, halfway, as engine M4 does", () => {
+    const server = startMockServer()
+    const socket = connect(server)
+    server.handle('POST', '/api/zones/bedroom/start', { lookId: 'sunset', transition: { kind: 'fade', durationS: 2 } })
+    socket.clear()
+    const pushes = () => socket.json().filter((message): message is RunningMessage => message.channel === 'running')
+    vi.advanceTimersByTime(950)
+    expect(pushes()).toEqual([])
+    vi.advanceTimersByTime(100)
+    expect(pushes()).toHaveLength(1)
+    const bedroom = pushes()[0].zones.find((zone) => zone.zoneId === 'bedroom')
+    expect(bedroom).toMatchObject({ state: 'transition', transition: { kind: 'fade', progress: 0.5, durationS: 2 } })
   })
 
   it('turns a zone off again and again, and says 404 for a zone it does not know', () => {
