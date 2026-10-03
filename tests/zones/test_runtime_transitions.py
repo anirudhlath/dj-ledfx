@@ -8,6 +8,7 @@ from typing import Any, ClassVar
 import numpy as np
 import pytest
 from loguru import logger
+from map_home import tiny_home
 from runtime_fakes import (
     FlatField,
     field_layer,
@@ -22,6 +23,7 @@ from runtime_fakes import (
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.home.map import space_of
 from dj_ledfx.looks.model import Layer, LookModifiers, Transition
 from dj_ledfx.types import FloatRGB
 from dj_ledfx.zones.runtime import ZoneRuntime
@@ -252,6 +254,20 @@ def test_new_lights_mid_transition_end_it() -> None:
 
     assert new.state == "running" and _levels(new) == [0.0] * 5
     assert switches == [new] and new.handing_over == {"tile"}  # the manager applies it
+
+
+# H8 = M12: an anchor or an outline edited elsewhere in the home is a new space, not new
+# lights: the zone's transition plays on.
+def test_a_new_space_alone_keeps_the_transition_going() -> None:
+    old, new = _flat(1.0), _flat(0.0)
+    new.begin_transition(FADE, [old])
+    new.tick(1000.0)
+    new.tick(1001.0)
+
+    new.set_lights(new.lights, space_of(tiny_home()))
+    new.tick(1001.0)
+
+    assert new.state == "transition" and _levels(new) == [0.5] * 8
 
 
 # Review Focus 3: a start mid-transition takes the mix on; a third ends the oldest one.

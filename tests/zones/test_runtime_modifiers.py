@@ -101,6 +101,26 @@ def test_a_map_change_redraws_a_masked_layer() -> None:
     assert np.allclose(latest(runtime)[:, 0], [0.8, 0.8])
 
 
+# H8 = M12: an outline edited keeps a zone's trails, and its masked layer follows the new
+# outline.
+def test_an_outline_edit_keeps_the_trails_and_redraws_the_mask() -> None:
+    nook = ((0.0, 0.0), (3.0, 0.0), (3.0, 2.0), (0.0, 2.0))
+    bigger = replace(SPACE, sub_zone_outlines=MappingProxyType({"desk": nook}))
+    look = look_of(
+        field_layer(0.8, mask=SubZoneMask("desk")), modifiers=LookModifiers(trails_s=1.0)
+    )
+    runtime = runtime_of(look, [WEST], space=bigger)
+    runtime.tick(100.0)
+    assert np.allclose(latest(runtime)[:, 0], 0.8)  # the desk takes in the west lamp
+
+    runtime.set_lights([WEST], SPACE)  # the desk shrinks back to its corner
+    runtime.tick(100.1)
+    fading = 0.8 * math.exp(-TRAILS_FALL * 0.1)
+    assert np.allclose(latest(runtime)[:, 0], fading, rtol=1e-5)  # a trail, not black
+    runtime.tick(102.0)
+    assert np.allclose(latest(runtime)[:, 0], 0.0)  # the mask follows the new outline
+
+
 def test_trails_hold_a_light_that_drops() -> None:
     look = look_of(field_layer(1.0), modifiers=LookModifiers(trails_s=1.0))
     runtime = runtime_of(look)

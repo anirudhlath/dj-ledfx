@@ -368,8 +368,12 @@ class ZoneRuntime:
         """Rebuild the LED set, in a new space if one is given. Routes read the ring and
         the LED set at each send, so they need nothing. A new ring starts only when the
         frame's layout changed (which device's LEDs sit where): a light moved or a new
-        space keeps the frames coming, with no warm-up."""
-        self.end_transition()  # its rows were this LED set's
+        space keeps the frames coming, with no warm-up. A change to the zone's own lights
+        (which, or where) ends its transition and starts its trails afresh; a new space
+        alone (an anchor or an outline edited) only redraws the layers' views."""
+        if tuple(lights) != self._lights:
+            self.end_transition()  # its rows were this LED set's
+            self._trails.reset()
         if space is not None:
             self._space = space
         self._place(lights)
@@ -720,8 +724,7 @@ class ZoneRuntime:
         self.leds = leds
         if before is None or before.slices != self.leds.slices:
             self.ring = RingBuffer(self._capacity)
-        self._views = {}
-        self._trails.reset()
+        self._views = {}  # the layers' views follow the LED set and its space
         ids = {light.device_id for light in self._lights}
         self._emulated &= ids
         self._handover &= ids
