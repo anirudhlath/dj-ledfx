@@ -309,19 +309,6 @@ async def test_listeners_see_packets_while_a_request_waits() -> None:
 
 
 @pytest.mark.asyncio
-async def test_query_host_firmware() -> None:
-    transport, sent = _transport()
-    task = asyncio.create_task(transport.query_host_firmware(b"\xaa" * 6, "10.0.0.1", 56700))
-    await asyncio.sleep(0)
-    request, _ = sent.packets[0]
-    assert request.msg_type == 14
-    transport._on_packet_received(
-        _reply(transport, request, 15, struct.pack("<QQHH", 0, 0, 77, 2)), ("10.0.0.1", 56700)
-    )
-    assert await task == (2, 77)
-
-
-@pytest.mark.asyncio
 async def test_query_version_retries_once_then_gives_up() -> None:
     transport, sent = _transport()
     with pytest.raises(NoAnswer):

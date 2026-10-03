@@ -11,14 +11,11 @@ from loguru import logger
 
 from dj_ledfx.devices.capabilities import NoAnswer
 from dj_ledfx.devices.lifx.packet import (
-    GET_HOST_FIRMWARE,
     GET_VERSION,
-    STATE_HOST_FIRMWARE,
     STATE_UNHANDLED,
     STATE_VERSION,
     LifxPacket,
     build_echo_request,
-    parse_state_host_firmware,
     parse_state_service,
     parse_state_version,
 )
@@ -376,12 +373,6 @@ class LifxTransport:
             mac, (ip, port), GET_VERSION, b"", STATE_VERSION, parse_state_version, tries=2
         )
         return None if version is None else (int(version[0]), int(version[1]))
-
-    async def query_host_firmware(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
-        """(major, minor) of the light's firmware, or None if it doesn't answer."""
-        return await self.query(
-            mac, (ip, port), GET_HOST_FIRMWARE, b"", STATE_HOST_FIRMWARE, parse_state_host_firmware
-        )
 
     def _on_packet_received(self, data: bytes, addr: tuple[str, int]) -> None:
         try:

@@ -26,6 +26,7 @@ from dj_ledfx.devices.lifx.packet import (
     STATE_TILE_EFFECT,
     STATE_VERSION,
     build_get_tile_effect,
+    parse_state_host_firmware,
 )
 from dj_ledfx.devices.lifx.products import lifx_capabilities
 from dj_ledfx.devices.lifx.transport import LifxTransport
@@ -52,8 +53,18 @@ def _queries(caps: DeviceCapabilities) -> list[tuple[int, bytes, int]]:
     return queries
 
 
+async def _host_firmware(
+    transport: LifxTransport, record: LifxDeviceRecord
+) -> tuple[int, int] | None:
+    """(major, minor) of the light's firmware, or None if it doesn't answer."""
+    addr = (record.ip, record.port)
+    return await transport.query(
+        record.mac, addr, GET_HOST_FIRMWARE, b"", STATE_HOST_FIRMWARE, parse_state_host_firmware
+    )
+
+
 async def _record(transport: LifxTransport, record: LifxDeviceRecord) -> None:
-    firmware = await transport.query_host_firmware(record.mac, record.ip, record.port)
+    firmware = await _host_firmware(transport, record)
     # An unknown product records as "LIFX product <pid>", with firmware and version only.
     caps, _relays = lifx_capabilities(record.product, firmware, record.vendor)
     name, pid = caps.model, record.product
