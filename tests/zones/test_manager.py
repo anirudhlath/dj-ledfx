@@ -392,6 +392,23 @@ async def test_the_brightness_cap_caps_the_firmware_lights_too(make_home: HomeFa
     assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": pytest.approx(0.3)})
 
 
+async def test_running_zones_follow_the_managers_evening(make_home: HomeFactory) -> None:
+    asked: list[float] = []
+
+    def evening() -> float:
+        asked.append(1.0)
+        return 1.0
+
+    lamp = FakeLight("lamp", caps=LAMP)
+    home = await make_home([lamp], [zone_record("z", "lamp")], evening=evening)
+    look = replace(home.look("classic-breathe"), modifiers=LookModifiers(evening=True))
+    await home.manager.start("z", look)
+
+    home.host.runtimes["z"].tick(1000.0)
+
+    assert asked
+
+
 async def test_a_look_starts_its_firmware_even_when_layer_ids_repeat(
     make_home: HomeFactory,
 ) -> None:

@@ -31,6 +31,7 @@ from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent, EventBus
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.store import HomeStore
+from dj_ledfx.home.sun import Evening
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.store import LookStore
@@ -303,6 +304,7 @@ async def _run(args: argparse.Namespace) -> None:
         preview_only=config.engine.preview_only is True,
         home=MapZones(home_map),
         frames_watched=partial(watchers.watching, "live"),
+        evening=Evening(lambda: home_map.home.location),  # looks with evening (spec §5.3)
     )
     await zone_manager.load()
     # Before any light connects, so no light is restored and then taken over again.

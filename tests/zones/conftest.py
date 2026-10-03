@@ -22,6 +22,7 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
         preview_only: bool = False,
         view: HomeView | None = None,
         frames_watched: Callable[[], bool] | None = None,
+        evening: Callable[[], float] = lambda: 0.0,
     ) -> Home:
         home = await build_home(
             tmp_path,
@@ -30,6 +31,7 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
             preview_only=preview_only,
             view=view,
             frames_watched=frames_watched,
+            evening=evening,
         )
         homes.append(home)
         return home
