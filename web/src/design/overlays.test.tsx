@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { Button } from './button'
@@ -57,13 +57,17 @@ describe('overlays', () => {
     expect(opener).toHaveFocus()
   })
 
-  it('Sheet opens as a named dialog', async () => {
+  // Phone-State-Problems: the count beside the heading, and a Close at the row's end.
+  it('Sheet opens as a named dialog, with its aside and a Close', async () => {
     render(
-      <Sheet trigger={<Button>Where</Button>} title="Put a look on">
+      <Sheet trigger={<Button>Where</Button>} title="Put a look on" aside={<span>3</span>}>
         <p>Pick a zone</p>
       </Sheet>,
     )
     await userEvent.click(screen.getByRole('button', { name: 'Where' }))
-    expect(await screen.findByRole('dialog', { name: 'Put a look on' })).toBeInTheDocument()
+    const sheet = await screen.findByRole('dialog', { name: 'Put a look on' })
+    expect(within(sheet).getByText('3')).toBeInTheDocument()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog', { name: 'Put a look on' })).toBeNull()
   })
 })

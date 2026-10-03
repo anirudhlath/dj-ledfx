@@ -1,10 +1,11 @@
 // The chrome's parts on the live store. Each reads its own slice (hooks.ts), so a message redraws only the
 // part whose slice it changes (a beat, none: the pip writer draws the pips), and each draws nothing until
 // its data has arrived. TAP sends a tap and the source button opens the tempo source popover.
-import { useCallback, type ReactElement } from 'react'
+import { useCallback, useState, type ReactElement } from 'react'
 import { failureText, tapTempo } from '@/api/actions'
 import { useAnnounce } from '@/design/announce'
 import { AttentionButton } from './attention-button'
+import { AttentionPopover, AttentionSheet } from './attention-list'
 import { ConnectionIndicator } from './connection-indicator'
 import { useAttentionTotal, useConnection, useConnectionUnlessLive, useHoldNews, usePreviewOnly, useTempo } from './hooks'
 import { PreviewOnlySwitch } from './preview-only-switch'
@@ -61,10 +62,17 @@ export function ChromePreviewOnly({ variant }: { variant: Variant }) {
   return <PreviewOnlySwitch variant={variant} on={on} />
 }
 
+/** §6.2: the button, and what it opens: the popover on desktop, the sheet on the phone. */
 export function ChromeAttention({ variant }: { variant: Variant }) {
   const total = useAttentionTotal()
+  const [open, setOpen] = useState(false)
   if (total === null) return null
-  return <AttentionButton variant={variant} count={total} />
+  const button = <AttentionButton variant={variant} count={total} />
+  return variant === 'bar' ? (
+    <AttentionPopover trigger={button} count={total} open={open} onOpenChange={setOpen} />
+  ) : (
+    <AttentionSheet trigger={button} count={total} open={open} onOpenChange={setOpen} />
+  )
 }
 
 export function ChromeConnection({ variant }: { variant: Variant }) {

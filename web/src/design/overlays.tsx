@@ -67,13 +67,16 @@ export function Popover({
     <BasePopover.Root open={open} onOpenChange={onOpenChange}>
       <BasePopover.Trigger render={trigger} />
       <BasePopover.Portal>
-        <BasePopover.Positioner sideOffset={8} align={align} className="z-50">
-          <BasePopover.Popup className={`max-w-[calc(100vw-2rem)] overflow-hidden ${SURFACE}`} style={width === undefined ? undefined : { width }}>
-            <div className="flex items-baseline justify-between gap-2 px-3.5 py-3">
+        <BasePopover.Positioner sideOffset={8} align={align} collisionPadding={16} className="z-50">
+          <BasePopover.Popup
+            className={`flex max-h-(--available-height) max-w-[calc(100vw-2rem)] flex-col overflow-hidden ${SURFACE}`}
+            style={width === undefined ? undefined : { width }}
+          >
+            <div className="flex shrink-0 items-baseline justify-between gap-2 px-3.5 py-3">
               <BasePopover.Title className={HEAD}>{title}</BasePopover.Title>
               {aside}
             </div>
-            {children}
+            <div className="min-h-0 overflow-y-auto">{children}</div>
           </BasePopover.Popup>
         </BasePopover.Positioner>
       </BasePopover.Portal>
@@ -107,15 +110,24 @@ export function Dialog({ title, children, ...modal }: OverlayProps) {
   )
 }
 
-/** §6.1 Sheet: the phone's bottom sheet, with a grabber. */
-export function Sheet({ title, children, ...modal }: OverlayProps) {
+/**
+ * §6.1 Sheet: the phone's bottom sheet, with a grabber, its title (Phone-State-Problems: `aside` beside
+ * it, the count) and a Close at the row's end.
+ */
+export function Sheet({ title, aside, children, ...modal }: OverlayProps & { aside?: ReactNode }) {
   return (
     <Modal
       {...modal}
       className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] flex-col gap-1 overflow-y-auto rounded-t-sheet border-t border-line bg-panel px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-sheet outline-none"
     >
       <span aria-hidden="true" className="mx-auto mb-1.5 h-1.25 w-10 shrink-0 rounded-[3px] bg-line-strong" />
-      <BaseDialog.Title className={HEAD}>{title}</BaseDialog.Title>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-baseline gap-1">
+          <BaseDialog.Title className="text-title font-semibold text-text">{title}</BaseDialog.Title>
+          {aside}
+        </div>
+        <BaseDialog.Close render={<IconButton icon="x" label="Close" />} />
+      </div>
       {children}
     </Modal>
   )
