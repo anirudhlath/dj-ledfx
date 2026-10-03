@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
-from govee_fakes import lamp_record, lamp_transport, sent
+from govee_fakes import STATUS, lamp_record, lamp_transport, sent
 
 from dj_ledfx.devices.govee.adapter_base import STATUS_TIMEOUT_S
 from dj_ledfx.devices.govee.colour import GoveeColourAdapter
@@ -106,6 +106,7 @@ async def test_restore_without_power_sends_nothing(transport: MagicMock) -> None
 async def test_a_restore_leaves_razer_then_puts_colour_and_brightness_back(
     transport: MagicMock, on_off: int, last: list[str]
 ) -> None:
+    transport.query_status.return_value = STATUS  # it takes an off
     adapter = GoveeColourAdapter(transport, lamp_record())
     state = GoveeDeviceState(on_off=on_off, brightness=50, r=10, g=20, b=30)
     await adapter.restore_state(state.to_bytes())
