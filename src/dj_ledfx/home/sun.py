@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
+from functools import lru_cache
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from astral import Observer, sun
@@ -36,9 +38,12 @@ def _ramp(fraction: float) -> float:
     return ease_in_out(min(max(fraction, 0.0), 1.0))
 
 
-def _times(observer: Observer, around: date) -> dict[str, list[datetime]]:
+@lru_cache(maxsize=8)
+def _times(lat: float, lon: float, around: date) -> Mapping[str, tuple[datetime, ...]]:
     """Each kind of event from two days before to two days after, each once, in order.
-    astral answers per UTC date, so one date can hold two sunsets and the next none."""
+    astral answers per UTC date, so one date can hold two sunsets and the next none. Kept
+    per place and UTC date: they change once a day."""
+    observer = Observer(latitude=lat, longitude=lon)
     found: dict[str, list[datetime]] = {name: [] for name in _EVENTS}
     for offset in range(-2, 3):
         day = around + timedelta(days=offset)
@@ -49,7 +54,7 @@ def _times(observer: Observer, around: date) -> dict[str, list[datetime]]:
                 continue
             if all(abs(at - seen) > _SAME_EVENT for seen in found[name]):
                 found[name].append(at)
-    return {name: sorted(times) for name, times in found.items()}
+    return MappingProxyType({name: tuple(sorted(times)) for name, times in found.items()})
 
 
 def evening_amount(lat: float, lon: float, at: datetime) -> float:
@@ -59,10 +64,10 @@ def evening_amount(lat: float, lon: float, at: datetime) -> float:
     the sun gets no lower than civil twilight, the middle of the night stands in for dusk
     and dawn; where it doesn't set or rise for days, it's day or night by the sun's
     height. Never raises, and moves continuously."""
-    observer = Observer(latitude=lat, longitude=lon)
-    times = _times(observer, at.astimezone(UTC).date())
+    times = _times(lat, lon, at.astimezone(UTC).date())
     begun = [sunset for sunset in times["sunset"] if sunset - LEAD <= at]
     if not begun:  # no sunset for days: polar day (0) or polar night (1)
+        observer = Observer(latitude=lat, longitude=lon)
         return 0.0 if sun.elevation(observer, at) > HORIZON_DEG else 1.0
     sunset = begun[-1]
     sunrise = next((rise for rise in times["sunrise"] if rise > sunset), None)

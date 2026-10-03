@@ -6,6 +6,7 @@ import math
 from collections.abc import Iterator
 from dataclasses import replace
 from types import MappingProxyType
+from typing import Any
 
 import numpy as np
 import pytest
@@ -24,9 +25,15 @@ from runtime_fakes import (
 )
 from tempo_fakes import START, FakeTime, tempo_clock
 
+from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.context import EVENING, RenderContext
+from dj_ledfx.effects.field import FieldEffect
+from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.home.map import space_of
-from dj_ledfx.looks.model import LookModifiers, Mirror, RoomMask, SubZoneMask, Transform
-from dj_ledfx.zones.look_modifiers import EVENING_LEVEL, EVENING_TINT, TRAILS_FALL
+from dj_ledfx.looks.model import Layer, LookModifiers, Mirror, RoomMask, SubZoneMask, Transform
+from dj_ledfx.types import FloatRGB
+from dj_ledfx.zones.look_modifiers import EVENING_FULLEST, TRAILS_FALL
 
 SPACE = space_of(tiny_home())  # west and east rooms, the desk in the west's north-west
 WEST = placed_light("west-lamp", (1.0, 1.0, 1.0), (2.0, 1.0, 1.0), room=0)
@@ -163,8 +170,35 @@ def test_a_look_follows_the_evening_only_when_it_asks(on: bool) -> None:
 
     runtime.tick(1000.0)
 
-    fullest = 0.5 * np.asarray(EVENING_TINT) * EVENING_LEVEL
+    fullest = 0.5 * EVENING_FULLEST
     np.testing.assert_allclose(latest(runtime)[0], fullest if on else [0.5] * 3, rtol=1e-6)
+
+
+class EveningField(FieldEffect, register=False):
+    """Grey at the evening's amount, as the frame's signals carry it."""
+
+    @classmethod
+    def parameters(cls) -> dict[str, EffectParam]:
+        return {}
+
+    def get_params(self) -> dict[str, Any]:
+        return {}
+
+    def _apply_params(self, **kwargs: Any) -> None:
+        pass
+
+    def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
+        return np.full((leds.count, 3), ctx.signals.get(EVENING), dtype=np.float32)
+
+
+def test_an_effect_can_read_the_evening() -> None:
+    Effect._registry["evening_field"] = EveningField
+    layer = Layer(id="evening", name="Evening", type="field", kind="evening_field")
+    runtime = runtime_of(look_of(layer), evening=lambda: 0.6)  # the look's own evening off
+
+    runtime.tick(1000.0)
+
+    np.testing.assert_allclose(latest(runtime), 0.6, rtol=1e-6)
 
 
 def test_the_cap_caps_streamed_lights_and_the_preview_of_firmware_ones() -> None:

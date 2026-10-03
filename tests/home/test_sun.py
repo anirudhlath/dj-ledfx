@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from astral import Observer, sun
 
+from dj_ledfx.home import sun as sun_module
 from dj_ledfx.home.model import Location
 from dj_ledfx.home.sun import CACHE_S, LEAD, Evening, evening_amount
 
@@ -98,6 +99,27 @@ def test_with_no_civil_dusk_the_evening_is_full_at_the_middle_of_the_night() -> 
     assert evening_amount(lat, lon, middle) == 1.0
     assert 0.0 < evening_amount(lat, lon, sunset) < 1.0
     assert evening_amount(lat, lon, sunrise) == 0.0
+
+
+def test_the_suns_times_are_worked_out_once_a_day_for_a_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[object] = []
+    sunset = sun_module._EVENTS["sunset"]
+
+    def counted(*args: object, **kwargs: object) -> datetime:
+        asked.append(args[1])
+        return sunset(*args, **kwargs)
+
+    monkeypatch.setitem(sun_module._EVENTS, "sunset", counted)
+    lat, lon = (12.5, -40.25)  # somewhere no other test asks about
+    morning = datetime(2026, 3, 9, 6, tzinfo=UTC)
+
+    for minutes in range(0, 12 * 60, 30):  # the evening, every half hour of one UTC date
+        evening_amount(lat, lon, morning + timedelta(minutes=minutes))
+    evening_amount(lat + 1.0, lon, morning)  # another place: its own times
+
+    assert len(asked) == 10  # five dates around each place's, each asked once
 
 
 def test_evening_reads_the_homes_location_once_a_second() -> None:

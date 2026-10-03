@@ -553,7 +553,9 @@ class ZoneRuntime:
         if self._ticks % self._stride:
             return
         target = now + self.horizon_s
-        ctx = render_context(self._env.clock, target, self._stride / self._env.fps)
+        ctx = render_context(
+            self._env.clock, target, self._stride / self._env.fps, self._env.evening()
+        )
         started = self._env.timer()
         try:
             colors = self.render(ctx)
@@ -635,7 +637,7 @@ class ZoneRuntime:
         if modifiers.downbeat_flash:
             frame = flashed(frame, ctx)
         if modifiers.evening:
-            frame = warmed(frame, self._env.evening())
+            frame = warmed(frame, ctx)
         if self._claim_targets and self._env.watched():
             self._draw_firmware(frame, ctx, self._claim_targets)
         if modifiers.brightness_cap is not None:

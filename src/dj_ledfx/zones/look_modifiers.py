@@ -5,10 +5,13 @@ order, each one making a new array, so a frame the ring holds never changes."""
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.typing import NDArray
 
+from dj_ledfx.effects.context import EVENING
 from dj_ledfx.tempo.model import BEATS_PER_BAR
 
 if TYPE_CHECKING:
@@ -20,6 +23,9 @@ FLASH_BEATS = 0.5  # the downbeat flash fades out over half a beat
 FLASH_LEVEL = 0.8  # how far towards white the flash starts
 EVENING_TINT = (1.0, 0.77, 0.54)  # warm white (about 3500 K) against the look's own white
 EVENING_LEVEL = 0.75  # the look's brightness at the evening's fullest
+# What the evening multiplies each channel by at its fullest.
+EVENING_FULLEST = np.asarray(EVENING_TINT, dtype=np.float32) * np.float32(EVENING_LEVEL)
+EVENING_FULLEST.flags.writeable = False
 
 
 class Trails:
@@ -59,14 +65,22 @@ def flashed(frame: FloatRGB, ctx: RenderContext) -> FloatRGB:
     return flashed
 
 
-def warmed(frame: FloatRGB, amount: float) -> FloatRGB:
-    """Warmer and dimmer by the evening's amount, 0 (day) to 1 (its fullest)."""
+def warmed(frame: FloatRGB, ctx: RenderContext) -> FloatRGB:
+    """Warmer and dimmer by the evening's amount (the frame's EVENING signal), 0 (day) to 1
+    (its fullest)."""
+    amount = ctx.signals.get(EVENING)
     if amount <= 0.0:
         return frame
-    fullest = np.asarray(EVENING_TINT, dtype=np.float32) * np.float32(EVENING_LEVEL)
-    factor = 1.0 + (fullest - 1.0) * np.float32(min(amount, 1.0))
-    warmed: FloatRGB = frame * factor
+    warmed: FloatRGB = frame * _evening_factor(min(amount, 1.0))
     return warmed
+
+
+@lru_cache(maxsize=4)
+def _evening_factor(amount: float) -> NDArray[np.float32]:
+    """Each channel's factor at this much evening, which moves at most once a second."""
+    factor = (1.0 + (EVENING_FULLEST - 1.0) * np.float32(amount)).astype(np.float32)
+    factor.flags.writeable = False
+    return factor
 
 
 def capped(frame: FloatRGB, cap: float) -> FloatRGB:

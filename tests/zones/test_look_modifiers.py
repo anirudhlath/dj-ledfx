@@ -4,14 +4,15 @@ and the brightness cap."""
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
-from conftest import tempo_ctx
+from conftest import render_ctx, tempo_ctx
 
+from dj_ledfx.effects.context import EVENING, RenderContext, SignalView
 from dj_ledfx.zones.look_modifiers import (
-    EVENING_LEVEL,
-    EVENING_TINT,
+    EVENING_FULLEST,
     FLASH_LEVEL,
     TRAILS_FALL,
     Trails,
@@ -74,14 +75,21 @@ def test_the_downbeat_flashes_towards_white_and_fades_by_half_a_beat() -> None:
     np.testing.assert_array_equal(flashed(_frame(1.5), tempo_ctx(4.0)), _frame(1.5))
 
 
+def _evening(amount: float) -> RenderContext:
+    """A moment with this much evening."""
+    return replace(render_ctx(), signals=SignalView({EVENING: amount}))
+
+
 def test_the_evening_warms_and_dims_by_its_amount() -> None:
     white = _frame(1.0)
-    fullest = np.asarray(EVENING_TINT, dtype=np.float32) * np.float32(EVENING_LEVEL)
 
-    np.testing.assert_array_equal(warmed(white, 0.0), white)
-    np.testing.assert_allclose(warmed(white, 1.0)[0], fullest, rtol=1e-6)
-    np.testing.assert_allclose(warmed(white, 0.5)[0], (1.0 + fullest) / 2.0, rtol=1e-6)
-    red, _, blue = warmed(white, 1.0)[0]
+    np.testing.assert_array_equal(warmed(white, _evening(0.0)), white)
+    np.testing.assert_array_equal(warmed(white, render_ctx()), white)  # no evening signalled
+    np.testing.assert_allclose(warmed(white, _evening(1.0))[0], EVENING_FULLEST, rtol=1e-6)
+    np.testing.assert_allclose(
+        warmed(white, _evening(0.5))[0], (1.0 + EVENING_FULLEST) / 2.0, rtol=1e-6
+    )
+    red, _, blue = warmed(white, _evening(1.0))[0]
     assert red > blue  # warmer
 
 

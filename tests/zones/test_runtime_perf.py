@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import itertools
 import statistics
 import time
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from conftest import builtin_look
 from map_home import seeded_space, seeded_zone_lights
 
+from dj_ledfx.home.model import Location
 from dj_ledfx.home.seed import handoff_home_json
+from dj_ledfx.home.sun import Evening, evening_amount
 from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.looks.model import (
     MAX_TRANSITION_S,
@@ -87,6 +92,22 @@ def test_a_zone_frame_with_every_modifier_renders_in_under_5_ms(look: Look) -> N
 
     assert statistics.median(tick_times(runtime)) < FRAME_BUDGET_S
     assert runtime.fps_actual >= 59  # it never dropped to a lower frame rate
+
+
+# Spec §5.3: the evening is worked out once a second, inside whichever zone's tick asks
+# first. A real Evening at a made-up place, a sixtieth of a second on at each tick, so the
+# ticks that work it out again (every 60th) are measured too.
+def test_a_zone_frame_that_works_the_evening_out_renders_in_under_5_ms() -> None:
+    place, at = Location("Test", 12.5, -40.25), datetime(2026, 3, 9, 20, 15, tzinfo=UTC)
+    assert 0.0 < evening_amount(place.lat, place.lon, at) < 1.0  # it warms the frame
+    ticks = itertools.count()
+    evening = Evening(lambda: place, now=lambda: at, clock=lambda: next(ticks) / 60)
+    runtime = home_runtime(with_every_modifier(builtin_look("aurora")), evening=evening)
+
+    durations = tick_times(runtime)
+
+    assert statistics.median(durations) < FRAME_BUDGET_S
+    assert statistics.median(durations[60::60]) < FRAME_BUDGET_S  # worked out again
 
 
 def _heavy(look_id: str) -> ZoneRuntime:
