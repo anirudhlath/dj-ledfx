@@ -529,10 +529,14 @@ def validate_look(look: Look) -> None:
         raise LookError("Look modifiers arrive in M4")
     for layer in look.layers:
         make_effect(layer)
-        if (layer.mask, layer.mirror, layer.transform) != (None, None, None):
-            raise LookError(f"Layer '{layer.name}': layer modifiers arrive in M4")
+        modified = (layer.mask, layer.mirror, layer.transform) != (None, None, None)
+        if layer.type == "firmware" and modified:
+            raise LookError(
+                f"Layer '{layer.name}': a firmware layer runs whole on the lights it picks; "
+                "it takes no mask, mirror or transform"
+            )
         if layer.type != "firmware" and layer.lights is not None:
             raise LookError(
                 f"Layer '{layer.name}': only a firmware layer picks its lights; "
-                "masks for streamed layers arrive in M4"
+                "give a streamed layer a mask instead"
             )

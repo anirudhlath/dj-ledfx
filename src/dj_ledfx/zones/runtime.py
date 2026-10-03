@@ -39,6 +39,7 @@ from dj_ledfx.looks.selectors import selects
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.timing import trim_window, utcnow
 from dj_ledfx.types import RenderedFrame
+from dj_ledfx.zones.layer_view import LayerView, layer_view
 from dj_ledfx.zones.model import CrashInfo
 
 if TYPE_CHECKING:
@@ -148,6 +149,9 @@ class ZoneRuntime:
         self._copy_targets: list[tuple[int, NDArray[np.intp], LedSet]] = []
         self._claim_targets: list[tuple[int, NDArray[np.intp], LedSet]] = []
         self._lights: tuple[ZoneLight, ...] = ()
+        # Each field layer's view of the LEDs (its mask, mirror and transform), with the
+        # modifiers it was made for; a new LED set clears them (_place).
+        self._views: dict[str, tuple[object, LayerView]] = {}
         self._rendering = ""
         self._last_crash_log = float("-inf")
         self._render_s = 0.0  # moving average of the render time
@@ -325,13 +329,16 @@ class ZoneRuntime:
         frame: FloatRGB | None = None
         for layer, field_effect in self._fields:
             self._rendering = layer.name
-            colors = _finite(field_effect.render(ctx, self.leds))
-            if frame is None and layer.blend == "normal" and layer.opacity == 1.0:
+            view = self._view(layer)
+            colors = _finite(field_effect.render(ctx, view.leds))
+            whole = view.weight is None
+            if frame is None and whole and layer.blend == "normal" and layer.opacity == 1.0:
                 frame = np.array(colors, dtype=np.float32)  # over black: its own colours
                 continue
             if frame is None:
                 frame = np.zeros((count, 3), dtype=np.float32)
-            blend_into(frame, colors, layer.blend, layer.opacity)
+            opacity = layer.opacity if view.weight is None else view.weight * layer.opacity
+            blend_into(frame, colors, layer.blend, opacity)
         if frame is None:
             frame = np.zeros((count, 3), dtype=np.float32)
         targets = self._copy_targets
@@ -342,6 +349,17 @@ class ZoneRuntime:
             self._rendering = layer.name
             frame[where] = _finite(firmware.emulate(ctx, leds)) * np.float32(layer.opacity)
         return frame
+
+    def _view(self, layer: Layer) -> LayerView:
+        """The layer's view of the zone's LEDs, made again only when its modifiers or the
+        LED set change, so the effect's per-LED work is kept between frames."""
+        modifiers = (layer.mask, layer.mirror, layer.transform)
+        kept = self._views.get(layer.id)
+        if kept is not None and kept[0] == modifiers:
+            return kept[1]
+        view = layer_view(layer, self.leds)
+        self._views[layer.id] = (modifiers, view)
+        return view
 
     def _compile(self) -> None:
         self.generation = next(_GENERATIONS)
@@ -377,6 +395,7 @@ class ZoneRuntime:
         )
         if before is None or before.slices != self.leds.slices:
             self.ring = RingBuffer(self._capacity)
+        self._views = {}
         self._emulated &= {light.device_id for light in self._lights}
 
     def _picks(self, index: int, light: ZoneLight) -> bool:

@@ -145,7 +145,6 @@ def test_setting_schema_types() -> None:
         ({"needs": ["weather"]}, "input"),
         ({"layers": [_layer(type="particles", kind="fireflies")]}, "M5"),
         ({"layers": [_layer(settings={"beats_per_cycle": {"value": 2.0, "binding": {}}})]}, "M7"),
-        ({"layers": [_layer(mask={"kind": "height", "range": [0.0, 1.0]})]}, "M4"),
         ({"layers": [_layer(settings={"beats_per_cycle": 2.0})]}, "value"),
         (
             {
@@ -180,7 +179,18 @@ def test_looks_m1_cannot_run_are_refused_with_the_reason(
             [_layer(type="firmware", kind="lifx_flame", settings={"lights": {"value": "type:"}})],
             "one word",
         ),
-        ([_layer(settings={"lights": {"value": ["lamp"]}})], "M4"),
+        ([_layer(settings={"lights": {"value": ["lamp"]}})], "give a streamed layer a mask"),
+        (
+            [
+                _layer(
+                    type="firmware",
+                    kind="lifx_flame",
+                    settings={},
+                    mask={"kind": "room", "room": "west"},
+                )
+            ],
+            "takes no mask",
+        ),
     ],
 )
 def test_layer_problems_are_refused(layers: list[dict[str, Any]], reason: str) -> None:
@@ -367,6 +377,7 @@ def test_layer_modifiers_round_trip(written: dict[str, Any], mask: object) -> No
     mirror = {"axis": "y", "at": 2.5}
     transform = {"offset": [1.0, 0.0, -0.5], "rotateDeg": 90.0, "scale": 2.0}
     look = look_from_dict(_look(layers=[_layer(mask=written, mirror=mirror, transform=transform)]))
+    validate_look(look)  # a streamed layer takes all three
     layer = look.layers[0]
     assert layer.mask == mask
     assert layer.mirror == Mirror("y", 2.5)

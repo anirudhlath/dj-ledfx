@@ -25,7 +25,17 @@ from dj_ledfx.home import shapes
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import WallKind
 from dj_ledfx.looks import model as looks
-from dj_ledfx.looks.model import Blend, Category, InputKind, LayerType, Scope, TransitionKind
+from dj_ledfx.looks.model import (
+    MAX_SCALE,
+    MIN_SCALE,
+    Blend,
+    Category,
+    InputKind,
+    LayerType,
+    MirrorAxis,
+    Scope,
+    TransitionKind,
+)
 from dj_ledfx.prodjlink.listener import Listening
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.tempo.model import (
@@ -89,6 +99,58 @@ class SettingSchema(ContractModel):
     options: list[str] | None = None
 
 
+Finite = Annotated[float, Field(allow_inf_nan=False)]
+
+
+class HeightMask(ContractModel):
+    """The layer shows between two heights, metres above the floor, low then high."""
+
+    kind: Literal["height"]
+    range: tuple[Finite, Finite]
+
+
+class RoomMask(ContractModel):
+    """The layer shows in one room, by id."""
+
+    kind: Literal["room"]
+    room: str
+
+
+class SubZoneMask(ContractModel):
+    """The layer shows in one sub-zone, by id."""
+
+    kind: Literal["sub-zone"]
+    sub_zone: str
+
+
+class AnchorMask(ContractModel):
+    """The layer shows within `radius` metres of an anchor."""
+
+    kind: Literal["anchor"]
+    anchor: str
+    radius: float = Field(gt=0.0, allow_inf_nan=False)
+
+
+Mask = Annotated[HeightMask | RoomMask | SubZoneMask | AnchorMask, Field(discriminator="kind")]
+
+
+class Mirror(ContractModel):
+    """The field reflected across a plane square to `axis`, `at` metres along it (null:
+    the zone's centre); the low side shows on both."""
+
+    axis: MirrorAxis = "x"
+    at: Finite | None = None
+
+
+class Transform(ContractModel):
+    """The field shifted by `offset` metres, turned `rotateDeg` clockwise seen from above
+    and grown `scale` times, both about the zone's centre."""
+
+    offset: tuple[Finite, Finite, Finite] = (0.0, 0.0, 0.0)
+    rotate_deg: Finite = 0.0
+    scale: float = Field(default=1.0, ge=MIN_SCALE, le=MAX_SCALE, allow_inf_nan=False)
+
+
 class Layer(ContractModel):
     id: str
     name: str
@@ -99,9 +161,9 @@ class Layer(ContractModel):
     opacity: float = 1.0
     settings: dict[str, SettingValue] = Field(default_factory=dict)
     setting_schema: list[SettingSchema] = Field(default_factory=list, alias="schema")
-    mask: dict[str, Any] | None = None
-    mirror: dict[str, Any] | None = None
-    transform: dict[str, Any] | None = None
+    mask: Mask | None = None
+    mirror: Mirror | None = None
+    transform: Transform | None = None
 
 
 class LookModifiers(ContractModel):

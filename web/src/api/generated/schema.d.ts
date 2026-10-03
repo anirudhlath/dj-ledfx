@@ -1050,6 +1050,21 @@ export interface components {
                 number
             ];
         };
+        /**
+         * AnchorMask
+         * @description The layer shows within `radius` metres of an anchor.
+         */
+        AnchorMask: {
+            /** Anchor */
+            anchor: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "anchor";
+            /** Radius */
+            radius: number;
+        };
         /** AnchorUpdate */
         AnchorUpdate: {
             /** Confirmed */
@@ -1338,6 +1353,22 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HeightMask
+         * @description The layer shows between two heights, metres above the floor, low then high.
+         */
+        HeightMask: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "height";
+            /** Range */
+            range: [
+                number,
+                number
+            ];
+        };
         /** Home */
         Home: {
             /** Anchors */
@@ -1455,13 +1486,8 @@ export interface components {
             /** Kind */
             kind: string;
             /** Mask */
-            mask?: {
-                [key: string]: unknown;
-            } | null;
-            /** Mirror */
-            mirror?: {
-                [key: string]: unknown;
-            } | null;
+            mask?: (components["schemas"]["HeightMask"] | components["schemas"]["RoomMask"] | components["schemas"]["SubZoneMask"] | components["schemas"]["AnchorMask"]) | null;
+            mirror?: components["schemas"]["Mirror"] | null;
             /** Name */
             name: string;
             /**
@@ -1475,10 +1501,7 @@ export interface components {
             settings?: {
                 [key: string]: components["schemas"]["SettingValue"];
             };
-            /** Transform */
-            transform?: {
-                [key: string]: unknown;
-            } | null;
+            transform?: components["schemas"]["Transform"] | null;
             /**
              * Type
              * @enum {string}
@@ -1693,6 +1716,21 @@ export interface components {
             type: "linear" | "radial";
         };
         /**
+         * Mirror
+         * @description The field reflected across a plane square to `axis`, `at` metres along it (null:
+         *     the zone's centre); the low side shows on both.
+         */
+        Mirror: {
+            /** At */
+            at?: number | null;
+            /**
+             * Axis
+             * @default x
+             * @enum {string}
+             */
+            axis: "x" | "y" | "z";
+        };
+        /**
          * NudgeRequest
          * @description A phase shift in beats: positive brings the beat sooner (M3 ruling 8).
          */
@@ -1871,6 +1909,19 @@ export interface components {
                 number,
                 number
             ][];
+        };
+        /**
+         * RoomMask
+         * @description The layer shows in one room, by id.
+         */
+        RoomMask: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "room";
+            /** Room */
+            room: string;
         };
         /** Running */
         Running: {
@@ -2063,6 +2114,19 @@ export interface components {
             /** Room */
             room: string;
         };
+        /**
+         * SubZoneMask
+         * @description The layer shows in one sub-zone, by id.
+         */
+        SubZoneMask: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "sub-zone";
+            /** Subzone */
+            subZone: string;
+        };
         /** SubZoneUpdate */
         SubZoneUpdate: {
             /** Name */
@@ -2126,6 +2190,36 @@ export interface components {
              * @enum {string}
              */
             lock: "auto" | "prodjlink" | "music" | "internal";
+        };
+        /**
+         * Transform
+         * @description The field shifted by `offset` metres, turned `rotateDeg` clockwise seen from above
+         *     and grown `scale` times, both about the zone's centre.
+         */
+        Transform: {
+            /**
+             * Offset
+             * @default [
+             *       0,
+             *       0,
+             *       0
+             *     ]
+             */
+            offset: [
+                number,
+                number,
+                number
+            ];
+            /**
+             * Rotatedeg
+             * @default 0
+             */
+            rotateDeg: number;
+            /**
+             * Scale
+             * @default 1
+             */
+            scale: number;
         };
         /** Transition */
         Transition: {

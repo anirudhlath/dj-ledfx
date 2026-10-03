@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import itertools
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, ClassVar
@@ -10,9 +10,15 @@ import numpy as np
 import pytest
 from conftest import builtin_look, nearest_frame, span
 from loguru import logger
+from runtime_fakes import BULB, LAMP, TILE, FlatField, register_fields
+from runtime_fakes import field_layer as _field
+from runtime_fakes import glow_layer as _glow
+from runtime_fakes import latest as _latest
+from runtime_fakes import look_of as _look
+from runtime_fakes import runtime_of as _runtime
+from runtime_fakes import sent as _sent
 from tempo_fakes import START, FakeTime, tempo_clock
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext, render_context
 from dj_ledfx.effects.field import FieldEffect
@@ -20,102 +26,19 @@ from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet, PlacedLeds, Space
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.builtin import classic_look_id
-from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.looks.model import Layer
 from dj_ledfx.looks.selectors import parse_selector
 from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import FloatRGB, RenderedFrame
-from dj_ledfx.zones.runtime import HORIZON_CAP_S, ZoneLight, ZoneRuntime
-
-TILE = DeviceCapabilities(protocol="LIFX", matrix=True)
-BULB = DeviceCapabilities(protocol="LIFX")
-LAMP = DeviceCapabilities(protocol="Govee")
-LIGHTS = (ZoneLight("tile", 4, TILE), ZoneLight("bulb", 1, BULB), ZoneLight("lamp", 3, LAMP))
-
-
-class FlatField(FieldEffect, register=False):
-    """Flat grey at `level`; raises or returns NaN when the test asks it to."""
-
-    mode: ClassVar[str] = "ok"
-
-    @classmethod
-    def parameters(cls) -> dict[str, EffectParam]:
-        return {"level": EffectParam(type="float", default=0.5, min=0.0, max=1.0)}
-
-    def __init__(self, level: float = 0.5) -> None:
-        self.level = level
-
-    def get_params(self) -> dict[str, Any]:
-        return {"level": self.level}
-
-    def _apply_params(self, **kwargs: Any) -> None:
-        self.level = float(kwargs.get("level", self.level))
-
-    def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
-        if FlatField.mode == "raise":
-            raise RuntimeError("boom")
-        value = np.nan if FlatField.mode == "nan" else self.level
-        return np.full((leds.count, 3), value, dtype=np.float32)
+from dj_ledfx.zones.runtime import HORIZON_CAP_S, ZoneLight
 
 
 @pytest.fixture(autouse=True)
-def _flat_field() -> Iterator[None]:
-    Effect._registry["flat_field"] = FlatField  # conftest drops it after each test
-    FlatField.mode = "ok"
+def _fields() -> Iterator[None]:
+    register_fields()  # conftest drops them after each test
     yield
     FlatField.mode = "ok"
-
-
-def _field(level: float = 0.5, opacity: float = 1.0) -> Layer:
-    return Layer(
-        id="field",
-        name="Flat",
-        type="field",
-        kind="flat_field",
-        opacity=opacity,
-        settings={"level": level},
-    )
-
-
-def _glow(level: float = 0.5) -> Layer:
-    return Layer(
-        id="glow", name="Glow", type="firmware", kind="glow_firmware", settings={"level": level}
-    )
-
-
-def _look(*layers: Layer, needs: tuple[Any, ...] = ()) -> Look:
-    return Look(id="test", name="Test", category="ambient", layers=layers, needs=needs)
-
-
-def _runtime(
-    look: Look,
-    lights: Sequence[ZoneLight] = LIGHTS,
-    latencies: dict[str, float | None] | None = None,
-    clock: TempoClock | None = None,
-    **kwargs: Any,
-) -> ZoneRuntime:
-    known = latencies or {}
-    return ZoneRuntime(
-        "zone",
-        look,
-        lights,
-        clock=clock or TempoClock(),
-        latency_s=lambda device_id: known.get(device_id, 0.02),
-        **kwargs,
-    )
-
-
-def _latest(runtime: ZoneRuntime) -> np.ndarray:
-    return nearest_frame(runtime.ring, 1e9).colors
-
-
-def _sent(runtime: ZoneRuntime, light: str, at: float, leds: int) -> np.ndarray:
-    """What a light's route sends at `at`, to a device of `leds` LEDs."""
-    route = runtime.route_for(light)
-    assert route is not None
-    sent = route.colors_at(at, leds)
-    assert sent is not None
-    return sent
 
 
 def test_firmware_runs_where_supported_and_the_field_plays_elsewhere() -> None:

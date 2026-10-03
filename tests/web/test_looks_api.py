@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
+import pytest
 import pytest_asyncio
 from api_home import Api, api_home
 from conftest import FakeLight
@@ -160,3 +163,66 @@ async def test_a_look_with_a_colour_it_cannot_use_is_refused(api: Api) -> None:
 
     assert no_colours.status_code == 400 and "1 to 16 hex colours" in no_colours.json()["detail"]
     assert not_hex.status_code == 400 and "hex colour" in not_hex.json()["detail"]
+
+
+def _raw(body: dict[str, Any]) -> dict[str, Any]:
+    """A body as Python's json writes it, NaN and all, which httpx's json= won't send."""
+    return {"content": json.dumps(body), "headers": {"content-type": "application/json"}}
+
+
+MODIFIERS = {
+    "mask": {"kind": "height", "range": [0.0, 1.0]},
+    "mirror": {"axis": "x", "at": None},
+    "transform": {"offset": [1.0, 0.0, 0.0], "rotateDeg": 90.0, "scale": 2.0},
+}
+
+
+async def test_a_look_with_layer_modifiers_is_saved_and_served(api: Api) -> None:
+    draft = (await api.client.get("/api/looks/classic-breathe")).json()
+    draft["name"] = "Low breathe"
+    draft["layers"][0].update(MODIFIERS)
+
+    created = await api.client.post("/api/looks", json=draft)
+
+    assert created.status_code == 201
+    layer = (await api.client.get(f"/api/looks/{created.json()['id']}")).json()["layers"][0]
+    assert {key: layer[key] for key in MODIFIERS} == MODIFIERS
+
+
+# Review Focus 4: garbage modifiers from a script or an old client are refused with the
+# reason, and nothing is saved.
+@pytest.mark.parametrize(
+    ("change", "status", "says"),
+    [
+        ({"mask": {"kind": "outdoors"}}, 422, "outdoors"),
+        ({"mask": {"kind": "height", "range": [float("nan"), 1.0]}}, 422, "nan"),
+        ({"mask": {"kind": "height", "range": [2.0, 1.0]}}, 400, "from low to high"),
+        ({"mask": {"kind": "anchor", "anchor": "sofa", "radius": 0.0}}, 422, "greater than 0"),
+        ({"mirror": {"axis": "w"}}, 422, "'x', 'y' or 'z'"),
+        ({"transform": {"scale": 50.0}}, 422, "less than or equal to 10"),
+        ({"transform": {"offset": [1.0, float("inf"), 0.0]}}, 422, "inf"),
+    ],
+)
+async def test_garbage_layer_modifiers_are_refused_with_the_reason(
+    api: Api, change: dict[str, Any], status: int, says: str
+) -> None:
+    draft = (await api.client.get("/api/looks/classic-breathe")).json()
+    draft["name"] = "Broken"
+    draft["layers"][0].update(change)
+
+    resp = await api.client.post("/api/looks", **_raw(draft))
+
+    assert resp.status_code == status
+    assert says in str(resp.json()["detail"])
+    listed = [look["id"] for look in (await api.client.get("/api/looks")).json()]
+    assert listed == BUILT_INS
+
+
+async def test_a_firmware_layer_with_a_mask_is_refused(api: Api) -> None:
+    firmware = (await api.client.get("/api/looks/firmware")).json()
+    firmware["name"] = "Masked"
+    firmware["layers"][0]["mask"] = {"kind": "room", "room": "kitchen"}
+
+    resp = await api.client.post("/api/looks", json=firmware)
+
+    assert resp.status_code == 400 and "takes no mask" in resp.json()["detail"]
