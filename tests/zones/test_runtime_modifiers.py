@@ -163,6 +163,21 @@ def test_the_downbeat_flash_follows_the_tempo_clock() -> None:
     assert latest(runtime)[0, 0] == pytest.approx(0.5)
 
 
+# M2: the flash runs before the trails, so it leaves one.
+def test_a_downbeat_flash_leaves_a_trail() -> None:
+    clock = tempo_clock(FakeTime())  # beat 0 at START, 120 BPM: a bar every 2 s
+    modifiers = LookModifiers(trails_s=10.0, downbeat_flash=True)
+    runtime = runtime_of(look_of(field_layer(0.5), modifiers=modifiers), clock=clock)
+
+    runtime.tick(START + 2.0)  # renders a few hundredths of a beat past the downbeat
+    flash = latest(runtime)[0, 0]
+    runtime.tick(START + 2.3)  # the flash is over (half a beat), its trail isn't
+
+    assert flash > 0.75
+    trail = flash * math.exp(-TRAILS_FALL * 0.3 / 10.0)
+    assert latest(runtime)[0, 0] == pytest.approx(trail, rel=1e-5)
+
+
 @pytest.mark.parametrize("on", [True, False])
 def test_a_look_follows_the_evening_only_when_it_asks(on: bool) -> None:
     look = look_of(field_layer(0.5), modifiers=LookModifiers(evening=on))

@@ -1,6 +1,7 @@
-"""A look's modifiers (spec §5.3): trails, the downbeat flash, the evening and the
-brightness cap. The runtime applies them to the zone's frame after its layers, in that
-order, each one making a new array, so a frame the ring holds never changes."""
+"""A look's modifiers (spec §5.3): the downbeat flash, trails (so a flash leaves one), the
+evening and the brightness cap. The runtime applies them to the zone's frame after its
+layers, in that order, each one making a new array, so a frame the ring holds never
+changes."""
 
 from __future__ import annotations
 

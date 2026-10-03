@@ -623,8 +623,8 @@ class ZoneRuntime:
 
     def _render_look(self, ctx: RenderContext) -> FloatRGB:
         """A new frame every tick: the ring keeps it. The look's streamed colours (its
-        layers), then its modifiers on them (spec §5.3): trails, the downbeat flash and the
-        evening. The lights that run their own effect are drawn after those, as they show
+        layers), then its modifiers on them (spec §5.3): the downbeat flash, trails (so a
+        flash leaves one) and the evening. The lights that run their own effect are drawn after those, as they show
         (for the preview, while it's watched), and the brightness cap goes over every LED.
         The trails keep their own copy of what they showed. Waiting, it's dark."""
         count = self.leds.count
@@ -632,10 +632,10 @@ class ZoneRuntime:
             return np.zeros((count, 3), dtype=np.float32)
         frame = self._render_layers(ctx)
         modifiers = self.look.modifiers
-        if modifiers.trails_s is not None:
-            frame = self._trails.apply(frame, ctx.t, modifiers.trails_s)
         if modifiers.downbeat_flash:
             frame = flashed(frame, ctx)
+        if modifiers.trails_s is not None:
+            frame = self._trails.apply(frame, ctx.t, modifiers.trails_s)
         if modifiers.evening:
             frame = warmed(frame, ctx)
         if self._claim_targets and self._env.watched():
