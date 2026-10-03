@@ -25,6 +25,8 @@ from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
 T = TypeVar("T")
 
+GET_SERVICE_GAP_S = 1.0  # discovery broadcasts GetService three times, this far apart
+
 PacketListener = Callable[[LifxPacket, tuple[str, int]], None]
 _Waiter = tuple[frozenset[int], "asyncio.Future[LifxPacket]"]
 
@@ -311,12 +313,12 @@ class LifxTransport:
 
         self.add_listener(_on_state_service)
         try:
-            # Broadcast GetService 3 times, 1 second apart; dedup by MAC
+            # Broadcast GetService 3 times, GET_SERVICE_GAP_S apart; dedup by MAC
             for i in range(3):
                 self._broadcast_get_service(("255.255.255.255", 56700))
                 if i < 2:
-                    await asyncio.sleep(1.0)
-            remaining = timeout_s - 2.0
+                    await asyncio.sleep(GET_SERVICE_GAP_S)
+            remaining = timeout_s - 2 * GET_SERVICE_GAP_S
             if remaining > 0:
                 await asyncio.sleep(remaining)
         finally:

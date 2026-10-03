@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from dj_ledfx.devices.lifx import transport as lifx_transport
 from dj_ledfx.devices.lifx.packet import GET_VERSION, STATE_UNHANDLED, STATE_VERSION, LifxPacket
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
@@ -88,15 +89,22 @@ async def test_rtt_probe_correlation() -> None:
     await transport.close()
 
 
+@pytest.fixture
+def quick_broadcasts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Discovery broadcasts GetService 10 ms apart instead of a second apart."""
+    monkeypatch.setattr(lifx_transport, "GET_SERVICE_GAP_S", 0.01)
+
+
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("quick_broadcasts")
 async def test_discover_sends_broadcast() -> None:
-    """Discovery sends GetService(2) with tagged=1."""
-    transport = LifxTransport()
-    await transport.open()
-    # Discovery with 0.1s timeout returns empty list (no devices on test network)
+    """Discovery broadcasts GetService (2), tagged, three times; with no light answering,
+    it finds nothing."""
+    transport, sent = _transport()
     devices = await transport.discover(timeout_s=0.1)
-    assert isinstance(devices, list)
-    await transport.close()
+    assert devices == []
+    broadcasts = [(packet.msg_type, packet.tagged, addr) for packet, addr in sent.packets]
+    assert broadcasts == [(2, True, ("255.255.255.255", 56700))] * 3
 
 
 class _Sent:
@@ -307,6 +315,7 @@ async def test_query_version_retries_once_then_gives_up() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("quick_broadcasts")
 async def test_discovery_skips_known_lights_and_leaves_silent_ones_for_later() -> None:
     transport, sent = _transport()
     known, silent, new = (bytes.fromhex(f"d073d500000{i}") for i in (1, 2, 3))
