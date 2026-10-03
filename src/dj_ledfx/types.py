@@ -63,6 +63,12 @@ class BeatContext:
     dj: bool = False  # a DJ's deck drives the tempo (effects/context.py's DJ_BEAT signal)
     beat_index: int = 0  # beats since the tempo clock started counting
 
+    @property
+    def beats(self) -> float:
+        """Where the music is: beats since the tempo clock started counting, and the part
+        of this one gone."""
+        return self.beat_index + self.beat_phase
+
 
 @dataclass(frozen=True, slots=True)
 class DeviceStats:

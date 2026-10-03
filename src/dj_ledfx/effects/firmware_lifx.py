@@ -20,7 +20,13 @@ from dj_ledfx.devices.lifx.packet import (
 )
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
-from dj_ledfx.effects.color import hex_to_rgb, palette_lerp, rgb_to_hex, to_float_rgb
+from dj_ledfx.effects.color import (
+    hex_to_rgb,
+    palette_lerp,
+    palette_loop,
+    rgb_to_hex,
+    to_float_rgb,
+)
 from dj_ledfx.effects.easing import raised_cosine
 from dj_ledfx.effects.firmware import FirmwareEffect, Params, require_adapter
 from dj_ledfx.effects.params import EffectParam
@@ -56,13 +62,8 @@ def _hsbk(colour: str | RGB, brightness: float, kelvin: int = 3500) -> HSBK:
     return hue, sat, round(bri * clamp01(brightness)), k
 
 
-def _loop(palette: list[RGB], positions: NDArray[np.float64]) -> NDArray[np.uint8]:
-    """Palette colours around a loop: position 0 and 1 are the same colour."""
-    return palette_lerp([*palette, palette[0]], np.mod(positions, 1.0))
-
-
 def _cyclic(palette: list[RGB], positions: NDArray[np.float64]) -> FloatRGB:
-    return to_float_rgb(_loop(palette, positions))
+    return to_float_rgb(palette_loop(palette, positions))
 
 
 def _lifx(adapter: DeviceAdapter) -> LifxAdapterBase:
@@ -223,7 +224,7 @@ class LifxMove(FirmwareEffect):
         palette = [hex_to_rgb(c) for c in params.get("palette", MOVE_PALETTE)]
         count = strip.led_count
         positions = np.arange(count, dtype=np.float64) / max(1, count)
-        gradient = _loop(palette, positions)
+        gradient = palette_loop(palette, positions)
         await strip.set_zone_colours(
             [_hsbk((int(r), int(g), int(b)), brightness) for r, g, b in gradient]
         )

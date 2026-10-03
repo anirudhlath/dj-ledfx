@@ -1,65 +1,35 @@
-import math
-
 import numpy as np
+from conftest import beat_ctx
 
 from dj_ledfx.effects.color_chase import ColorChase
-from dj_ledfx.types import BeatContext
 
 RED, GREEN, BLUE, WHITE = [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]
 FOUR = ["#ff0000", "#00ff00", "#0000ff", "#ffffff"]
 
 
-def _ctx(beat_phase: float = 0.0, bar_phase: float = 0.0, bpm: float = 128.0) -> BeatContext:
-    return BeatContext(beat_phase=beat_phase, bar_phase=bar_phase, bpm=bpm, dt=0.016)
-
-
-def _at(beats: float, bpm: float = 120.0) -> BeatContext:
-    """The beat `beats` beats into the music."""
-    index = math.floor(beats)
-    return BeatContext(
-        beat_phase=beats - index, bar_phase=beats % 4 / 4, bpm=bpm, dt=0.016, beat_index=index
-    )
-
-
 def _first_light(chase: ColorChase, beats: float) -> list[int]:
-    colours: list[int] = chase.render(_at(beats), 5)[0].tolist()
-    return colours
+    return chase.render(beat_ctx(beats), 5)[0].tolist()
 
 
 def test_output_shape_and_dtype():
     effect = ColorChase()
-    result = effect.render(_ctx(), 20)
+    result = effect.render(beat_ctx(0.0), 20)
     assert result.shape == (20, 3)
     assert result.dtype == np.uint8
 
 
 def test_spatial_gradient():
     effect = ColorChase()
-    result = effect.render(_ctx(), 20)
+    result = effect.render(beat_ctx(0.0), 20)
     # Not all LEDs should be the same color (spatial variation)
     assert not np.all(result == result[0])
 
 
 def test_single_led_degradation():
     effect = ColorChase()
-    result = effect.render(_ctx(), 1)
+    result = effect.render(beat_ctx(0.0), 1)
     assert result.shape == (1, 3)
     assert result.max() > 0
-
-
-def test_scrolls_with_beat_phase():
-    effect = ColorChase()
-    frame1 = effect.render(_ctx(beat_phase=0.0), 20)
-    frame2 = effect.render(_ctx(beat_phase=0.5), 20)
-    assert not np.array_equal(frame1, frame2), "Should scroll with beat phase"
-
-
-def test_direction_reverse():
-    effect_fwd = ColorChase(direction="forward")
-    effect_rev = ColorChase(direction="reverse")
-    fwd = effect_fwd.render(_ctx(beat_phase=0.25), 20)
-    rev = effect_rev.render(_ctx(beat_phase=0.25), 20)
-    assert not np.array_equal(fwd, rev)
 
 
 def test_parameters_schema():
@@ -112,26 +82,34 @@ def test_beats_per_step_sets_how_long_each_colour_takes() -> None:
 # One band over five LEDs puts the palette's four colours a LED apart.
 def test_the_colours_travel_forward_a_light_a_step() -> None:
     chase = ColorChase(palette=FOUR, band_count=1.0)
-    before, after = chase.render(_at(6.0), 5), chase.render(_at(7.0), 5)
+    before, after = chase.render(beat_ctx(6.0), 5), chase.render(beat_ctx(7.0), 5)
     assert np.array_equal(after[1:], before[:-1])
 
 
 def test_reverse_sends_them_back_the_other_way() -> None:
     chase = ColorChase(palette=FOUR, band_count=1.0, direction="reverse")
-    before, after = chase.render(_at(6.0), 5), chase.render(_at(7.0), 5)
+    before, after = chase.render(beat_ctx(6.0), 5), chase.render(beat_ctx(7.0), 5)
     assert np.array_equal(after[:-1], before[1:])
 
 
 def test_a_light_glides_on_over_beats_and_bars() -> None:
-    chase = ColorChase(palette=["#ff0000", "#00ff00", "#0000ff"])  # three colours: not a bar
+    chase = ColorChase(palette=FOUR[:3])  # three colours: not a bar
     for beat in (1.0, 4.0, 7.0):
-        before = chase.render(_at(beat - 1e-6), 20).astype(int)
-        on = chase.render(_at(beat), 20).astype(int)
+        before = chase.render(beat_ctx(beat - 1e-6), 20).astype(int)
+        on = chase.render(beat_ctx(beat), 20).astype(int)
         assert np.abs(on - before).max() <= 1
 
 
 def test_the_tempo_sets_when_the_beats_come_and_nothing_else() -> None:
     chase = ColorChase()
-    assert np.array_equal(
-        chase.render(_at(2.5, bpm=90.0), 20), chase.render(_at(2.5, bpm=150.0), 20)
-    )
+    slow, fast = beat_ctx(2.5, bpm=90.0), beat_ctx(2.5, bpm=150.0)
+    assert np.array_equal(chase.render(slow, 20), chase.render(fast, 20))
+
+
+def test_new_settings_apply_from_the_next_frame() -> None:
+    for settings in ({"direction": "reverse"}, {"band_count": 3.0}):
+        chase = ColorChase(palette=FOUR)
+        chase.render(beat_ctx(1.0), 20)
+        chase.set_params(**settings)
+        fresh = ColorChase(palette=FOUR, **settings)  # type: ignore[arg-type]
+        assert np.array_equal(chase.render(beat_ctx(1.0), 20), fresh.render(beat_ctx(1.0), 20))

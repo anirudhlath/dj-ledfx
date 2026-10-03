@@ -83,6 +83,12 @@ def palette_lerp(
     return _eight_bit(palette_at(np.asarray(palette, dtype=np.float32), positions))
 
 
+def palette_loop(palette: list[RGB], positions: NDArray[np.float64]) -> NDArray[np.uint8]:
+    """palette_lerp around a loop: position 0 and 1 are the same colour, the last colour
+    blending back into the first, and any position wraps round."""
+    return palette_lerp([*palette, palette[0]], np.mod(positions, 1.0))
+
+
 def _eight_bit(values: NDArray[np.floating[Any]]) -> NDArray[np.uint8]:
     out: NDArray[np.uint8] = np.clip(values, 0, 255).astype(np.uint8)
     return out

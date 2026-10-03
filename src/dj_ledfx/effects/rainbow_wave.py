@@ -8,12 +8,14 @@ from numpy.typing import NDArray
 from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.color import hsv_to_rgb_array
 from dj_ledfx.effects.easing import ease_in
-from dj_ledfx.effects.energy import bpm_energy
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import BeatContext
 
 
 class RainbowWave(StripEffect):
+    """A rainbow across the strip, turning once a bar, its brightness dipping through each
+    beat by `beat_pulse`."""
+
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
@@ -54,8 +56,6 @@ class RainbowWave(StripEffect):
             self._beat_pulse = float(kwargs["beat_pulse"])
 
     def render(self, ctx: BeatContext, led_count: int) -> NDArray[np.uint8]:
-        energy = bpm_energy(ctx.bpm)
-        speed = 1.0 + energy
-        hues = (np.linspace(0.0, self._wave_count, led_count) + ctx.bar_phase * speed) % 1.0
+        hues = (np.linspace(0.0, self._wave_count, led_count) + ctx.bar_phase) % 1.0
         value = 1.0 - self._beat_pulse * ease_in(ctx.beat_phase, 2.0)
         return hsv_to_rgb_array(hues, self._saturation, value)

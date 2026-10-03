@@ -19,7 +19,7 @@ from dj_ledfx.devices.capabilities import (
     NoAnswer,
 )
 from dj_ledfx.effects.base import Effect
-from dj_ledfx.effects.context import NO_SIGNALS, RenderContext
+from dj_ledfx.effects.context import NO_SIGNALS, RenderContext, to_beat_context
 from dj_ledfx.effects.firmware import FirmwareEffect, Params
 from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
 from dj_ledfx.effects.params import EffectParam
@@ -31,7 +31,7 @@ from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.spatial.geometry import DeviceGeometry
 from dj_ledfx.tempo.timeline import beat_and_bar
-from dj_ledfx.types import DeviceInfo, DeviceStats, FloatRGB, RenderedFrame
+from dj_ledfx.types import BeatContext, DeviceInfo, DeviceStats, FloatRGB, RenderedFrame
 
 
 class MockDeviceAdapter(DeviceAdapter):
@@ -407,6 +407,11 @@ def tempo_ctx(beats: float, *, bpm: float = 120.0) -> RenderContext:
         bar_index=bar_index,
         signals=NO_SIGNALS,
     )
+
+
+def beat_ctx(beats: float, *, bpm: float = 120.0) -> BeatContext:
+    """tempo_ctx()'s moment as a 1D effect sees it."""
+    return to_beat_context(tempo_ctx(beats, bpm=bpm))
 
 
 # The app's effects and GlowFirmware. Every test starts from these, and an effect a test

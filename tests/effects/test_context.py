@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from conftest import tempo_ctx
 from tempo_fakes import START, FakeTime, play, tempo_clock
 
 from dj_ledfx.effects.context import (
@@ -83,3 +84,8 @@ def test_to_beat_context_keeps_the_beat_bpm_and_dt() -> None:
         128.0,
         0.02,
     )
+
+
+def test_a_moment_says_where_the_music_is_in_beats() -> None:
+    assert tempo_ctx(13.25).beats == 13.25
+    assert to_beat_context(tempo_ctx(13.25)).beats == 13.25

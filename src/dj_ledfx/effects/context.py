@@ -43,6 +43,12 @@ class RenderContext:
     bar_index: int
     signals: SignalView
 
+    @property
+    def beats(self) -> float:
+        """Where the music is: beats since the tempo clock started counting, and the part
+        of this one gone."""
+        return self.beat_index + self.beat_phase
+
 
 def render_context(clock: TempoClock, t: float, dt: float) -> RenderContext:
     """Read the tempo clock at the frame's target time `t` (spec §7.2): only what a frame

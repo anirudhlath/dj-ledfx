@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.base import StripEffect
-from dj_ledfx.effects.color import hex_to_rgb, palette_lerp, rgb_to_hex
+from dj_ledfx.effects.color import hex_to_rgb, palette_loop, rgb_to_hex
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import BeatContext
 
@@ -47,6 +47,7 @@ class ColorChase(StripEffect):
         self._band_count = band_count
         self._beats_per_step = beats_per_step
         self._direction = direction
+        self._places: NDArray[np.float64] | None = None  # _places_for()'s, for an LED count
 
     def get_params(self) -> dict[str, Any]:
         return {
@@ -65,13 +66,19 @@ class ColorChase(StripEffect):
             self._beats_per_step = float(kwargs["beats_per_step"])
         if "direction" in kwargs:
             self._direction = str(kwargs["direction"])
+        self._places = None
 
     def render(self, ctx: BeatContext, led_count: int) -> NDArray[np.uint8]:
-        steps = (ctx.beat_index + ctx.beat_phase) / self._beats_per_step
-        places = np.linspace(0.0, 1.0, led_count)
-        if self._direction == "reverse":
-            places = places[::-1]
         # A light runs through the palette in time (a step a colour) while the colours lie
         # the other way along the strip, so they travel forward.
-        along = (steps / len(self._palette) - places * self._band_count) % 1.0
-        return palette_lerp([*self._palette, self._palette[0]], along)
+        palettes = ctx.beats / (self._beats_per_step * len(self._palette))
+        return palette_loop(self._palette, palettes - self._places_for(led_count))
+
+    def _places_for(self, led_count: int) -> NDArray[np.float64]:
+        """Each LED's place along the strip in bands, 0 to band_count (from the far end in
+        reverse), kept until the LED count or a setting changes."""
+        places = self._places
+        if places is None or len(places) != led_count:
+            places = np.linspace(0.0, self._band_count, led_count)
+            self._places = places = places[::-1] if self._direction == "reverse" else places
+        return places
