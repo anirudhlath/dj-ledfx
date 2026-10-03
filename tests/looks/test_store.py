@@ -142,6 +142,18 @@ async def test_saved_looks_with_numbers_out_of_bounds_load_clamped(db: StateDB) 
     assert loaded["mine-far"].layers[0].transform == Transform((1000.0, 0.0, 0.0))
 
 
+# M8: a request can't give two layers one id, but a saved look that has them still loads.
+async def test_a_saved_look_whose_layers_share_an_id_loads(db: StateDB) -> None:
+    now = "2026-09-24T00:00:00+00:00"
+    body = look_to_dict(_mine())
+    body["layers"] = [body["layers"][0], body["layers"][0]]
+    await db.write_many([(INSERT_LOOK, ("mine-twice", json.dumps(body), now, now))])
+
+    store = await _loaded(db)
+
+    assert [layer.id for layer in store.get("mine-twice").layers] == ["l1", "l1"]
+
+
 # Review Focus 1: a look saved before M4 checked transitions loads, clamped, never dropped.
 async def test_saved_looks_with_odd_transition_durations_load_clamped(db: StateDB) -> None:
     now = "2026-09-24T00:00:00+00:00"

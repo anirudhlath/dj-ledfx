@@ -227,6 +227,19 @@ async def test_garbage_layer_modifiers_are_refused_with_the_reason(
     assert listed == BUILT_INS
 
 
+# M8: a look whose two layers share an id is refused with the reason, and nothing is saved.
+async def test_a_look_whose_layers_share_an_id_is_refused(api: Api) -> None:
+    draft = (await api.client.get("/api/looks/classic-breathe")).json()
+    draft["name"] = "Twice"
+    draft["layers"] = [draft["layers"][0], {**draft["layers"][0], "blend": "add"}]
+
+    resp = await api.client.post("/api/looks", json=draft)
+
+    assert resp.status_code == 422 and "share the id" in str(resp.json()["detail"])
+    listed = [look["id"] for look in (await api.client.get("/api/looks")).json()]
+    assert listed == BUILT_INS
+
+
 async def test_a_firmware_layer_with_a_mask_is_refused(api: Api) -> None:
     firmware = (await api.client.get("/api/looks/firmware")).json()
     firmware["name"] = "Masked"

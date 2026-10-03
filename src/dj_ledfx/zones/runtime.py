@@ -195,7 +195,7 @@ class ZoneRuntime:
         self._lights: tuple[ZoneLight, ...] = ()
         # Each field layer's view of the LEDs (its mask, mirror and transform), with the
         # modifiers it was made for; a new LED set clears them (_place).
-        self._views: dict[str, tuple[object, LayerView]] = {}
+        self._views: dict[int, tuple[object, LayerView]] = {}  # by the layer's place
         self._rendering = ""
         self._last_crash_log = float("-inf")
         self._render_s = 0.0  # moving average of the render time
@@ -631,9 +631,10 @@ class ZoneRuntime:
     def _render_look(self, ctx: RenderContext) -> FloatRGB:
         """A new frame every tick: the ring keeps it. The look's streamed colours (its
         layers), then its modifiers on them (spec §5.3): the downbeat flash, trails (so a
-        flash leaves one) and the evening. The lights that run their own effect are drawn after those, as they show
-        (for the preview, while it's watched), and the brightness cap goes over every LED.
-        The trails keep their own copy of what they showed. Waiting, it's dark."""
+        flash leaves one) and the evening. The lights that run their own effect are drawn
+        after those, as they show (for the preview, while it's watched), and the brightness
+        cap goes over every LED. The trails keep their own copy of what they showed.
+        Waiting, it's dark."""
         count = self.leds.count
         if self.waiting_for or count == 0:
             return np.zeros((count, 3), dtype=np.float32)
@@ -656,9 +657,9 @@ class ZoneRuntime:
         the lights that stream it."""
         count = self.leds.count
         frame: FloatRGB | None = None
-        for layer, field_effect in self._fields:
+        for index, (layer, field_effect) in enumerate(self._fields):
             self._rendering = layer.name
-            view = self._view(layer)
+            view = self._view(index, layer)
             colors = _finite(field_effect.render(ctx, view.leds))
             whole = view.weight is None
             if frame is None and whole and layer.blend == "normal" and layer.opacity == 1.0:
@@ -685,15 +686,16 @@ class ZoneRuntime:
             self._rendering = layer.name
             frame[where] = _finite(firmware.emulate(ctx, leds)) * np.float32(layer.opacity)
 
-    def _view(self, layer: Layer) -> LayerView:
-        """The layer's view of the zone's LEDs, made again only when its modifiers or the
-        LED set change, so the effect's per-LED work is kept between frames."""
+    def _view(self, index: int, layer: Layer) -> LayerView:
+        """The view of the zone's LEDs for the field layer at `index`, made again only when
+        its modifiers or the LED set change, so the effect's per-LED work is kept between
+        frames. Kept by place, not id: a saved look may give two layers one id."""
         modifiers = (layer.mask, layer.mirror, layer.transform)
-        kept = self._views.get(layer.id)
+        kept = self._views.get(index)
         if kept is not None and kept[0] == modifiers:
             return kept[1]
         view = layer_view(layer, self.leds)
-        self._views[layer.id] = (modifiers, view)
+        self._views[index] = (modifiers, view)
         return view
 
     def _compile(self) -> None:

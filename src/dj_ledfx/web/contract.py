@@ -10,6 +10,7 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
+from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
@@ -217,7 +218,13 @@ def look_out(look: looks.Look, starred: bool) -> Look:
 
 
 def look_in(body: Look) -> looks.Look:
-    """The look a request describes. Raises LookError when M1 can't read it."""
+    """The look a request describes. Raises LookError when M1 can't read it. One whose
+    layers share an id is refused (422): the editor tells layers apart by id. A saved
+    look can still have them (the runtime keeps each layer's view by its place)."""
+    ids = [layer.id for layer in body.layers]
+    shared = next((layer_id for layer_id in ids if ids.count(layer_id) > 1), None)
+    if shared is not None:
+        raise HTTPException(422, f"Two layers share the id '{shared}'; each needs its own")
     return looks.look_from_dict(body.model_dump(by_alias=True))
 
 

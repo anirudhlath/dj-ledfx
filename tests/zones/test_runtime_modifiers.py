@@ -178,6 +178,22 @@ def test_a_downbeat_flash_leaves_a_trail() -> None:
     assert latest(runtime)[0, 0] == pytest.approx(trail, rel=1e-5)
 
 
+# M8: views are kept by the layer's place in the look, so two layers that share an id keep
+# their own views (and their effects' per-LED work) from frame to frame.
+def test_two_layers_with_one_id_keep_their_own_views() -> None:
+    look = look_of(
+        place_layer(transform=Transform(offset=(1.0, 0.0, 0.0))),
+        place_layer(transform=Transform(scale=2.0), blend="add"),
+    )
+    runtime = runtime_of(look)
+
+    runtime.tick(1000.0)
+    runtime.tick(1000.1)
+
+    first, second, first_again, second_again = PlaceField.seen
+    assert first_again is first and second_again is second
+
+
 @pytest.mark.parametrize("on", [True, False])
 def test_a_look_follows_the_evening_only_when_it_asks(on: bool) -> None:
     look = look_of(field_layer(0.5), modifiers=LookModifiers(evening=on))
