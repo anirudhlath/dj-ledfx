@@ -81,7 +81,7 @@ def _within(key: str, param: EffectParam, value: Any, number: float) -> None:
 def check_setting(key: str, param: EffectParam, value: Any) -> None:
     """Raise ValueError, naming the setting, when the value doesn't fit its type."""
     if param.type in ("float", "int"):
-        if isinstance(value, bool) or not isinstance(value, int | float):
+        if not is_finite_number(value):
             raise ValueError(f"{key} must be a number")
         _within(key, param, value, value)
     elif param.type == "color":

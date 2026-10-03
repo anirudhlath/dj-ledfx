@@ -38,14 +38,16 @@ def test_parameters_schema():
     assert "band_count" in schema
     assert "direction" in schema
     assert schema["direction"].type == "choice"
+    assert schema["band_count"].label == "Band count"
     step = schema["beats_per_step"]
+    # Half a beat at least: a light swings from dark to bright and back at most once a beat
     assert (step.type, step.default, step.min, step.max, step.step, step.label) == (
         "float",
         1.0,
-        0.25,
+        0.5,
         8.0,
         0.25,
-        "Beats per Step",
+        "Beats per step",
     )
 
 

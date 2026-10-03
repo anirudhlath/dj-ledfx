@@ -1,7 +1,13 @@
 import numpy as np
 import pytest
 
-from dj_ledfx.effects.color import hex_to_rgb, hsv_to_rgb_array, palette_lerp, rgb_to_hex
+from dj_ledfx.effects.color import (
+    hex_to_rgb,
+    hsv_to_rgb_array,
+    palette_lerp,
+    palette_loop,
+    rgb_to_hex,
+)
 
 
 def test_hex_to_rgb():
@@ -65,6 +71,13 @@ def test_palette_lerp_wraps():
     positions = np.array([0.0, 0.5, 1.0])
     result = palette_lerp(palette, positions)
     assert result.shape == (3, 3)
+
+
+def test_palette_loop_blends_the_last_colour_back_into_the_first_and_wraps() -> None:
+    positions = np.array([0.0, 0.25, 0.5, 0.75, 1.0, -0.25, 1.5])
+    colours = palette_loop([(255, 0, 0), (0, 0, 255)], positions).tolist()
+    half = [127, 0, 127]
+    assert colours == [[255, 0, 0], half, [0, 0, 255], half, [255, 0, 0], half, [0, 0, 255]]
 
 
 def test_palette_lerp_single_color():

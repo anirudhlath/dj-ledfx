@@ -25,10 +25,12 @@ class ColorChase(StripEffect):
                 type="color_list", default=list(_DEFAULT_PALETTE), label="Palette"
             ),
             "band_count": EffectParam(
-                type="float", default=2.0, min=1.0, max=8.0, step=0.5, label="Band Count"
+                type="float", default=2.0, min=1.0, max=8.0, step=0.5, label="Band count"
             ),
+            # At least half a beat, so a light swings from dark to bright and back at most
+            # once a beat, as Beat pulse flashes
             "beats_per_step": EffectParam(
-                type="float", default=1.0, min=0.25, max=8.0, step=0.25, label="Beats per Step"
+                type="float", default=1.0, min=0.5, max=8.0, step=0.25, label="Beats per step"
             ),
             "direction": EffectParam(
                 type="choice", default="forward", choices=["forward", "reverse"], label="Direction"
@@ -39,8 +41,8 @@ class ColorChase(StripEffect):
         self,
         palette: list[str] | None = None,
         band_count: float = 2.0,
-        direction: str = "forward",
         beats_per_step: float = 1.0,
+        direction: str = "forward",
     ) -> None:
         colors = palette or list(_DEFAULT_PALETTE)
         self._palette = [hex_to_rgb(c) for c in colors]
