@@ -84,6 +84,13 @@ def _finite(colors: FloatRGB) -> FloatRGB:
     return colors
 
 
+def _opacity(layer: Layer, view: LayerView) -> float | NDArray[np.float32]:
+    """How much of a field layer shows: its opacity, by each LED's weight in its mask."""
+    if view.weight is None:
+        return layer.opacity
+    return view.weight if layer.opacity == 1.0 else view.weight * np.float32(layer.opacity)
+
+
 def _layout(look: Look) -> list[tuple[str, str, str, bool, object]]:
     """What can't change in place: the layers, and which lights each one picks."""
     return [
@@ -673,13 +680,12 @@ class ZoneRuntime:
             self._rendering = layer.name
             view = self._view(index, layer)
             colors = _finite(field_effect.render(ctx, view.leds))
-            whole = view.weight is None
-            if frame is None and whole and layer.blend == "normal" and layer.opacity == 1.0:
-                frame = np.array(colors, dtype=np.float32)  # over black: its own colours
+            opacity = _opacity(layer, view)
+            if frame is None and layer.blend == "normal":  # over black: its colours, weighed
+                frame = np.multiply(colors, opacity, dtype=np.float32)
                 continue
             if frame is None:
                 frame = np.zeros((count, 3), dtype=np.float32)
-            opacity = layer.opacity if view.weight is None else view.weight * layer.opacity
             blend_into(frame, colors, layer.blend, opacity)
         if frame is None:
             frame = np.zeros((count, 3), dtype=np.float32)

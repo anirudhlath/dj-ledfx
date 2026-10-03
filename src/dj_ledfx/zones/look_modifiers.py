@@ -88,7 +88,10 @@ def _evening_factor(amount: float) -> NDArray[np.float32]:
 def capped(frame: FloatRGB, cap: float) -> FloatRGB:
     """Each LED no brighter than the cap, its hue kept: a colour whose brightest channel
     is over the cap is scaled down until that channel is at it."""
-    peak = frame.max(axis=1, keepdims=True)
-    scale = np.minimum(1.0, np.float32(cap) / np.maximum(peak, np.float32(1e-6)))
-    limited: FloatRGB = frame * scale.astype(np.float32)
+    peak = np.maximum(frame[:, 0], frame[:, 1])  # each LED's brightest channel
+    np.maximum(peak, frame[:, 2], out=peak)
+    np.maximum(peak, np.float32(1e-6), out=peak)
+    scale = np.divide(np.float32(cap), peak, out=peak)  # in place: each LED's scale
+    np.minimum(scale, np.float32(1.0), out=scale)
+    limited: FloatRGB = frame * scale[:, None]
     return limited

@@ -20,7 +20,7 @@ def blend_into(
 ) -> None:
     """Composite `top` onto `base`, in place, at `opacity` (0..1): one for every LED, or
     each LED its own, shape (N, 1) (a layer's mask)."""
-    weight = np.float32(opacity) if isinstance(opacity, float | int) else opacity
+    weight = np.asarray(opacity, dtype=np.float32)
     if mode == "add":
         base += top * weight
         return
