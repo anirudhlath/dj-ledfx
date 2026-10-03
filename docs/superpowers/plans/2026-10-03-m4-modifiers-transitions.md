@@ -5847,6 +5847,13 @@ elif STEP == "midpoint":
     start(ROOM, "sunset", {"kind": "fade", "durationS": 10})
     time.sleep(11)
     say("done: sunset alone")
+elif STEP == "to-firmware":
+    start(ROOM, "sunset")
+    time.sleep(5)
+    say("a 10 s fade to the firmware showcase starts now: the lights it runs itself keep sunset, then start their own effect at about 5 s with no blink")
+    start(ROOM, "firmware", {"kind": "fade", "durationS": 10})
+    time.sleep(11)
+    say("done: the firmware showcase alone")
 elif STEP == "interrupt":
     start(ROOM, "lava", {"kind": "fade", "durationS": 6})
     time.sleep(2)
@@ -5920,9 +5927,10 @@ Then, one step at a time, with the owner watching, run `uv run python /tmp/m4-sh
 3. `trails`, `flash`, `cap` and `cap-firmware`: the look modifiers; the cap holds the lights that run their own effect too (ruling 9). `evening`: only telling while the evening's amount is above 0; at 0 the owner sees the look as it is.
 4. `fade`, `wipe`, `spread` and `dissolve`: 6 s each, lava to aurora. A wipe runs along the room's longer side, west to east or north to south; a spread grows outward from the anchor nearest the room's middle (ruling 10).
 5. `midpoint`: the firmware showcase, then a 10 s fade to sunset. The lights that run their own effect switch whole 5 s in; the rest fade (ruling 12).
-6. `interrupt`: a fade, and a second one 2 s into it, with no jump (ruling 13).
-7. `off`: Off 2 s into a fade. The room's lights go back as they were and stay so past the midpoint.
-8. `stop`: Stop all.
+6. `to-firmware`: the other way, sunset, then a 10 s fade to the firmware showcase. The lights the showcase runs itself keep showing sunset until their own effect starts, about 5 s in. The owner looks for no blink on them: no dark frame and no other colour between sunset and their effect (the review's I2). The rest fade.
+7. `interrupt`: a fade, and a second one 2 s into it, with no jump (ruling 13).
+8. `off`: Off 2 s into a fade. The room's lights go back as they were and stay so past the midpoint.
+9. `stop`: Stop all.
 
 The tunables are the owner's to judge here: the evening's tint and level, the flash's level and length, the trails' fall, the transitions' edges and the masks' soft edge (`EVENING_TINT`, `EVENING_LEVEL`, `FLASH_LEVEL`, `FLASH_BEATS`, `TRAILS_FALL`, `EDGES`, `MASK_EDGE_M`). A change they ask for goes into the task that owns the constant (Task 3, 4 or 6), with its tests, as a fix commit on this branch.
 
