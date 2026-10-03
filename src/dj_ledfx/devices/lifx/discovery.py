@@ -123,20 +123,10 @@ class LifxBackend(DeviceBackend):
                     "Skipping known LIFX device '{}': missing ip or mac", row.get("name")
                 )
                 return None
-            mac = bytes.fromhex(mac_hex)
-            try:
-                version = await transport.query_version(mac, ip, LIFX_PORT)
-            except NoAnswer:
-                version = None
-            if version is None:
-                logger.info(
-                    "Known LIFX device '{}' didn't answer; it stays offline", row.get("name")
-                )
+            record = await transport.record_of(bytes.fromhex(mac_hex), ip, LIFX_PORT)
+            if record is None:
+                logger.info("Known LIFX device '{}' stays offline for now", row.get("name"))
                 return None
-            vendor, product = version
-            record = LifxDeviceRecord(
-                mac=mac, ip=ip, port=LIFX_PORT, vendor=vendor, product=product
-            )
             return await self._setup(record, config)
 
         outcomes = await asyncio.gather(*(_reconnect(row) for row in rows), return_exceptions=True)

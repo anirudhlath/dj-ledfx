@@ -145,36 +145,6 @@ class GoveeTransport:
         logger.info("Govee discovery found {} devices", len(discovered))
         return list(discovered.values())
 
-    async def unicast_sweep(
-        self,
-        hosts: list[str],
-        concurrency: int = 50,
-        timeout_s: float = 0.5,
-    ) -> list[GoveeDeviceRecord]:
-        """Send scan command to every IP on port 4001."""
-        discovered: dict[str, GoveeDeviceRecord] = {}  # device_id → record
-
-        self._cmd_handlers["scan"] = self._make_scan_handler(discovered)
-
-        try:
-            scan_msg = build_scan_message()
-            scan_data = json.dumps(scan_msg).encode("utf-8")
-
-            sem = asyncio.Semaphore(concurrency)
-
-            async def _probe_host(ip: str) -> None:
-                async with sem:
-                    if self._send_transport:
-                        self._send_transport.sendto(scan_data, (ip, DISCOVERY_PORT))
-
-            await asyncio.gather(*[_probe_host(ip) for ip in hosts])
-            await asyncio.sleep(timeout_s)
-        finally:
-            self._cmd_handlers.pop("scan", None)
-
-        logger.info("Govee unicast sweep found {} devices", len(discovered))
-        return list(discovered.values())
-
     async def query_status(self, ip: str, timeout_s: float = 2.0) -> dict[str, Any] | None:
         """The lamp's status, or None when no reply comes within timeout_s. A query to the
         lamp already in flight is shared, not sent again: each caller gets its one reply."""

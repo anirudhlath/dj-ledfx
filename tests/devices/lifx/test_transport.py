@@ -334,6 +334,18 @@ async def test_a_light_that_can_t_say_its_version_has_none() -> None:
     assert await light.query_version(MAC, "127.0.0.1", 56700) is None
 
 
+async def test_a_light_s_record_comes_from_its_version_or_there_is_none() -> None:
+    """Discovery and the reconnect at start build a record one way: a light silent to
+    GetVersion, or one that can't say it, gives none, and a later scan asks again."""
+    light = FakeLifxTransport(product=57)
+    record = await light.record_of(MAC, "127.0.0.1", 56700)
+    assert record == LifxDeviceRecord(MAC, "127.0.0.1", 56700, vendor=1, product=57)
+
+    for light in (FakeLifxTransport(silent=True), FakeLifxTransport(unhandled={GET_VERSION})):
+        assert await light.record_of(MAC, "127.0.0.1", 56700) is None
+        assert light.types() == [GET_VERSION] * (2 if light.silent else 1)
+
+
 ADDR = ("127.0.0.1", 56700)
 
 

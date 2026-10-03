@@ -327,6 +327,8 @@ Wave N:
 
 ### Subnet-wide Unicast Probing
 
+Superseded by the light-output fixes (2026-10-02): the orchestrator never ran these sweeps, and both are gone, so discovery only broadcasts. `DiscoveryConfig` keeps `unicast_concurrency`, `unicast_timeout_s` and `subnet_mask`, unread, so a config file or export that carries them still loads.
+
 After each broadcast wave, send unicast probes to every IP in the subnet:
 
 **LIFX:**
@@ -379,7 +381,7 @@ For offline devices specifically:
 
 ### API Endpoints
 
-- `POST /api/devices/scan` — trigger immediate full multi-wave scan (including subnet sweep). `POST /api/devices/discover` stays for the old UI: it runs the same scan and names the devices it brought online.
+- `POST /api/devices/scan` — trigger immediate full multi-wave scan. `POST /api/devices/discover` stays for the old UI: it runs the same scan and names the devices it brought online.
 - `POST /api/devices/scan?wave=1` — single wave (quick check)
 - `DELETE /api/devices/{device_name}` — unregister device from DB (cascades to groups and scene_placements). Resolves display name to stable ID internally.
 - `PUT /api/devices/{device_name}` — edit device metadata (rename, override LED count, etc.)

@@ -314,16 +314,10 @@ class LifxTransport:
         version_tasks: list[asyncio.Task[None]] = []
         results: list[LifxDeviceRecord] = []
 
-        async def _query_version_and_record(mac: bytes, ip: str, port: int) -> None:
-            try:
-                version = await self.query_version(mac, ip, port)
-            except NoAnswer:
-                version = None
-            if version is None:
-                logger.info("LIFX {} didn't answer GetVersion; a later scan asks again", ip)
+        async def _record(mac: bytes, ip: str, port: int) -> None:
+            record = await self.record_of(mac, ip, port)
+            if record is None:
                 return
-            vendor, product = version
-            record = LifxDeviceRecord(mac=mac, ip=ip, port=port, vendor=vendor, product=product)
             results.append(record)
             if on_record is not None:
                 on_record(record)
@@ -339,9 +333,7 @@ class LifxTransport:
             if mac_hex in skip_macs or mac_hex in discovered:
                 return
             discovered[mac_hex] = (mac, addr[0], port)
-            version_tasks.append(
-                asyncio.create_task(_query_version_and_record(mac, addr[0], port))
-            )
+            version_tasks.append(asyncio.create_task(_record(mac, addr[0], port)))
 
         self.add_listener(_on_state_service)
         try:
@@ -362,52 +354,20 @@ class LifxTransport:
         logger.info("LIFX discovery found {} devices", len(results))
         return results
 
-    async def unicast_sweep(
-        self,
-        subnet_hosts: list[str],
-        concurrency: int = 50,
-        timeout_s: float = 0.5,
-    ) -> list[LifxDeviceRecord]:
-        """Send GetService to every IP in the list. Rate-limited."""
-        discovered: dict[str, tuple[bytes, str, int]] = {}  # mac_hex -> (mac, ip, port)
-
-        def _on_state_service(pkt: LifxPacket, addr: tuple[str, int]) -> None:
-            if pkt.msg_type != 3:
-                return
-            service, port = parse_state_service(pkt.payload)
-            if service == 1:  # UDP
-                mac = pkt.target[:6]
-                discovered[mac.hex()] = (mac, addr[0], port)
-
-        self.add_listener(_on_state_service)
+    async def record_of(self, mac: bytes, ip: str, port: int) -> LifxDeviceRecord | None:
+        """The light's record, from its answer to GetVersion (asked twice). None when it
+        stays silent or can't say what product it is: a later scan asks again, since a
+        light recorded from a guess would be set up as the wrong kind."""
         try:
-            sem = asyncio.Semaphore(concurrency)
-
-            async def _probe_host(ip: str) -> None:
-                async with sem:
-                    self._broadcast_get_service((ip, 56700))
-
-            await asyncio.gather(*[_probe_host(ip) for ip in subnet_hosts])
-            await asyncio.sleep(timeout_s)
-        finally:
-            self.remove_listener(_on_state_service)
-
-        results: list[LifxDeviceRecord] = []
-        for mac, ip, port in discovered.values():
-            try:
-                version = await self.query_version(mac, ip, port)
-            except NoAnswer:
-                version = None
-            if version is None:
-                logger.info("LIFX {} didn't answer GetVersion; a later scan asks again", ip)
-                continue
-            vendor, product = version
-            results.append(
-                LifxDeviceRecord(mac=mac, ip=ip, port=port, vendor=vendor, product=product)
-            )
-
-        logger.info("LIFX unicast sweep found {} devices", len(results))
-        return results
+            version = await self.query_version(mac, ip, port)
+        except NoAnswer:
+            logger.info("LIFX {} didn't answer GetVersion; a later scan asks again", ip)
+            return None
+        if version is None:
+            logger.info("LIFX {} can't say what product it is; a later scan asks again", ip)
+            return None
+        vendor, product = version
+        return LifxDeviceRecord(mac=mac, ip=ip, port=port, vendor=vendor, product=product)
 
     async def query_version(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
         """(vendor, product), or None if the light can't say. Raises NoAnswer if it doesn't

@@ -112,6 +112,9 @@ class DevicesConfig:
 @dataclass
 class DiscoveryConfig:
     broadcast_interval_s: float = 30.0
+    # Unread since the unicast sweeps went: discovery only broadcasts. Kept so config files
+    # and exports that carry them still load: PUT /config and POST /config/import refuse a
+    # key DiscoveryConfig doesn't have.
     unicast_concurrency: int = 50
     unicast_timeout_s: float = 0.5
     subnet_mask: int = 24
