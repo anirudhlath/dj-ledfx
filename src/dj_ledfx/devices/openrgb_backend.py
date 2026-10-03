@@ -6,17 +6,18 @@ from typing import Any
 from loguru import logger
 
 from dj_ledfx.config import AppConfig, OpenRGBConfig
-from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
+from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice, configured_fps
 from dj_ledfx.devices.heuristics import estimate_device_latency_ms
 from dj_ledfx.devices.openrgb import OpenRGBAdapter
 from dj_ledfx.latency.tracker import LatencyTracker, tracker_for
 
 
-def _tracker(cfg: OpenRGBConfig, name: str) -> LatencyTracker:
+def _tracker(cfg: OpenRGBConfig, adapter: OpenRGBAdapter) -> LatencyTracker:
     """A static strategy keeps the configured latency; the others start from the heuristic
     for the device's name (OpenRGB can't be probed)."""
     static = cfg.latency_strategy == "static"
-    return tracker_for(cfg, seed_ms=None if static else estimate_device_latency_ms(name))
+    seed = None if static else estimate_device_latency_ms(adapter.device_info.name)
+    return tracker_for(cfg, seed_ms=seed, display_ms=adapter.display_ms)
 
 
 class OpenRGBBackend(DeviceBackend):
@@ -44,14 +45,14 @@ class OpenRGBBackend(DeviceBackend):
                     host=orgb.host,
                     port=orgb.port,
                     device_index=i,
+                    max_fps=configured_fps(config, orgb.max_fps),
                 )
                 await adapter.connect()
 
-                tracker = _tracker(orgb, adapter.device_info.name)
                 device = DiscoveredDevice(
                     adapter=adapter,
-                    tracker=tracker,
-                    max_fps=orgb.max_fps,
+                    tracker=_tracker(orgb, adapter),
+                    max_fps=adapter.stream_fps,
                 )
                 results.append(device)
                 if on_found is not None:
@@ -87,15 +88,19 @@ class OpenRGBBackend(DeviceBackend):
                     port = orgb_cfg.port
                     device_index = 0
 
-                adapter = OpenRGBAdapter(host=host, port=port, device_index=device_index)
+                adapter = OpenRGBAdapter(
+                    host=host,
+                    port=port,
+                    device_index=device_index,
+                    max_fps=configured_fps(config, orgb_cfg.max_fps),
+                )
                 await adapter.connect()
 
-                tracker = _tracker(orgb_cfg, adapter.device_info.name)
                 results.append(
                     DiscoveredDevice(
                         adapter=adapter,
-                        tracker=tracker,
-                        max_fps=orgb_cfg.max_fps,
+                        tracker=_tracker(orgb_cfg, adapter),
+                        max_fps=adapter.stream_fps,
                     )
                 )
                 logger.info("Reconnected known OpenRGB device '{}' at {}:{}", name, host, port)

@@ -20,7 +20,7 @@ from dj_ledfx.types import DeviceGroup, DeviceInfo
 class ManagedDevice:
     adapter: DeviceAdapter
     tracker: LatencyTracker
-    max_fps: int = 60
+    max_fps: float | None = None  # the most frames a second it's sent; None: the engine's
     status: Literal["online", "offline", "reconnecting"] = "online"
 
 
@@ -45,7 +45,7 @@ class DeviceManager:
         self,
         adapter: DeviceAdapter,
         tracker: LatencyTracker,
-        max_fps: int = 60,
+        max_fps: float | None = None,
     ) -> None:
         self._devices.append(ManagedDevice(adapter=adapter, tracker=tracker, max_fps=max_fps))
         self._index()
@@ -145,7 +145,7 @@ class DeviceManager:
         self,
         device_info: DeviceInfo,
         tracker: LatencyTracker,
-        max_fps: int = 60,
+        max_fps: float | None = None,
         status: Literal["online", "offline", "reconnecting"] = "online",
     ) -> None:
         """Add a device represented only by its DeviceInfo (wraps in GhostAdapter)."""
@@ -166,14 +166,13 @@ class DeviceManager:
         stable_id: str,
         adapter: DeviceAdapter,
         tracker: LatencyTracker | None = None,
-        max_fps: int | None = None,
     ) -> None:
         """Swap a GhostAdapter, or a live adapter, for a real adapter and set status to
         online. A live adapter it replaces is disconnected, as demote_device does.
 
-        Optionally updates the tracker and max_fps — important when promoting
-        from a ghost (StaticLatency placeholder) to a real backend tracker
-        (EMA/windowed) that receives probe callbacks.
+        Optionally updates the tracker — important when promoting from a ghost
+        (StaticLatency placeholder) to a real backend tracker (EMA/windowed) that
+        receives probe callbacks.
         """
         managed = self.get_by_stable_id(stable_id)
         if managed is None:
@@ -185,8 +184,6 @@ class DeviceManager:
             self._disconnect_later(old_adapter, "a swap")
         if tracker is not None:
             managed.tracker = tracker
-        if max_fps is not None:
-            managed.max_fps = max_fps
         managed.status = "online"
         logger.info(
             "Promoted device '{}' to online (stable_id={})",
@@ -197,9 +194,11 @@ class DeviceManager:
     def replace_adapter(self, stable_id: str, device: DiscoveredDevice) -> None:
         """Put a set-up device's adapter, tracker and rate in place of a managed device's,
         online: the adapter it replaces is disconnected, and the devices indexed again."""
-        self.promote_device(
-            stable_id, device.adapter, tracker=device.tracker, max_fps=device.max_fps
-        )
+        managed = self.get_by_stable_id(stable_id)  # before the swap: it may index anew
+        if managed is None:
+            raise KeyError(f"Device not found: {stable_id}")
+        managed.max_fps = device.max_fps  # None too: the engine's rate
+        self.promote_device(stable_id, device.adapter, tracker=device.tracker)
 
     def demote_device(self, stable_id: str) -> None:
         """Swap a real adapter for a GhostAdapter and set status to offline."""

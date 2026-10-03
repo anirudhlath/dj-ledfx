@@ -37,7 +37,9 @@ class OpenRGBAdapter(DeviceAdapter):
         host: str = "127.0.0.1",
         port: int = 6742,
         device_index: int = 0,
+        max_fps: float | None = None,
     ) -> None:
+        self._max_fps = max_fps
         self._host = host
         self._port = port
         self._device_index = device_index

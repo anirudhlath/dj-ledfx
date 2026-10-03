@@ -24,7 +24,7 @@ class LifxBulbAdapter(LifxAdapterBase):
         kelvin: int = 3500,
         *,
         caps: DeviceCapabilities | None = None,
-        fade_ms: int = 0,
+        max_fps: float | None = None,
     ) -> None:
         super().__init__(
             transport,
@@ -32,7 +32,7 @@ class LifxBulbAdapter(LifxAdapterBase):
             target_mac,
             kelvin=kelvin,
             caps=caps or DeviceCapabilities(protocol="LIFX"),
-            fade_ms=fade_ms,
+            max_fps=max_fps,
         )
 
     @property

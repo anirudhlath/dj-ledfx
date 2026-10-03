@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import pytest
-from govee_fakes import NO_RAZER, UPRIGHT
+from govee_fakes import NO_RAZER, UPRIGHT, lamp_record, lamp_transport
 from loguru import logger
 
 from dj_ledfx.config import GOVEE_COLOUR_FPS, GOVEE_RAZER_FPS
+from dj_ledfx.devices.govee.colour import GoveeColourAdapter
 from dj_ledfx.devices.govee.output import (
     MAX_SEGMENTS,
     MIN_SEGMENTS,
     GoveeOutput,
     LampPlan,
-    lamp_fps,
     lamp_plan,
 )
+from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
 from dj_ledfx.devices.govee.types import GoveeDeviceCapability
 
 PLAIN = GoveeDeviceCapability(is_rgbic=False, segment_count=0)
@@ -60,9 +61,11 @@ def test_a_plan_names_its_mode() -> None:
 
 
 def test_razer_streams_at_the_configured_rate_and_one_colour_at_ten_at_most() -> None:
-    assert lamp_fps(LampPlan(15, razer=True), GOVEE_RAZER_FPS) == GOVEE_RAZER_FPS
-    assert lamp_fps(LampPlan(15, razer=False), GOVEE_RAZER_FPS) == GOVEE_COLOUR_FPS
-    assert lamp_fps(LampPlan(1, razer=False), 5) == 5
+    transport, record = lamp_transport(), lamp_record()
+    razer = GoveeRazerAdapter(transport, record, 15, max_fps=GOVEE_RAZER_FPS)
+    colour = GoveeColourAdapter(transport, record, 15, max_fps=GOVEE_RAZER_FPS)
+    assert (razer.stream_fps, colour.stream_fps) == (GOVEE_RAZER_FPS, GOVEE_COLOUR_FPS)
+    assert GoveeColourAdapter(transport, record, max_fps=5).stream_fps == 5
 
 
 @pytest.mark.parametrize(

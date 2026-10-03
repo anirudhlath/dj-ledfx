@@ -12,11 +12,17 @@ from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.latency.tracker import LatencyTracker
 
 
+def configured_fps(config: AppConfig, max_fps: int) -> int:
+    """The rate a backend builds its adapters with: its kind's max_fps, within the engine's
+    rate (a light is never sent more frames than the engine renders)."""
+    return min(config.engine.fps, max_fps)
+
+
 @dataclass(frozen=True, slots=True)
 class DiscoveredDevice:
     adapter: DeviceAdapter
     tracker: LatencyTracker
-    max_fps: int
+    max_fps: float | None  # the adapter's stream_fps; None: the scheduler's rate
     # Hands the tracker the light's round trips. The orchestrator calls it once it takes the
     # device in, so a duplicate it turns away never takes them from the live tracker.
     on_accepted: Callable[[], None] | None = None

@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from loguru import logger
 
-from dj_ledfx.config import GOVEE_COLOUR_FPS
 from dj_ledfx.devices.govee.adapter_base import GoveeAdapterBase
 from dj_ledfx.devices.govee.protocol import MAX_RAZER_SEGMENTS
 from dj_ledfx.devices.govee.sku_registry import get_device_capability
@@ -129,8 +128,3 @@ def lamp_report(
         plays = planned(row, segment_override)
     own = GoveeOutput.from_extra(row.get("extra"))
     return LampOutputReport(light_id=row["id"], own=own, plays=plays, online=live is not None)
-
-
-def lamp_fps(plan: LampPlan, max_fps: int) -> int:
-    """Razer at the configured rate; one colour at GOVEE_COLOUR_FPS at most."""
-    return max_fps if plan.razer else min(max_fps, GOVEE_COLOUR_FPS)

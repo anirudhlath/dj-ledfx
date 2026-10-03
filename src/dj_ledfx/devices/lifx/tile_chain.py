@@ -61,7 +61,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
         *,
         tiles: Sequence[TileInfo] = (),
         caps: DeviceCapabilities | None = None,
-        fade_ms: int = 0,
+        max_fps: float | None = None,
     ) -> None:
         super().__init__(
             transport,
@@ -69,7 +69,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
             target_mac,
             kelvin=kelvin,
             caps=caps or DeviceCapabilities(protocol="LIFX", matrix=True),
-            fade_ms=fade_ms,
+            max_fps=max_fps,
         )
         self._tiles: list[TileInfo] = list(tiles)
         self._sizes = tile_sizes(self._tiles, tile_count)

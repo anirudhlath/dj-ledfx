@@ -9,18 +9,28 @@ import numpy as np
 from lifx_fakes import MAC, FakeLifxTransport, lifx_info
 
 from dj_ledfx.config import LIFX_MATRIX_FPS, LIFX_STRIP_FPS
-from dj_ledfx.devices.lifx.base import stream_fade_ms, stream_fps
+from dj_ledfx.devices.lifx.base import stream_fade_ms
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.packet import SET_COLOR, SET_EXTENDED_COLOR_ZONES, SET_TILE_STATE_64
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import MATRIX_DISPLAY_MS, LifxTileChainAdapter
 
 
+def _matrix(transport: FakeLifxTransport, max_fps: float | None) -> LifxTileChainAdapter:
+    return LifxTileChainAdapter(
+        transport, lifx_info("matrix", 64), MAC, tile_count=1, max_fps=max_fps
+    )
+
+
 def test_each_kind_streams_within_its_cap() -> None:
-    assert stream_fps(LifxBulbAdapter, 60) == 60
-    assert stream_fps(LifxStripAdapter, 60) == LIFX_STRIP_FPS
-    assert stream_fps(LifxTileChainAdapter, 60) == LIFX_MATRIX_FPS
-    assert stream_fps(LifxTileChainAdapter, 10) == 10  # a lower configured rate wins
+    transport = FakeLifxTransport()
+    bulb = LifxBulbAdapter(transport, lifx_info("bulb", 1), MAC, max_fps=60)
+    strip = LifxStripAdapter(transport, lifx_info("strip", 4), MAC, zone_count=4, max_fps=60)
+    assert (bulb.stream_fps, strip.stream_fps) == (60, LIFX_STRIP_FPS)
+    assert _matrix(transport, 60).stream_fps == LIFX_MATRIX_FPS
+    assert _matrix(transport, 10).stream_fps == 10  # a lower configured rate wins
+    assert _matrix(transport, None).stream_fps == LIFX_MATRIX_FPS  # its cap, whatever it's sent
+    assert LifxBulbAdapter(transport, lifx_info("bulb", 1), MAC).stream_fps is None
 
 
 def test_a_fade_ends_just_before_the_next_frame() -> None:
@@ -29,38 +39,33 @@ def test_a_fade_ends_just_before_the_next_frame() -> None:
     assert stream_fade_ms(1000) == 0
 
 
-async def test_every_frame_fades_for_the_adapter_s_fade() -> None:
+async def test_every_frame_fades_over_the_gap_at_the_rate_it_streams_at() -> None:
     transport = FakeLifxTransport()
-    bulb = LifxBulbAdapter(transport, lifx_info("bulb", 1), MAC, fade_ms=15)
+    bulb = LifxBulbAdapter(transport, lifx_info("bulb", 1), MAC, max_fps=60)
     await bulb.send_frame(np.full((1, 3), 200, dtype=np.uint8))
     *_, duration = struct.unpack("<B4HI", transport.last(SET_COLOR).payload)
-    assert duration == 15
+    assert duration == stream_fade_ms(60) == 15
 
-    strip = LifxStripAdapter(transport, lifx_info("strip", 4), MAC, zone_count=4, fade_ms=48)
+    strip = LifxStripAdapter(transport, lifx_info("strip", 4), MAC, zone_count=4, max_fps=60)
     await strip.send_frame(np.full((4, 3), 200, dtype=np.uint8))
-    assert struct.unpack_from("<I", transport.last(SET_EXTENDED_COLOR_ZONES).payload)[0] == 48
+    fade = stream_fade_ms(LIFX_STRIP_FPS)  # its cap's gap, not the configured rate's
+    assert struct.unpack_from("<I", transport.last(SET_EXTENDED_COLOR_ZONES).payload)[0] == fade
 
-    matrix = LifxTileChainAdapter(
-        transport, lifx_info("matrix", 64), MAC, tile_count=1, fade_ms=48
-    )
-    await matrix.send_frame(np.full((64, 3), 200, dtype=np.uint8))
+    await _matrix(transport, 60).send_frame(np.full((64, 3), 200, dtype=np.uint8))
     assert struct.unpack_from("<6BI", transport.last(SET_TILE_STATE_64).payload)[6] == 48
 
 
 def test_a_light_shows_a_frame_half_way_through_its_fade() -> None:
     transport = FakeLifxTransport()
-    bulb = LifxBulbAdapter(transport, lifx_info("bulb", 1), MAC, fade_ms=48)
-    matrix = LifxTileChainAdapter(
-        transport, lifx_info("matrix", 64), MAC, tile_count=1, fade_ms=48
-    )
+    bulb = LifxBulbAdapter(transport, lifx_info("bulb", 1), MAC, max_fps=20)  # a 48 ms fade
     assert bulb.display_ms == 24.0
-    assert matrix.display_ms == 24.0 + MATRIX_DISPLAY_MS
+    assert _matrix(transport, 60).display_ms == 24.0 + MATRIX_DISPLAY_MS
 
 
 # Review Focus 6: a light that never acks or answers. Frames are fire and forget.
 async def test_a_light_that_never_answers_still_takes_every_frame() -> None:
     transport = FakeLifxTransport(silent=True)
-    bulb = LifxBulbAdapter(transport, lifx_info("bulb", 1), MAC, fade_ms=15)
+    bulb = LifxBulbAdapter(transport, lifx_info("bulb", 1), MAC, max_fps=60)
     for level in (50, 100, 150):
         frame = np.full((1, 3), level, dtype=np.uint8)
         await asyncio.wait_for(bulb.send_frame(frame), timeout=0.05)  # waits for nothing

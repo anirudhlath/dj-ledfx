@@ -49,7 +49,9 @@ class GoveeAdapterBase(DeviceAdapter):
         form: GoveeForm = "strip",
         from_top: bool = False,
         connected: bool = False,  # True: it replaces an adapter of a lamp that answers
+        max_fps: float | None = None,
     ) -> None:
+        self._max_fps = max_fps
         self._transport = transport
         self._record = record
         self._segments = segments

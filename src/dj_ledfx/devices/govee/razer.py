@@ -37,10 +37,17 @@ class GoveeRazerAdapter(GoveeAdapterBase):
         form: GoveeForm = "strip",
         from_top: bool = False,
         connected: bool = False,
+        max_fps: float | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         super().__init__(
-            transport, record, segments, form=form, from_top=from_top, connected=connected
+            transport,
+            record,
+            segments,
+            form=form,
+            from_top=from_top,
+            connected=connected,
+            max_fps=max_fps,
         )
         self._clock = clock
         self._last_frame_at: float | None = None  # None: razer is switched on first

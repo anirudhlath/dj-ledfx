@@ -13,6 +13,7 @@ from dj_ledfx.config import (
     GOVEE_RAZER_FPS,
     AppConfig,
     DevicesConfig,
+    EngineConfig,
     GoveeConfig,
 )
 from dj_ledfx.devices.backend import DiscoveredDevice
@@ -94,6 +95,15 @@ async def test_an_upright_razer_lamp_streams_each_segment_standing(
     assert device.adapter.led_count == 15
     assert device.adapter.geometry == StripGeometry((0, 1, 0), UPRIGHT_HEIGHT_M)
     assert device.max_fps == config.devices.govee.max_fps == GOVEE_RAZER_FPS
+
+
+async def test_a_razer_lamp_streams_no_faster_than_the_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(SKU_REGISTRY, TEST_MODEL, UPRIGHT)
+    device = await _connect(AppConfig(engine=EngineConfig(fps=20)))  # below razer's 30
+    assert isinstance(device.adapter, GoveeRazerAdapter)
+    assert device.max_fps == device.adapter.stream_fps == 20
 
 
 async def test_a_lamp_without_razer_plays_one_colour_at_the_colour_rate(

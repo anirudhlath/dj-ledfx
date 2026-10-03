@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import struct
 from collections.abc import Callable, Collection
 from typing import Any
 
+import numpy as np
 import pytest
 from lifx_fakes import FakeLifxTransport
 
-from dj_ledfx.config import LIFX_MATRIX_FPS, AppConfig, DevicesConfig, LIFXConfig
+from dj_ledfx.config import LIFX_MATRIX_FPS, AppConfig, DevicesConfig, EngineConfig, LIFXConfig
 from dj_ledfx.devices.lifx.base import stream_fade_ms
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.discovery import LifxBackend
@@ -15,6 +17,7 @@ from dj_ledfx.devices.lifx.packet import (
     GET_DEVICE_CHAIN,
     GET_EXTENDED_COLOR_ZONES,
     GET_HOST_FIRMWARE,
+    SET_COLOR,
 )
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import MATRIX_DISPLAY_MS, LifxTileChainAdapter
@@ -171,6 +174,21 @@ async def test_a_matrix_streams_at_its_rate_and_its_latency_counts_its_display()
     display = stream_fade_ms(LIFX_MATRIX_FPS) / 2 + MATRIX_DISPLAY_MS
     assert device.adapter.display_ms == display
     assert device.tracker.effective_latency_ms == AppConfig().devices.lifx.latency_ms + display
+
+
+async def test_a_light_fades_over_the_engine_s_gap_when_the_engine_is_slower() -> None:
+    transport = FakeLifxTransport(product=1)
+    config = AppConfig(engine=EngineConfig(fps=30))  # below LIFX's max_fps of 60
+    device = await _backend(transport)._setup(_record(1), config)
+    assert device is not None and isinstance(device.adapter, LifxBulbAdapter)
+    assert device.max_fps == device.adapter.stream_fps == 30
+    fade = stream_fade_ms(30)
+    assert device.adapter.display_ms == fade / 2  # half-way through a 31 ms fade
+    assert device.tracker.effective_latency_ms == config.devices.lifx.latency_ms + fade / 2
+
+    await device.adapter.send_frame(np.full((1, 3), 200, dtype=np.uint8))
+    *_, duration = struct.unpack("<B4HI", transport.last(SET_COLOR).payload)
+    assert duration == fade == 31
 
 
 async def test_a_known_online_light_is_left_out_before_it_is_asked() -> None:

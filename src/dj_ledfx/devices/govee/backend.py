@@ -9,10 +9,10 @@ from typing import Any
 from loguru import logger
 
 from dj_ledfx.config import AppConfig
-from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
+from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice, configured_fps
 from dj_ledfx.devices.govee.adapter_base import GoveeAdapterBase
 from dj_ledfx.devices.govee.colour import GoveeColourAdapter
-from dj_ledfx.devices.govee.output import GoveeOutput, lamp_fps, lamp_plan
+from dj_ledfx.devices.govee.output import GoveeOutput, lamp_plan
 from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
 from dj_ledfx.devices.govee.sku_registry import get_device_capability
 from dj_ledfx.devices.govee.transport import GoveeTransport
@@ -158,8 +158,8 @@ class GoveeBackend(DeviceBackend):
         if record is None or self._transport is None:
             return None
         output = GoveeOutput.from_extra(row.get("extra"))
-        adapter, max_fps = self._adapter(self._transport, record, config, output, connected=True)
-        return DiscoveredDevice(adapter=adapter, tracker=tracker, max_fps=max_fps)
+        adapter = self._adapter(self._transport, record, config, output, connected=True)
+        return DiscoveredDevice(adapter=adapter, tracker=tracker, max_fps=adapter.stream_fps)
 
     async def shutdown(self) -> None:
         if self._transport:
@@ -175,13 +175,13 @@ class GoveeBackend(DeviceBackend):
     ) -> DiscoveredDevice:
         """Connect a lamp as its plan says it plays; once the orchestrator takes it in, its
         status reads time its round trips. Raises ConnectionError when it doesn't answer."""
-        adapter, max_fps = self._adapter(transport, record, config, output)
+        adapter = self._adapter(transport, record, config, output)
         await adapter.connect()
-        tracker = tracker_for(config.devices.govee)
+        tracker = tracker_for(config.devices.govee, display_ms=adapter.display_ms)
         return DiscoveredDevice(
             adapter=adapter,
             tracker=tracker,
-            max_fps=max_fps,
+            max_fps=adapter.stream_fps,
             on_accepted=partial(transport.register_device, record, tracker.update_rtt),
         )
 
@@ -193,9 +193,9 @@ class GoveeBackend(DeviceBackend):
         output: GoveeOutput,
         *,
         connected: bool = False,
-    ) -> tuple[GoveeAdapterBase, int]:
+    ) -> GoveeAdapterBase:
         """The adapter a lamp plays through, as its plan says (razer, or one colour on any
-        number of segments), and its rate."""
+        number of segments), built at the configured rate: a colour adapter caps its own."""
         govee = config.devices.govee
         capability = get_device_capability(record.sku)
         plan = lamp_plan(capability, output, govee.segment_override)
@@ -207,14 +207,14 @@ class GoveeBackend(DeviceBackend):
             form=capability.form,
             from_top=capability.segments_from_top,
             connected=connected,
+            max_fps=configured_fps(config, govee.max_fps),
         )
-        max_fps = lamp_fps(plan, govee.max_fps)
         logger.info(
             "Govee {} at {}: {} segment(s), {}, {} frames a second",
             record.sku,
             record.ip,
             plan.segments,
             "razer" if plan.razer else "one colour",
-            max_fps,
+            adapter.stream_fps,
         )
-        return adapter, max_fps
+        return adapter

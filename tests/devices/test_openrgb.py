@@ -74,6 +74,12 @@ async def test_openrgb_truncates_colors() -> None:
         assert len(sent_colors) == 5
 
 
+def test_an_adapter_streams_at_the_rate_it_was_built_with() -> None:
+    assert OpenRGBAdapter(max_fps=30).stream_fps == 30
+    assert OpenRGBAdapter().stream_fps is None  # the scheduler's rate
+    assert OpenRGBAdapter().display_ms == 0.0
+
+
 async def test_send_frame_connection_error_disconnects() -> None:
     """send_frame should set is_connected=False on ConnectionError and re-raise."""
     with patch("dj_ledfx.devices.openrgb.OpenRGBClient") as mock_cls:

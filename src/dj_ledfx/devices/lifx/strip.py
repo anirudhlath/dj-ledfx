@@ -55,7 +55,7 @@ class LifxStripAdapter(LifxAdapterBase):
         kelvin: int = 3500,
         *,
         caps: DeviceCapabilities | None = None,
-        fade_ms: int = 0,
+        max_fps: float | None = None,
     ) -> None:
         super().__init__(
             transport,
@@ -64,7 +64,7 @@ class LifxStripAdapter(LifxAdapterBase):
             kelvin=kelvin,
             caps=caps
             or DeviceCapabilities(protocol="LIFX", multizone=True, extended_multizone=True),
-            fade_ms=fade_ms,
+            max_fps=max_fps,
         )
         self._zone_count = zone_count
 

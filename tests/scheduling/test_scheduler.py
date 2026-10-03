@@ -903,6 +903,22 @@ async def test_a_light_given_a_new_adapter_gets_its_frame_at_once() -> None:
     assert len(replacement.send_frame_calls) == 1
 
 
+async def test_a_device_without_a_rate_of_its_own_gets_the_engine_s() -> None:
+    adapter = MockDeviceAdapter(name="Free", led_count=10)
+    assert adapter.stream_fps is None and adapter.display_ms == 0.0  # the ABC's defaults
+    tracker = LatencyTracker(StaticLatency(10.0))
+    device = ManagedDevice(adapter=adapter, tracker=tracker, max_fps=adapter.stream_fps)
+    buf = RingBuffer(capacity=150)
+    _fill_buffer(buf, time.monotonic(), 150)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=30)
+
+    await _run_for(scheduler, 0.5)
+
+    assert 11 <= len(adapter.send_frame_calls) <= 19  # 30 a second, within 25%
+    (stats,) = scheduler.get_device_stats()
+    assert stats.send_fps > 0
+
+
 # Review Focus 6: a light that never acks or answers a probe keeps its rate.
 async def test_a_light_that_never_acks_keeps_its_rate() -> None:
     adapter = MockDeviceAdapter(name="Quiet", led_count=10)

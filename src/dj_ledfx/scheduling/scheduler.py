@@ -257,7 +257,7 @@ class LookaheadScheduler:
             # The next frame is due a period on; a loop that fell behind starts again from now
             # rather than bursting to catch up.
             now = time.monotonic()
-            last_send_time = max(last_send_time + 1.0 / device.max_fps, now)
+            last_send_time = max(last_send_time + 1.0 / self._rate(device), now)
             state.due_at = last_send_time
             if last_send_time > now:
                 await asyncio.sleep(last_send_time - now)
@@ -287,7 +287,7 @@ class LookaheadScheduler:
         state.last = None if rerouted else LastSend(adapter, data, sent)
         metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
         metrics.DEVICE_LATENCY.labels(device=key).set(device.tracker.effective_latency_s)
-        metrics.DEVICE_FPS.labels(device=key).set(device.max_fps)
+        metrics.DEVICE_FPS.labels(device=key).set(self._rate(device))
         return sent
 
     def get_device_stats(self) -> list[DeviceStats]:
@@ -316,5 +316,10 @@ class LookaheadScheduler:
         route = self._routes.get(key)
         if route is None or not route.streaming or not state.managed.adapter.is_connected:
             return 0.0
-        expected = min(self._fps, state.managed.max_fps)
+        expected = self._rate(state.managed)
         return max(0.0, 1.0 - send_fps / expected) * 100.0
+
+    def _rate(self, device: ManagedDevice) -> float:
+        """The most frames a second a device is sent: its own rate (the adapter's), within
+        the engine's; a device with none of its own gets the engine's."""
+        return self._fps if device.max_fps is None else min(self._fps, device.max_fps)

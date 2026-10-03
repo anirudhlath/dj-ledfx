@@ -155,7 +155,7 @@ src/dj_ledfx/devices/govee/
 ├── adapter_base.py      # GoveeAdapterBase — what both outputs share: reads, capture, restore, segment geometry
 ├── razer.py             # GoveeRazerAdapter — one colour per segment by razer
 ├── colour.py            # GoveeColourAdapter — one colour by colorwc, on any number of segments
-├── output.py            # GoveeOutput (a lamp's own output), lamp_plan(), planned(), lamp_report(), lamp_fps()
+├── output.py            # GoveeOutput (a lamp's own output), lamp_plan(), planned(), lamp_report()
 ├── sku_registry.py      # SKU → capability lookup (imports types from types.py)
 └── backend.py           # GoveeBackend(DeviceBackend) — discovery orchestration
 
@@ -238,7 +238,10 @@ What a lamp's two outputs share. The backend picks the adapter on the lamp's `La
 class GoveeAdapterBase(DeviceAdapter):
     razer: ClassVar[bool] = False
 
-    def __init__(self, transport: GoveeTransport, record: GoveeDeviceRecord, segments: int = 1, *, form: GoveeForm = "strip", from_top: bool = False): ...
+    def __init__(self, transport: GoveeTransport, record: GoveeDeviceRecord, segments: int = 1, *, form: GoveeForm = "strip", from_top: bool = False, max_fps: float | None = None): ...
+
+    # max_fps: the configured rate, the engine's or govee_max_fps if lower; stream_fps
+    #   is that under the adapter's own cap (stream_fps_cap), and the scheduler's rate for it
 
     # device_info: device_type="govee_segment" for a lamp of segments, "govee_solid" for one,
     #   as rows and the API have always held them; led_count=segments
@@ -268,6 +271,8 @@ One colour by `colorwc`, on a lamp of any number of segments: one segment, a mod
 
 ```python
 class GoveeColourAdapter(GoveeAdapterBase):
+    stream_fps_cap = GOVEE_COLOUR_FPS
+
     # send_frame: the frame's average as one colorwc command
     # prepare_stream: razer off, in case a look left the lamp there, then full brightness
 ```
