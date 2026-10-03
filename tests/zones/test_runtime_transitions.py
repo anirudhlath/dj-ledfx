@@ -22,7 +22,7 @@ from runtime_fakes import (
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.ledset import LedSet
-from dj_ledfx.looks.model import Layer, Transition
+from dj_ledfx.looks.model import Layer, LookModifiers, Transition
 from dj_ledfx.types import FloatRGB
 from dj_ledfx.zones.runtime import ZoneRuntime
 
@@ -269,6 +269,39 @@ def test_a_start_mid_transition_takes_the_mix_on_and_three_looks_at_most_render(
     fourth.begin_transition(FADE, [third])
     assert second.transition_sources == ()  # the oldest look is dropped
     assert second.state == "running"
+
+
+# M4: a start that takes lights from a zone mid-transition starts from that zone's mix as
+# it is, and the zone that loses them runs on undisturbed.
+def test_lights_taken_from_a_zone_mid_transition_start_from_its_mix() -> None:
+    old, left = _flat(1.0), _flat(0.0, zone_id="left")
+    left.begin_transition(FADE, [old])
+    left.tick(1000.0)
+    left.tick(1001.0)  # half-way: 0.5
+    right = _flat(0.2, zone_id="right")
+
+    right.begin_transition(FADE, [left.twin()])
+    right.tick(1001.0)
+
+    assert _levels(right) == [0.5] * 8  # no jump: the mix as it is
+    assert left.transition_sources == (old,) and left.state == "transition"
+
+
+# M4: a light taken from a look with trails keeps its trail.
+def test_a_twin_keeps_the_trail_it_was_taken_from() -> None:
+    trails = LookModifiers(trails_s=1.0)
+    left = runtime_of(look_of(field_layer(1.0), modifiers=trails), zone_id="left")
+    left.tick(1000.0)
+    left.update_look(look_of(field_layer(0.0), modifiers=trails))
+    left.tick(1000.1)  # the lights dropped to black: their trail fades from 1.0
+    shown = _levels(left)
+    assert shown[0] > 0.5
+    right = _flat(0.0, zone_id="right")
+
+    right.begin_transition(FADE, [left.twin()])
+    right.tick(1000.1)  # its first frame is for the moment of left's last
+
+    assert _levels(right) == shown  # the trail as it was, not black
 
 
 def test_a_twin_draws_what_its_runtime_draws_under_the_same_generation() -> None:

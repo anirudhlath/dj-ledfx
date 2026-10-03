@@ -34,6 +34,12 @@ class Trails:
     def reset(self) -> None:
         self._held = None
 
+    def copy(self) -> Trails:
+        """These trails as they are now: a twin's (the frame it holds is never changed)."""
+        twin = Trails()
+        twin._held, twin._at = self._held, self._at
+        return twin
+
     def apply(self, frame: FloatRGB, t: float, trails_s: float) -> FloatRGB:
         held, gap = self._held, max(t - self._at, 0.0)  # a shorter horizon: no time passed
         if held is not None and held.shape == frame.shape and gap < trails_s:

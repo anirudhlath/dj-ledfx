@@ -432,18 +432,21 @@ class ZoneRuntime:
     def begin_transition(self, transition: Transition, sources: Sequence[ZoneRuntime]) -> None:
         """Play this look in over what the zone's lights showed (spec §5.3). `sources` are
         the runtimes that drove them: the zone's own last look, and copies (twin()) of the
-        zones it took lights from. A light keeps the first source that has it, with the
-        same number of LEDs; a light none had (idle) fades in from black, and runs its
-        firmware effect at once. A cut, a transition of no time or a look that failed to
-        build plays nothing."""
-        if transition.kind == "cut" or transition.duration_s <= 0.0 or self.crash is not None:
+        zones it took lights from, each with its own transition as it is. A light keeps the
+        first source that has it, with the same number of LEDs; a light none had (idle)
+        fades in from black, and runs its firmware effect at once. A light held keeps the
+        look it follows in its source until this transition's midpoint; the zone's own last
+        look lets its held lights go over first (settle()). A cut, a transition of no time
+        or a look that failed to build plays nothing."""
+        if not transition.plays or self.crash is not None:
             return
         rows: list[tuple[ZoneRuntime, NDArray[np.intp], NDArray[np.intp]]] = []
         held: dict[str, ZoneRuntime] = {}
         held_rows: dict[str, slice] = {}
         covered: set[str] = set()
         for source in sources:
-            source.settle()  # this transition takes its lights on from here
+            if source.zone_id == self.zone_id:
+                source.settle()  # this transition takes its lights on from here
             mine: list[NDArray[np.intp]] = []
             theirs: list[NDArray[np.intp]] = []
             for piece in self.leds.slices:
@@ -456,13 +459,14 @@ class ZoneRuntime:
                 mine.append(here)
                 theirs.append(np.arange(old.start, old.stop, dtype=np.intp))
                 if source.claim_for(device_id) is not None or device_id in self._claims:
-                    held[device_id] = source
+                    held[device_id] = source._holder(device_id)
                     held_rows[device_id] = slice(piece.start, piece.stop)
             if mine:
                 rows.append((source, np.concatenate(mine), np.concatenate(theirs)))
-        for source in sources:  # at most three looks at once: older transitions end now
-            for older in source.transition_sources:
-                older.end_transition()
+        for source in sources:  # three looks at most in the zone's own chain: older end now
+            if source.zone_id == self.zone_id:
+                for older in source.transition_sources:
+                    older.end_transition()
         self._transition = _Transition(
             kind=transition.kind,
             duration_s=transition.duration_s,
@@ -477,8 +481,9 @@ class ZoneRuntime:
         """This runtime as it is now, for a zone that takes some of its lights: the same
         look on the same LEDs, so the same frames (effects are seeded alike), and the same
         firmware effects under the same generation, so a light that runs one isn't sent it
-        again. It is never ticked or told about: the new zone renders it while its
-        transition plays."""
+        again. It carries the mix it's in, the lights its transition holds and its trails,
+        so the taken lights don't jump. It is never ticked or told about, so its own
+        midpoint never passes: the new zone renders it while its transition plays."""
         twin = ZoneRuntime(
             self.zone_id,
             self.look,
@@ -491,6 +496,10 @@ class ZoneRuntime:
             emulated=self._emulated,
         )
         twin.generation = self.generation
+        twin._trails = self._trails.copy()
+        twin._handover = set(self._handover)
+        if self._transition is not None:  # its mix, as it is (it never ticks or switches)
+            twin._transition = replace(self._transition)
         return twin
 
     def settle(self) -> None:

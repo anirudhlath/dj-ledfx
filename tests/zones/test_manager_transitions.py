@@ -8,15 +8,17 @@ import json
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from conftest import FakeLight, events
 from loguru import logger
+from runtime_fakes import FlatField
 from zone_home import GLOW, TILE, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
-from dj_ledfx.looks.model import Transition
+from dj_ledfx.effects.base import Effect
+from dj_ledfx.looks.model import Layer, Look, Transition
 from dj_ledfx.looks.store import look_body
 from dj_ledfx.main import _switch_at_midpoints
 from dj_ledfx.zones.model import LightsChanged, TransitionInfo, TransitionSwitched
@@ -166,6 +168,58 @@ async def test_a_take_over_of_a_zone_in_transition_cuts_it_on_the_lights_it_keep
     assert left is not None and left.state == "running" and left.lights == ("a",)
     assert result.running.transition is not None
     assert result.running.transition.from_name == "Strobe"
+
+
+# M4: a light taken from a zone mid-transition keeps the firmware effect that zone's old
+# look runs on it, not sent again, until the new transition's midpoint; then it switches.
+async def test_a_light_taken_mid_transition_keeps_its_effect_until_the_new_midpoint(
+    make_home: HomeFactory,
+) -> None:
+    a, b = FakeLight("a", caps=TILE), FakeLight("b", caps=TILE)
+    home = await make_home([a, b], [zone_record("left", "a", "b"), zone_record("right", "b")])
+    await home.manager.start("left", GLOW)
+    await home.manager.start("left", home.look("classic-breathe"), FADE)  # b keeps Glow
+    sent = len(b.calls)
+
+    await home.manager.start("right", home.look("classic-strobe"), FADE)
+
+    assert b.calls[sent:] == []  # Glow stays on it, not sent again
+    assert home.manager.effect_name("b") == "Glow" and not home.routes.routes["b"].streaming
+    _past_midpoint(home.host.runtimes["right"])
+    await home.manager.switch("right")
+    assert b.names()[sent:] == ["prepare_stream"]  # then the strobe streams to it
+
+
+class CountedField(FlatField, register=False):
+    """A flat field that counts the effects made of it: every runtime it's compiled in,
+    a twin's too."""
+
+    made: ClassVar[int] = 0
+
+    def __init__(self, level: float = 0.5) -> None:
+        super().__init__(level)
+        CountedField.made += 1
+
+
+# E8 = H9: a start whose transition doesn't play builds no twin of the zones it takes from.
+@pytest.mark.parametrize(
+    ("transition", "twins"),
+    [(Transition(), 0), (Transition(kind="fade", duration_s=0.0), 0), (FADE, 1)],
+)
+async def test_only_a_start_whose_transition_plays_builds_twins(
+    make_home: HomeFactory, transition: Transition, twins: int
+) -> None:
+    Effect._registry["counted_field"] = CountedField  # conftest drops it after each test
+    CountedField.made = 0
+    a, b = FakeLight("a"), FakeLight("b")
+    home = await make_home([a, b], [zone_record("left", "a", "b"), zone_record("right", "b")])
+    layer = Layer(id="counted", name="Counted", type="field", kind="counted_field")
+    await home.manager.start("left", Look("counted", "Counted", "ambient", layers=(layer,)))
+    made = CountedField.made
+
+    await home.manager.start("right", home.look("classic-breathe"), transition)
+
+    assert CountedField.made - made == twins
 
 
 # Review Focus 2 (I2): a light the new look runs itself streams the old look past the

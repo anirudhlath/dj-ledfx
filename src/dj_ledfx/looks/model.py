@@ -51,6 +51,11 @@ class Transition:
     kind: TransitionKind = "cut"
     duration_s: float = 0.0
 
+    @property
+    def plays(self) -> bool:
+        """Whether a start plays anything: a cut, or a transition of no time, doesn't."""
+        return self.kind != "cut" and self.duration_s > 0.0
+
 
 @dataclass(frozen=True, slots=True)
 class LookModifiers:

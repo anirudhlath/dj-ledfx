@@ -778,7 +778,9 @@ class ZoneManager:
         lights = [light for light in zone.lights if self._adapter(light) is not None]
         if not lights:
             raise ZoneError(f"{zone.name} has no lights")
-        sources = self._sources(zone_id, lights)  # before any light changes hands
+        transition = look.transition if transition is None else transition
+        # What the lights show, read before any changes hands: only for a transition that plays.
+        sources = self._sources(zone_id, lights) if transition.plays else []
         take_overs = await self._take_over(zone_id, lights)
         previous: _Running | None = None
         stopped: list[StoppedLook] = []
@@ -786,7 +788,7 @@ class ZoneManager:
             previous, stopped = self._end_run(zone_id, remember=True)
         brightness = _brightness_of(previous) if previous is not None else 1.0
         runtime = self._new_runtime(zone_id, look, lights, brightness)
-        runtime.begin_transition(look.transition if transition is None else transition, sources)
+        runtime.begin_transition(transition, sources)
         running = _Running(
             since=self._now(), lights=lights, runtime=runtime, members=tuple(lights)
         )
@@ -802,14 +804,12 @@ class ZoneManager:
         """What a start's lights show now, for its transition (spec §5.3): the zone's own
         runtime, and a twin of each zone it takes lights from (its runtime is about to lose
         them). A crashed zone's lights fade in from black."""
-        sources: list[ZoneRuntime] = []
-        wanted = set(lights)
-        for other_id, running in self._running.items():
-            runtime = running.runtime
-            if runtime is None or runtime.crash is not None or not wanted & set(running.lights):
-                continue
-            sources.append(runtime if other_id == zone_id else runtime.twin())
-        return sources
+        owners = dict.fromkeys(
+            runtime
+            for light in lights
+            if (runtime := self._runtime_of(light)) is not None and runtime.crash is None
+        )
+        return [owner if owner.zone_id == zone_id else owner.twin() for owner in owners]
 
     def _new_runtime(
         self,
