@@ -16,8 +16,8 @@ COLUMN: list[Point] = [(1.0, y, 1.0) for y in (0.0, 1.0, 2.0, 3.0, 4.0)]  # nort
 
 
 def _share(kind: TransitionKind, points: list[Point], p: float) -> list[float]:
-    leds = leds_at(points)
-    return [round(float(x), 3) for x in new_share(kind, switch_order(kind, leds, 7), p, 5)[:, 0]]
+    share = new_share(kind, switch_order(kind, leds_at(points), 7), p)
+    return [round(float(x), 3) for x in np.broadcast_to(share, (len(points), 1))[:, 0]]
 
 
 @pytest.mark.parametrize("kind", ["fade", "cut"])

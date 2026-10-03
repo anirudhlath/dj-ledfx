@@ -100,12 +100,33 @@ def _layout(look: Look) -> list[tuple[str, str, str, bool, object]]:
 
 class _Drawn(NamedTuple):
     """Where a look a transition replaces drew the zone's lights: how many of them, and
-    their rows in this zone's frame (`mine`) and in that look's (`theirs`)."""
+    their rows in this zone's frame (`mine`) and in that look's (`theirs`), a slice where
+    they follow on in order."""
 
     source: ZoneRuntime
     lights: int
-    mine: NDArray[np.intp]
-    theirs: NDArray[np.intp]
+    mine: NDArray[np.intp] | slice
+    theirs: NDArray[np.intp] | slice
+
+
+def _rows(pieces: list[NDArray[np.intp]]) -> NDArray[np.intp] | slice:
+    """The rows of a look's lights, a piece for each: a slice when they follow on in order
+    (a zone replacing its own look), else each row's index."""
+    rows = np.concatenate(pieces)
+    start = int(rows[0])
+    if np.array_equal(rows, np.arange(start, start + len(rows))):
+        return slice(start, start + len(rows))
+    return rows
+
+
+def _whole(rows: list[_Drawn], count: int) -> bool:
+    """Whether one look drew every row of the frame, as the frame has them."""
+    if len(rows) != 1 or rows[0].source.leds.count != count:
+        return False
+    return all(
+        isinstance(part, slice) and (part.start, part.stop) == (0, count)
+        for part in (rows[0].mine, rows[0].theirs)
+    )
 
 
 @dataclass(eq=False)
@@ -118,7 +139,8 @@ class _Transition:
     kind: TransitionKind
     duration_s: float
     rows: list[_Drawn]
-    order: NDArray[np.float32] | None  # each LED's place in the switch; None: all at once
+    whole: bool  # one look drew every row, as the frame has them: its frame is the old one
+    order: NDArray[np.float64] | None  # each LED's place in the switch; None: all at once
     held: dict[str, ZoneRuntime]  # light -> the runtime whose look it keeps until then
     held_rows: dict[str, slice]
     started: float | None = None  # the first frame's time: the transition runs from it
@@ -270,9 +292,11 @@ class ZoneRuntime:
         the lookahead. A light running its own effect, or not connected (latency None), takes
         none."""
         latency = 0.0
+        plain = self._transition is None  # else a light may follow the old look (_holder)
         for light in self._lights:
-            if self.streams(light.device_id):
-                light_s = self._env.latency_s(light.device_id)
+            device_id = light.device_id
+            if device_id not in self._claims if plain else self.streams(device_id):
+                light_s = self._env.latency_s(device_id)
                 if light_s is not None and light_s > latency:
                     latency = light_s
         frame_s = self._stride / self._env.fps
@@ -490,9 +514,7 @@ class ZoneRuntime:
                     held[device_id] = source._holder(device_id)
                     held_rows[device_id] = slice(piece.start, piece.stop)
             if mine:  # one piece for each light, however many LEDs it has
-                rows.append(
-                    _Drawn(source, len(mine), np.concatenate(mine), np.concatenate(theirs))
-                )
+                rows.append(_Drawn(source, len(mine), _rows(mine), _rows(theirs)))
         for source in sources:  # three looks at most in the zone's own chain: older end now
             if source.zone_id == self.zone_id:
                 for older in source.transition_sources:
@@ -501,6 +523,7 @@ class ZoneRuntime:
             kind=transition.kind,
             duration_s=transition.duration_s,
             rows=rows,
+            whole=_whole(rows, self.leds.count),
             order=switch_order(transition.kind, self.leds, self.generation),
             held=held,
             held_rows=held_rows,
@@ -626,26 +649,41 @@ class ZoneRuntime:
             )
             self.end_transition()
             return frame
-        share = new_share(transition.kind, transition.order, transition.progress, len(frame))
-        for device_id, rows in transition.held_rows.items():  # firmware lights switch whole
-            if device_id in self._claims:  # this look runs it: new once its effect started
-                new = transition.switched and device_id not in self._handover
-            else:  # it streams this look once applied, which is after the midpoint
-                new = transition.switched or transition.past_midpoint(ctx.t)
-            share[rows] = 1.0 if new else 0.0
+        share = new_share(transition.kind, transition.order, transition.progress)
+        if transition.held_rows:  # firmware lights switch whole: a share for each LED
+            each = (
+                np.full((len(frame), 1), share, np.float32) if isinstance(share, float) else share
+            )
+            for device_id, rows in transition.held_rows.items():
+                if device_id in self._claims:  # this look runs it: new once its effect started
+                    new = transition.switched and device_id not in self._handover
+                else:  # it streams this look once applied, which is after the midpoint
+                    new = transition.switched or transition.past_midpoint(ctx.t)
+                each[rows] = 1.0 if new else 0.0
+            share = each
         blend_into(old, frame, "normal", share)  # the new look over the old, LED by LED
         return old
 
     def _replaced(self, ctx: RenderContext, transition: _Transition) -> FloatRGB:
-        """What the zone's lights showed: each replaced look's rows, at that look's own
-        brightness (frames are scaled by this zone's at send); black where none was. A new
-        array, which the mix then changes in place."""
+        """What the zone's lights showed: each replaced look's rows; black where none was.
+        A new array, which the mix then changes in place: when one look drew every row as
+        this frame has them, its own frame."""
+        if transition.whole:
+            return self._as_drawn(transition.rows[0].source, ctx)
         old = np.zeros((self.leds.count, 3), dtype=np.float32)
         for source, _, mine, theirs in transition.rows:
-            colours = source.render(ctx)
-            scale = source.brightness / self.brightness if self.brightness > 0.0 else 0.0
-            old[mine] = colours[theirs] * np.float32(scale)
+            old[mine] = self._as_drawn(source, ctx)[theirs]
         return old
+
+    def _as_drawn(self, source: ZoneRuntime, ctx: RenderContext) -> FloatRGB:
+        """A replaced look's frame at its own brightness (frames are scaled by this zone's
+        at send), scaled in place: nothing else holds it (twins and replaced looks don't
+        tick)."""
+        colours = source.render(ctx)
+        scale = source.brightness / self.brightness if self.brightness > 0.0 else 0.0
+        if scale != 1.0:
+            colours *= np.float32(scale)
+        return colours
 
     def _render_look(self, ctx: RenderContext) -> FloatRGB:
         """A new frame every tick: the ring keeps it. The look's streamed colours (its
