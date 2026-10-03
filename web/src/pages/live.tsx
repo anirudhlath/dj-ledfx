@@ -17,6 +17,7 @@ import { PhoneRunning } from '@/live/phone-live'
 import { PreviewOnlyLabel } from '@/live/preview-only'
 import { ReconnectingCard } from '@/live/reconnecting'
 import { RunningPanel } from '@/live/running-panel'
+import { ZoneDetail } from '@/live/zone-detail'
 import { StagePending } from '@/stage/stage-pending'
 
 const Stage = lazy(() => import('@/stage/stage'))
@@ -46,7 +47,7 @@ export function LivePage() {
   }
   const stage = (
     <Suspense fallback={<StagePending />}>
-      <Stage variant={phone ? 'phone' : 'desktop'} outlined={phone ? null : (hovered ?? zoneId ?? null)} />
+      <Stage variant={phone ? 'phone' : 'desktop'} outlined={phone ? null : (hovered ?? zoneId ?? null)} focus={phone ? (zoneId ?? null) : null} />
     </Suspense>
   )
   if (phone) {
@@ -55,7 +56,7 @@ export function LivePage() {
         <div className="relative shrink-0" style={{ aspectRatio: `${LIVE_SPEC.phoneStage.width} / ${LIVE_SPEC.phoneStage.height}` }}>
           {stage}
         </div>
-        <PhoneRunning />
+        {zoneId === undefined ? <PhoneRunning /> : <ZoneDetail zoneId={zoneId} />}
       </div>
     )
   }

@@ -83,4 +83,19 @@ describe('LightSwatch', () => {
     render(<LightSwatch light={light('bedl')} state={lightState({ ...light('bedl'), status: 'streaming', power: true }, undefined)} size="row" />)
     expect(screen.getByRole('img', { name: light('bedl').name }).style.width).toBe(`${LIVE_RENDER.rowSwatchPx}px`)
   })
+
+  // F3 decision 24: Phone-Zone's "glowing" and "waiting", written with the colour.
+  it('writes "glowing" or "waiting" where it is asked to, as its light lights and darkens', () => {
+    vi.useFakeTimers()
+    const words = document.createElement('span')
+    const target = light('bedl')
+    render(<LightSwatch light={target} state={lightState({ ...target, status: 'streaming', power: true }, undefined)} words={words} />)
+    expect(words).toHaveTextContent('waiting')
+    pushFrame('bedl', 1, [255, 120, 0])
+    act(() => vi.advanceTimersToNextFrame())
+    expect(words).toHaveTextContent('glowing')
+    pushFrame('bedl', 2, [0, 0, 0])
+    act(() => vi.advanceTimersToNextFrame())
+    expect(words).toHaveTextContent('waiting')
+  })
 })

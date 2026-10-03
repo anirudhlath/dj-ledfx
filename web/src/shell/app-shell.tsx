@@ -25,6 +25,7 @@ import { TopBar } from './top-bar'
 export function AppShell() {
   const isPhone = useIsPhone()
   const meta = usePageMeta()
+  const { PhoneTitle } = meta
   const news = useConnectionNews(useConnectionStatus())
   const server = useServerName()
 
@@ -39,7 +40,11 @@ export function AppShell() {
       >
         <title>{documentTitle(meta.title)}</title>
         {isPhone ? (
-          <PhoneHeader title={meta.phoneTitle ?? meta.title} context={meta.phoneContext && <PageContext get={meta.phoneContext} />}>
+          <PhoneHeader
+            title={PhoneTitle ? <PhoneTitle /> : (meta.phoneTitle ?? meta.title)}
+            back={meta.phoneBack}
+            context={meta.phoneContext && <PageContext get={meta.phoneContext} />}
+          >
             {meta.tempoStrip && <ChromeTempoStrip />}
           </PhoneHeader>
         ) : (

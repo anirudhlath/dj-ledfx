@@ -45,9 +45,11 @@ export interface LightSwatchProps {
   light: Light
   state: LightState
   size?: SwatchSize
+  /** Where the swatch writer writes "glowing" or "waiting" (F3 decision 24). An element, not a ref: a row's words come after its swatch, so they mount later. */
+  words?: HTMLElement | null
 }
 
-export function LightSwatch({ light, state, size = 'card' }: LightSwatchProps) {
+export function LightSwatch({ light, state, size = 'card', words: wordsElement = null }: LightSwatchProps) {
   const ref = useRef<HTMLSpanElement>(null)
   const calm = useReducedMotion()
   const hollow = isHollow(state.status)
@@ -55,8 +57,8 @@ export function LightSwatch({ light, state, size = 'card' }: LightSwatchProps) {
   const pill = !hollow && (light.capabilities.includes('multizone') || light.capabilities.includes('matrix'))
   useLayoutEffect(() => {
     if (hollow || ref.current === null) return
-    return registerSwatch({ element: ref.current, lightId: light.id, state, pill, calm })
-  }, [hollow, light.id, state, pill, calm])
+    return registerSwatch({ element: ref.current, lightId: light.id, state, pill, calm, words: wordsElement })
+  }, [hollow, light.id, state, pill, calm, wordsElement])
 
   const px = SIZE_PX[size]
   const words = WORDS[state.status]

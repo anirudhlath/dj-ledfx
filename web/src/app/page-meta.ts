@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react'
 import { useMatches } from 'react-router'
 
 export interface MetaContext {
@@ -22,6 +23,10 @@ export interface PageMeta {
   phoneContext?: (at: MetaContext) => string
   /** Phone only: the tempo strip under the header (Live). */
   tempoStrip?: boolean
+  /** Draws the phone header's title when it comes from data, over phoneTitle (Zone detail: the zone's name). */
+  PhoneTitle?: ComponentType
+  /** Phone only: a Back link before the title, to this path (Zone detail: Live). */
+  phoneBack?: string
 }
 
 const FALLBACK: PageMeta = { title: 'dj-ledfx' }

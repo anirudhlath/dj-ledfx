@@ -8,7 +8,7 @@ import type { Id } from '@/api/contract'
 import type { LightFrame } from '@/api/frames'
 import { frames } from '@/api/live'
 import { LIVE_SPEC } from '@/design/live-numbers'
-import { swatchFill, swatchGlow, type RGB } from '@/lib/light-colour'
+import { intensityOf, isDark, swatchFill, swatchGlow, type RGB } from '@/lib/light-colour'
 import { isStreamed, type LightState } from '@/stage/show'
 import { currentColour } from '@/stage/tooltip'
 
@@ -20,6 +20,8 @@ export interface Swatch {
   pill: boolean
   /** Reduced motion: repainted at most once per LIVE_SPEC.reducedMotionMs. */
   calm: boolean
+  /** Where the light's words go: "glowing" while it's lit, "waiting" while it's dark (Phone-Zone; F3 decision 24). */
+  words?: HTMLElement | null
 }
 
 interface Painted {
@@ -59,6 +61,10 @@ function write(swatch: Swatch, lightFrame: LightFrame | undefined): void {
   const { style } = swatch.element
   style.background = swatch.pill && lightFrame !== undefined && lightFrame.count > 1 ? pillFill(lightFrame) : swatchFill(rgb)
   style.boxShadow = swatchGlow(rgb, LIVE_SPEC.swatch.glowPx)
+  if (swatch.words != null) {
+    const words = isDark(intensityOf(rgb)) ? 'waiting' : 'glowing'
+    if (swatch.words.textContent !== words) swatch.words.textContent = words
+  }
 }
 
 /** Paints a swatch whose light has something new. Returns how long a calm one must wait first, else Infinity. */

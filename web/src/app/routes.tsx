@@ -1,5 +1,6 @@
 import { Navigate, type RouteObject } from 'react-router'
 import { formatDayDateTime, formatDayTime, formatTimeWithSeconds } from '@/lib/format'
+import { ZoneTitle } from '@/live/zone-detail'
 import { AppError, RootError } from '@/pages/app-error'
 import { LivePage } from '@/pages/live'
 import { NotFound } from '@/pages/not-found'
@@ -20,6 +21,8 @@ const LIVE: PageMeta = {
       : `${formatDayTime(now)} · ${previewOnly ? 'on screen only' : `sun sets ${sunset}`}`,
   tempoStrip: true,
 }
+/** Zone detail (Phone-Zone): the zone's name with Back to Live, and no context line or tempo strip. On desktop it's Live (F3 decision 23). */
+const ZONE: PageMeta = { title: LIVE.title, context: LIVE.context, PhoneTitle: ZoneTitle, phoneBack: '/live' }
 const LOOKS: PageMeta = { title: 'Looks' }
 const MAP: PageMeta = {
   title: 'Map',
@@ -50,7 +53,9 @@ export const routes: RouteObject[] = [
           // F3 decision 23: /live/zones/:zoneId is Live with that zone's card outlined, so the stage
           // stays mounted between them. LivePage reads the id; the child draws nothing (Task 19 gives it
           // the phone's Zone detail).
-          { path: 'live', handle: LIVE, element: <LivePage />, children: [{ path: 'zones/:zoneId', element: null }] },
+          // F3 decision 23: /live/zones/:zoneId is Live, so the stage stays mounted between them. LivePage
+          // reads the id: on desktop it outlines the zone's card, and on the phone it draws Zone detail.
+          { path: 'live', handle: LIVE, element: <LivePage />, children: [{ path: 'zones/:zoneId', handle: ZONE, element: null }] },
           { path: 'live/put', handle: LIVE, element: <Placeholder name="Put a look on" milestone="F4" /> },
           { path: 'looks', handle: LOOKS, element: <Placeholder name="Looks" milestone="F5" /> },
           { path: 'looks/:lookId', handle: LOOKS, element: <Placeholder name="Look editor" milestone="F8" /> },
