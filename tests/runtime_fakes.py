@@ -5,6 +5,7 @@ that calls register_fields() (conftest drops them after each test)."""
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import fields
 from typing import Any, ClassVar
 
 import numpy as np
@@ -19,7 +20,7 @@ from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.model import Layer, Look
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import FloatRGB
-from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import RuntimeEnv, ZoneLight, ZoneRuntime
 
 TILE = DeviceCapabilities(protocol="LIFX", matrix=True)
 BULB = DeviceCapabilities(protocol="LIFX")
@@ -126,6 +127,9 @@ def placed_light(
     return ZoneLight(device_id, len(points), caps, placed=placed, room=room)
 
 
+ENV_FIELDS = frozenset(f.name for f in fields(RuntimeEnv))
+
+
 def runtime_of(
     look: Look,
     lights: Sequence[ZoneLight] = LIGHTS,
@@ -133,15 +137,15 @@ def runtime_of(
     clock: TempoClock | None = None,
     **kwargs: Any,
 ) -> ZoneRuntime:
+    """The look on these lights, 20 ms away unless `latencies` says otherwise. Keyword
+    arguments set the RuntimeEnv's fields (timer, watched, evening...) or the runtime's."""
     known = latencies or {}
-    return ZoneRuntime(
-        kwargs.pop("zone_id", "zone"),
-        look,
-        lights,
+    env = RuntimeEnv(
         clock=clock or TempoClock(),
         latency_s=lambda device_id: known.get(device_id, 0.02),
-        **kwargs,
+        **{name: kwargs.pop(name) for name in ENV_FIELDS & kwargs.keys()},
     )
+    return ZoneRuntime(kwargs.pop("zone_id", "zone"), look, lights, env, **kwargs)
 
 
 def latest(runtime: ZoneRuntime) -> np.ndarray:

@@ -51,7 +51,7 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
     ZonesChanged,
 )
-from dj_ledfx.zones.runtime import LightMode, ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import LightMode, RuntimeEnv, ZoneLight, ZoneRuntime
 from dj_ledfx.zones.store import new_group_id
 
 if TYPE_CHECKING:
@@ -161,16 +161,23 @@ class ZoneManager:
         self._host = host
         self._routes = routes
         self._event_bus = event_bus
-        self._clock = clock
-        self._fps = fps
-        self._max_lookahead_s = max_lookahead_s
         self._preview_only = preview_only
         self._now = now
         self._home = home
-        # Whether anyone watches the live stream: zones draw lights that run their own
-        # effect only then (M1 review, constraint 3). main passes Watchers.watching_live.
-        self._frames_watched = frames_watched
-        self._evening = evening  # how far into the evening it is, for looks that follow it
+        # What every zone's runtime reads. `frames_watched`: whether anyone watches the live
+        # stream, so zones draw lights that run their own effect only then (M1 review,
+        # constraint 3; main passes Watchers.watching_live). `evening`: how far into the
+        # evening it is, for looks that follow it.
+        self._env = RuntimeEnv(
+            clock=clock,
+            latency_s=self._latency_s,
+            fps=fps,
+            max_lookahead_s=max_lookahead_s,
+            now=now,
+            watched=frames_watched,
+            evening=evening,
+            on_state_change=self._state_changed,
+        )
         self._zones: dict[str, ZoneRecord] = {}
         self._running: dict[str, _Running] = {}
         self._captured: dict[str, bytes] = {}  # b"": control taken, nothing captured
@@ -536,9 +543,8 @@ class ZoneManager:
             raise ZoneError(f"{zone.name} has no lights")
         running = self._running.get(zone_id)
         brightness = _brightness_of(running) if running is not None else 1.0
-        runtime = self._new_runtime(
-            zone_id, look, lights, brightness, latency_s=lambda _: None, watched=lambda: True
-        )
+        env = replace(self._env, latency_s=lambda _: None, watched=lambda: True)
+        runtime = self._new_runtime(zone_id, look, lights, brightness, env)
         self._previews[runtime] = on_end
         self._host.add_runtime(runtime)
         return runtime
@@ -824,26 +830,17 @@ class ZoneManager:
         look: Look,
         lights: Iterable[str],
         brightness: float,
-        *,
-        latency_s: Callable[[str], float | None] | None = None,
-        watched: Callable[[], bool] | None = None,
+        env: RuntimeEnv | None = None,
     ) -> ZoneRuntime:
-        """A zone's runtime. A preview's passes its own latency (none) and watched (always:
-        it exists only to be watched)."""
+        """A zone's runtime. A preview passes its own env: no latency (nothing is sent)
+        and always watched (it exists only to be watched)."""
         return ZoneRuntime(
             zone_id,
             look,
             self._zone_lights(lights),
-            clock=self._clock,
-            latency_s=latency_s or self._latency_s,
-            fps=self._fps,
-            max_lookahead_s=self._max_lookahead_s,
+            env or self._env,
             brightness=brightness,
             space=self._home.space(),
-            now=self._now,
-            on_state_change=self._state_changed,
-            watched=watched or self._frames_watched,
-            evening=self._evening,
         )
 
     def _state_changed(self, runtime: ZoneRuntime) -> None:

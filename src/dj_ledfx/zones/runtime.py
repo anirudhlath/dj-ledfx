@@ -6,8 +6,8 @@ import itertools
 import math
 import time
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -124,6 +124,28 @@ class ZoneLight:
     name: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeEnv:
+    """What every zone's runtime reads from the app around it. The zone manager makes one
+    and hands it to each runtime it makes; a preview and a twin each change a field or two
+    (dataclasses.replace)."""
+
+    clock: TempoClock
+    latency_s: Callable[[str], float | None]  # a light's latency; None: not connected
+    fps: int = 60
+    max_lookahead_s: float = 1.0
+    timer: Callable[[], float] = time.perf_counter  # times each render
+    now: Callable[[], datetime] = utcnow  # when a zone crashed or turned slow
+    # Whether anyone watches the zone's frames (Task 13). Lights that run their own effect
+    # are drawn only for the preview, so only while someone watches.
+    watched: Callable[[], bool] = lambda: True
+    # How far into the evening it is now, 0..1 (home/sun.py), for looks that follow it.
+    evening: Callable[[], float] = lambda: 0.0
+    # Called when the zone crashes, turns slow, recovers by itself or its transition
+    # starts, passes the midpoint or ends: the zone manager tells the running channel.
+    on_state_change: Callable[[ZoneRuntime], None] | None = None
+
+
 class ZoneRuntime:
     """Renders one running zone's look ahead of time into its own ring buffer."""
 
@@ -132,42 +154,24 @@ class ZoneRuntime:
         zone_id: str,
         look: Look,
         lights: Sequence[ZoneLight],
+        env: RuntimeEnv,
         *,
-        clock: TempoClock,
-        latency_s: Callable[[str], float | None],
-        fps: int = 60,
-        max_lookahead_s: float = 1.0,
         brightness: float = 1.0,
         seed: int = 0,
         space: Space = NO_SPACE,
-        timer: Callable[[], float] = time.perf_counter,
-        now: Callable[[], datetime] = utcnow,
-        on_state_change: Callable[[ZoneRuntime], None] | None = None,
-        watched: Callable[[], bool] = lambda: True,
-        evening: Callable[[], float] = lambda: 0.0,
+        leds: LedSet | None = None,
+        emulated: Iterable[str] = (),
     ) -> None:
+        """`leds` is the LED set the lights make in `space`, when the caller has it (a
+        twin); `emulated` the lights that refused their firmware effects (mark_emulated)."""
         self.zone_id = zone_id
-        # Called when the zone crashes, turns slow or recovers by itself; the zone
-        # manager tells the running channel.
-        self._on_state_change = on_state_change
+        self._env = env
         self.look = look
         self.brightness = brightness
         self.generation = 0  # _compile draws the first
         self.crash: CrashInfo | None = None
         self.slow_since: datetime | None = None
-        self._clock = clock
-        self._latency_s = latency_s
-        self._fps = fps
-        self._max_lookahead_s = max_lookahead_s
         self._seed = seed
-        self._timer = timer
-        self._now = now
-        # Whether anyone watches this zone's frames (Task 13). Lights that run their
-        # own effect are drawn only for the preview, so only while someone watches.
-        self._watched = watched
-        # How far into the evening it is now, 0..1 (home/sun.py); a look with its evening
-        # modifier on reads it every frame.
-        self._evening = evening
         self._trails = Trails()
         self._transition: _Transition | None = None
         self._switch_due = False  # lights went over to this look: the manager applies them
@@ -175,7 +179,7 @@ class ZoneRuntime:
         self._firmware: list[tuple[Layer, FirmwareEffect]] = []  # top layer first
         self._claims: dict[str, int] = {}  # light -> firmware layer it runs itself
         self._copies: dict[str, int] = {}  # light -> firmware layer streamed as a copy
-        self._emulated: set[str] = set()  # lights that rejected their firmware effect
+        self._emulated = set(emulated)  # lights that rejected their firmware effect
         # Each firmware layer's lights and their LEDs: where they sit in the zone's frame
         # and the LED set the layer's emulation is drawn on. Copies go to the lights;
         # claims only to the preview.
@@ -192,11 +196,11 @@ class ZoneRuntime:
         self._ticks = 0
         self._rendered: deque[float] = deque()
         self._below_since: float | None = None
-        self._capacity = int(max_lookahead_s * fps) + 2
+        self._capacity = int(env.max_lookahead_s * env.fps) + 2
         self.ring: RingBuffer
         self.leds: LedSet
         self._space = space
-        self._place(lights)
+        self._place(lights, leds)
         self._compile()
 
     # --- what the zone looks like from outside -------------------------------------
@@ -234,7 +238,7 @@ class ZoneRuntime:
 
     @property
     def fps_target(self) -> int:
-        return self._fps
+        return self._env.fps
 
     @property
     def horizon_s(self) -> float:
@@ -245,10 +249,11 @@ class ZoneRuntime:
         latency = 0.0
         for light in self._lights:
             if self.streams(light.device_id):
-                light_s = self._latency_s(light.device_id)
+                light_s = self._env.latency_s(light.device_id)
                 if light_s is not None and light_s > latency:
                     latency = light_s
-        return min(latency + self._stride / self._fps, HORIZON_CAP_S, self._max_lookahead_s)
+        frame_s = self._stride / self._env.fps
+        return min(latency + frame_s, HORIZON_CAP_S, self._env.max_lookahead_s)
 
     @property
     def firmware_brightness(self) -> float:
@@ -436,20 +441,13 @@ class ZoneRuntime:
             self.zone_id,
             self.look,
             self._lights,
-            clock=self._clock,
-            latency_s=self._latency_s,
-            fps=self._fps,
-            max_lookahead_s=self._max_lookahead_s,
+            replace(self._env, on_state_change=None),
             brightness=self.brightness,
             seed=self._seed,
             space=self._space,
-            timer=self._timer,
-            now=self._now,
-            watched=self._watched,
-            evening=self._evening,
+            leds=self.leds,
+            emulated=self._emulated,
         )
-        twin._emulated = set(self._emulated)
-        twin._plan_claims()
         twin.generation = self.generation
         return twin
 
@@ -490,14 +488,14 @@ class ZoneRuntime:
         if self._ticks % self._stride:
             return
         target = now + self.horizon_s
-        ctx = render_context(self._clock, target, self._stride / self._fps)
-        started = self._timer()
+        ctx = render_context(self._env.clock, target, self._stride / self._env.fps)
+        started = self._env.timer()
         try:
             colors = self.render(ctx)
         except Exception as exc:  # a look never takes the engine down (spec §8)
             self._fail(self._rendering, f"{type(exc).__name__}: {exc}")
             return
-        elapsed = self._timer() - started
+        elapsed = self._env.timer() - started
         self.ring.write(
             RenderedFrame(
                 colors=colors,
@@ -569,8 +567,8 @@ class ZoneRuntime:
         if modifiers.downbeat_flash:
             frame = flashed(frame, ctx)
         if modifiers.evening:
-            frame = warmed(frame, self._evening())
-        if self._claim_targets and self._watched():
+            frame = warmed(frame, self._env.evening())
+        if self._claim_targets and self._env.watched():
             self._draw_firmware(frame, ctx, self._claim_targets)
         if modifiers.brightness_cap is not None:
             frame = capped(frame, modifiers.brightness_cap)
@@ -642,18 +640,20 @@ class ZoneRuntime:
                 self._fields.append((layer, effect))
         self._plan_claims()
 
-    def _place(self, lights: Sequence[ZoneLight]) -> None:
+    def _place(self, lights: Sequence[ZoneLight], leds: LedSet | None = None) -> None:
         self._lights = tuple(lights)
         before = getattr(self, "leds", None)
-        self.leds = build_ledset(
-            [
-                LedSource(
-                    light.device_id, light.led_count, light.geometry, light.placed, light.room
-                )
-                for light in self._lights
-            ],
-            self._space,
-        )
+        if leds is None:
+            leds = build_ledset(
+                [
+                    LedSource(
+                        light.device_id, light.led_count, light.geometry, light.placed, light.room
+                    )
+                    for light in self._lights
+                ],
+                self._space,
+            )
+        self.leds = leds
         if before is None or before.slices != self.leds.slices:
             self.ring = RingBuffer(self._capacity)
         self._views = {}
@@ -704,7 +704,7 @@ class ZoneRuntime:
         return targets
 
     def _fail(self, layer: str, message: str) -> None:
-        self.crash = CrashInfo(layer=layer, message=message, at=self._now())
+        self.crash = CrashInfo(layer=layer, message=message, at=self._env.now())
         self._state_changed()
         stamp = time.monotonic()
         if stamp - self._last_crash_log >= CRASH_LOG_INTERVAL_S:
@@ -718,14 +718,14 @@ class ZoneRuntime:
 
     def _track_speed(self, now: float, elapsed: float) -> None:
         self._render_s = elapsed if self._render_s == 0.0 else 0.9 * self._render_s + 0.1 * elapsed
-        self._stride = max(1, min(self._fps, math.ceil(self._render_s / FRAME_BUDGET_S)))
+        self._stride = max(1, min(self._env.fps, math.ceil(self._render_s / FRAME_BUDGET_S)))
         self._rendered.append(now)
         trim_window(self._rendered, now)
-        if len(self._rendered) < SLOW_RATIO * self._fps:
+        if len(self._rendered) < SLOW_RATIO * self._env.fps:
             if self._below_since is None:
                 self._below_since = now
             if self.slow_since is None and now - self._below_since >= SLOW_AFTER_S:
-                self.slow_since = self._now()
+                self.slow_since = self._env.now()
                 self._state_changed()
         else:
             self._below_since = None
@@ -734,5 +734,5 @@ class ZoneRuntime:
                 self._state_changed()
 
     def _state_changed(self) -> None:
-        if self._on_state_change is not None:
-            self._on_state_change(self)
+        if self._env.on_state_change is not None:
+            self._env.on_state_change(self)

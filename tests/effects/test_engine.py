@@ -12,7 +12,7 @@ from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import RenderedFrame
-from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import RuntimeEnv, ZoneLight, ZoneRuntime
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ def test_ring_buffer_hands_out_its_frame_and_routes_copy_their_slice() -> None:
 def _runtime(zone_id: str, clock: TempoClock) -> ZoneRuntime:
     look = builtin_look("classic-breathe")
     light = ZoneLight(f"{zone_id}-light", 4, DeviceCapabilities(protocol="LIFX"))
-    return ZoneRuntime(zone_id, look, [light], clock=clock, latency_s=lambda _: 0.05)
+    return ZoneRuntime(zone_id, look, [light], RuntimeEnv(clock, lambda _: 0.05))
 
 
 def test_the_engine_renders_each_zone_it_hosts(clock: TempoClock) -> None:

@@ -23,7 +23,7 @@ from dj_ledfx.looks.model import (
     TransitionKind,
 )
 from dj_ledfx.tempo.clock import TempoClock
-from dj_ledfx.zones.runtime import FRAME_BUDGET_S, ZoneRuntime
+from dj_ledfx.zones.runtime import FRAME_BUDGET_S, RuntimeEnv, ZoneRuntime
 
 pytestmark = pytest.mark.perf
 
@@ -49,18 +49,17 @@ def with_every_modifier(look: Look) -> Look:
     return replace(look, layers=layers, modifiers=EVERY_LOOK_MODIFIER)
 
 
-def home_runtime(look: Look, **kwargs: Any) -> ZoneRuntime:
-    """The look on every seeded LED of this home, as the whole-home zone runs it."""
+def home_runtime(look: Look, **env: Any) -> ZoneRuntime:
+    """The look on every seeded LED of this home, as the whole-home zone runs it; `env`
+    sets RuntimeEnv's fields."""
     lights = seeded_zone_lights()
     assert sum(light.led_count for light in lights) == handoff_home_json()["totals"]["leds"]
     return ZoneRuntime(
         "home",
         look,
         lights,
-        clock=TempoClock(),
-        latency_s=lambda _: 0.05,
+        RuntimeEnv(TempoClock(), lambda _: 0.05, **env),
         space=seeded_space(),
-        **kwargs,
     )
 
 
