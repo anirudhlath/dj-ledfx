@@ -19,11 +19,14 @@ def test_an_unknown_model_plays_one_colour() -> None:
     assert (capability.is_rgbic, capability.segment_count, capability.razer) == (False, 0, False)
 
 
-# Ruling 12, checked through each model's key wherever its entry sits in the table. The
-# models aren't named here: the repo is public, and the table's own lines name them.
-def test_the_upright_lamp_takes_razer_and_the_strip_does_not() -> None:
-    flags = sorted(
-        (entry.razer, entry.form, entry.segments_from_top)
+# Ruling 12 and what the lamps showed in the plan's Task 8 (2026-10-02), checked through each
+# model's key wherever its entry sits in the table. The models aren't named here: the repo
+# is public, and the table's own lines name them. The upright lamps show 14 segments, the
+# first at the bottom, and two of three stayed dark for frames of 15; the strip takes razer
+# frames of 15.
+def test_each_kind_plays_razer_with_the_segments_its_lamps_showed() -> None:
+    kinds = sorted(
+        (entry.form, entry.razer, entry.segment_count, entry.segments_from_top)
         for entry in map(get_device_capability, SKU_REGISTRY)
     )
-    assert flags == [(False, "strip", False), (True, "upright", False)]
+    assert kinds == [("strip", True, 15, False), ("upright", True, 14, False)]

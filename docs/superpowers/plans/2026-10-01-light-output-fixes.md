@@ -79,6 +79,7 @@ The owner's rulings first; the rest are this plan's, where the specs are silent 
 10. **Govee rates:** razer at up to 30 a second (`GOVEE_RAZER_FPS`, the Govee `max_fps` default); `colorwc` is capped at 10 a second (`GOVEE_COLOUR_FPS`) whatever the config says, from the measurements and the outage above.
 11. **Razer is armed lazily:** razer-on goes before a lamp's first frame and again after 2 s without one (`RAZER_IDLE_S`), and after every prepare, restore or power switch. A restore of a lamp that's on sends razer-off first. A lamp in colour mode is sent razer-off when it's prepared, in case it was left in razer mode. `ptReal` and its helpers are removed.
 12. **The SKU table** (an existing entry changes): the first entry (an upright lamp) plays razer and is upright; the second (a strip) keeps razer off until Task 8 checks it: this home has one, and Task 8 plays `whole` on it. Each table entry gains `razer`, `form` and `segments_from_top`. Task 8 checks the upright lamps on the real lamps and may change these.
+   *Note, 2026-10-02 (Task 8):* the owner watched every pattern. The upright lamps take razer and show 14 segments, the first at the bottom. With 15 colours, one lamp dropped the extra colour and two showed nothing, so the first entry's count is 14. The strip takes razer with 15 segments, the first at the plug end, so the second entry gets `razer=True`. The chase was smooth and every lamp held all four colours through `gaps`, so `RAZER_IDLE_S` stays at 2 s.
 13. **A lamp's segment count:** its own stored output, else the config's `segment_override` (for RGBIC lamps, as now), else the table. Fewer than 2 segments plays one colour.
 14. **Govee capabilities:** the model is `Govee <model number>` and multizone means more than one segment.
 15. **A Govee lamp that stops answering is a missed read:** `read_light` raises `NoAnswer`, so three missed 5 s polls (about 15 s) take it offline; it gets no frames until a scan (every 30 s) finds it again. While another program holds UDP 4002 the app can't hear replies at all, can't tell, and keeps sending.
@@ -2870,6 +2871,8 @@ Expected: the script prints `status replies: B/5 before razer, D/A during` and `
 | `gaps`: blue or white didn't show | The lamp leaves razer mode in a pause of 2 or 3 s: `sed -i 's/^RAZER_IDLE_S = 2.0$/RAZER_IDLE_S = 1.0/' src/dj_ledfx/devices/govee/segment.py`. The tests use the constant. |
 | `gaps`: green didn't show | Stop and tell the owner and the coordinator: the lamp leaves razer within 1 s, and ruling 8's keepalive of 1 s can't hold it there. |
 | all as expected (red at the bottom, LEDS bands, a smooth chase, all four colours) | Nothing. |
+
+*Note, 2026-10-02:* the owner couldn't count `stripes` by eye. A probe that lit one segment at a time settled the count: index 13 lit the upright lamps' top segment. The strip's index 14 lit its far tip. See ruling 12's note.
 
 - [ ] **Step 6: The fallback ruling, if Step 4 calls for it**
 
