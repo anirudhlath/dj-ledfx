@@ -116,15 +116,6 @@ async def test_frame_slot_take_blocks_until_put() -> None:
     assert result == 99.0
 
 
-async def test_frame_slot_put_count() -> None:
-    slot = FrameSlot()
-    assert slot.put_count == 0
-    slot.put(1.0)
-    slot.put(2.0)
-    slot.put(3.0)
-    assert slot.put_count == 3
-
-
 async def test_frame_slot_has_pending() -> None:
     slot = FrameSlot()
     assert slot.has_pending is False
@@ -651,6 +642,46 @@ class _Labels(metrics._NoOpMetric):
     def labels(self, **kw: str) -> metrics._NoOpMetric:
         self.devices.add(kw["device"])
         return self
+
+
+async def test_a_light_slower_than_the_engine_drops_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dropped = _Labels()
+    monkeypatch.setattr(metrics, "FRAMES_DROPPED", dropped)
+    device = _make_device(max_fps=20)
+    buf = RingBuffer(capacity=150)
+    _fill_buffer(buf, time.monotonic(), 150)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
+
+    await _run_for(scheduler, 0.5)
+
+    (stats,) = scheduler.get_device_stats()
+    assert len(device.adapter.send_frame_calls) >= 7  # it streamed, at its own rate
+    assert (stats.frames_dropped, dropped.devices) == (0, set())
+
+
+async def test_a_frame_overwritten_while_the_light_was_due_is_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dropped = _Labels()
+    monkeypatch.setattr(metrics, "FRAMES_DROPPED", dropped)
+    adapter = _HeldAdapter()
+    device = ManagedDevice(adapter=adapter, tracker=LatencyTracker(StaticLatency(10.0)))
+    buf = RingBuffer(capacity=60)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = _scheduler(ring_buffer=buf, devices=[device], fps=60)
+
+    task = asyncio.create_task(scheduler.run())
+    await asyncio.wait_for(adapter.sending.wait(), timeout=1.0)
+    await asyncio.sleep(0.2)  # its send hangs while it's due: the frames meant for it pile up
+    (stats,) = scheduler.get_device_stats()
+    adapter.release.set()
+    scheduler.stop()
+    await task
+
+    assert stats.frames_dropped >= 5
+    assert dropped.devices == {"held"}
 
 
 # B11: the four RAM sticks share a name; each keeps its own frames, sequence and metrics.
