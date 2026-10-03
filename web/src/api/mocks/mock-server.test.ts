@@ -395,6 +395,111 @@ describe('the REST API', () => {
   })
 })
 
+describe('the tempo controls, as engine M3 has them', () => {
+  const T = HERO_NOW.getTime() / 1000
+  const LOCKED = 'The tempo is locked to Pro DJ Link: choose Auto or Internal to set it here'
+  const tempoOf = (server: MockServer) => (server.handle('GET', '/api/inputs').body as Inputs).tempo
+  const tap = (server: MockServer, clientTime: number) => server.handle('POST', '/api/inputs/tempo/tap', { clientTime })
+  const pushedTempo = (socket: ReturnType<typeof connect>) =>
+    (socket.json().filter((message) => message.channel === 'inputs').at(-1)?.inputs as Inputs | undefined)?.tempo
+
+  it('takes the tempo on Internal from the third tap of a DJ set, holds it, and hands it back under Auto', () => {
+    const server = startMockServer({ scenario: 'dj-playing' })
+    const socket = connect(server)
+    for (const at of [T, T + 0.5, T + 1]) expect(tap(server, at).status).toBe(200)
+    expect(tempoOf(server)).toMatchObject({ source: 'internal', bpm: 120, held: true, lock: 'auto', stale: false })
+    expect(tempoOf(server).internal).toMatchObject({ bpm: 120, how: 'tapped' })
+    expect(pushedTempo(socket)).toEqual(tempoOf(server))
+    expect(server.handle('PUT', '/api/inputs/tempo', { lock: 'auto' })).toMatchObject({ status: 200, body: { source: 'prodjlink', held: false } })
+    expect(pushedTempo(socket)).toMatchObject({ source: 'prodjlink', held: false })
+  })
+
+  it("holds the DJ's BPM from the first tap, until the DJ starts again", () => {
+    const server = startMockServer({ scenario: 'dj-playing' })
+    tap(server, T)
+    expect(tempoOf(server)).toMatchObject({ source: 'internal', held: true, bpm: 124 * (1 + 1.2 / 100) })
+    expect(tempoOf(server).internal).toMatchObject({ how: 'kept' })
+    server.djStartsAgain()
+    expect(tempoOf(server)).toMatchObject({ source: 'prodjlink', held: false })
+  })
+
+  it('refuses a tap and a nudge under the Pro DJ Link lock, over REST and the socket alike', () => {
+    const server = startMockServer({ scenario: 'dj-playing' })
+    expect(server.handle('PUT', '/api/inputs/tempo', { lock: 'prodjlink' }).status).toBe(200)
+    expect(tap(server, T)).toEqual({ status: 409, body: { detail: LOCKED } })
+    expect(server.handle('POST', '/api/inputs/tempo/nudge', { delta: 0.25 })).toEqual({ status: 409, body: { detail: LOCKED } })
+    const socket = connect(server)
+    socket.clear()
+    socket.send({ action: 'tap', client_time: T })
+    expect(socket.json()).toEqual([{ channel: 'error', id: 1, detail: LOCKED }])
+    expect(tempoOf(server)).toMatchObject({ source: 'prodjlink', lock: 'prodjlink', held: false })
+  })
+
+  it('pushes the inputs before it acks a socket tap, and puts the beat on the tap', () => {
+    const server = startMockServer()
+    const socket = connect(server)
+    socket.send({ action: 'subscribe_beat', fps: 30 })
+    socket.clear()
+    socket.send({ action: 'tap', client_time: T })
+    expect(socket.json().map((message) => message.channel)).toEqual(['inputs', 'ack'])
+    vi.advanceTimersByTime(40)
+    const beat = socket.json().filter((message) => message.channel === 'beat').at(-1)
+    expect(beat).toMatchObject({ source: 'internal', bpm: 121.8, stale: false })
+    expect(beat.beat_phase).toBeLessThan(0.1)
+  })
+
+  it('nudges the beat by up to a beat either way, and refuses more', () => {
+    const server = startMockServer({ scenario: 'problems', still: true })
+    const phase = () => {
+      const socket = connect(server)
+      socket.send({ action: 'subscribe_beat', fps: 30 })
+      return socket.json().find((message) => message.channel === 'beat').beat_phase as number
+    }
+    const before = phase()
+    expect(server.handle('POST', '/api/inputs/tempo/nudge', { delta: 1.5 })).toEqual({ status: 400, body: { detail: 'A nudge is -1 to 1 beats' } })
+    expect(server.handle('POST', '/api/inputs/tempo/nudge', { delta: 0.25 })).toMatchObject({ status: 200, body: { source: 'internal', bpm: 118 } })
+    expect(phase()).toBeCloseTo(before + 0.25)
+  })
+
+  it('sets a BPM only with Auto or Internal, from 30 to 300, and a lock to Internal keeps the BPM playing', () => {
+    const server = startMockServer()
+    const put = (body: object) => server.handle('PUT', '/api/inputs/tempo', body)
+    expect(put({ lock: 'music', bpm: 100 })).toEqual({ status: 400, body: { detail: 'A BPM can only be set with Auto or Internal' } })
+    expect(put({ lock: 'auto', bpm: 400 })).toEqual({ status: 400, body: { detail: 'A tempo is 30 to 300 BPM, not 400' } })
+    expect(put({ lock: 'sometimes' })).toEqual({ status: 400, body: { detail: "No tempo lock 'sometimes'" } })
+    expect(put({ lock: 'internal', bpm: 100 })).toMatchObject({
+      status: 200,
+      body: { source: 'internal', lock: 'internal', bpm: 100, held: false, internal: { bpm: 100, how: 'set' } },
+    })
+    expect(startMockServer().handle('PUT', '/api/inputs/tempo', { lock: 'internal' })).toMatchObject({
+      status: 200,
+      body: { source: 'internal', bpm: 121.8, internal: { bpm: 121.8, how: 'kept' } },
+    })
+  })
+
+  // Engine M3's tap() lines the run's first tap up with the nearest downbeat (nearest_beat(position, 1)).
+  it("makes a run's first tap a downbeat, as engine M3's clock does", () => {
+    const server = startMockServer({ still: true })
+    const heard = () => {
+      const socket = connect(server)
+      socket.send({ action: 'subscribe_beat', fps: 30 })
+      return socket.json().find((message) => message.channel === 'beat')
+    }
+    expect(heard()).toMatchObject({ beat_in_bar: 2 })
+    tap(server, T)
+    expect(heard()).toMatchObject({ beat_in_bar: 1, beat_phase: 0 })
+  })
+
+  it('says which integrations are on, and scans for lights', () => {
+    const server = startMockServer()
+    expect(server.handle('GET', '/api/config').body).toMatchObject({
+      engine: { preview_only: false },
+      devices: { openrgb: { enabled: true }, lifx: { enabled: true }, govee: { enabled: true } },
+    })
+    expect(server.handle('POST', '/api/devices/scan')).toEqual({ status: 200, body: { discovered: 0 } })
+  })
+})
+
 describe('"Start again"', () => {
   const listed = (server: MockServer) =>
     (server.handle('GET', '/api/running/recent').body as RecentLook[]).map((entry) => `${entry.zoneId}/${entry.lookId}`)

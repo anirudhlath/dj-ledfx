@@ -5,17 +5,17 @@
 // decks or inputs (decision 9), 404 for the routes M1 doesn't serve, and the PC as a light per part.
 import {
   STREAMED,
-  type AnchorIn, type ApiPath, type CreateGroup, type FrameStream, type HomeSettings, type Id, type Inputs, type Light,
-  type LightShape, type LightUpdate, type Look, type PendingPath, type Placement, type PlacementIn, type PreviewRequest,
-  type PreviewUpdate, type RecentLook, type RunningZone, type StartRequest, type SubZoneIn, type TakeOver, type Transition,
-  type UpdateGroup, type Zone,
+  type AnchorIn, type ApiPath, type CreateGroup, type FrameStream, type HomeSettings, type Id, type Inputs, type InternalTempo,
+  type Light, type LightShape, type LightUpdate, type Look, type PendingPath, type Placement, type PlacementIn,
+  type PreviewRequest, type PreviewUpdate, type RecentLook, type RunningZone, type StartRequest, type SubZoneIn, type TakeOver,
+  type TempoLock, type TempoSource, type Transition, type UpdateGroup, type Zone,
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import { PATH_PARAM } from '../rest'
 import type { BeatV1, BeatV2, ServerMessage, StatsMessage } from '../ws-messages'
 import { coversOf, partId, runningZone } from './fixtures'
 import { motifFor, paint, type MotifSpec } from './frame-generator'
-import { asEngineM1, buildScenario, type ScenarioName, type ScenarioState } from './scenarios'
+import { asEngineM1, buildScenario, type ScenarioBeat, type ScenarioName, type ScenarioState } from './scenarios'
 
 const FRAME_MS = 1000 / 60
 const TICK_MS = 16
@@ -139,7 +139,7 @@ function lightUpdate(light: Light): LightUpdate {
   }
 }
 
-type Pushed = 'running' | 'lights' | 'attention' | 'transport'
+type Pushed = 'running' | 'lights' | 'attention' | 'transport' | 'inputs'
 
 /** The inputs as engine M3 serves them: Pro DJ Link's decks are the decks channel's. */
 export function inputsOf(state: Pick<ScenarioState, 'inputs' | 'decks'>): Required<Inputs> {
@@ -158,11 +158,15 @@ export function snapshotMessages(state: ScenarioState, protocol: 1 | 2): ServerM
   return messages
 }
 
-/** Beats since bar 1's downbeat, `elapsedS` after the scenario began a quarter into its beat. */
+/**
+ * Beats since bar 1's downbeat, `elapsedS` after the scenario began a quarter into its beat, or since a
+ * tempo control re-anchored it (`beat.from`). A stale beat, or one at 0 BPM, stands still.
+ */
 function position(state: Pick<ScenarioState, 'beat'>, elapsedS: number): number {
   const { beat } = state
-  const start = (beat.bar - 1) * 4 + (beat.beatInBar - 1) + 0.25
-  return beat.stale || beat.bpm <= 0 ? start : start + (elapsedS * beat.bpm) / 60
+  const start = beat.from?.position ?? (beat.bar - 1) * 4 + (beat.beatInBar - 1) + 0.25
+  const since = elapsedS - (beat.from?.elapsedS ?? 0)
+  return beat.stale || beat.bpm <= 0 ? start : start + (since * beat.bpm) / 60
 }
 
 /** The beat message. M1 (protocol 1) only has Pro DJ Link: with no DJ it sends bpm 0, stopped. */
@@ -258,6 +262,23 @@ function withOne<T>(items: readonly T[], matches: (item: T) => boolean, missing:
   return item === undefined ? notFound(missing) : then(item)
 }
 
+// Engine M3's tempo rules (tempo/tap.py, tempo/clock.py, tempo/model.py): its limits, and its words.
+const TAP_GAP_S = 2 // a longer pause starts a new run of taps
+const TAP_ONE_S = 0.2 // taps closer than this are one tap, twice
+const BPM_FROM_TAP = 3 // the run's BPM counts from its third tap
+const MAX_INTERVALS = 8 // the BPM is the last eight intervals'
+const A_DAY_S = 86_400 // a client's time further out than this isn't used
+const LOCK_NAMES: Record<TempoLock, string> = { auto: 'Auto', prodjlink: 'Pro DJ Link', music: 'Music', internal: 'Internal' }
+const UNLOCKED: ReadonlySet<TempoLock> = new Set<TempoLock>(['auto', 'internal'])
+/** Engine M3's `nearest_beat(position, 1)`: the downbeat nearest `position`, never before beat 0. */
+const nearestDownbeat = (position: number): number => Math.max(0, 4 * Math.round(position / 4))
+
+/** The 409 for a tempo control under a lock that isn't Auto or Internal. */
+const locked = (lock: TempoLock): MockReply => ({
+  status: 409,
+  body: { detail: `The tempo is locked to ${LOCK_NAMES[lock]}: choose Auto or Internal to set it here` },
+})
+
 export class MockServer {
   readonly state: ScenarioState
   private readonly protocol: 1 | 2
@@ -284,6 +305,12 @@ export class MockServer {
   private nextSignalsAt: number
   private firstConnectAt: number | null = null
   private refusing = false
+  /** The scenario's own beat: the source it plays, which drives the clock whenever nothing holds it. */
+  private readonly ownBeat: ScenarioBeat
+  /** The current run of taps' times, its first tap's beat, and how many taps it has had. */
+  private taps: number[] = []
+  private tapOrigin = 0
+  private tapIndex = 0
   private readonly routes: Route[]
 
   constructor(options: MockServerOptions = {}) {
@@ -293,6 +320,7 @@ export class MockServer {
     this.wallClock = options.wallClock ?? (() => Date.now())
     const state = buildScenario(options.scenario ?? 'hero', new Date(this.wallClock()))
     this.state = this.protocol === 1 ? asEngineM1(state) : state
+    this.ownBeat = { ...this.state.beat }
     this.routes =
       this.protocol === 1
         ? this.servedRoutes()
@@ -378,8 +406,15 @@ export class MockServer {
       this.ack(session, id, action)
       return
     }
-    if (this.protocol === 2 && (action === 'subscribe_fx' || action === 'tap')) {
+    if (this.protocol === 2 && action === 'subscribe_fx') {
       this.ack(session, id, action)
+      return
+    }
+    if (this.protocol === 2 && action === 'tap') {
+      // Engine M3's socket tap: the inputs push, then its ack; or the error a refused tap raises.
+      const reply = this.tapTempo(command.client_time)
+      if (reply.status === 200) this.ack(session, id, action)
+      else this.sendJson(session, { channel: 'error', id, detail: (reply.body as { detail: string }).detail })
       return
     }
     this.sendJson(session, { channel: 'error', id, detail: `Unknown action: ${action}` })
@@ -627,9 +662,11 @@ export class MockServer {
       '/api/lights': { GET: () => ok(this.state.lights) },
       '/api/attention': { GET: () => ok(this.state.attention) },
       '/api/config': {
-        GET: () => ok({ engine: { preview_only: this.state.previewOnly } }),
+        GET: () => ok(this.config()),
         PUT: (_, body) => this.putConfig(body),
       },
+      // A discovery scan. The mock's lights are all known, so it finds none.
+      '/api/devices/scan': { POST: () => ok({ discovered: 0 }) },
     })
   }
 
@@ -694,6 +731,9 @@ export class MockServer {
   private m3Routes(): Route[] {
     return compile<ApiPath>({
       '/api/inputs': { GET: () => ok(inputsOf(this.state)) },
+      '/api/inputs/tempo': { PUT: (_, body) => this.putTempo(body) },
+      '/api/inputs/tempo/tap': { POST: (_, body) => this.tapTempo((body as { clientTime?: unknown } | undefined)?.clientTime) },
+      '/api/inputs/tempo/nudge': { POST: (_, body) => this.nudge((body as { delta?: unknown } | undefined)?.delta) },
     })
   }
 
@@ -942,7 +982,119 @@ export class MockServer {
       this.state.previewOnly = on
       this.changed('transport')
     }
-    return ok({ engine: { preview_only: this.state.previewOnly } })
+    return ok(this.config())
+  }
+
+  /** GET /config as the engine answers it, in part: preview only, and which integrations are on (§9.4 First run). */
+  private config(): object {
+    return {
+      engine: { preview_only: this.state.previewOnly },
+      devices: { openrgb: { enabled: true }, lifx: { enabled: true }, govee: { enabled: true } },
+    }
+  }
+
+  // ── The tempo clock's controls (engine M3; CLAUDE.md, "Key Design Decisions") ───────────────
+
+  /** Engine M3's `_dj_started`: a DJ plays again after a pause of 2 s or more, and a hold ends. Tests call it. */
+  djStartsAgain(): void {
+    this.state.inputs.tempo.held = false
+    this.retime()
+  }
+
+  private tempoReply(): MockReply {
+    return ok(structuredClone(this.state.inputs.tempo))
+  }
+
+  /** PUT /inputs/tempo: a lock, and with Auto or Internal a BPM. No BPM releases a hold. */
+  private putTempo(body: unknown): MockReply {
+    const { lock, bpm: asked = null } = (body ?? {}) as { lock?: unknown; bpm?: unknown }
+    if (typeof lock !== 'string' || !Object.hasOwn(LOCK_NAMES, lock)) return badRequest(`No tempo lock '${String(lock)}'`)
+    const chosen = lock as TempoLock
+    const bpm = typeof asked === 'number' ? asked : null
+    if (asked !== null && (bpm === null || !(bpm >= 30 && bpm <= 300))) return badRequest(`A tempo is 30 to 300 BPM, not ${String(asked)}`)
+    if (bpm !== null && !UNLOCKED.has(chosen)) {
+      // A 409 only for a lock that's already on.
+      return chosen === this.state.inputs.tempo.lock ? locked(chosen) : badRequest('A BPM can only be set with Auto or Internal')
+    }
+    this.state.inputs.tempo.lock = chosen
+    if (bpm === null) this.state.inputs.tempo.held = false
+    else this.takeTempo({ bpm, how: 'set' })
+    this.retime()
+    return this.tempoReply()
+  }
+
+  /** A tap, over REST or the socket: the run's first is a downbeat, each one after it the next beat. */
+  private tapTempo(clientTime: unknown): MockReply {
+    const { lock } = this.state.inputs.tempo
+    if (!UNLOCKED.has(lock)) return locked(lock)
+    const wall = this.wallClock() / 1000
+    // A client's time is a hint: missing, not finite, or a day out, the arrival times the tap.
+    const at = typeof clientTime === 'number' && Number.isFinite(clientTime) && Math.abs(clientTime - wall) <= A_DAY_S ? clientTime : wall
+    const last = this.taps.at(-1)
+    if (last !== undefined && at - last < TAP_ONE_S) return this.tempoReply() // a double tap, or one stamped before the last
+    if (last === undefined || at - last > TAP_GAP_S) {
+      this.taps = []
+      this.tapOrigin = nearestDownbeat(this.positionNow())
+      this.tapIndex = 0
+    } else this.tapIndex += 1
+    this.taps = [...this.taps, at].slice(-(MAX_INTERVALS + 1))
+    const span = this.taps[this.taps.length - 1] - this.taps[0]
+    const bpm = this.taps.length < BPM_FROM_TAP ? null : Math.min(Math.max((60 * (this.taps.length - 1)) / span, 30), 300)
+    this.takeTempo(bpm === null ? null : { bpm, how: 'tapped' })
+    this.retime(this.tapOrigin + this.tapIndex)
+    return this.tempoReply()
+  }
+
+  /** POST /inputs/tempo/nudge: the beat moves by `delta` beats, -1 to 1; the BPM stays. */
+  private nudge(delta: unknown): MockReply {
+    if (typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 1) return badRequest('A nudge is -1 to 1 beats')
+    const { lock } = this.state.inputs.tempo
+    if (!UNLOCKED.has(lock)) return locked(lock)
+    this.takeTempo(null)
+    const moved = this.positionNow() + delta
+    this.retime(moved >= 0 ? moved : moved + 4)
+    return this.tempoReply()
+  }
+
+  /** Engine M3's `_take_internal` (a BPM set or tapped) and `_take_over` (none: the one playing is kept). */
+  private takeTempo(set: Pick<InternalTempo, 'bpm' | 'how'> | null): void {
+    const tempo = this.state.inputs.tempo
+    if (set !== null) {
+      tempo.internal = { ...set, at: this.isoNow() }
+      tempo.bpm = set.bpm // `_drive`: the clock plays the new BPM at once, so retime() keeps it rather than the old one
+    } else if (tempo.source !== 'internal') tempo.internal = { bpm: tempo.bpm, how: 'kept', at: this.isoNow() }
+    tempo.held = tempo.lock === 'auto'
+  }
+
+  private positionNow(): number {
+    return position(this.state, this.beatElapsedS(this.clock()))
+  }
+
+  /**
+   * Engine M3's `_choose` and `_settle`: the source that drives the beat now, and the beat, from `at` beats
+   * or from where it is. The scenario's own beat stands for its source; a lock to another source is stale.
+   */
+  private retime(at: number = this.positionNow()): void {
+    const tempo = this.state.inputs.tempo
+    const own = this.ownBeat
+    const source: TempoSource = tempo.lock !== 'auto' ? tempo.lock : tempo.held ? 'internal' : own.source
+    // Handed back to Internal, the clock keeps the BPM that was playing.
+    if (source === 'internal' && tempo.source !== 'internal' && tempo.bpm !== tempo.internal.bpm) {
+      tempo.internal = { bpm: tempo.bpm, how: 'kept', at: this.isoNow() }
+    }
+    const playing = source === own.source
+    const bpm = source === 'internal' ? tempo.internal.bpm : playing ? own.bpm : tempo.bpm
+    const stale = source !== 'internal' && (!playing || own.stale)
+    this.state.beat = {
+      ...this.state.beat,
+      source,
+      bpm,
+      stale,
+      pitchPercent: playing ? own.pitchPercent : 0,
+      from: { elapsedS: this.beatElapsedS(this.clock()), position: at },
+    }
+    this.state.inputs.tempo = { ...tempo, source, bpm, stale }
+    this.changed('inputs')
   }
 
   /** Spreads unplaced lights around their rooms, unconfirmed (§12.3): here, at the room's label. */

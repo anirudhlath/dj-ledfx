@@ -39,6 +39,8 @@ export interface ScenarioBeat {
   beatInBar: number
   pitchPercent: number
   stale: boolean
+  /** Where a tempo control re-anchored the beat: its position in beats, `elapsedS` after the scenario began. */
+  from?: { elapsedS: number; position: number }
 }
 
 /**
