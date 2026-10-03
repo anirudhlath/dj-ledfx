@@ -390,24 +390,70 @@ def test_a_layer_without_modifiers_writes_nulls() -> None:
         ({"mask": "height"}, "must be an object"),
         ({"mask": {"kind": "height", "range": [1.0]}}, "must be 2 numbers"),
         ({"mask": {"kind": "height", "range": [2.0, 1.0]}}, "from low to high"),
-        ({"mask": {"kind": "height", "range": [0.0, float("nan")]}}, "finite"),
         ({"mask": {"kind": "room", "room": ""}}, "needs an id"),
         ({"mask": {"kind": "sub-zone"}}, "needs an id"),
-        ({"mask": {"kind": "anchor", "anchor": "sofa", "radius": 0.0}}, "above 0"),
-        ({"mask": {"kind": "anchor", "anchor": "sofa", "radius": float("inf")}}, "finite"),
         ({"mask": {"kind": "anchor", "anchor": "sofa"}}, "must be a number"),
         ({"mirror": {"axis": "w"}}, "Unknown mirror axis"),
-        ({"mirror": {"axis": "x", "at": float("nan")}}, "finite"),
         ({"transform": {"offset": [1.0, 2.0]}}, "must be 3 numbers"),
-        ({"transform": {"scale": 0.0}}, "between 0.1 and 10"),
-        ({"transform": {"scale": 100.0}}, "between 0.1 and 10"),
-        ({"transform": {"rotateDeg": float("inf")}}, "finite"),
         ({"transform": {"rotateDeg": True}}, "must be a number"),
+        ({"opacity": "half"}, "must be a number"),
     ],
 )
 def test_layer_modifier_problems_are_refused(modifier: dict[str, Any], reason: str) -> None:
     with pytest.raises(LookError, match=reason):
         look_from_dict(_look(layers=[_layer(**modifier)]))
+
+
+BIG = 10**400  # JSON's integers have no limit, and this one fits no float
+
+
+# H6: saved data (a look, a zone's assignment, a restored backup) is read leniently: a
+# number past its bounds is clamped to them, and one that isn't finite is its neutral
+# value. A request never gets here out of bounds: the contract refuses it (422).
+@pytest.mark.parametrize(
+    ("change", "field", "read"),
+    [
+        ({"mask": {"kind": "height", "range": [-5000.0, 1e39]}}, "mask", HeightMask(-1e3, 1e3)),
+        ({"mask": {"kind": "height", "range": [0.5, float("nan")]}}, "mask", HeightMask(0.5, 1e3)),
+        (
+            {"mask": {"kind": "anchor", "anchor": "sofa", "radius": -1.0}},
+            "mask",
+            AnchorMask("sofa", 0.0),
+        ),
+        (
+            {"mask": {"kind": "anchor", "anchor": "sofa", "radius": BIG}},
+            "mask",
+            AnchorMask("sofa", 1e3),
+        ),
+        ({"mirror": {"axis": "x", "at": 1e39}}, "mirror", Mirror("x", 1e3)),
+        ({"mirror": {"axis": "x", "at": float("nan")}}, "mirror", Mirror("x", None)),
+        (
+            {"transform": {"offset": [1e39, float("nan"), -BIG]}},
+            "transform",
+            Transform((1e3, 0.0, -1e3)),
+        ),
+        ({"transform": {"scale": 0.0}}, "transform", Transform(scale=0.1)),
+        ({"transform": {"scale": 100.0}}, "transform", Transform(scale=10.0)),
+        ({"transform": {"scale": float("nan")}}, "transform", Transform()),
+        ({"transform": {"rotateDeg": 450.0}}, "transform", Transform(rotate_deg=90.0)),
+        ({"transform": {"rotateDeg": -190.0}}, "transform", Transform(rotate_deg=170.0)),
+        ({"transform": {"rotateDeg": float("inf")}}, "transform", Transform()),
+        ({"opacity": 1.5}, "opacity", 1.0),
+        ({"opacity": -0.5}, "opacity", 0.0),
+        ({"opacity": float("nan")}, "opacity", 1.0),
+    ],
+)
+def test_saved_layer_numbers_are_clamped_never_refused(
+    change: dict[str, Any], field: str, read: object
+) -> None:
+    layer = look_from_dict(_look(layers=[_layer(**change)])).layers[0]
+    assert getattr(layer, field) == read
+
+
+def test_a_requested_rotation_is_kept_within_a_turn() -> None:
+    turned = look_from_dict(_look(layers=[_layer(transform={"rotateDeg": 1e300})]))
+    transform = turned.layers[0].transform
+    assert transform is not None and -180.0 < transform.rotate_deg <= 180.0
 
 
 def _modifiers(**changes: Any) -> dict[str, Any]:
@@ -430,19 +476,32 @@ def test_look_modifiers_are_read() -> None:
 @pytest.mark.parametrize(
     ("changes", "reason"),
     [
-        ({"trailsS": 0.0}, "longer than 0"),
-        ({"trailsS": -1.0}, "longer than 0"),
-        ({"trailsS": 11.0}, "at most 10"),
-        ({"trailsS": float("nan")}, "finite"),
         ({"trailsS": "long"}, "must be a number"),
-        ({"brightnessCap": 1.5}, "between 0 and 1"),
-        ({"brightnessCap": -0.1}, "between 0 and 1"),
-        ({"brightnessCap": float("inf")}, "finite"),
+        ({"brightnessCap": "dim"}, "must be a number"),
     ],
 )
 def test_look_modifier_problems_are_refused(changes: dict[str, Any], reason: str) -> None:
     with pytest.raises(LookError, match=reason):
         look_from_dict(_look(modifiers=_modifiers(**changes)))
+
+
+@pytest.mark.parametrize(
+    ("changes", "read"),
+    [
+        ({"trailsS": 12.0}, LookModifiers(trails_s=10.0)),
+        ({"trailsS": 0.0}, LookModifiers()),  # no time: no trails
+        ({"trailsS": -1.0}, LookModifiers()),
+        ({"trailsS": float("nan")}, LookModifiers()),
+        ({"trailsS": BIG}, LookModifiers(trails_s=10.0)),  # a finite number, clamped
+        ({"brightnessCap": 1.5}, LookModifiers(brightness_cap=1.0)),
+        ({"brightnessCap": -0.1}, LookModifiers(brightness_cap=0.0)),
+        ({"brightnessCap": float("inf")}, LookModifiers()),
+    ],
+)
+def test_saved_look_modifiers_are_clamped_never_refused(
+    changes: dict[str, Any], read: LookModifiers
+) -> None:
+    assert look_from_dict(_look(modifiers=_modifiers(**changes))).modifiers == read
 
 
 @pytest.mark.parametrize(
@@ -454,6 +513,7 @@ def test_look_modifier_problems_are_refused(changes: dict[str, Any], reason: str
         (99.0, MAX_TRANSITION_S),
         (float("nan"), 0.0),
         (float("inf"), 0.0),
+        pytest.param(BIG, MAX_TRANSITION_S, id="too-big-for-a-float"),
     ],
 )
 def test_transition_durations_are_clamped_never_refused(written: float, read: float) -> None:

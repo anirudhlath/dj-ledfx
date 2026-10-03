@@ -13,6 +13,7 @@ from dj_ledfx.looks.model import (
     Look,
     LookError,
     LookNotFoundError,
+    Transform,
     look_to_dict,
 )
 from dj_ledfx.looks.store import INSERT_LOOK, LookStore
@@ -117,6 +118,28 @@ async def test_load_skips_corrupt_saved_look(db: StateDB) -> None:
     assert [look.id for look in store.looks()[BUILT_INS:]] == ["mine-good"]
     assert any("mine-json" in warning for warning in warnings)
     assert any("mine-kind" in w and "retired_effect" in w for w in warnings)
+
+
+# H6: a saved look whose numbers are out of bounds (a hand-edited backup, a limit narrowed
+# later) loads clamped, never dropped.
+async def test_saved_looks_with_numbers_out_of_bounds_load_clamped(db: StateDB) -> None:
+    now = "2026-09-24T00:00:00+00:00"
+    long_trails, far = look_to_dict(_mine()), look_to_dict(_mine())
+    long_trails["modifiers"]["trailsS"] = 12.0
+    far["layers"][0]["transform"] = {"offset": [1e39, 0.0, 0.0], "rotateDeg": 0.0, "scale": 1.0}
+    await db.write_many(
+        [
+            (INSERT_LOOK, ("mine-trails", json.dumps(long_trails), now, now)),
+            (INSERT_LOOK, ("mine-far", json.dumps(far), now, now)),
+        ]
+    )
+
+    store = await _loaded(db)
+
+    loaded = {look.id: look for look in store.looks()[BUILT_INS:]}
+    assert loaded.keys() == {"mine-trails", "mine-far"}
+    assert loaded["mine-trails"].modifiers.trails_s == 10.0
+    assert loaded["mine-far"].layers[0].transform == Transform((1000.0, 0.0, 0.0))
 
 
 # Review Focus 1: a look saved before M4 checked transitions loads, clamped, never dropped.

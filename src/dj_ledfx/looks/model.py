@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, get_args
+from typing import Any, Literal, TypeVar, get_args
 
 from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.field import FieldEffect
@@ -32,6 +32,10 @@ MAX_TRANSITION_S = 10.0  # the longest transition; a saved look's longer one pla
 MAX_TRAILS_S = 10.0  # the longest trail
 MIN_SCALE = 0.1  # a transform's scale, smallest and largest
 MAX_SCALE = 10.0
+# The farthest, either way, a look's places and distances go in metres: a mask's heights
+# and reach, a mirror's place, a transform's offset. A float32 position goes infinite at
+# about 3.4e38 m, and every effect's colours with it.
+MAX_DISTANCE_M = 1000.0
 
 
 class LookError(ValueError):
@@ -158,17 +162,44 @@ def _choice(value: Any, allowed: tuple[str, ...], what: str) -> Any:
     return value
 
 
-def _float(value: Any, what: str) -> float:
+# Reading a look is lenient with numbers: saved data (a look, a zone's assignment, a
+# restored backup) may hold one no request could send now, from before a limit or by hand.
+# A number past its bounds is clamped to them, and NaN or an infinity is the number's
+# neutral value, so the look still loads. Requests never get here out of bounds: the
+# contract refuses them with 422 (web/contract.py). What can't be mapped is refused:
+# something that isn't a number at all, an unknown kind, a height range from high to low.
+_Neutral = TypeVar("_Neutral", float, None)
+
+
+def _number(value: Any, what: str) -> int | float:
+    """The value, if it's a number (JSON's integers may be too big for a float)."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise LookError(f"{what} must be a number")
-    return float(value)
-
-
-def _finite(value: Any, what: str) -> float:
-    number = _float(value, what)
-    if not math.isfinite(number):
-        raise LookError(f"{what} must be a finite number")
+    number: int | float = value
     return number
+
+
+def _endless(number: int | float) -> bool:
+    return isinstance(number, float) and not math.isfinite(number)
+
+
+def _bounded(
+    value: Any, what: str, low: float, high: float, neutral: _Neutral
+) -> float | _Neutral:
+    """A number within low..high, clamped to them; `neutral` for NaN or an infinity."""
+    number = _number(value, what)
+    return neutral if _endless(number) else float(min(max(number, low), high))
+
+
+def _metres(value: Any, what: str, neutral: _Neutral) -> float | _Neutral:
+    return _bounded(value, what, -MAX_DISTANCE_M, MAX_DISTANCE_M, neutral)
+
+
+def _degrees(value: Any, what: str) -> float:
+    """An angle as the same turn from -180 (not included) to 180; 0 for NaN or an
+    infinity."""
+    number = _number(value, what)
+    return 0.0 if _endless(number) else 180.0 - (180 - number) % 360
 
 
 def _ident(value: Any, what: str) -> str:
@@ -177,10 +208,10 @@ def _ident(value: Any, what: str) -> str:
     return value.strip()
 
 
-def _numbers(value: Any, count: int, what: str) -> tuple[float, ...]:
+def _numbers(value: Any, count: int, what: str) -> tuple[Any, ...]:
     if not isinstance(value, list | tuple) or len(value) != count:
         raise LookError(f"{what} must be {count} numbers")
-    return tuple(_finite(item, what) for item in value)
+    return tuple(value)
 
 
 def _mask(layer: str, data: Any) -> Mask | None:
@@ -190,18 +221,20 @@ def _mask(layer: str, data: Any) -> Mask | None:
         raise LookError(f"Layer '{layer}': a mask must be an object")
     kind = _choice(data.get("kind"), get_args(MaskKind), "mask")
     what = f"Layer '{layer}': the {kind} mask"
-    if kind == "height":
-        low, high = _numbers(data.get("range"), 2, f"{what}'s range")
+    if kind == "height":  # NaN or an infinity leaves its side of the band open
+        low, high = (
+            _number(part, f"{what}'s range")
+            for part in _numbers(data.get("range"), 2, f"{what}'s range")
+        )
+        low, high = (-math.inf if _endless(low) else low, math.inf if _endless(high) else high)
         if low >= high:
             raise LookError(f"{what}'s range must run from low to high")
-        return HeightMask(low, high)
+        return HeightMask(_metres(low, what, -MAX_DISTANCE_M), _metres(high, what, MAX_DISTANCE_M))
     if kind == "room":
         return RoomMask(_ident(data.get("room"), what))
     if kind == "sub-zone":
         return SubZoneMask(_ident(data.get("subZone"), what))
-    radius = _finite(data.get("radius"), f"{what}'s radius")
-    if radius <= 0.0:
-        raise LookError(f"{what}'s radius must be above 0")
+    radius = _bounded(data.get("radius"), f"{what}'s radius", 0.0, MAX_DISTANCE_M, MAX_DISTANCE_M)
     return AnchorMask(_ident(data.get("anchor"), what), radius)
 
 
@@ -213,7 +246,7 @@ def _mirror(layer: str, data: Any) -> Mirror | None:
     at = data.get("at")
     return Mirror(
         axis=_choice(data.get("axis", "x"), get_args(MirrorAxis), "mirror axis"),
-        at=None if at is None else _finite(at, f"Layer '{layer}': the mirror's place"),
+        at=None if at is None else _metres(at, f"Layer '{layer}': the mirror's place", None),
     )
 
 
@@ -223,28 +256,23 @@ def _transform(layer: str, data: Any) -> Transform | None:
     if not isinstance(data, Mapping):
         raise LookError(f"Layer '{layer}': a transform must be an object")
     what = f"Layer '{layer}': the transform"
-    x, y, z = _numbers(data.get("offset", (0.0, 0.0, 0.0)), 3, f"{what}'s offset")
-    scale = _finite(data.get("scale", 1.0), f"{what}'s scale")
-    if not MIN_SCALE <= scale <= MAX_SCALE:
-        raise LookError(f"{what}'s scale must be between {MIN_SCALE:g} and {MAX_SCALE:g}")
+    x, y, z = (
+        _metres(part, f"{what}'s offset", 0.0)
+        for part in _numbers(data.get("offset", (0.0, 0.0, 0.0)), 3, f"{what}'s offset")
+    )
     return Transform(
         offset=(x, y, z),
-        rotate_deg=_finite(data.get("rotateDeg", 0.0), f"{what}'s rotation"),
-        scale=scale,
+        rotate_deg=_degrees(data.get("rotateDeg", 0.0), f"{what}'s rotation"),
+        scale=_bounded(data.get("scale", 1.0), f"{what}'s scale", MIN_SCALE, MAX_SCALE, 1.0),
     )
 
 
 def _modifiers(data: Mapping[str, Any]) -> LookModifiers:
-    trails = data.get("trailsS")
-    if trails is not None:
-        trails = _finite(trails, "Trails")
-        if not 0.0 < trails <= MAX_TRAILS_S:
-            raise LookError(f"Trails must be longer than 0 s and at most {MAX_TRAILS_S:g} s")
-    cap = data.get("brightnessCap")
+    trails, cap = data.get("trailsS"), data.get("brightnessCap")
+    if trails is not None:  # no time is no trails
+        trails = _bounded(trails, "Trails", 0.0, MAX_TRAILS_S, None) or None
     if cap is not None:
-        cap = _finite(cap, "The brightness cap")
-        if not 0.0 <= cap <= 1.0:
-            raise LookError("The brightness cap must be between 0 and 1")
+        cap = _bounded(cap, "The brightness cap", 0.0, 1.0, None)
     return LookModifiers(
         trails_s=trails,
         downbeat_flash=bool(data.get("downbeatFlash", False)),
@@ -254,12 +282,8 @@ def _modifiers(data: Mapping[str, Any]) -> LookModifiers:
 
 
 def _duration(value: Any) -> float:
-    """A transition's length. A saved look may hold one no request could send now (from
-    before M4 checked them): out of range it's clamped, and not finite it's a cut."""
-    seconds = _float(value, "Transition duration")
-    if not math.isfinite(seconds) or seconds <= 0.0:
-        return 0.0
-    return min(seconds, MAX_TRANSITION_S)
+    """A transition's length: none (a cut) when it isn't finite."""
+    return _bounded(value, "Transition duration", 0.0, MAX_TRANSITION_S, 0.0)
 
 
 def _inputs(values: Any, what: str) -> tuple[Any, ...]:
@@ -284,9 +308,7 @@ def _layer_from_dict(data: Mapping[str, Any], index: int) -> Layer:
         if setting.get("binding") is not None:
             raise LookError(f"Setting '{key}' is bound to a signal; bindings arrive in M7")
         settings[str(key)] = setting["value"]
-    opacity = _float(data.get("opacity", 1.0), "Layer opacity")
-    if not 0.0 <= opacity <= 1.0:
-        raise LookError("Layer opacity must be between 0 and 1")
+    opacity = _bounded(data.get("opacity", 1.0), "Layer opacity", 0.0, 1.0, 1.0)
     kind = str(data.get("kind") or "")
     name = str(data.get("name") or kind)
     lights = _lights(name, settings.pop(LIGHTS_SETTING, None))

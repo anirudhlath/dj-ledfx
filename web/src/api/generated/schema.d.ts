@@ -2208,7 +2208,8 @@ export interface components {
         /**
          * Transform
          * @description The field shifted by `offset` metres, turned `rotateDeg` clockwise seen from above
-         *     and grown `scale` times, both about the zone's centre.
+         *     (any angle, kept as the same turn from -180 to 180) and grown `scale` times, both
+         *     about the zone's centre.
          */
         Transform: {
             /**

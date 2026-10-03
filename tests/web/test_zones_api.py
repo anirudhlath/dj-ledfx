@@ -193,6 +193,17 @@ async def test_a_start_plays_the_transition_it_asks_for(api: Api) -> None:
     assert zone["transition"] == expected
 
 
+# Review Focus 4 (M6): a draft whose numbers are out of bounds is refused, and nothing starts.
+async def test_a_draft_out_of_bounds_is_refused_and_nothing_starts(api: Api) -> None:
+    draft = (await api.client.get("/api/looks/classic-breathe")).json()
+    draft["layers"][0]["transform"] = {"offset": [1e39, 0.0, 0.0], "rotateDeg": 0.0, "scale": 1.0}
+
+    resp = await api.client.post("/api/zones/desk/start", json={"look": draft})
+
+    assert resp.status_code == 422 and "less than or equal to 1000" in str(resp.json()["detail"])
+    assert (await api.client.get("/api/running")).json()["zones"] == []
+
+
 # Review Focus 4: a garbage transition is refused with the reason, and nothing starts.
 @pytest.mark.parametrize(
     ("transition", "says"),

@@ -201,6 +201,15 @@ async def test_a_look_with_layer_modifiers_is_saved_and_served(api: Api) -> None
         ({"mirror": {"axis": "w"}}, 422, "'x', 'y' or 'z'"),
         ({"transform": {"scale": 50.0}}, 422, "less than or equal to 10"),
         ({"transform": {"offset": [1.0, float("inf"), 0.0]}}, 422, "inf"),
+        ({"transform": {"offset": [1e39, 0.0, 0.0]}}, 422, "less than or equal to 1000"),
+        ({"mirror": {"axis": "x", "at": -1e39}}, 422, "greater than or equal to -1000"),
+        ({"mask": {"kind": "height", "range": [0.0, 5000.0]}}, 422, "less than or equal to 1000"),
+        (
+            {"mask": {"kind": "anchor", "anchor": "sofa", "radius": 5000.0}},
+            422,
+            "less than or equal to 1000",
+        ),
+        ({"opacity": 1.5}, 422, "less than or equal to 1"),
     ],
 )
 async def test_garbage_layer_modifiers_are_refused_with_the_reason(

@@ -26,6 +26,7 @@ from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import WallKind
 from dj_ledfx.looks import model as looks
 from dj_ledfx.looks.model import (
+    MAX_DISTANCE_M,
     MAX_SCALE,
     MAX_TRAILS_S,
     MAX_TRANSITION_S,
@@ -102,13 +103,15 @@ class SettingSchema(ContractModel):
 
 
 Finite = Annotated[float, Field(allow_inf_nan=False)]
+# A place or a distance in a look, in metres, at most MAX_DISTANCE_M either way.
+Metres = Annotated[float, Field(ge=-MAX_DISTANCE_M, le=MAX_DISTANCE_M, allow_inf_nan=False)]
 
 
 class HeightMask(ContractModel):
     """The layer shows between two heights, metres above the floor, low then high."""
 
     kind: Literal["height"]
-    range: tuple[Finite, Finite]
+    range: tuple[Metres, Metres]
 
 
 class RoomMask(ContractModel):
@@ -130,7 +133,7 @@ class AnchorMask(ContractModel):
 
     kind: Literal["anchor"]
     anchor: str
-    radius: float = Field(gt=0.0, allow_inf_nan=False)
+    radius: float = Field(gt=0.0, le=MAX_DISTANCE_M, allow_inf_nan=False)
 
 
 Mask = Annotated[HeightMask | RoomMask | SubZoneMask | AnchorMask, Field(discriminator="kind")]
@@ -141,14 +144,15 @@ class Mirror(ContractModel):
     the zone's centre); the low side shows on both."""
 
     axis: MirrorAxis = "x"
-    at: Finite | None = None
+    at: Metres | None = None
 
 
 class Transform(ContractModel):
     """The field shifted by `offset` metres, turned `rotateDeg` clockwise seen from above
-    and grown `scale` times, both about the zone's centre."""
+    (any angle, kept as the same turn from -180 to 180) and grown `scale` times, both
+    about the zone's centre."""
 
-    offset: tuple[Finite, Finite, Finite] = (0.0, 0.0, 0.0)
+    offset: tuple[Metres, Metres, Metres] = (0.0, 0.0, 0.0)
     rotate_deg: Finite = 0.0
     scale: float = Field(default=1.0, ge=MIN_SCALE, le=MAX_SCALE, allow_inf_nan=False)
 
@@ -160,7 +164,7 @@ class Layer(ContractModel):
     kind: str
     visible: bool = True
     blend: Blend = "normal"
-    opacity: float = 1.0
+    opacity: float = Field(default=1.0, ge=0.0, le=1.0, allow_inf_nan=False)
     settings: dict[str, SettingValue] = Field(default_factory=dict)
     setting_schema: list[SettingSchema] = Field(default_factory=list, alias="schema")
     mask: Mask | None = None

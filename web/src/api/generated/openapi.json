@@ -153,6 +153,7 @@
           },
           "radius": {
             "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
             "title": "Radius",
             "type": "number"
           }
@@ -913,9 +914,13 @@
             "minItems": 2,
             "prefixItems": [
               {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
                 "type": "number"
               },
               {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
                 "type": "number"
               }
             ],
@@ -1307,6 +1312,8 @@
           },
           "opacity": {
             "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
             "title": "Opacity",
             "type": "number"
           },
@@ -1967,6 +1974,8 @@
           "at": {
             "anyOf": [
               {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
                 "type": "number"
               },
               {
@@ -3382,7 +3391,7 @@
         "type": "object"
       },
       "Transform": {
-        "description": "The field shifted by `offset` metres, turned `rotateDeg` clockwise seen from above\nand grown `scale` times, both about the zone's centre.",
+        "description": "The field shifted by `offset` metres, turned `rotateDeg` clockwise seen from above\n(any angle, kept as the same turn from -180 to 180) and grown `scale` times, both\nabout the zone's centre.",
         "properties": {
           "offset": {
             "default": [
@@ -3394,12 +3403,18 @@
             "minItems": 3,
             "prefixItems": [
               {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
                 "type": "number"
               },
               {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
                 "type": "number"
               },
               {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
                 "type": "number"
               }
             ],
