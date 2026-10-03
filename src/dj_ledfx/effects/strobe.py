@@ -76,8 +76,8 @@ class Strobe(StripEffect):
 
         out = np.zeros((led_count, 3), dtype=np.uint8)
         if on:
-            beat_index = beat_in_bar % len(self._palette)
-            r, g, b = self._palette[beat_index]
+            colour = beat_in_bar % len(self._palette)
+            r, g, b = self._palette[colour]
             out[:, 0] = r
             out[:, 1] = g
             out[:, 2] = b

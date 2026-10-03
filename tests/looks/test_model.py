@@ -108,7 +108,7 @@ def test_layer_schema_follows_the_effect_parameters() -> None:
         "bindable": False,
         "type": "number",
         "min": 1.0,
-        "max": 4.0,
+        "max": 8.0,
         "step": 0.5,
     }
 

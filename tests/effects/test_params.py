@@ -51,6 +51,8 @@ def test_settings_of_each_type_are_accepted(param: EffectParam, value: Any) -> N
         (EffectParam(type="range", default=(0.0, 1.0), min=0.0, max=3.0), [0.5, 4.0], "above max"),
         (EffectParam(type="device_set", default=[]), [1, 2], "selector"),
         (EffectParam(type="float", default=0.5, min=0.0, max=1.0), True, "a number"),
+        (EffectParam(type="float", default=0.5, min=0.0, max=1.0), float("nan"), "a number"),
+        (EffectParam(type="float", default=0.5), float("inf"), "a number"),
         (EffectParam(type="float", default=0.5, min=0.0, max=1.0), 2.0, "above max"),
         (EffectParam(type="choice", default="a", choices=["a"]), "b", "not in"),
         (EffectParam(type="color", default="#000000"), "red", "hex colour"),

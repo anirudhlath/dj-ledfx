@@ -78,7 +78,7 @@ async def test_looks_come_built_in_first_in_the_contract_shape(api: Api) -> None
         "bindable": False,
         "type": "number",
         "min": 1.0,
-        "max": 4.0,
+        "max": 8.0,
         "step": 0.5,
         "options": None,
     }

@@ -1,4 +1,9 @@
-"""BPM-to-energy inference for automatic effect adaptation."""
+"""BPM-to-energy inference for automatic effect adaptation.
+
+Energy scales amounts (how strong, how many, which power-of-two split of the beat), never a
+speed: the tempo sets the pace already, and a speed that changes with the BPM jumps wherever
+the phase it scales wraps round.
+"""
 
 from __future__ import annotations
 

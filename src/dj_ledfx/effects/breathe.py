@@ -8,8 +8,6 @@ from numpy.typing import NDArray
 
 from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.color import hex_to_rgb, rgb_to_hex
-from dj_ledfx.effects.easing import lerp
-from dj_ledfx.effects.energy import bpm_energy
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.types import BeatContext
 
@@ -17,6 +15,9 @@ _DEFAULT_PALETTE = ["#ffbf47", "#ff8c00", "#ffd700", "#ffaa33"]
 
 
 class Breathe(StripEffect):
+    """The strip breathes, a breath every `beats_per_cycle` beats, each in the palette's next
+    colour, which it takes at its dimmest."""
+
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
@@ -24,7 +25,7 @@ class Breathe(StripEffect):
                 type="color_list", default=list(_DEFAULT_PALETTE), label="Palette"
             ),
             "beats_per_cycle": EffectParam(
-                type="float", default=4.0, min=1.0, max=4.0, step=0.5, label="Beats per Cycle"
+                type="float", default=4.0, min=1.0, max=8.0, step=0.5, label="Beats per Cycle"
             ),
             "min_brightness": EffectParam(
                 type="float", default=0.05, min=0.0, max=0.5, step=0.01, label="Min Brightness"
@@ -58,17 +59,10 @@ class Breathe(StripEffect):
             self._min_brightness = float(kwargs["min_brightness"])
 
     def render(self, ctx: BeatContext, led_count: int) -> NDArray[np.uint8]:
-        energy = bpm_energy(ctx.bpm)
-        effective_beats = lerp(self._beats_per_cycle, 1.0, energy)
-        cycles_per_bar = 4.0 / effective_beats
-        cycle_phase = (ctx.bar_phase * cycles_per_bar) % 1.0
-
-        brightness = self._min_brightness + (1.0 - self._min_brightness) * (
-            0.5 + 0.5 * math.sin(cycle_phase * 2.0 * math.pi)
-        )
-
-        color_index = int(ctx.bar_phase * cycles_per_bar) % len(self._palette)
-        r, g, b = self._palette[color_index]
+        cycle = ctx.beats / self._beats_per_cycle
+        breath = 0.5 - 0.5 * math.cos((cycle % 1.0) * 2.0 * math.pi)
+        brightness = self._min_brightness + (1.0 - self._min_brightness) * breath
+        r, g, b = self._palette[math.floor(cycle) % len(self._palette)]
 
         out = np.empty((led_count, 3), dtype=np.uint8)
         out[:, 0] = int(r * brightness)
