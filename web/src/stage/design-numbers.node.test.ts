@@ -39,6 +39,11 @@ describe('the design numbers', () => {
     expect(LIVE_RENDER.pip.holdBeats).toBeLessThan(LIVE_RENDER.pip.endBeats)
   })
 
+  // F3 decision 34: §6.3 gives a ZoneRow's "small swatches" no size, so they are the renders' (State-Problems, Live-Doorbell).
+  it("size a ZoneRow's small swatches below a card's", () => {
+    expect(LIVE_RENDER.rowSwatchPx).toBeLessThan(LIVE_SPEC.swatch.px)
+  })
+
   it('name the sentence that moved', () => {
     expect(() => extractSpec('')).toThrow(/§7\.1 Floors/)
     expect(() => extractLive('')).toThrow(/§4\.4/)

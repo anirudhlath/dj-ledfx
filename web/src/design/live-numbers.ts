@@ -53,5 +53,6 @@ export const LIVE_RENDER = {
     "ink": "#ffcf5c",
     "track": "#3a311a",
     "fill": "#ffcf5c"
-  }
+  },
+  "rowSwatchPx": 11
 } as const

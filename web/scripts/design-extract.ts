@@ -249,7 +249,7 @@ const luminance = (hex: string) => [1, 3, 5].reduce((sum, at) => sum + parseInt(
 /** The renders RENDER reads. */
 const RENDERS = ['reference/Main.html', 'reference/State-Firmware.html']
 /** The renders LIVE_RENDER reads. */
-const LIVE_RENDERS = ['reference/Main.html', 'reference/State-Sheet.html']
+const LIVE_RENDERS = ['reference/Main.html', 'reference/State-Sheet.html', 'reference/State-Problems.html']
 
 /** Fails unless each named file of docs/design/web-app is the one HANDOFF.sha256 (`pins`) pins. */
 export function checkPins(pins: string, names: readonly string[], readBytes: (name: string) => Uint8Array): void {
@@ -435,12 +435,14 @@ export function extractRender(read: ReadText): Record<string, unknown> {
  * LIVE_RENDER: what everything outside the stage takes from the renders. The pips' curve, from Main.html's
  * `@keyframes pip`, is turned from a cycle's percentages into beats: the four pips share one animation,
  * each a beat behind the last, so a cycle is as many beats as the delays' step goes into it. An overlay's
- * gold is State-Sheet.html's: tokens.css has no colour for it.
+ * gold is State-Sheet.html's: tokens.css has no colour for it. A ZoneRow's small swatches are State-Problems.html's
+ * size: §6.3 gives them none (F3 decision 34).
  */
 export function extractLiveRender(read: ReadText): Record<string, unknown> {
   const tokens = read('tokens.css')
   const main = read('reference/Main.html')
   const sheet = read('reference/State-Sheet.html')
+  const problems = read('reference/State-Problems.html')
   const curve = same(main, {
     where: 'Main.html @keyframes pip',
     pattern:
@@ -459,6 +461,12 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     pattern:
       /background: (#[0-9a-f]{6}); border: 1px solid (#[0-9a-f]{6})"><div style="display: flex; align-items: center; justify-content: space-between"><span style="font-size: [\d.]+px; font-weight: 600; color: (#[0-9a-f]{6})">[^<]* s left<\/span>[\s\S]*?<div style="height: \d+px; border-radius: \d+px; background: (#[0-9a-f]{6}); overflow: hidden"><div style="width: \d+%; height: 100%; background: (#[0-9a-f]{6})"><\/div>/,
   })
+  // A ZoneRow: its look's name and its zone's, then its swatches, the first a circle.
+  const row = same(problems, {
+    where: "State-Problems.html ZoneRow's swatches",
+    pattern:
+      /font-size: 20px; white-space: nowrap">[^<]*<\/span><span style="font-size: 12px; color: #[0-9a-f]{6}; white-space: nowrap">[^<]*<\/span><\/div><div style="display: flex; align-items: center; flex-wrap: wrap; gap: \d+px"><span title="[^"]*" style="display: inline-block; width: (\d+)px; height: \1px; border-radius: 50%/,
+  })
   return {
     pip: {
       rest: colour(tokens, curve[1]),
@@ -471,6 +479,7 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
       glowAlpha: glow.alpha,
     },
     overlay: { background: card[1], border: card[2], ink: card[3], track: card[4], fill: card[5] },
+    rowSwatchPx: n(row[1]),
   }
 }
 
