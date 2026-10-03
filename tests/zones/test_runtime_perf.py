@@ -12,7 +12,16 @@ from map_home import seeded_space, seeded_zone_lights
 
 from dj_ledfx.home.seed import handoff_home_json
 from dj_ledfx.looks.builtin import builtin_looks
-from dj_ledfx.looks.model import HeightMask, Look, LookModifiers, Mirror, Transform
+from dj_ledfx.looks.model import (
+    MAX_TRANSITION_S,
+    HeightMask,
+    Look,
+    LookModifiers,
+    Mirror,
+    Transform,
+    Transition,
+    TransitionKind,
+)
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.zones.runtime import FRAME_BUDGET_S, ZoneRuntime
 
@@ -79,3 +88,36 @@ def test_a_zone_frame_with_every_modifier_renders_in_under_5_ms(look: Look) -> N
 
     assert statistics.median(tick_times(runtime)) < FRAME_BUDGET_S
     assert runtime.fps_actual >= 59  # it never dropped to a lower frame rate
+
+
+def _heavy(look_id: str) -> ZoneRuntime:
+    """One of the heaviest looks, every modifier on, on every LED of this home."""
+    look = next(look for look in builtin_looks() if look.id == look_id)
+    return home_runtime(with_every_modifier(look), evening=lambda: 0.5)
+
+
+# Spec §5.3: during a transition the zone renders both looks, and both count against the
+# budget. The two heaviest looks with every modifier, 4 s into the longest transition.
+@pytest.mark.parametrize("kind", ["fade", "wipe", "spread", "dissolve"])
+def test_a_zone_frame_mid_transition_renders_in_under_5_ms(kind: TransitionKind) -> None:
+    old, new = _heavy("aurora"), _heavy("lava")
+    new.begin_transition(Transition(kind=kind, duration_s=MAX_TRANSITION_S), [old])
+
+    durations = tick_times(new)
+
+    assert new.state == "transition"
+    assert statistics.median(durations) < FRAME_BUDGET_S
+    assert new.fps_actual >= 59  # it never dropped to a lower frame rate
+
+
+# The most a zone renders at once: a start while its transition plays mixes three looks.
+def test_three_looks_mid_transition_render_in_under_5_ms() -> None:
+    first, second, third = _heavy("aurora"), _heavy("lava"), _heavy("focus")
+    second.begin_transition(Transition(kind="dissolve", duration_s=MAX_TRANSITION_S), [first])
+    third.begin_transition(Transition(kind="spread", duration_s=MAX_TRANSITION_S), [second])
+
+    durations = tick_times(third)
+
+    assert third.state == "transition" and second.state == "transition"
+    assert statistics.median(durations) < FRAME_BUDGET_S
+    assert third.fps_actual >= 59

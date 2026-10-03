@@ -7,7 +7,7 @@ import math
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -31,6 +31,8 @@ from dj_ledfx.looks.model import (
     Layer,
     Look,
     LookError,
+    Transition,
+    TransitionKind,
     firmware_layers,
     make_effect,
     visible_field_layers,
@@ -41,7 +43,8 @@ from dj_ledfx.timing import trim_window, utcnow
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.layer_view import LayerView, layer_view
 from dj_ledfx.zones.look_modifiers import Trails, capped, flashed, warmed
-from dj_ledfx.zones.model import CrashInfo
+from dj_ledfx.zones.model import CrashInfo, TransitionInfo
+from dj_ledfx.zones.transition import new_share, switch_order
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -67,7 +70,7 @@ HORIZON_CAP_S = 0.12
 # runtime always sees a new look as new.
 _GENERATIONS = itertools.count(1)
 
-ZoneState = Literal["running", "slow", "crashed", "waiting"]
+ZoneState = Literal["running", "slow", "crashed", "waiting", "transition"]
 LightMode = Literal["streaming", "own-effect", "streamed-copy"]
 
 
@@ -82,6 +85,28 @@ def _layout(look: Look) -> list[tuple[str, str, str, bool, object]]:
     return [
         (layer.id, layer.type, layer.kind, layer.visible, layer.lights) for layer in look.layers
     ]
+
+
+@dataclass(eq=False)
+class _Transition:
+    """A transition while it plays (spec §5.3). `rows` says where each look it replaces
+    drew the zone's lights: rows of this zone's frame and of that runtime's. `held` lights
+    run a firmware effect in one of the two looks, so they stay with the look they had
+    until the midpoint and then switch whole."""
+
+    kind: TransitionKind
+    duration_s: float
+    rows: list[tuple[ZoneRuntime, NDArray[np.intp], NDArray[np.intp]]]
+    order: NDArray[np.float32] | None  # each LED's place in the switch; None: all at once
+    held: dict[str, ZoneRuntime]  # light -> the runtime whose look it keeps until then
+    held_rows: NDArray[np.intp]
+    started: float | None = None  # the first frame's time: the transition runs from it
+    progress: float = 0.0  # of the newest frame, 0..1
+    switched: bool = False  # the held lights went over to the new look
+    covered: dict[ZoneRuntime, int] = field(default_factory=dict)  # each look's LEDs
+
+    def past_midpoint(self, t: float) -> bool:
+        return self.started is not None and t >= self.started + self.duration_s / 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +169,8 @@ class ZoneRuntime:
         # modifier on reads it every frame.
         self._evening = evening
         self._trails = Trails()
+        self._transition: _Transition | None = None
+        self._switch_due = False  # lights went over to this look: the manager applies them
         self._fields: list[tuple[Layer, FieldEffect]] = []  # bottom to top
         self._firmware: list[tuple[Layer, FirmwareEffect]] = []  # top layer first
         self._claims: dict[str, int] = {}  # light -> firmware layer it runs itself
@@ -197,6 +224,8 @@ class ZoneRuntime:
             return "crashed"
         if self.waiting_for:
             return "waiting"
+        if self._transition is not None:
+            return "transition"
         return "slow" if self.slow_since is not None else "running"
 
     @property
@@ -215,7 +244,7 @@ class ZoneRuntime:
         none."""
         latency = 0.0
         for light in self._lights:
-            if light.device_id not in self._claims:
+            if self.streams(light.device_id):
                 light_s = self._latency_s(light.device_id)
                 if light_s is not None and light_s > latency:
                     latency = light_s
@@ -249,7 +278,41 @@ class ZoneRuntime:
         piece = self.leds.slice_for(device_id)
         if piece is None or piece.count == 0:
             return None
-        return DeviceRoute(self, device_id, streaming=device_id not in self._claims)
+        return DeviceRoute(self, device_id, streaming=self.streams(device_id))
+
+    def streams(self, device_id: str) -> bool:
+        """Whether the light takes this zone's frames now: it runs no firmware effect of
+        the look it follows (holder())."""
+        return self.holder(device_id).claim_for(device_id) is None
+
+    def holder(self, device_id: str) -> ZoneRuntime:
+        """The runtime whose look the light follows now: this one, but during a transition
+        a light that runs a firmware effect in either look keeps the look it had until the
+        midpoint (spec §5.3). The zone manager applies the holder's firmware effect, at its
+        brightness, under its generation, so a light keeps the effect it already runs."""
+        transition = self._transition
+        if transition is None or transition.switched:
+            return self
+        return transition.held.get(device_id, self)
+
+    @property
+    def transition_sources(self) -> tuple[ZoneRuntime, ...]:
+        """The runtimes whose looks this one's transition mixes in, while it plays."""
+        transition = self._transition
+        return () if transition is None else tuple(transition.covered)
+
+    def transition_info(self) -> TransitionInfo | None:
+        transition = self._transition
+        if transition is None:
+            return None
+        covered = transition.covered
+        replaced = max(covered, key=covered.__getitem__).look.name if covered else ""
+        return TransitionInfo(
+            from_name=replaced,
+            kind=transition.kind,
+            progress=transition.progress,
+            duration_s=transition.duration_s,
+        )
 
     # --- changes --------------------------------------------------------------------
 
@@ -258,15 +321,20 @@ class ZoneRuntime:
         the LED set at each send, so they need nothing. A new ring starts only when the
         frame's layout changed (which device's LEDs sit where): a light moved or a new
         space keeps the frames coming, with no warm-up."""
+        self.end_transition()  # its rows were this LED set's
         if space is not None:
             self._space = space
         self._place(lights)
         self._plan_claims()
 
     def set_brightness(self, value: float) -> None:
+        """The zone's brightness, for the looks a transition replaces too: the whole zone
+        dims together."""
         self.brightness = value
         if self._claims:
             self.generation = next(_GENERATIONS)  # firmware effects take it when they start
+        for source in self.transition_sources:
+            source.set_brightness(value)
 
     def update_look(self, look: Look) -> None:
         """Take new settings in place when the layers are the same, else rebuild the look.
@@ -300,6 +368,7 @@ class ZoneRuntime:
 
     def restart(self) -> None:
         """Re-create the look (spec §8), and give rejected firmware effects another try."""
+        self.end_transition()
         self._emulated.clear()
         self._compile()
 
@@ -311,12 +380,112 @@ class ZoneRuntime:
             self._copies[device_id] = index
             self._retarget()
 
+    # --- transitions ----------------------------------------------------------------
+
+    def begin_transition(self, transition: Transition, sources: Sequence[ZoneRuntime]) -> None:
+        """Play this look in over what the zone's lights showed (spec §5.3). `sources` are
+        the runtimes that drove them: the zone's own last look, and copies (twin()) of the
+        zones it took lights from. A light keeps the first source that has it, with the
+        same number of LEDs; a light none had (idle) fades in from black, and runs its
+        firmware effect at once. A cut, a transition of no time or a look that failed to
+        build plays nothing."""
+        if transition.kind == "cut" or transition.duration_s <= 0.0 or self.crash is not None:
+            return
+        rows: list[tuple[ZoneRuntime, NDArray[np.intp], NDArray[np.intp]]] = []
+        held: dict[str, ZoneRuntime] = {}
+        held_rows: list[NDArray[np.intp]] = []
+        covered: set[str] = set()
+        for source in sources:
+            source.settle()  # this transition takes its lights on from here
+            mine: list[NDArray[np.intp]] = []
+            theirs: list[NDArray[np.intp]] = []
+            for piece in self.leds.slices:
+                device_id = piece.device_id
+                old = source.leds.slice_for(device_id)
+                if device_id in covered or old is None or old.count != piece.count:
+                    continue
+                covered.add(device_id)
+                here = np.arange(piece.start, piece.stop, dtype=np.intp)
+                mine.append(here)
+                theirs.append(np.arange(old.start, old.stop, dtype=np.intp))
+                if source.claim_for(device_id) is not None or device_id in self._claims:
+                    held[device_id] = source
+                    held_rows.append(here)
+            if mine:
+                rows.append((source, np.concatenate(mine), np.concatenate(theirs)))
+        for source in sources:  # at most three looks at once: older transitions end now
+            for older in source.transition_sources:
+                older.end_transition()
+        self._transition = _Transition(
+            kind=transition.kind,
+            duration_s=transition.duration_s,
+            rows=rows,
+            order=switch_order(transition.kind, self.leds, self.generation),
+            held=held,
+            held_rows=np.concatenate(held_rows) if held_rows else np.zeros(0, np.intp),
+            covered={source: len(mine_rows) for source, mine_rows, _ in rows},
+        )
+
+    def twin(self) -> ZoneRuntime:
+        """This runtime as it is now, for a zone that takes some of its lights: the same
+        look on the same LEDs, so the same frames (effects are seeded alike), and the same
+        firmware effects under the same generation, so a light that runs one isn't sent it
+        again. It is never ticked or told about: the new zone renders it while its
+        transition plays."""
+        twin = ZoneRuntime(
+            self.zone_id,
+            self.look,
+            self._lights,
+            clock=self._clock,
+            latency_s=self._latency_s,
+            fps=self._fps,
+            max_lookahead_s=self._max_lookahead_s,
+            brightness=self.brightness,
+            seed=self._seed,
+            space=self._space,
+            timer=self._timer,
+            now=self._now,
+            watched=self._watched,
+            evening=self._evening,
+        )
+        twin._emulated = set(self._emulated)
+        twin._plan_claims()
+        twin.generation = self.generation
+        return twin
+
+    def settle(self) -> None:
+        """Let the lights this runtime's transition holds go over to its look now: a newer
+        start takes them on from here. Its colours keep mixing until the transition ends."""
+        if self._transition is not None and not self._transition.switched:
+            self._transition.switched = True
+            self._switch_due = True
+
+    def end_transition(self) -> None:
+        """Show this look alone from the next frame: a transition ending, or cut short."""
+        transition, self._transition = self._transition, None
+        if transition is None:
+            return
+        if not transition.switched:
+            self._switch_due = True
+        self._state_changed()
+
+    def take_switch(self) -> bool:
+        """Whether lights went over to this look since the last call (its transition passed
+        the midpoint or ended): the zone manager applies their firmware effects then."""
+        due, self._switch_due = self._switch_due, False
+        return due
+
     # --- rendering ------------------------------------------------------------------
 
     def tick(self, now: float) -> None:
         """Render the frame shown at now + horizon, unless crashed or skipping for budget."""
         if self.crash is not None:
             return
+        transition = self._transition
+        if transition is not None and not transition.switched and transition.past_midpoint(now):
+            transition.switched = True  # the frame showing now is past it
+            self._switch_due = True
+            self._state_changed()
         self._ticks += 1
         if self._ticks % self._stride:
             return
@@ -324,7 +493,7 @@ class ZoneRuntime:
         ctx = render_context(self._clock, target, self._stride / self._fps)
         started = self._timer()
         try:
-            colors = self._render_look(ctx)
+            colors = self.render(ctx)
         except Exception as exc:  # a look never takes the engine down (spec §8)
             self._fail(self._rendering, f"{type(exc).__name__}: {exc}")
             return
@@ -338,6 +507,51 @@ class ZoneRuntime:
             )
         )
         self._track_speed(now, elapsed)
+
+    def render(self, ctx: RenderContext) -> FloatRGB:
+        """The zone's frame for ctx.t: its look, and while a transition plays, the looks it
+        replaces under it, LED by LED (spec §5.3). Both count against the frame budget: tick
+        times this whole call. A replaced look that fails ends the transition, never the
+        zone."""
+        frame = self._render_look(ctx)
+        transition = self._transition
+        if transition is None:
+            return frame
+        if transition.started is None:
+            transition.started = ctx.t
+        progress = (ctx.t - transition.started) / transition.duration_s
+        transition.progress = min(max(progress, 0.0), 1.0)
+        if progress >= 1.0:
+            self.end_transition()
+            return frame
+        try:
+            old = self._replaced(ctx, transition)
+        except Exception as exc:
+            logger.warning(
+                "Zone {}: the look it replaces failed ({}: {}); cutting to {}",
+                self.zone_id,
+                type(exc).__name__,
+                exc,
+                self.look.name,
+            )
+            self.end_transition()
+            return frame
+        share = new_share(transition.kind, transition.order, progress, len(frame))
+        if len(transition.held_rows):  # firmware lights switch whole, at the midpoint
+            new = transition.switched or transition.past_midpoint(ctx.t)
+            share[transition.held_rows] = 1.0 if new else 0.0
+        mixed: FloatRGB = old + (frame - old) * share
+        return mixed
+
+    def _replaced(self, ctx: RenderContext, transition: _Transition) -> FloatRGB:
+        """What the zone's lights showed: each replaced look's rows, at that look's own
+        brightness (frames are scaled by this zone's at send); black where none was."""
+        old = np.zeros((self.leds.count, 3), dtype=np.float32)
+        for source, mine, theirs in transition.rows:
+            colours = source.render(ctx)
+            scale = source.brightness / self.brightness if self.brightness > 0.0 else 0.0
+            old[mine] = colours[theirs] * np.float32(scale)
+        return old
 
     def _render_look(self, ctx: RenderContext) -> FloatRGB:
         """A new frame every tick: the ring keeps it. The look's streamed colours (its
