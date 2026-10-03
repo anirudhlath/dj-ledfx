@@ -117,3 +117,20 @@ async def test_load_skips_corrupt_saved_look(db: StateDB) -> None:
     assert [look.id for look in store.looks()[BUILT_INS:]] == ["mine-good"]
     assert any("mine-json" in warning for warning in warnings)
     assert any("mine-kind" in w and "retired_effect" in w for w in warnings)
+
+
+# Review Focus 1: a look saved before M4 checked transitions loads, clamped, never dropped.
+async def test_saved_looks_with_odd_transition_durations_load_clamped(db: StateDB) -> None:
+    now = "2026-09-24T00:00:00+00:00"
+    rows = []
+    for look_id, seconds in [("mine-nan", "NaN"), ("mine-minus", "-3"), ("mine-long", "99")]:
+        body = look_to_dict(_mine())
+        body["transition"] = {"kind": "fade", "durationS": 0.0}
+        text = json.dumps(body).replace('"durationS": 0.0', f'"durationS": {seconds}')
+        rows.append((INSERT_LOOK, (look_id, text, now, now)))
+    await db.write_many(rows)
+
+    store = await _loaded(db)
+
+    durations = {look.id: look.transition.duration_s for look in store.looks()[BUILT_INS:]}
+    assert durations == {"mine-nan": 0.0, "mine-minus": 0.0, "mine-long": 10.0}

@@ -14,10 +14,17 @@ from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.strip_adapter import StripAdapter
 from dj_ledfx.looks.model import (
     LIGHTS_SETTING,
+    MAX_TRANSITION_S,
+    AnchorMask,
+    HeightMask,
     Layer,
     Look,
     LookError,
     LookModifiers,
+    Mirror,
+    RoomMask,
+    SubZoneMask,
+    Transform,
     Transition,
     firmware_layers,
     look_from_dict,
@@ -138,7 +145,7 @@ def test_setting_schema_types() -> None:
         ({"needs": ["weather"]}, "input"),
         ({"layers": [_layer(type="particles", kind="fireflies")]}, "M5"),
         ({"layers": [_layer(settings={"beats_per_cycle": {"value": 2.0, "binding": {}}})]}, "M7"),
-        ({"layers": [_layer(mask={"kind": "height"})]}, "M4"),
+        ({"layers": [_layer(mask={"kind": "height", "range": [0.0, 1.0]})]}, "M4"),
         ({"layers": [_layer(settings={"beats_per_cycle": 2.0})]}, "value"),
         (
             {
@@ -345,3 +352,115 @@ def test_a_strip_layer_takes_its_projection_from_its_settings() -> None:
         )
     )
     assert isinstance(effect, StripAdapter) and effect.get_params()["beats_per_cycle"] == 2.0
+
+
+MASKS = [
+    ({"kind": "height", "range": [0.5, 1.5]}, HeightMask(0.5, 1.5)),
+    ({"kind": "room", "room": "west"}, RoomMask("west")),
+    ({"kind": "sub-zone", "subZone": "desk"}, SubZoneMask("desk")),
+    ({"kind": "anchor", "anchor": "sofa", "radius": 2.0}, AnchorMask("sofa", 2.0)),
+]
+
+
+@pytest.mark.parametrize(("written", "mask"), MASKS)
+def test_layer_modifiers_round_trip(written: dict[str, Any], mask: object) -> None:
+    mirror = {"axis": "y", "at": 2.5}
+    transform = {"offset": [1.0, 0.0, -0.5], "rotateDeg": 90.0, "scale": 2.0}
+    look = look_from_dict(_look(layers=[_layer(mask=written, mirror=mirror, transform=transform)]))
+    layer = look.layers[0]
+    assert layer.mask == mask
+    assert layer.mirror == Mirror("y", 2.5)
+    assert layer.transform == Transform((1.0, 0.0, -0.5), 90.0, 2.0)
+    out = look_to_dict(look)["layers"][0]
+    assert (out["mask"], out["mirror"], out["transform"]) == (written, mirror, transform)
+    assert look_from_dict(look_to_dict(look)) == look
+
+
+def test_a_layer_without_modifiers_writes_nulls() -> None:
+    out = look_to_dict(look_from_dict(_look()))["layers"][0]
+    assert (out["mask"], out["mirror"], out["transform"]) == (None, None, None)
+    defaults = look_from_dict(_look(layers=[_layer(mirror={}, transform={})])).layers[0]
+    assert (defaults.mirror, defaults.transform) == (Mirror(), Transform())
+
+
+@pytest.mark.parametrize(
+    ("modifier", "reason"),
+    [
+        ({"mask": {"kind": "outdoors"}}, "Unknown mask"),
+        ({"mask": "height"}, "must be an object"),
+        ({"mask": {"kind": "height", "range": [1.0]}}, "must be 2 numbers"),
+        ({"mask": {"kind": "height", "range": [2.0, 1.0]}}, "from low to high"),
+        ({"mask": {"kind": "height", "range": [0.0, float("nan")]}}, "finite"),
+        ({"mask": {"kind": "room", "room": ""}}, "needs an id"),
+        ({"mask": {"kind": "sub-zone"}}, "needs an id"),
+        ({"mask": {"kind": "anchor", "anchor": "sofa", "radius": 0.0}}, "above 0"),
+        ({"mask": {"kind": "anchor", "anchor": "sofa", "radius": float("inf")}}, "finite"),
+        ({"mask": {"kind": "anchor", "anchor": "sofa"}}, "must be a number"),
+        ({"mirror": {"axis": "w"}}, "Unknown mirror axis"),
+        ({"mirror": {"axis": "x", "at": float("nan")}}, "finite"),
+        ({"transform": {"offset": [1.0, 2.0]}}, "must be 3 numbers"),
+        ({"transform": {"scale": 0.0}}, "between 0.1 and 10"),
+        ({"transform": {"scale": 100.0}}, "between 0.1 and 10"),
+        ({"transform": {"rotateDeg": float("inf")}}, "finite"),
+        ({"transform": {"rotateDeg": True}}, "must be a number"),
+    ],
+)
+def test_layer_modifier_problems_are_refused(modifier: dict[str, Any], reason: str) -> None:
+    with pytest.raises(LookError, match=reason):
+        look_from_dict(_look(layers=[_layer(**modifier)]))
+
+
+def _modifiers(**changes: Any) -> dict[str, Any]:
+    return {
+        "trailsS": None,
+        "downbeatFlash": False,
+        "brightnessCap": None,
+        "evening": False,
+        **changes,
+    }
+
+
+def test_look_modifiers_are_read() -> None:
+    modifiers = _modifiers(trailsS=0.5, downbeatFlash=True, brightnessCap=0.6, evening=True)
+    look = look_from_dict(_look(modifiers=modifiers))
+    assert look.modifiers == LookModifiers(0.5, True, 0.6, True)
+    assert look_to_dict(look)["modifiers"] == modifiers
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
+        ({"trailsS": 0.0}, "longer than 0"),
+        ({"trailsS": -1.0}, "longer than 0"),
+        ({"trailsS": 11.0}, "at most 10"),
+        ({"trailsS": float("nan")}, "finite"),
+        ({"trailsS": "long"}, "must be a number"),
+        ({"brightnessCap": 1.5}, "between 0 and 1"),
+        ({"brightnessCap": -0.1}, "between 0 and 1"),
+        ({"brightnessCap": float("inf")}, "finite"),
+    ],
+)
+def test_look_modifier_problems_are_refused(changes: dict[str, Any], reason: str) -> None:
+    with pytest.raises(LookError, match=reason):
+        look_from_dict(_look(modifiers=_modifiers(**changes)))
+
+
+@pytest.mark.parametrize(
+    ("written", "read"),
+    [
+        (2.5, 2.5),
+        (0.0, 0.0),
+        (-1.0, 0.0),
+        (99.0, MAX_TRANSITION_S),
+        (float("nan"), 0.0),
+        (float("inf"), 0.0),
+    ],
+)
+def test_transition_durations_are_clamped_never_refused(written: float, read: float) -> None:
+    look = look_from_dict(_look(transition={"kind": "fade", "durationS": written}))
+    assert look.transition == Transition("fade", read)
+
+
+def test_a_transition_duration_that_is_not_a_number_is_refused() -> None:
+    with pytest.raises(LookError, match="Transition duration must be a number"):
+        look_from_dict(_look(transition={"kind": "fade", "durationS": "2"}))
