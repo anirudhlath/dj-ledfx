@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 import pytest
-from map_home import SMALL_MATRIX, UPRIGHT_LAMP, tiny_home
+from map_home import ROUND_MATRIX, SMALL_MATRIX, UPRIGHT_LAMP, tiny_home
 
 from dj_ledfx.devices.govee.adapter_base import UPRIGHT_HEIGHT_M
 from dj_ledfx.devices.lights import LightEntry, LightPart
@@ -13,6 +13,7 @@ from dj_ledfx.home.guess import (
     GUESS_HEIGHT_M,
     SPREAD_RADIUS_M,
     UPRIGHT_BASE_M,
+    UPRIGHT_GRID,
     first_placements,
     guess_placements,
     in_form,
@@ -30,6 +31,7 @@ from dj_ledfx.home.shapes import (
     Placement,
     PointShape,
     led_positions,
+    shape_centre,
 )
 from dj_ledfx.home.store import ScenePlacement
 from dj_ledfx.spatial.geometry import DeviceGeometry, MatrixGeometry, PointGeometry, StripGeometry
@@ -111,7 +113,7 @@ def test_a_scene_matrix_becomes_a_standing_grid_and_the_room_defaults_to_the_lar
     cx, cy = largest_room(home).label_at
     shape = moved["tile"].shape
     assert isinstance(shape, GridShape)
-    assert shape.center == (cx, cy, GUESS_HEIGHT_M) and shape.rotation == (0.0, 90.0, 0.0)
+    assert shape.center == (cx, cy, GUESS_HEIGHT_M) and shape.rotation == UPRIGHT_GRID
     assert (shape.width, shape.depth) == pytest.approx((0.12, 0.09))  # 4 columns, 3 rows
 
 
@@ -187,6 +189,26 @@ def test_a_matrix_stands_as_a_grid_with_its_first_row_at_the_top() -> None:
     assert np.allclose(leds[:, 1], AT[1])  # standing: every LED at one depth
 
 
+def test_a_matrix_stands_first_row_highest_whether_moved_from_a_scene_or_fitted() -> None:
+    scene = [ScenePlacement("s1", "tile", (0.0, 1.0, 0.0), "matrix", None, None, 6, 5)]
+    moved = moved_scene_placements(tiny_home(), scene, lambda device_id: None)["tile"]
+    fitted = placed_in_form(AT, 30, SMALL_MATRIX)
+    for placement in (moved, fitted):
+        z = led_positions(placement.shape, 30, placement.led_order).pos[:, 2]
+        assert z[0] == pytest.approx(z.max()) and z[0] > z[-1]  # row 0 is the highest
+
+
+def test_a_candle_or_tube_stands_round_its_spot_as_a_cylinder_first_row_at_the_top() -> None:
+    candle = placed_in_form(AT, 30, ROUND_MATRIX)
+    shape = candle.shape
+    assert isinstance(shape, CylinderShape) and candle.led_order == "top-to-bottom"
+    assert shape_centre(shape) == pytest.approx(AT)
+    assert shape.height == pytest.approx(0.18)  # its 6 rows
+    assert 2 * math.pi * shape.radius == pytest.approx(0.15)  # its 5 columns go round it
+    z = led_positions(shape, 30, candle.led_order, ROUND_MATRIX).pos[:, 2]
+    assert z[0] == pytest.approx(z.max())  # row 0 at the top, as a grid's is
+
+
 def test_a_light_of_one_led_or_of_no_known_form_is_a_point() -> None:
     for leds, geometry in ((1, UPRIGHT_LAMP), (15, None), (15, PointGeometry())):
         assert placed_in_form(AT, leds, geometry) == Placement(PointShape(AT), "")
@@ -205,8 +227,26 @@ def test_only_many_leds_on_a_point_or_an_upright_lamp_lying_down_hide_a_form() -
 
 @pytest.mark.parametrize(
     "geometry",
-    [UPRIGHT_LAMP, DOWN, ALONG, SMALL_MATRIX, MatrixGeometry(()), PointGeometry(), None],
-    ids=["upright", "upside-down", "strip", "matrix", "matrix-without-tiles", "point", "none"],
+    [
+        UPRIGHT_LAMP,
+        DOWN,
+        ALONG,
+        SMALL_MATRIX,
+        ROUND_MATRIX,
+        MatrixGeometry(()),
+        PointGeometry(),
+        None,
+    ],
+    ids=[
+        "upright",
+        "upside-down",
+        "strip",
+        "matrix",
+        "round-matrix",
+        "matrix-without-tiles",
+        "point",
+        "none",
+    ],
 )
 @pytest.mark.parametrize("leds", [1, 30])
 def test_a_light_placed_in_its_form_is_in_its_form(

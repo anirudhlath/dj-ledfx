@@ -24,7 +24,7 @@ from dj_ledfx.devices.lifx.packet import (
     rgb_array_to_hsbk,
 )
 from dj_ledfx.devices.lifx.types import TileInfo
-from dj_ledfx.spatial.geometry import MatrixGeometry, TileLayout
+from dj_ledfx.spatial.geometry import MatrixForm, MatrixGeometry, TileLayout
 from dj_ledfx.types import DeviceInfo
 
 if TYPE_CHECKING:
@@ -46,7 +46,8 @@ def tile_sizes(tiles: Sequence[TileInfo], tile_count: int) -> list[tuple[int, in
 
 
 class LifxTileChainAdapter(LifxAdapterBase):
-    """Matrix lights: Tile, Candle, Tube, Spot, Path, Ceiling. Sized from StateDeviceChain."""
+    """Matrix lights: Tile, Candle, Tube, Spot, Path, Ceiling. Sized from StateDeviceChain;
+    `form` says how the light holds its matrix (a candle's and a tube's wrap round them)."""
 
     _effect_key = "tile_effect"
     stream_fps_cap = LIFX_MATRIX_FPS
@@ -62,6 +63,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
         tiles: Sequence[TileInfo] = (),
         caps: DeviceCapabilities | None = None,
         max_fps: float | None = None,
+        form: MatrixForm = "flat",
     ) -> None:
         super().__init__(
             transport,
@@ -74,6 +76,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
         self._tiles: list[TileInfo] = list(tiles)
         self._sizes = tile_sizes(self._tiles, tile_count)
         self._led_count = sum(width * height for width, height in self._sizes)
+        self._form: MatrixForm = form
 
     @property
     def tiles(self) -> list[TileInfo]:
@@ -101,7 +104,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
             else:
                 offset = (index * (width + 1) * PIXEL_PITCH_M, 0.0)
             layouts.append(TileLayout(offset[0], offset[1], width, height))
-        return MatrixGeometry(tiles=tuple(layouts), pixel_pitch=PIXEL_PITCH_M)
+        return MatrixGeometry(tiles=tuple(layouts), pixel_pitch=PIXEL_PITCH_M, form=self._form)
 
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         hsbk = rgb_array_to_hsbk(colors, kelvin=self._kelvin)

@@ -265,7 +265,9 @@ def lifx_candle(
 ) -> LifxTileChainAdapter:
     """A Candle C: one 5x6 matrix."""
     tile = TileInfo(user_x=0.0, user_y=0.0, width=5, height=6, accel_x=0, accel_y=0, accel_z=0)
-    return LifxTileChainAdapter(transport, lifx_info("tile", 30), MAC, tiles=[tile], caps=caps)
+    return LifxTileChainAdapter(
+        transport, lifx_info("tile", 30), MAC, tiles=[tile], caps=caps, form="cylinder"
+    )
 
 
 def read_hex(path: Path) -> bytes:

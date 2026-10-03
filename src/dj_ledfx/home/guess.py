@@ -22,6 +22,7 @@ from dj_ledfx.home.model import Home, Room, Vec3
 from dj_ledfx.home.seed import SeedLight, normalise_name
 from dj_ledfx.home.shapes import (
     BentLineShape,
+    CylinderShape,
     GridShape,
     LightShape,
     LineShape,
@@ -34,10 +35,10 @@ from dj_ledfx.spatial.geometry import DeviceGeometry, MatrixGeometry, StripGeome
 
 SPREAD_RADIUS_M = 0.8
 GUESS_HEIGHT_M = 1.0
-STANDING = (0.0, 90.0, 0.0)  # a grid tilted up to face south, as the scene hung matrices
 UPRIGHT_BASE_M = 0.1  # an upright lamp's LEDs start this far off the floor
 UPRIGHT_RISE = 0.9  # a strip that rises more than this per metre along it is an upright lamp
-# A grid stood up with its first row at the top, as a matrix's own frame has it.
+# A grid stood up to face south with its first row at the top, as a matrix's own frame has
+# it: how every matrix stands, fitted or moved from an old scene.
 UPRIGHT_GRID = (0.0, -90.0, 0.0)
 
 
@@ -126,20 +127,21 @@ def _matrix_size(geometry: MatrixGeometry) -> tuple[float, float]:
     return right - left, bottom - top
 
 
-Form = Literal["point", "upright", "line", "grid"]
+Form = Literal["point", "upright", "line", "grid", "cylinder"]
 
 
 def _form(leds: int, geometry: DeviceGeometry | None) -> Form:
     """The form a light shows on the map (the light-output plan's ruling 19): a strip that
     runs near vertical is an upright lamp, any other strip a line, and a matrix a grid of
-    its tiles. A light of one LED, of no known form, or a matrix with no tiles is a point.
-    `placed_in_form` and `in_form` both go by it, so a placement made in form stays in it."""
+    its tiles, or a cylinder when the light wraps it round one (a candle, a tube). A light
+    of one LED, of no known form, or a matrix with no tiles is a point. `placed_in_form`
+    and `in_form` both go by it, so a placement made in form stays in it."""
     if leds <= 1:
         return "point"
     if isinstance(geometry, StripGeometry):
         return "upright" if abs(_rise(geometry)) > UPRIGHT_RISE else "line"
     if isinstance(geometry, MatrixGeometry) and geometry.tiles:
-        return "grid"
+        return "cylinder" if geometry.form == "cylinder" else "grid"
     return "point"
 
 
@@ -147,7 +149,8 @@ def placed_in_form(at: Vec3, leds: int, geometry: DeviceGeometry | None) -> Plac
     """An unconfirmed placement at `at` that shows the light's form. An upright lamp stands
     on the floor below `at`, a vertical line as long as its geometry; a strip lies through
     `at` along its direction; a matrix stands at `at` as a grid of its tiles' size, first
-    row at the top (a chain of tiles is one grid, in rows); a point is at `at`."""
+    row at the top (a chain of tiles is one grid, in rows), or as a cylinder round `at`,
+    its columns round it and its first row at the top; a point is at `at`."""
     form = _form(leds, geometry)
     if form == "upright" and isinstance(geometry, StripGeometry):
         x, y, _ = at
@@ -161,6 +164,11 @@ def placed_in_form(at: Vec3, leds: int, geometry: DeviceGeometry | None) -> Plac
     if form == "grid" and isinstance(geometry, MatrixGeometry):
         width, height = _matrix_size(geometry)
         return Placement(GridShape(at, width, height, UPRIGHT_GRID), "rows")
+    if form == "cylinder" and isinstance(geometry, MatrixGeometry):
+        around, height = _matrix_size(geometry)
+        x, y, z = at
+        shape = CylinderShape((x, y, z - height / 2.0), height, around / (2.0 * math.pi))
+        return Placement(shape, "top-to-bottom")
     return Placement(PointShape(at), check_led_order("point", None))
 
 
@@ -193,7 +201,7 @@ def _scene_shape(placement: ScenePlacement, at: NDArray[np.float64]) -> LightSha
             return LineShape((_vec(at), _vec(at + direction / norm * placement.length)))
     if placement.geometry == "matrix":
         columns, rows = max(placement.cols or 1, 1), max(placement.rows or 1, 1)
-        return GridShape(_vec(at), columns * LED_PITCH_M, rows * LED_PITCH_M, STANDING)
+        return GridShape(_vec(at), columns * LED_PITCH_M, rows * LED_PITCH_M, UPRIGHT_GRID)
     return PointShape(_vec(at))
 
 

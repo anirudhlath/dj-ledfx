@@ -13,12 +13,15 @@ from importlib.resources import files
 from typing import Any
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.spatial.geometry import MatrixForm
 
 PRODUCTS_URL = (
     "https://raw.githubusercontent.com/LIFX/products/"
     "8adbe485db11621639f693f3a1510603f029c902/products.json"
 )
 PRODUCTS_SHA256 = "09f6b87367ea3a974cd4be9e7a562db73e1776d012854fb487b00ac9be520360"
+# The matrices that wrap their LEDs round a cylinder, by a word of the product's name.
+CYLINDERS = frozenset({"Candle", "Tube"})
 
 
 @functools.cache
@@ -82,3 +85,9 @@ def lifx_capabilities(
         firmware_version=version,
     )
     return caps, bool(features.get("relays", False))
+
+
+def matrix_form(name: str) -> MatrixForm:
+    """How a LIFX matrix holds its LEDs: candles and tubes wrap theirs round a cylinder, and
+    the rest are flat. LIFX's registry doesn't say, so the product's name decides."""
+    return "cylinder" if CYLINDERS.intersection(name.split()) else "flat"

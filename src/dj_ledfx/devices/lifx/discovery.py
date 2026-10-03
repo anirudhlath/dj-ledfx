@@ -26,7 +26,7 @@ from dj_ledfx.devices.lifx.packet import (
     parse_state_extended_color_zones,
     parse_state_host_firmware,
 )
-from dj_ledfx.devices.lifx.products import lifx_capabilities
+from dj_ledfx.devices.lifx.products import lifx_capabilities, matrix_form
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter, tile_sizes
 from dj_ledfx.devices.lifx.transport import LifxTransport
@@ -223,6 +223,7 @@ class LifxBackend(DeviceBackend):
                 tiles=tiles,
                 caps=caps,
                 max_fps=rate,
+                form=matrix_form(caps.model),
             )
         if caps.multizone and caps.extended_multizone:
             zones = await self._query_zone_count(record)

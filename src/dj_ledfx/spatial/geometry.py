@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from loguru import logger
@@ -47,12 +48,17 @@ class TileLayout:
     height: int
 
 
+MatrixForm = Literal["flat", "cylinder"]
+
+
 @dataclass(frozen=True, slots=True)
 class MatrixGeometry:
-    """W×H LED grid with tile offsets."""
+    """W×H LED grid with tile offsets. Its form is how the light holds it: flat, or one tile
+    wrapped round a cylinder, its columns round it and its rows up it (a candle, a tube)."""
 
     tiles: tuple[TileLayout, ...]
     pixel_pitch: float = 0.03  # meters between LED centers
+    form: MatrixForm = "flat"
 
 
 DeviceGeometry = PointGeometry | StripGeometry | MatrixGeometry

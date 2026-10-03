@@ -65,6 +65,7 @@ async def test_candle_is_a_matrix_sized_from_its_device_chain() -> None:
     assert adapter.device_info.name == "Candle 1"
     assert adapter.device_info.device_type == "lifx_tile"
     assert adapter.capabilities.model == "LIFX Candle C"
+    assert adapter.geometry.form == "cylinder"  # its matrix wraps round it
     assert adapter.capabilities.firmware_version == "3.90"
 
 
@@ -73,6 +74,7 @@ async def test_tile_without_a_chain_reply_falls_back_to_five_8x8_tiles() -> None
     adapter = await _backend(transport)._create_adapter(_record(55), AppConfig())
     assert isinstance(adapter, LifxTileChainAdapter)
     assert adapter.led_count == 5 * 64
+    assert adapter.geometry.form == "flat"
 
 
 async def test_neon_is_a_strip_sized_from_its_zones() -> None:

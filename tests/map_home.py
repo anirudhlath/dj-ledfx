@@ -50,6 +50,8 @@ IN_THE_EAST_ROOM = {"kind": "point", "position": list(EAST_SPOT)}
 # it), and a matrix of one 5 x 6 tile.
 UPRIGHT_LAMP = StripGeometry((0.0, 1.0, 0.0), UPRIGHT_HEIGHT_M)
 SMALL_MATRIX = MatrixGeometry((TileLayout(0.0, 0.0, 5, 6),), pixel_pitch=0.03)
+# A candle's matrix: one tile, its columns round a cylinder and its rows up it.
+ROUND_MATRIX = MatrixGeometry((TileLayout(0.0, 0.0, 5, 6),), pixel_pitch=0.03, form="cylinder")
 
 # The design handoff's files, which the vendored copies must equal byte for byte.
 DESIGN = Path(__file__).parents[1] / "docs" / "design" / "web-app"

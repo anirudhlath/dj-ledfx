@@ -6,7 +6,7 @@ from importlib.resources import files
 import pytest
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
-from dj_ledfx.devices.lifx.products import PRODUCTS_SHA256, lifx_capabilities
+from dj_ledfx.devices.lifx.products import PRODUCTS_SHA256, lifx_capabilities, matrix_form
 
 
 def test_vendored_registry_matches_the_pin() -> None:
@@ -23,6 +23,13 @@ def _caps(pid: int, firmware: tuple[int, int] | None) -> DeviceCapabilities:
 def test_candles_are_matrix_lights(pid: int) -> None:
     caps = _caps(pid, (3, 90))
     assert caps.matrix and not caps.chain and not caps.multizone
+
+
+def test_candles_and_tubes_wrap_round_a_cylinder_and_other_matrices_are_flat() -> None:
+    for name in ("LIFX Candle", "LIFX Candle C Intl", "LIFX Tube", "LIFX Tube Intl"):
+        assert matrix_form(name) == "cylinder"
+    for name in ("LIFX Tile", "LIFX Ceiling", "LIFX Spot", "LIFX Path", "test-model"):
+        assert matrix_form(name) == "flat"
 
 
 def test_tile_is_a_matrix_chain() -> None:
