@@ -107,7 +107,7 @@ class _Transition:
     started: float | None = None  # the first frame's time: the transition runs from it
     progress: float = 0.0  # of the newest frame, 0..1
     switched: bool = False  # the held lights went over to the new look
-    covered: dict[ZoneRuntime, int] = field(default_factory=dict)  # each look's LEDs
+    covered: dict[ZoneRuntime, int] = field(default_factory=dict)  # each look's lights
 
     def past_midpoint(self, t: float) -> bool:
         return self.started is not None and t >= self.started + self.duration_s / 2.0
@@ -356,7 +356,8 @@ class ZoneRuntime:
         return self._transition is not None
 
     def transition_info(self) -> TransitionInfo | None:
-        """The transition the zone shows: only while its state is `transition`."""
+        """The transition the zone shows: only while its state is `transition`. It's from
+        the look that drove most of the zone's lights."""
         transition = self._transition
         if transition is None or self.state != "transition":
             return None
@@ -454,6 +455,7 @@ class ZoneRuntime:
         rows: list[tuple[ZoneRuntime, NDArray[np.intp], NDArray[np.intp]]] = []
         held: dict[str, ZoneRuntime] = {}
         held_rows: dict[str, slice] = {}
+        drove: dict[ZoneRuntime, int] = {}
         covered: set[str] = set()
         for source in sources:
             if source.zone_id == self.zone_id:
@@ -474,6 +476,7 @@ class ZoneRuntime:
                     held_rows[device_id] = slice(piece.start, piece.stop)
             if mine:
                 rows.append((source, np.concatenate(mine), np.concatenate(theirs)))
+                drove[source] = len(mine)  # lights, however many LEDs each has
         for source in sources:  # three looks at most in the zone's own chain: older end now
             if source.zone_id == self.zone_id:
                 for older in source.transition_sources:
@@ -485,7 +488,7 @@ class ZoneRuntime:
             order=switch_order(transition.kind, self.leds, self.generation),
             held=held,
             held_rows=held_rows,
-            covered={source: len(mine_rows) for source, mine_rows, _ in rows},
+            covered=drove,
         )
 
     def twin(self) -> ZoneRuntime:

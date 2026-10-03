@@ -2710,7 +2710,7 @@
         "type": "object"
       },
       "RunningZoneTransition": {
-        "description": "A zone's transition while it plays: the look it replaces (\"\" when its lights were\nidle), the kind, how far it has got (0..1) when this was sent, and how long it takes in\nall, so a client moves the bar on by itself. The running channel pushes it as the\ntransition starts, at its midpoint and as it ends.",
+        "description": "A zone's transition while it plays: the look it replaces (the one that drove most of\nits lights, counted as lights; \"\" when they were idle), the kind, how far it has got\n(0..1) when this was sent, and how long it takes in all, so a client moves the bar on by\nitself. The running channel pushes it as the transition starts, at its midpoint and as\nit ends.",
         "properties": {
           "durationS": {
             "title": "Durations",

@@ -11,6 +11,8 @@ import pytest
 from loguru import logger
 from map_home import tiny_home
 from runtime_fakes import (
+    BULB,
+    TILE,
     FlatField,
     field_layer,
     glow_layer,
@@ -27,7 +29,7 @@ from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.home.map import space_of
 from dj_ledfx.looks.model import Layer, LookModifiers, Transition
 from dj_ledfx.types import FloatRGB
-from dj_ledfx.zones.runtime import ZoneRuntime
+from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
 FADE = Transition(kind="fade", duration_s=2.0)
 HORIZON = 0.02 + 1 / 60  # the fake lights' latency and a frame: every frame's lead
@@ -143,6 +145,24 @@ def test_the_transition_says_where_it_has_got() -> None:
     assert info is not None
     assert (info.from_name, info.kind, info.duration_s) == ("Level 1.0", "fade", 2.0)
     assert info.progress == pytest.approx(0.25)
+
+
+# M9: the transition is from the look that drove most of the zone's lights, counted as
+# lights: a matrix of 64 LEDs is one light against three bulbs.
+def test_the_transition_is_from_the_look_that_drove_most_of_the_lights() -> None:
+    matrix, bulbs = (
+        ZoneLight("matrix", 64, TILE),
+        [ZoneLight(f"bulb{n}", 1, BULB) for n in range(3)],
+    )
+    on_the_matrix = _flat(1.0, lights=[matrix], zone_id="den")
+    on_the_bulbs = _flat(0.5, lights=bulbs, zone_id="hall")
+    new = _flat(0.0, lights=[matrix, *bulbs])
+    new.begin_transition(FADE, [on_the_matrix, on_the_bulbs])
+    new.tick(1000.0)
+
+    info = new.transition_info()
+
+    assert info is not None and info.from_name == "Level 0.5"
 
 
 def test_the_old_look_keeps_its_own_brightness() -> None:

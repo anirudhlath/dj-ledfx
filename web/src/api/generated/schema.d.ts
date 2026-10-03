@@ -1987,10 +1987,11 @@ export interface components {
         };
         /**
          * RunningZoneTransition
-         * @description A zone's transition while it plays: the look it replaces ("" when its lights were
-         *     idle), the kind, how far it has got (0..1) when this was sent, and how long it takes in
-         *     all, so a client moves the bar on by itself. The running channel pushes it as the
-         *     transition starts, at its midpoint and as it ends.
+         * @description A zone's transition while it plays: the look it replaces (the one that drove most of
+         *     its lights, counted as lights; "" when they were idle), the kind, how far it has got
+         *     (0..1) when this was sent, and how long it takes in all, so a client moves the bar on by
+         *     itself. The running channel pushes it as the transition starts, at its midpoint and as
+         *     it ends.
          */
         RunningZoneTransition: {
             /** Durations */
