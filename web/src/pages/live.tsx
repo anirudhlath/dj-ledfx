@@ -6,6 +6,7 @@
 import { usePrefetchQuery } from '@tanstack/react-query'
 import { lazy, Suspense, useState } from 'react'
 import { useParams } from 'react-router'
+import type { Id } from '@/api/contract'
 import { queries } from '@/api/queries'
 import { Button } from '@/design/button'
 import { LIVE_SPEC } from '@/design/live-numbers'
@@ -31,6 +32,7 @@ export function LivePage() {
   const phone = useIsPhone()
   const narrow = useMediaQuery(NARROW_QUERY)
   const [panel, setPanel] = useState<NarrowPanel>('open')
+  const [hovered, setHovered] = useState<Id | null>(null)
   const [named, setNamed] = useState(zoneId)
   if (zoneId !== named) {
     // React's way to adjust state to a prop: a zone named while the panel is hidden brings it back.
@@ -39,7 +41,7 @@ export function LivePage() {
   }
   const stage = (
     <Suspense fallback={<StagePending />}>
-      <Stage variant={phone ? 'phone' : 'desktop'} />
+      <Stage variant={phone ? 'phone' : 'desktop'} outlined={phone ? null : (hovered ?? zoneId ?? null)} />
     </Suspense>
   )
   if (phone) {
@@ -55,12 +57,13 @@ export function LivePage() {
   return (
     <div className="relative flex h-full min-h-0">
       <div className="relative min-w-0 flex-1">{stage}</div>
-      {!narrow && <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" />}
+      {!narrow && <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} />}
       {narrow && panel !== 'hidden' && (
         <RunningPanel
           selected={zoneId}
           className="absolute inset-y-0 right-0 z-20 w-(--live-panel-w) shadow-pop"
           onHide={() => setPanel('hidden')}
+          onZoneHover={setHovered}
           focusHide={panel === 'reopened'}
         />
       )}

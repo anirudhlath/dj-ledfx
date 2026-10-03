@@ -10,6 +10,7 @@ import type { StageLabel } from '../labels'
 import type { Mark } from '../marks'
 import { cssColour, cssSize } from '../palette'
 import type { SunScene } from '../sun'
+import { ZoneOutline, type ZoneOutlineShape } from './zone-outline'
 
 export interface StageSvgProps {
   pose: CameraPose
@@ -18,12 +19,15 @@ export interface StageSvgProps {
   labels: readonly StageLabel[] | null
   /** The sun, with its label where the stage has labels (behaviour.ts). */
   sun: SunScene | null
+  /** The zone a card is hovered over, or /live/zones/:zoneId names; null for none. */
+  outline?: ZoneOutlineShape | null
 }
 
-export const StageSvg = memo(function StageSvg({ pose, marks, labels, sun }: StageSvgProps) {
+export const StageSvg = memo(function StageSvg({ pose, marks, labels, sun, outline = null }: StageSvgProps) {
   return (
     <svg aria-hidden="true" className="pointer-events-none absolute inset-0" width={pose.width} height={pose.height}>
       {sun !== null && <SunMark pose={pose} sun={sun} />}
+      {outline !== null && <ZoneOutline outline={outline} />}
       {marks.map((mark) => (
         <MarkShape key={mark.key} mark={mark} />
       ))}

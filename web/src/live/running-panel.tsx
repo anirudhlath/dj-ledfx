@@ -33,9 +33,11 @@ export interface RunningPanelProps {
   onHide?: () => void
   /** Hide takes the focus: the panel came back from the stage's Running button. */
   focusHide?: boolean
+  /** The zone of the card or row under the pointer or the focus; null when it leaves (§8.1). */
+  onZoneHover?: (zoneId: Id | null) => void
 }
 
-export function RunningPanel({ selected, className, onHide, focusHide = false }: RunningPanelProps) {
+export function RunningPanel({ selected, className, onHide, focusHide = false, onZoneHover }: RunningPanelProps) {
   const world = useZoneWorld()
   const running = useLive((state) => state.running?.zones ?? null)
   const overlays = useLive((state) => state.running?.overlays ?? NO_OVERLAYS)
@@ -55,11 +57,20 @@ export function RunningPanel({ selected, className, onHide, focusHide = false }:
   const stop = () => {
     stopAll().catch((error: unknown) => announce(failureText('stop all', error)))
   }
+  const hover = (target: EventTarget) =>
+    onZoneHover?.(target instanceof Element ? (target.closest<HTMLElement>('[data-zone]')?.dataset.zone ?? null) : null)
   const something = zones.length > 0
   const nothing = running !== null && !something && overlays.length === 0
   const on = nothing ? [...world.states.values()].filter((state) => state.power === true).length : 0
   return (
-    <aside aria-label="Running" className={cx('flex min-h-0 flex-col border-l border-line-soft bg-panel', className)}>
+    <aside
+      aria-label="Running"
+      className={cx('flex min-h-0 flex-col border-l border-line-soft bg-panel', className)}
+      onPointerOver={(event) => hover(event.target)}
+      onPointerLeave={() => onZoneHover?.(null)}
+      onFocus={(event) => hover(event.target)}
+      onBlur={() => onZoneHover?.(null)}
+    >
       <div className={cx('flex items-center justify-between gap-2 px-5 pt-4', something && 'pb-3')}>
         <div className="flex min-w-0 items-baseline gap-2">
           <h2 className="text-section font-semibold">Running</h2>

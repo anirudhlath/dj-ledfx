@@ -10,6 +10,7 @@ export function ZoneRow({ view, to }: { view: ZoneView; to: string }) {
     <Link
       to={to}
       aria-label={`${view.name} — ${view.lookName}`}
+      data-zone={view.zoneId}
       data-shape="row"
       className="flex items-center justify-between gap-2.5 rounded-tile border border-line bg-raised px-3.5 py-2.5 hover:border-line-strong"
     >

@@ -55,3 +55,21 @@ export function colourLine(state: LightState, rgb: RGB | null): string | null {
   if (rgb !== null) return `${hexOf(rgb)} · ${Math.round(intensityOf(rgb) * 100)}%`
   return state.power === false ? 'Off' : null
 }
+
+/** The protocols a firmware effect's name can start with ("LIFX Flame"). */
+const PROTOCOLS: readonly string[] = ['LIFX', 'Govee', 'OpenRGB'] satisfies readonly Light['protocol'][]
+
+/**
+ * §9.1's Copy column, in the tooltip (F3 decision 19): "Own effect · LIFX Flame", and "Streamed copy · Govee
+ * has no Flame", where the effect drops its protocol's word. The engine names in `ownEffect` the effect a
+ * light runs, or streams a copy of. Null for any other light.
+ */
+export function firmwareLine(light: Light, state: LightState): string | null {
+  const effect = state.ownEffect
+  if (state.status === 'own-effect') return effect === null ? 'Own effect' : `Own effect · ${effect}`
+  if (state.status !== 'streamed-copy') return null
+  if (effect === null) return 'Streamed copy'
+  const [first, ...rest] = effect.split(' ')
+  const name = PROTOCOLS.includes(first) && rest.length > 0 ? rest.join(' ') : effect
+  return `Streamed copy · ${light.protocol} has no ${name}`
+}

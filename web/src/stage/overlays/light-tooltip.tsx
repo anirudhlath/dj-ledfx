@@ -16,7 +16,7 @@ import { RENDER } from '../design-numbers'
 import { swatchFill, swatchGlow, type RGB } from '@/lib/light-colour'
 import { cssColour } from '../palette'
 import type { LightState } from '../show'
-import { colourLine, currentColour, deviceLine, type TooltipText } from '../tooltip'
+import { colourLine, currentColour, deviceLine, firmwareLine, type TooltipText } from '../tooltip'
 
 const BLACK: RGB = [0, 0, 0]
 
@@ -78,6 +78,7 @@ export function LightTooltip({ light, state, text, at, stage }: LightTooltipProp
           <span className="text-size-control font-semibold">{text.name}</span>
         </div>
         <div ref={colour} className="num text-text-2" />
+        {firmwareLine(light, state) !== null && <div className="text-text-2">{firmwareLine(light, state)}</div>}
         {text.running !== null && <div className="text-text-2">{text.running}</div>}
         <div className="text-text-2">{deviceLine(light, latencyMs)}</div>
       </div>

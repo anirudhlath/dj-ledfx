@@ -23,6 +23,7 @@ import { NoWebGL } from './overlays/no-webgl'
 import { RoomLinks } from './overlays/room-links'
 import { StageSvg } from './overlays/stage-svg'
 import { StageTools } from './overlays/stage-tools'
+import { ZoneTags } from './overlays/zone-tags'
 import { SunReadout } from './overlays/sun-readout'
 import { ViewControls } from './overlays/view-controls'
 import { pickLight, pickRoom, screenPoints } from './picking'
@@ -30,10 +31,12 @@ import { roomMask } from './room-mask'
 import { StageCanvas } from './stage-canvas'
 import { STAGE_LABEL } from './stage-pending'
 import { sunScene } from './sun'
+import { zoneTags } from './tags'
 import { tooltipText } from './tooltip'
 import type { StageData } from './use-stage-data'
 import { useStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
+import { zonePolygons } from './zone-shape'
 
 /** §7.6 frozen: the last frame, greyed as SPEC.frozen says. */
 const GREYED = `grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`
@@ -48,10 +51,12 @@ export interface StageViewProps {
   route: string
   /** Where a click on a room goes: its zone's composer (§8.1). */
   roomTo: (room: Room) => string
+  /** The zone to outline: the card under the pointer, or the one /live/zones/:zoneId names (F3 decision 23). */
+  outlined?: Id | null
 }
 
-export function StageView({ data, variant, route, roomTo }: StageViewProps) {
-  const { home, lights, states, running, zoneNames, sun, frozen } = data
+export function StageView({ data, variant, route, roomTo, outlined = null }: StageViewProps) {
+  const { home, lights, states, running, zoneNames, zones, sun, frozen } = data
   const [ref, size] = useElementSize<HTMLElement>()
   const [stored, store] = useStageView(route)
   const reducedMotion = useReducedMotion()
@@ -82,6 +87,16 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
   const labels = useMemo(() => (behaviour.labels ? stageLabels(home, running, lights) : null), [behaviour.labels, home, running, lights])
   const sunDrawn = useMemo(() => sunScene(home, sun, behaviour.sunLabel), [home, sun, behaviour.sunLabel])
   const points = useMemo(() => (pose === null ? [] : screenPoints(pose, bodies)), [pose, bodies])
+  // §8.1 "Hover a card → its zone outlines on the stage", drawn as §7.6 compose draws its zone.
+  const outlineZone = outlined === null ? undefined : zones.find((zone) => zone.id === outlined)
+  const outline = useMemo(() => {
+    if (pose === null || outlineZone === undefined) return null
+    const polygons = zonePolygons(home, outlineZone, lights).map((polygon) => polygon.map(([x, y]) => projectPoint(pose, [x, y, 0])))
+    return polygons.length === 0 ? null : { zoneId: outlineZone.id, polygons }
+  }, [pose, outlineZone, home, lights])
+  // State-Problems' and State-Transition's tags: desktop `live` only (F3 decision 18).
+  const tagged = behaviour.overlays && behaviour.interactive
+  const tags = useMemo(() => (tagged ? zoneTags(running, bodies) : []), [tagged, running, bodies])
 
   /** The pointer on the stage, in CSS px, with the room under it. */
   const under = (event: MouseEvent<HTMLElement>) => {
@@ -131,7 +146,7 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
                 pose={pose}
                 cadenceMs={behaviour.cadenceMs}
               />
-              <StageSvg pose={pose} marks={marks} labels={labels} sun={sunDrawn} />
+              <StageSvg pose={pose} marks={marks} labels={labels} sun={sunDrawn} outline={outline} />
             </>
           )}
         </div>
@@ -154,6 +169,7 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
               <ViewControls view={view} onView={(next) => store({ ...stored, view: next })} />
             </>
           )}
+          {webgl && pose !== null && tags.length > 0 && <ZoneTags tags={tags} pose={pose} />}
           {webgl && pose !== null && light !== undefined && body !== undefined && state !== undefined && (
             <LightTooltip
               light={light}

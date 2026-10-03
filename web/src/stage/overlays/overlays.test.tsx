@@ -75,6 +75,16 @@ describe("the stage's SVG layer (§7.3, §7.4, §7.6, §9.1)", () => {
     expect(container.querySelector('circle')).toBeInTheDocument()
     expect(container.querySelector('text')).not.toBeInTheDocument()
   })
+
+  // §8.1 "Hover a card → its zone outlines on the stage", drawn as §7.6 compose outlines its zone.
+  it('outlines a zone in SPEC.compose.outlinePx of text', () => {
+    const outline = { zoneId: 'living', polygons: [[[0, 0], [10, 0], [10, 10]] as [number, number][]] }
+    const { container } = render(<StageSvg pose={pose} marks={[]} labels={null} sun={null} outline={outline} />)
+    const drawn = container.querySelector('[data-outline="living"]')!
+    expect(drawn).toHaveAttribute('stroke', 'var(--color-text)')
+    expect(drawn).toHaveAttribute('stroke-width', String(SPEC.compose.outlinePx))
+    expect(drawn.querySelector('polygon')).toHaveAttribute('points', '0,0 10,0 10,10')
+  })
 })
 
 describe("the stage's controls (§8.1)", () => {
@@ -198,5 +208,12 @@ describe('the light tooltip (§8.1)', () => {
     const at: [number, number] = [MAIN_STAGE.width - 4, 100]
     render(<LightTooltip light={light} state={state} text={text} at={at} stage={MAIN_STAGE} />)
     expect(parseFloat(screen.getByRole('tooltip').style.left)).toBeLessThan(at[0])
+  })
+
+  // §9.1's Copy column; F3 decision 19.
+  it('says when its light streams a copy of an effect it lacks', () => {
+    const copy = buildScenario('firmware', HERO_NOW).lights.find((each) => each.status === 'streamed-copy')!
+    render(<LightTooltip light={copy} state={lightState(copy, undefined)} text={tooltipText(copy, [], new Map())} at={[100, 100]} stage={MAIN_STAGE} />)
+    expect(screen.getByRole('tooltip')).toHaveTextContent(`Streamed copy · ${copy.protocol} has no Flame`)
   })
 })
