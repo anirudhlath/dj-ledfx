@@ -17,7 +17,8 @@ import type {
   ZoneTransition,
 } from '@/api/contract'
 import type { IconName } from '@/design/icons'
-import { formatDuration, formatTime } from '@/lib/format'
+import { formatDuration, formatList, formatTime } from '@/lib/format'
+import { effectWord } from '@/lights/firmware'
 import { lightStates, type LightState } from '@/stage/show'
 
 export interface ZoneWorld {
@@ -233,6 +234,25 @@ function lightsNote(lights: readonly SwatchLight[]): ZoneNote | null {
   return parts.length === 0 ? null : { tone: 'quiet', parts }
 }
 
+/**
+ * State-Firmware: "Every light runs its own built-in effect. The Govee lamp has none, so it gets a streamed
+ * copy of Flame." Said only when every light of the zone runs its own effect or a copy of one. The names are
+ * the lights' own (§10), and the effect is said when the copies share one.
+ */
+function firmwareNote(lights: readonly SwatchLight[]): ZoneNote | null {
+  const own = lights.filter(({ state }) => state.status === 'own-effect')
+  const copies = lights.filter(({ state }) => state.status === 'streamed-copy')
+  if (own.length === 0 || own.length + copies.length < lights.length) return null
+  const every = 'Every light runs its own built-in effect.'
+  if (copies.length === 0) return { tone: 'quiet', parts: [{ text: every }] }
+  const effects = new Set(copies.map(({ state }) => state.ownEffect))
+  const [effect] = effects
+  const of = effects.size === 1 && effect !== null ? ` of ${effectWord(effect)}` : ''
+  const names = formatList(copies.map(({ light }) => light.name))
+  const rest = copies.length === 1 ? `${names} has none, so it gets a streamed copy${of}.` : `${names} have none, so they get streamed copies${of}.`
+  return { tone: 'quiet', parts: [{ text: `${every} ${rest}` }] }
+}
+
 /** A served transition as the card and the stage's tag say it; null without one. */
 export function transitionView(transition: ZoneTransition | null | undefined): TransitionView | null {
   if (transition == null) return null
@@ -261,7 +281,9 @@ export function zoneView(running: RunningZone, world: ZoneWorld, now: Date, comp
     inputs: look === undefined ? null : chipsFor(look, running.waitingFor ?? []),
     modifiers: look?.modifiers?.evening === true ? ['Evening'] : [],
     since: sinceLine(running, now, compact),
-    notes: [stateNote(running, world, name, now), compact ? null : lightsNote(lights)].filter((note) => note !== null),
+    notes: [stateNote(running, world, name, now), compact ? null : firmwareNote(lights), compact ? null : lightsNote(lights)].filter(
+      (note) => note !== null,
+    ),
     transition: running.state === 'transition' ? transitionView(running.transition) : null,
     lights,
   }

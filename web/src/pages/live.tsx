@@ -12,6 +12,7 @@ import { usePreviewOnly } from '@/chrome/hooks'
 import { Button } from '@/design/button'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
+import { EmptyHome } from '@/live/empty-home'
 import { PreviewOnlyLabel } from '@/live/preview-only'
 import { ReconnectingCard } from '@/live/reconnecting'
 import { RunningPanel } from '@/live/running-panel'
@@ -64,6 +65,7 @@ export function LivePage() {
         {stage}
         {previewOnly && <PreviewOnlyLabel />}
         <ReconnectingCard variant="desktop" />
+        <EmptyHome variant="desktop" />
       </div>
       {!narrow && <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} />}
       {narrow && panel !== 'hidden' && (

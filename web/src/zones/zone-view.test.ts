@@ -111,6 +111,30 @@ describe('zoneView', () => {
     expect(unsaid.transition).toEqual({ from: 'Fireflies', label: 'Fade', progress: 0.25, durationS: null })
   })
 
+  // State-Firmware: "Every light runs its own built-in effect. The Govee lamp has none, so it gets a streamed copy of Flame."
+  it('says every light runs its own effect, and which get a streamed copy of what', () => {
+    const copy = buildScenario('firmware', HERO_NOW).lights.find((light) => light.status === 'streamed-copy')!
+    expect(viewOf('firmware', 'home').notes).toEqual([
+      { tone: 'quiet', parts: [{ text: `Every light runs its own built-in effect. ${copy.name} has none, so it gets a streamed copy of Flame.` }] },
+    ])
+    // A compact card drops it, as it drops the lights' note (F3 decision 2).
+    expect(viewOf('firmware', 'home', { compact: true }).notes).toEqual([])
+
+    const two = viewOf('firmware', 'home', {
+      change: (state) => Object.assign(state.lights.find((light) => light.name === 'TV Lamp')!, { status: 'streamed-copy', ownEffect: 'LIFX Flame' }),
+    })
+    const names = two.lights.filter(({ state }) => state.status === 'streamed-copy').map(({ light }) => light.name)
+    expect(two.notes[0].parts[0].text).toBe(
+      `Every light runs its own built-in effect. ${names[0]} and ${names[1]} have none, so they get streamed copies of Flame.`,
+    )
+
+    // A light that streams the look: not every light runs its own effect, so the note says nothing.
+    const mixed = viewOf('firmware', 'home', {
+      change: (state) => Object.assign(state.lights.find((light) => light.name === 'TV Lamp')!, { status: 'streaming', ownEffect: null }),
+    })
+    expect(mixed.notes).toEqual([])
+  })
+
   // F3 decision 2: a compact card says "since HH:MM" and drops the lights' note.
   it('keeps a compact card short', () => {
     expect(viewOf('hero', 'living', { compact: true })).toMatchObject({ since: 'since 19:05', notes: [] })

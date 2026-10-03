@@ -3,7 +3,7 @@
 // fit (decision 2), and the footer's Put a look on. Nothing running is §9.4's. The zone /live/zones/:zoneId
 // names is outlined, collapses last and scrolls into view (decision 23). It reads the live store a slice at
 // a time; the frames reach only the swatches. Look and layout: Main.html's and State-Nothing-Running.html's.
-import { useEffect, useMemo } from 'react'
+import { Fragment, useEffect, useMemo } from 'react'
 import { failureText, stopAll } from '@/api/actions'
 import type { Id, Overlay } from '@/api/contract'
 import { useLive } from '@/api/live-store'
@@ -14,6 +14,7 @@ import { ConfirmDialog } from '@/design/confirm-dialog'
 import { cx } from '@/design/cx'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useNow } from '@/lib/use-now'
+import { runsFirmware } from '@/lights/firmware'
 import { newestFirst } from '@/stage/show'
 import { OverlayCard } from '@/zones/overlay-card'
 import { useZoneWorld } from '@/zones/use-zone-world'
@@ -21,6 +22,7 @@ import { ZoneCard } from '@/zones/zone-card'
 import { ZoneRow } from '@/zones/zone-row'
 import { chipsFor, zoneView } from '@/zones/zone-view'
 import { collapseKey, shapesAt, useCollapse } from './collapse'
+import { FirmwareBreakdown } from './firmware-breakdown'
 import { NothingRunning } from './nothing-running'
 import { TapeBar } from './preview-only'
 import { runningSummary } from './words'
@@ -64,6 +66,13 @@ export function RunningPanel({ selected, className, onHide, focusHide = false, o
   }
   const hover = (target: EventTarget) =>
     onZoneHover?.(target instanceof Element ? (target.closest<HTMLElement>('[data-zone]')?.dataset.zone ?? null) : null)
+  const items = zones.map((zone) => {
+    const shape = shapes.get(zone.zoneId) ?? 'card'
+    const view = zoneView(zone, world, now, shape !== 'card')
+    // F3 decision 20: a full card's lights that run their own effect are listed under it (State-Firmware).
+    const firmware = shape === 'card' && view.lights.some(({ state }) => runsFirmware(state))
+    return { zone, shape, view, firmware }
+  })
   const something = zones.length > 0
   const nothing = running !== null && !something && overlays.length === 0
   const on = nothing ? [...world.states.values()].filter((state) => state.power === true).length : 0
@@ -117,15 +126,24 @@ export function RunningPanel({ selected, className, onHide, focusHide = false, o
             const look = world.looks.get(overlay.lookId)
             return <OverlayCard key={`${overlay.lookId}:${overlay.endsAt}`} overlay={overlay} inputs={look === undefined ? [] : chipsFor(look)} />
           })}
-          {zones.map((zone) => {
-            const shape = shapes.get(zone.zoneId) ?? 'card'
-            const view = zoneView(zone, world, now, shape !== 'card')
-            return shape === 'row' ? (
+          {items.map(({ zone, shape, view, firmware }) =>
+            shape === 'row' ? (
               <ZoneRow key={zone.zoneId} view={view} to={`/live/zones/${encodeURIComponent(zone.zoneId)}`} />
             ) : (
-              <ZoneCard key={zone.zoneId} running={zone} view={view} compact={shape === 'compact'} outlined={zone.zoneId === selected} />
-            )
-          })}
+              // A compact card drops the breakdown, as it drops the lights' note (F3 decision 2). State-Firmware's
+              // card draws no swatches while the breakdown has every one of its lights'.
+              <Fragment key={zone.zoneId}>
+                <ZoneCard
+                  running={zone}
+                  view={view}
+                  compact={shape === 'compact'}
+                  outlined={zone.zoneId === selected}
+                  swatches={!firmware || !view.lights.every(({ state }) => runsFirmware(state))}
+                />
+                {firmware && <FirmwareBreakdown zoneName={view.name} lights={view.lights} />}
+              </Fragment>
+            ),
+          )}
           {nothing && <NothingRunning on={on} total={world.lightCount} />}
         </div>
       </div>
@@ -133,8 +151,11 @@ export function RunningPanel({ selected, className, onHide, focusHide = false, o
         <ButtonLink variant="primary" size="lg" icon="plus" to="/live/put" className="w-full">
           Put a look on
         </ButtonLink>
-        {/* F3 decision 34: the sentence goes while the cards are squeezed, and while the frozen stage takes no click. */}
-        {something && step === 0 && !frozen && <p className="text-center text-meta text-text-3">or click a room in the home</p>}
+        {/* F3 decision 34: the sentence goes while the cards are squeezed, while the frozen stage takes no click, and
+            while a firmware breakdown fills the panel (State-Firmware draws none). */}
+        {something && step === 0 && !frozen && !items.some(({ firmware }) => firmware) && (
+          <p className="text-center text-meta text-text-3">or click a room in the home</p>
+        )}
       </div>
     </aside>
   )

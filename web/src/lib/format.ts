@@ -87,3 +87,9 @@ export function formatSpan(start: Date, end: Date, now: Date): string {
   const endWord = startOfDay(start) === startOfDay(end) ? '' : formatDayWord(end, now) || 'today'
   return `${at(start, formatDayWord(start, now))} – ${at(end, endWord)}`
 }
+
+/** "A", "A and B", "A, B and C", as the spec's copy lists names (§9.3: "Doorbell ripple and Goodnight"). */
+export function formatList(items: readonly string[]): string {
+  if (items.length < 2) return items.join('')
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}

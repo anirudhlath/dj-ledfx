@@ -26,6 +26,8 @@ export interface ZoneCardProps {
   compact?: boolean
   /** The card /live/zones/:zoneId names (F3 decision 23), outlined as the renders draw focus. */
   outlined?: boolean
+  /** The lights' swatches; State-Firmware's card has none, its breakdown having each light's. */
+  swatches?: boolean
 }
 
 /** §6.3's note: what's wrong or special. */
@@ -95,7 +97,7 @@ function TransitionBar({ transition }: { transition: TransitionView }) {
   )
 }
 
-export function ZoneCard({ running, view, compact = false, outlined = false }: ZoneCardProps) {
+export function ZoneCard({ running, view, compact = false, outlined = false, swatches = true }: ZoneCardProps) {
   const announce = useAnnounce()
   const linked = useConnectionStatus() !== 'reconnecting'
   const [busy, setBusy] = useState(false)
@@ -142,7 +144,7 @@ export function ZoneCard({ running, view, compact = false, outlined = false }: Z
       <LookName view={view} compact={compact} />
       <Meta view={view} />
       {view.transition !== null && <TransitionBar transition={view.transition} />}
-      {view.lights.length > 0 && (
+      {swatches && view.lights.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.75">
           {view.lights.map(({ light, state }) => (
             <LightSwatch key={light.id} light={light} state={state} />

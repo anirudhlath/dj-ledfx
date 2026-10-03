@@ -3,6 +3,7 @@
 import type { Id, Light, RunningZone } from '@/api/contract'
 import type { LightFrame } from '@/api/frames'
 import { formatLatency, formatTime } from '@/lib/format'
+import { effectWord } from '@/lights/firmware'
 import { hexOf, intensityOf, type RGB } from '@/lib/light-colour'
 import { isStreamed, newestFirst, restingColour, type LightState } from './show'
 
@@ -56,9 +57,6 @@ export function colourLine(state: LightState, rgb: RGB | null): string | null {
   return state.power === false ? 'Off' : null
 }
 
-/** The protocols a firmware effect's name can start with ("LIFX Flame"). */
-const PROTOCOLS: readonly string[] = ['LIFX', 'Govee', 'OpenRGB'] satisfies readonly Light['protocol'][]
-
 /**
  * §9.1's Copy column, in the tooltip (F3 decision 19): "Own effect · LIFX Flame", and "Streamed copy · Govee
  * has no Flame", where the effect drops its protocol's word. The engine names in `ownEffect` the effect a
@@ -68,8 +66,5 @@ export function firmwareLine(light: Light, state: LightState): string | null {
   const effect = state.ownEffect
   if (state.status === 'own-effect') return effect === null ? 'Own effect' : `Own effect · ${effect}`
   if (state.status !== 'streamed-copy') return null
-  if (effect === null) return 'Streamed copy'
-  const [first, ...rest] = effect.split(' ')
-  const name = PROTOCOLS.includes(first) && rest.length > 0 ? rest.join(' ') : effect
-  return `Streamed copy · ${light.protocol} has no ${name}`
+  return effect === null ? 'Streamed copy' : `Streamed copy · ${light.protocol} has no ${effectWord(effect)}`
 }

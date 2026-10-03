@@ -7,6 +7,7 @@ import {
   formatDayWord,
   formatDuration,
   formatLatency,
+  formatList,
   formatPitch,
   formatSecondsLeft,
   formatSpan,
@@ -74,5 +75,13 @@ describe('format', () => {
     expect(formatSpan(new Date(2026, 8, 22, 18, 2), new Date(2026, 8, 22, 23, 31), now)).toBe('yesterday 18:02 – 23:31')
     expect(formatSpan(new Date(2026, 8, 22, 23, 31), new Date(2026, 8, 23, 7, 0), now)).toBe('yesterday 23:31 – today 07:00')
     expect(formatSpan(new Date(2026, 8, 23, 18, 2), new Date(2026, 8, 23, 19, 0), now)).toBe('18:02 – 19:00')
+  })
+
+  // "Doorbell ripple and Goodnight can't trigger" (§9.3).
+  it('lists names with "and" before the last', () => {
+    expect(formatList([])).toBe('')
+    expect(formatList(['LIFX'])).toBe('LIFX')
+    expect(formatList(['LIFX', 'Govee'])).toBe('LIFX and Govee')
+    expect(formatList(['OpenRGB', 'LIFX', 'Govee'])).toBe('OpenRGB, LIFX and Govee')
   })
 })
