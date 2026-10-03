@@ -13,11 +13,11 @@ import { Button } from '@/design/button'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
 import { EmptyHome } from '@/live/empty-home'
+import { PhoneRunning } from '@/live/phone-live'
 import { PreviewOnlyLabel } from '@/live/preview-only'
 import { ReconnectingCard } from '@/live/reconnecting'
 import { RunningPanel } from '@/live/running-panel'
 import { StagePending } from '@/stage/stage-pending'
-import { Placeholder } from './placeholder'
 
 const Stage = lazy(() => import('@/stage/stage'))
 
@@ -51,11 +51,11 @@ export function LivePage() {
   )
   if (phone) {
     return (
-      <div className="flex flex-col">
+      <div className="flex min-h-full flex-col">
         <div className="relative shrink-0" style={{ aspectRatio: `${LIVE_SPEC.phoneStage.width} / ${LIVE_SPEC.phoneStage.height}` }}>
           {stage}
         </div>
-        <Placeholder name="Running" milestone="F3" />
+        <PhoneRunning />
       </div>
     )
   }

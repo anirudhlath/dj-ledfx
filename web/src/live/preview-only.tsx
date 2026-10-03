@@ -57,7 +57,16 @@ export function PreviewOnlyBanner({ className }: { className?: string }) {
         <span className="text-meta font-bold tracking-[0.08em] uppercase">Preview only</span>
         <span className="text-[11.5px] text-text-2">Nothing is sent to the lights</span>
       </div>
-      <Button variant="primary" size="sm" aria-label="Turn off preview only" disabled={control.pending} onClick={() => control.change(false)}>
+      {/* Phone-State-Preview-Only draws this sm button 36 high, where the phone grows sm to the touch minimum:
+          the drawn face, with a touch-size hit area round it. */}
+      <Button
+        variant="primary"
+        size="sm"
+        aria-label="Turn off preview only"
+        className="h-9! rounded-control! px-2.5! text-data! touch-target"
+        disabled={control.pending}
+        onClick={() => control.change(false)}
+      >
         Turn off
       </Button>
     </div>

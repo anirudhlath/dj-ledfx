@@ -4,7 +4,7 @@ import { buildScenario, type ScenarioName, type ScenarioState } from '@/api/mock
 import { formatSecondsLeft } from '@/lib/format'
 import { HERO_NOW } from '@/test/live'
 import { runningIn, scenarioWorld } from '@/test/zones'
-import { overlayLeftMs, overlayProgress, transitionProgress, zoneView, zoneWorld } from './zone-view'
+import { overlayLeftMs, overlayProgress, shortLightsNote, transitionProgress, zoneView, zoneWorld } from './zone-view'
 
 function viewOf(name: ScenarioName, zoneId: Id, { compact = false, change }: { compact?: boolean; change?: (state: ScenarioState) => void } = {}) {
   const { state, world } = scenarioWorld(name, change)
@@ -181,5 +181,14 @@ describe('zoneView', () => {
     expect(transitionProgress(0.62, 3, -600)).toBeCloseTo(0.62)
     expect(transitionProgress(0.62, null, 600)).toBeCloseTo(0.62)
     expect(zoneView({ ...living, lights: [] }, world, HERO_NOW)).toMatchObject({ context: '0 lights', lights: [] })
+  })
+
+  // Phone-Live: "Rope offline · Candle 2 switched off elsewhere".
+  it("says the lights' news shorter for the phone", () => {
+    expect(shortLightsNote(viewOf('hero', 'living').lights)).toEqual({
+      tone: 'quiet',
+      parts: [{ text: 'Rope offline', strong: true }, { text: ' · ' }, { text: 'Candle 2 switched off elsewhere' }],
+    })
+    expect(shortLightsNote(viewOf('hero', 'office').lights)).toBeNull()
   })
 })

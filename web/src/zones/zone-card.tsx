@@ -2,11 +2,8 @@
 // compact (F3 decision 2). What it says is zone-view.ts's; what it does goes through src/api's actions, and
 // a failure is said in words (Review Focus 1). Look and layout: Main.html's, State-Transition.html's and
 // State-Problems.html's cards. The swatches follow the frame store without React (Task 8).
-import { useRef, useState } from 'react'
-import { failureText, restartZone, setBrightness, turnOff } from '@/api/actions'
+import { useRef } from 'react'
 import type { RunningZone } from '@/api/contract'
-import { useConnectionStatus } from '@/chrome/hooks'
-import { useAnnounce } from '@/design/announce'
 import { Button, ButtonLink } from '@/design/button'
 import { Chip } from '@/design/chip'
 import { cx } from '@/design/cx'
@@ -15,7 +12,7 @@ import { ProgressBar } from '@/design/progress-bar'
 import { Slider } from '@/design/slider'
 import { LightSwatch } from '@/lights/light-swatch'
 import { useMovingProgress } from './use-moving-progress'
-import { useThrottledValue } from './use-throttled-value'
+import { useZoneControls } from './use-zone-controls'
 import { ZoneMenu } from './zone-menu'
 import type { TransitionView, ZoneNote, ZoneView } from './zone-view'
 
@@ -98,23 +95,7 @@ function TransitionBar({ transition }: { transition: TransitionView }) {
 }
 
 export function ZoneCard({ running, view, compact = false, outlined = false, swatches = true }: ZoneCardProps) {
-  const announce = useAnnounce()
-  const linked = useConnectionStatus() !== 'reconnecting'
-  const [busy, setBusy] = useState(false)
-  const brightness = useThrottledValue({
-    server: running.brightness,
-    send: (value) => setBrightness(running.zoneId, value),
-    onFail: (error) => announce(failureText(`change the brightness of ${view.name}`, error)),
-    enabled: linked,
-  })
-  const act = (action: () => Promise<void>, what: string) => {
-    setBusy(true)
-    action()
-      .catch((error: unknown) => announce(failureText(what, error)))
-      .finally(() => setBusy(false))
-  }
-  const off = () => act(() => turnOff(running.zoneId), `turn off ${view.name}`)
-  const restart = () => act(() => restartZone(running.zoneId), `restart ${view.lookName}`)
+  const { brightness, busy, off, restart } = useZoneControls(running, view.name, view.lookName)
   const crashed = running.state === 'crashed'
   const offButton = (
     <Button variant="outline" size="sm" icon="power" aria-label={`Turn off ${view.name}`} disabled={busy} onClick={off}>

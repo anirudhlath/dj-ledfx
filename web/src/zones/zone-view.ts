@@ -218,21 +218,29 @@ function stateNote(running: RunningZone, world: ZoneWorld, name: string, now: Da
   }
 }
 
-/** Main.png: "Rope offline since 17:02 · Candle 2 was switched off elsewhere and rejoins when it's back on". */
-function lightsNote(lights: readonly SwatchLight[]): ZoneNote | null {
+/**
+ * Main.png: "Rope offline since 17:02 · Candle 2 was switched off elsewhere and rejoins when it's back on";
+ * `short`, Phone-Live's: "Rope offline · Candle 2 switched off elsewhere".
+ */
+function lightsNote(lights: readonly SwatchLight[], short = false): ZoneNote | null {
   const parts: NotePart[] = []
   const add = (...next: NotePart[]) => {
     if (parts.length > 0) parts.push({ text: ' · ' })
     parts.push(...next)
   }
   for (const { light, state } of lights) {
-    if (state.status === 'offline') add({ text: `${light.name} offline`, strong: true }, { text: ` since ${timeOf(state.since)}` })
+    if (state.status !== 'offline') continue
+    add({ text: `${light.name} offline`, strong: true }, ...(short ? [] : [{ text: ` since ${timeOf(state.since)}` }]))
   }
   for (const { light, state } of lights) {
-    if (state.status === 'switched-off') add({ text: `${light.name} was switched off elsewhere and rejoins when it's back on` })
+    if (state.status !== 'switched-off') continue
+    add({ text: short ? `${light.name} switched off elsewhere` : `${light.name} was switched off elsewhere and rejoins when it's back on` })
   }
   return parts.length === 0 ? null : { tone: 'quiet', parts }
 }
+
+/** The phone's card's lights note (Phone-Live). */
+export const shortLightsNote = (lights: readonly SwatchLight[]): ZoneNote | null => lightsNote(lights, true)
 
 /**
  * State-Firmware: "Every light runs its own built-in effect. The Govee lamp has none, so it gets a streamed
