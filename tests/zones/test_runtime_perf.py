@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import statistics
 import time
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -28,7 +29,7 @@ from dj_ledfx.looks.model import (
     TransitionKind,
 )
 from dj_ledfx.tempo.clock import TempoClock
-from dj_ledfx.zones.runtime import FRAME_BUDGET_S, RuntimeEnv, ZoneRuntime
+from dj_ledfx.zones.runtime import FRAME_BUDGET_S, RuntimeEnv, ZoneLight, ZoneRuntime
 
 pytestmark = pytest.mark.perf
 
@@ -59,8 +60,13 @@ def home_runtime(look: Look, **env: Any) -> ZoneRuntime:
     sets RuntimeEnv's fields."""
     lights = seeded_zone_lights()
     assert sum(light.led_count for light in lights) == handoff_home_json()["totals"]["leds"]
+    return zone_runtime("home", look, lights, **env)
+
+
+def zone_runtime(zone_id: str, look: Look, lights: Sequence[ZoneLight], **env: Any) -> ZoneRuntime:
+    """The look on these seeded lights, as a zone of them runs it."""
     return ZoneRuntime(
-        "home",
+        zone_id,
         look,
         lights,
         RuntimeEnv(TempoClock(), lambda _: 0.05, **env),
@@ -141,3 +147,40 @@ def test_three_looks_mid_transition_render_in_under_5_ms() -> None:
     assert third.state == "transition" and second.state == "transition"
     assert statistics.median(durations) < FRAME_BUDGET_S
     assert third.fps_actual >= 59
+
+
+# Ruling 13: a zone's own chain is at most three looks, and each zone a start takes lights
+# from adds its twin, so what a start renders is bounded by the number of zones. The whole
+# home, mid-transition from its own two looks, takes its lights back from two zones that
+# are mid-transition too: seven looks in one frame.
+def test_a_start_taking_lights_from_two_zones_mid_transition_renders_in_under_5_ms() -> None:
+    lights = seeded_zone_lights()
+    third = len(lights) // 3
+    parts = {
+        "home": lights[:third],
+        "west": lights[third : 2 * third],
+        "east": lights[2 * third :],
+    }
+    longest = Transition(kind="dissolve", duration_s=MAX_TRANSITION_S)
+    latest: dict[str, ZoneRuntime] = {}
+    for zone_id, part in parts.items():
+        first, second = (
+            zone_runtime(
+                zone_id, with_every_modifier(builtin_look(look_id)), part, evening=lambda: 0.5
+            )
+            for look_id in ("aurora", "lava")
+        )
+        second.begin_transition(longest, [first])
+        latest[zone_id] = second
+    new = home_runtime(with_every_modifier(builtin_look("focus")), evening=lambda: 0.5)
+    new.begin_transition(
+        Transition(kind="spread", duration_s=MAX_TRANSITION_S),
+        [latest["home"], latest["west"].twin(), latest["east"].twin()],
+    )
+
+    durations = tick_times(new)
+
+    assert len(new.transition_sources) == 3 and new.state == "transition"
+    assert all(len(source.transition_sources) == 1 for source in new.transition_sources)
+    assert statistics.median(durations) < FRAME_BUDGET_S
+    assert new.fps_actual >= 59
