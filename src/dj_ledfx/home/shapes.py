@@ -359,7 +359,11 @@ def _columns(count: int, width: float, depth: float) -> int:
     return max(1, min(count, math.ceil(math.sqrt(count * width / depth))))
 
 
-def _rotation(rotation: Vec3) -> NDArray[np.float64]:
+def rotation_matrix(rotation: Vec3) -> NDArray[np.float64]:
+    """A placement's turn, tilt and roll (degrees) as one matrix: turned clockwise seen from
+    above (x east, y south), tilted about x, rolled about y. A point (a column) times it is
+    turned; a row times it, as `rows @ matrix`, is turned back. A layer's transform turns
+    by it too (zones/layer_view.py)."""
     turn, tilt, roll = (math.radians(angle) for angle in rotation)
     about_z = np.array(
         [[math.cos(turn), -math.sin(turn), 0.0], [math.sin(turn), math.cos(turn), 0.0], [0, 0, 1]]
@@ -389,7 +393,7 @@ def _grid(shape: GridShape, count: int, by_columns: bool) -> PlacedLeds:
             np.zeros(count),
         ]
     )
-    pos = np.asarray(shape.center, dtype=np.float64) + flat @ _rotation(shape.rotation).T
+    pos = np.asarray(shape.center, dtype=np.float64) + flat @ rotation_matrix(shape.rotation).T
     # As M1 hung a matrix: row 0 at the top of the light's own frame.
     local = np.column_stack(
         [_spread(columns)[column], np.full(count, 0.5), 1.0 - _spread(rows)[row]]

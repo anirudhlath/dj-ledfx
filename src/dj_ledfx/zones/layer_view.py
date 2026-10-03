@@ -10,7 +10,6 @@ one per layer until either changes.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -18,6 +17,7 @@ import numpy as np
 
 from dj_ledfx.effects.field_tools import anchor_or_centre, distances, smoothstep
 from dj_ledfx.home.geometry import points_in_polygon
+from dj_ledfx.home.shapes import rotation_matrix
 from dj_ledfx.looks.model import (
     AnchorMask,
     HeightMask,
@@ -109,11 +109,6 @@ def transformed(
     the zone's centre. An LED shows what the unmoved field has at the returned place."""
     middle = centre.astype(np.float64)
     back = (pos - np.asarray(transform.offset, dtype=np.float64) - middle) / transform.scale
-    turn = math.radians(transform.rotate_deg)
-    cos, sin = math.cos(turn), math.sin(turn)
-    # Undo a clockwise turn: (x, y) -> (x cos + y sin, -x sin + y cos) with y pointing south.
-    x, y = back[:, 0].copy(), back[:, 1].copy()
-    back[:, 0] = x * cos + y * sin
-    back[:, 1] = -x * sin + y * cos
-    placed: NDArray[np.float64] = back + middle
+    turn = rotation_matrix((transform.rotate_deg, 0.0, 0.0))  # the map's turn
+    placed: NDArray[np.float64] = back @ turn + middle  # rows times it: turned back
     return placed
