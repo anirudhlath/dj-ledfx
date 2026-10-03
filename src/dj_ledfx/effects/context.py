@@ -68,4 +68,5 @@ def to_beat_context(ctx: RenderContext) -> BeatContext:
         bpm=ctx.bpm,
         dt=ctx.dt,
         dj=ctx.signals.get(DJ_BEAT) > 0.0,
+        beat_index=ctx.beat_index,
     )

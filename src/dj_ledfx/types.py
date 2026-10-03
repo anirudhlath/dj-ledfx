@@ -61,6 +61,7 @@ class BeatContext:
     bpm: float  # current pitch-adjusted BPM
     dt: float  # frame delta (seconds)
     dj: bool = False  # a DJ's deck drives the tempo (effects/context.py's DJ_BEAT signal)
+    beat_index: int = 0  # beats since the tempo clock started counting
 
 
 @dataclass(frozen=True, slots=True)

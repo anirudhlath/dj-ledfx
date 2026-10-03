@@ -64,16 +64,22 @@ def test_a_pro_dj_link_lock_with_no_dj_signals_no_dj() -> None:
     assert not to_beat_context(ctx).dj
 
 
-def test_to_beat_context_keeps_phases_bpm_and_dt() -> None:
+def test_to_beat_context_keeps_the_beat_bpm_and_dt() -> None:
     ctx = RenderContext(
         t=1.0,
         dt=0.02,
         beat_phase=0.3,
         bar_phase=0.7,
         bpm=128.0,
-        beat_index=0,
-        bar_index=0,
+        beat_index=37,
+        bar_index=9,
         signals=NO_SIGNALS,
     )
     beat = to_beat_context(ctx)
-    assert (beat.beat_phase, beat.bar_phase, beat.bpm, beat.dt) == (0.3, 0.7, 128.0, 0.02)
+    assert (beat.beat_index, beat.beat_phase, beat.bar_phase, beat.bpm, beat.dt) == (
+        37,
+        0.3,
+        0.7,
+        128.0,
+        0.02,
+    )
