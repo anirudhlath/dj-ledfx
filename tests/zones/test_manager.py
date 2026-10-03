@@ -13,7 +13,7 @@ from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
-from dj_ledfx.looks.model import Look, LookError
+from dj_ledfx.looks.model import Look, LookError, LookModifiers
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.model import (
     TakeOver,
@@ -378,6 +378,18 @@ async def test_starting_a_running_zone_again_replaces_its_look(make_home: HomeFa
     assert lamp.names().count("capture") == 1 and "restore" not in lamp.names()
     assert list(home.host.runtimes) == ["z"]
     assert home.routes.routes["lamp"].source is home.host.runtimes["z"]
+
+
+# Spec §5.3: the brightness cap also caps firmware devices.
+async def test_the_brightness_cap_caps_the_firmware_lights_too(make_home: HomeFactory) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    home = await make_home([tile], [zone_record("z", "tile")])
+
+    await home.manager.start("z", replace(GLOW, modifiers=LookModifiers(brightness_cap=0.6)))
+    assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": 0.6})
+
+    await home.manager.set_brightness("z", 0.5)
+    assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": pytest.approx(0.3)})
 
 
 async def test_a_look_starts_its_firmware_even_when_layer_ids_repeat(

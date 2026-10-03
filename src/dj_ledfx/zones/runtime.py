@@ -40,6 +40,7 @@ from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.timing import trim_window, utcnow
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.layer_view import LayerView, layer_view
+from dj_ledfx.zones.look_modifiers import Trails, capped, flashed, warmed
 from dj_ledfx.zones.model import CrashInfo
 
 if TYPE_CHECKING:
@@ -118,6 +119,7 @@ class ZoneRuntime:
         now: Callable[[], datetime] = utcnow,
         on_state_change: Callable[[ZoneRuntime], None] | None = None,
         watched: Callable[[], bool] = lambda: True,
+        evening: Callable[[], float] = lambda: 0.0,
     ) -> None:
         self.zone_id = zone_id
         # Called when the zone crashes, turns slow or recovers by itself; the zone
@@ -138,6 +140,10 @@ class ZoneRuntime:
         # Whether anyone watches this zone's frames (Task 13). Lights that run their
         # own effect are drawn only for the preview, so only while someone watches.
         self._watched = watched
+        # How far into the evening it is now, 0..1 (home/sun.py); a look with its evening
+        # modifier on reads it every frame.
+        self._evening = evening
+        self._trails = Trails()
         self._fields: list[tuple[Layer, FieldEffect]] = []  # bottom to top
         self._firmware: list[tuple[Layer, FirmwareEffect]] = []  # top layer first
         self._claims: dict[str, int] = {}  # light -> firmware layer it runs itself
@@ -215,6 +221,15 @@ class ZoneRuntime:
                     latency = light_s
         return min(latency + self._stride / self._fps, HORIZON_CAP_S, self._max_lookahead_s)
 
+    @property
+    def firmware_brightness(self) -> float:
+        """The brightness a light running its own effect is started at: the zone's, under
+        the look's brightness cap (spec §5.3: the cap also caps firmware devices). Streamed
+        colours are capped in the frame and scaled by the zone's brightness at send, so both
+        kinds of light end up at most brightness × cap."""
+        cap = self.look.modifiers.brightness_cap
+        return self.brightness if cap is None else self.brightness * cap
+
     def claim_for(self, device_id: str) -> tuple[Layer, FirmwareEffect] | None:
         index = self._claims.get(device_id)
         return None if index is None else self._firmware[index]
@@ -261,6 +276,8 @@ class ZoneRuntime:
         on only when firmware lights need their effect again.
         """
         old, self.look = self.look, look
+        if look.modifiers.trails_s is None:
+            self._trails.reset()
         if self.crash is not None or _layout(old) != _layout(look) or old.needs != look.needs:
             self._compile()
             return
@@ -276,7 +293,9 @@ class ZoneRuntime:
                 firmware.set_params(**layer.settings)
                 resend = True
             self._firmware[index] = (layer, firmware)
-        if resend:
+        # A new cap changes the brightness the firmware effects run at.
+        recapped = old.modifiers.brightness_cap != look.modifiers.brightness_cap
+        if resend or (recapped and self._claims):
             self.generation = next(_GENERATIONS)
 
     def restart(self) -> None:
@@ -305,7 +324,7 @@ class ZoneRuntime:
         ctx = render_context(self._clock, target, self._stride / self._fps)
         started = self._timer()
         try:
-            colors = self._render(ctx)
+            colors = self._render_look(ctx)
         except Exception as exc:  # a look never takes the engine down (spec §8)
             self._fail(self._rendering, f"{type(exc).__name__}: {exc}")
             return
@@ -320,12 +339,33 @@ class ZoneRuntime:
         )
         self._track_speed(now, elapsed)
 
-    def _render(self, ctx: RenderContext) -> FloatRGB:
-        """A new frame every tick: the ring keeps it. The field layers blend bottom to top;
-        then each firmware layer's emulation is drawn on its lights. Waiting, it's dark."""
+    def _render_look(self, ctx: RenderContext) -> FloatRGB:
+        """A new frame every tick: the ring keeps it. The look's streamed colours (its
+        layers), then its modifiers on them (spec §5.3): trails, the downbeat flash and the
+        evening. The lights that run their own effect are drawn after those, as they show
+        (for the preview, while it's watched), and the brightness cap goes over every LED.
+        The trails keep their own copy of what they showed. Waiting, it's dark."""
         count = self.leds.count
         if self.waiting_for or count == 0:
             return np.zeros((count, 3), dtype=np.float32)
+        frame = self._render_layers(ctx)
+        modifiers = self.look.modifiers
+        if modifiers.trails_s is not None:
+            frame = self._trails.apply(frame, ctx.t, modifiers.trails_s)
+        if modifiers.downbeat_flash:
+            frame = flashed(frame, ctx)
+        if modifiers.evening:
+            frame = warmed(frame, self._evening())
+        if self._claim_targets and self._watched():
+            self._draw_firmware(frame, ctx, self._claim_targets)
+        if modifiers.brightness_cap is not None:
+            frame = capped(frame, modifiers.brightness_cap)
+        return frame
+
+    def _render_layers(self, ctx: RenderContext) -> FloatRGB:
+        """The field layers blended bottom to top, then each firmware layer's copy drawn on
+        the lights that stream it."""
+        count = self.leds.count
         frame: FloatRGB | None = None
         for layer, field_effect in self._fields:
             self._rendering = layer.name
@@ -341,14 +381,20 @@ class ZoneRuntime:
             blend_into(frame, colors, layer.blend, opacity)
         if frame is None:
             frame = np.zeros((count, 3), dtype=np.float32)
-        targets = self._copy_targets
-        if self._claim_targets and self._watched():
-            targets = [*targets, *self._claim_targets]
+        self._draw_firmware(frame, ctx, self._copy_targets)
+        return frame
+
+    def _draw_firmware(
+        self,
+        frame: FloatRGB,
+        ctx: RenderContext,
+        targets: Sequence[tuple[int, NDArray[np.intp], LedSet]],
+    ) -> None:
+        """Each firmware layer's emulation, in place, on the rows of the lights given."""
         for index, where, leds in targets:
             layer, firmware = self._firmware[index]
             self._rendering = layer.name
             frame[where] = _finite(firmware.emulate(ctx, leds)) * np.float32(layer.opacity)
-        return frame
 
     def _view(self, layer: Layer) -> LayerView:
         """The layer's view of the zone's LEDs, made again only when its modifiers or the
@@ -364,6 +410,7 @@ class ZoneRuntime:
     def _compile(self) -> None:
         self.generation = next(_GENERATIONS)
         self.crash = None
+        self._trails.reset()
         self._fields = []
         self._firmware = []
         layers = visible_field_layers(self.look) + list(reversed(firmware_layers(self.look)))
@@ -396,6 +443,7 @@ class ZoneRuntime:
         if before is None or before.slices != self.leds.slices:
             self.ring = RingBuffer(self._capacity)
         self._views = {}
+        self._trails.reset()
         self._emulated &= {light.device_id for light in self._lights}
 
     def _picks(self, index: int, light: ZoneLight) -> bool:

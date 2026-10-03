@@ -1686,7 +1686,12 @@ export interface components {
             /** Uses */
             uses?: ("tempo" | "music" | "home-assistant" | "sun")[];
         };
-        /** LookModifiers */
+        /**
+         * LookModifiers
+         * @description The look's modifiers (engine spec §5.3): trails (per-LED decay over `trailsS`
+         *     seconds), a flash on every downbeat, a brightness cap (0..1, firmware lights too) and
+         *     evening (warmer and dimmer from an hour before sunset).
+         */
         LookModifiers: {
             /** Brightnesscap */
             brightnessCap?: number | null;

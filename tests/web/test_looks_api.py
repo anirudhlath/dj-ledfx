@@ -226,3 +226,44 @@ async def test_a_firmware_layer_with_a_mask_is_refused(api: Api) -> None:
     resp = await api.client.post("/api/looks", json=firmware)
 
     assert resp.status_code == 400 and "takes no mask" in resp.json()["detail"]
+
+
+async def test_a_look_with_look_modifiers_is_saved_and_served(api: Api) -> None:
+    draft = (await api.client.get("/api/looks/classic-breathe")).json()
+    draft["name"] = "Evening breathe"
+    modifiers = {"trailsS": 0.5, "downbeatFlash": True, "brightnessCap": 0.6, "evening": True}
+    draft["modifiers"] = modifiers
+
+    created = await api.client.post("/api/looks", json=draft)
+
+    assert created.status_code == 201
+    saved = await api.client.get(f"/api/looks/{created.json()['id']}")
+    assert saved.json()["modifiers"] == modifiers
+
+
+# Review Focus 4: garbage look modifiers are refused with the reason, and nothing is saved.
+@pytest.mark.parametrize(
+    ("change", "says"),
+    [
+        ({"trailsS": 0.0}, "greater than 0"),
+        ({"trailsS": 11.0}, "less than or equal to 10"),
+        ({"trailsS": float("nan")}, "nan"),
+        ({"brightnessCap": 1.5}, "less than or equal to 1"),
+        ({"brightnessCap": -0.1}, "greater than or equal to 0"),
+        ({"brightnessCap": float("inf")}, "inf"),
+        ({"evening": "tonight"}, "boolean"),
+    ],
+)
+async def test_garbage_look_modifiers_are_refused_with_the_reason(
+    api: Api, change: dict[str, Any], says: str
+) -> None:
+    draft = (await api.client.get("/api/looks/classic-breathe")).json()
+    draft["name"] = "Broken"
+    draft["modifiers"] = {**draft["modifiers"], **change}
+
+    resp = await api.client.post("/api/looks", **_raw(draft))
+
+    assert resp.status_code == 422
+    assert says in str(resp.json()["detail"])
+    listed = [look["id"] for look in (await api.client.get("/api/looks")).json()]
+    assert listed == BUILT_INS

@@ -520,13 +520,11 @@ def firmware_layers(look: Look) -> list[Layer]:
 
 
 def validate_look(look: Look) -> None:
-    """Raise LookError if M2 can't run the look."""
+    """Raise LookError if the engine can't run the look."""
     if not look.layers:
         raise LookError("A look needs at least one layer")
     if look.scope != "any-zone":
         raise LookError("Home looks (whole-home scope) arrive in M6")
-    if look.modifiers != LookModifiers():
-        raise LookError("Look modifiers arrive in M4")
     for layer in look.layers:
         make_effect(layer)
         modified = (layer.mask, layer.mirror, layer.transform) != (None, None, None)

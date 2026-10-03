@@ -146,17 +146,6 @@ def test_setting_schema_types() -> None:
         ({"layers": [_layer(type="particles", kind="fireflies")]}, "M5"),
         ({"layers": [_layer(settings={"beats_per_cycle": {"value": 2.0, "binding": {}}})]}, "M7"),
         ({"layers": [_layer(settings={"beats_per_cycle": 2.0})]}, "value"),
-        (
-            {
-                "modifiers": {
-                    "trailsS": 0.5,
-                    "downbeatFlash": False,
-                    "brightnessCap": None,
-                    "evening": False,
-                }
-            },
-            "M4",
-        ),
         ({"transition": {"kind": "melt", "durationS": 1.0}}, "transition"),
     ],
 )

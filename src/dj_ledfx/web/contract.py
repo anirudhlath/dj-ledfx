@@ -27,6 +27,7 @@ from dj_ledfx.home.model import WallKind
 from dj_ledfx.looks import model as looks
 from dj_ledfx.looks.model import (
     MAX_SCALE,
+    MAX_TRAILS_S,
     MIN_SCALE,
     Blend,
     Category,
@@ -167,9 +168,13 @@ class Layer(ContractModel):
 
 
 class LookModifiers(ContractModel):
-    trails_s: float | None = None
+    """The look's modifiers (engine spec §5.3): trails (per-LED decay over `trailsS`
+    seconds), a flash on every downbeat, a brightness cap (0..1, firmware lights too) and
+    evening (warmer and dimmer from an hour before sunset)."""
+
+    trails_s: float | None = Field(default=None, gt=0.0, le=MAX_TRAILS_S, allow_inf_nan=False)
     downbeat_flash: bool = False
-    brightness_cap: float | None = None
+    brightness_cap: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
     evening: bool = False
 
 

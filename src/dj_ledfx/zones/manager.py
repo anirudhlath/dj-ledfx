@@ -148,6 +148,7 @@ class ZoneManager:
         now: Callable[[], datetime] = utcnow,
         home: HomeView = NO_HOME,
         frames_watched: Callable[[], bool] = lambda: True,
+        evening: Callable[[], float] = lambda: 0.0,
     ) -> None:
         self._store = store
         self._looks = looks
@@ -165,6 +166,7 @@ class ZoneManager:
         # Whether anyone watches the live stream: zones draw lights that run their own
         # effect only then (M1 review, constraint 3). main passes Watchers.watching_live.
         self._frames_watched = frames_watched
+        self._evening = evening  # how far into the evening it is, for looks that follow it
         self._zones: dict[str, ZoneRecord] = {}
         self._running: dict[str, _Running] = {}
         self._captured: dict[str, bytes] = {}  # b"": control taken, nothing captured
@@ -814,6 +816,7 @@ class ZoneManager:
             now=self._now,
             on_state_change=self._state_changed,
             watched=watched or self._frames_watched,
+            evening=self._evening,
         )
 
     def _state_changed(self, runtime: ZoneRuntime) -> None:
@@ -1133,7 +1136,7 @@ class ZoneManager:
             self._routes.set_route(device_id, runtime.route_for(device_id))  # stop frames first
             try:
                 async with adapter.send_lock:
-                    await effect.start(adapter, effect.start_params(runtime.brightness))
+                    await effect.start(adapter, effect.start_params(runtime.firmware_brightness))
             except FirmwareRejected as exc:  # it can't run it: stream a copy (spec §8)
                 logger.warning(
                     "{} refused {} ({}); streaming a copy instead",

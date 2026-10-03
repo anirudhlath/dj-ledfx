@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from dataclasses import replace
 from types import MappingProxyType
@@ -13,6 +14,7 @@ from runtime_fakes import (
     FlatField,
     PlaceField,
     field_layer,
+    glow_layer,
     latest,
     look_of,
     place_layer,
@@ -20,9 +22,11 @@ from runtime_fakes import (
     register_fields,
     runtime_of,
 )
+from tempo_fakes import START, FakeTime, tempo_clock
 
 from dj_ledfx.home.map import space_of
-from dj_ledfx.looks.model import Mirror, RoomMask, SubZoneMask, Transform
+from dj_ledfx.looks.model import LookModifiers, Mirror, RoomMask, SubZoneMask, Transform
+from dj_ledfx.zones.look_modifiers import EVENING_LEVEL, EVENING_TINT, TRAILS_FALL
 
 SPACE = space_of(tiny_home())  # west and east rooms, the desk in the west's north-west
 WEST = placed_light("west-lamp", (1.0, 1.0, 1.0), (2.0, 1.0, 1.0), room=0)
@@ -95,3 +99,75 @@ def test_a_map_change_redraws_a_masked_layer() -> None:
     runtime.tick(100.1)
 
     assert np.allclose(latest(runtime)[:, 0], [0.8, 0.8])
+
+
+def test_trails_hold_a_light_that_drops() -> None:
+    look = look_of(field_layer(1.0), modifiers=LookModifiers(trails_s=1.0))
+    runtime = runtime_of(look)
+    runtime.tick(1000.0)
+
+    runtime.update_look(replace(look, layers=(field_layer(0.0),)))
+    runtime.tick(1000.5)
+
+    assert latest(runtime)[0, 0] == pytest.approx(math.exp(-TRAILS_FALL * 0.5), rel=1e-5)
+
+
+def test_trails_turned_off_forget_what_they_held() -> None:
+    look = look_of(field_layer(1.0), modifiers=LookModifiers(trails_s=1.0))
+    runtime = runtime_of(look)
+    runtime.tick(1000.0)
+
+    runtime.update_look(replace(look, layers=(field_layer(0.0),), modifiers=LookModifiers()))
+    runtime.tick(1000.1)
+    runtime.update_look(replace(look, layers=(field_layer(0.0),)))
+    runtime.tick(1000.2)
+
+    assert latest(runtime)[0, 0] == 0.0
+
+
+def test_the_downbeat_flash_follows_the_tempo_clock() -> None:
+    clock = tempo_clock(FakeTime())  # beat 0 at START, 120 BPM: a bar every 2 s
+    look = look_of(field_layer(0.5), modifiers=LookModifiers(downbeat_flash=True))
+    runtime = runtime_of(look, clock=clock)
+
+    runtime.tick(START + 2.0)  # renders a few hundredths of a beat past the downbeat
+    assert latest(runtime)[0, 0] > 0.75
+    runtime.tick(START + 2.5)  # a beat later
+    assert latest(runtime)[0, 0] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_a_look_follows_the_evening_only_when_it_asks(on: bool) -> None:
+    look = look_of(field_layer(0.5), modifiers=LookModifiers(evening=on))
+    runtime = runtime_of(look, evening=lambda: 1.0)
+
+    runtime.tick(1000.0)
+
+    fullest = 0.5 * np.asarray(EVENING_TINT) * EVENING_LEVEL
+    np.testing.assert_allclose(latest(runtime)[0], fullest if on else [0.5] * 3, rtol=1e-6)
+
+
+def test_the_cap_caps_streamed_lights_and_the_preview_of_firmware_ones() -> None:
+    look = look_of(field_layer(0.9), glow_layer(0.9), modifiers=LookModifiers(brightness_cap=0.6))
+    runtime = runtime_of(look, brightness=0.5)
+
+    runtime.tick(1000.0)
+
+    assert runtime.mode_of("tile") == "own-effect"  # drawn for the preview, capped too
+    np.testing.assert_allclose(latest(runtime), 0.6, rtol=1e-6)
+    assert runtime.firmware_brightness == pytest.approx(0.3)  # brightness × cap
+
+
+def test_a_new_cap_starts_the_firmware_effects_again() -> None:
+    look = look_of(field_layer(), glow_layer(), modifiers=LookModifiers(brightness_cap=0.6))
+    runtime = runtime_of(look)
+    before = runtime.generation
+
+    runtime.update_look(replace(look, modifiers=LookModifiers(brightness_cap=0.8)))
+
+    assert runtime.generation != before
+    assert runtime.firmware_brightness == pytest.approx(0.8)
+    streamed = runtime_of(look_of(field_layer(), modifiers=LookModifiers(brightness_cap=0.6)))
+    kept = streamed.generation
+    streamed.update_look(replace(streamed.look, modifiers=LookModifiers(brightness_cap=0.8)))
+    assert streamed.generation == kept  # no light to start again

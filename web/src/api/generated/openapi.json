@@ -1896,10 +1896,13 @@
         "type": "object"
       },
       "LookModifiers": {
+        "description": "The look's modifiers (engine spec §5.3): trails (per-LED decay over `trailsS`\nseconds), a flash on every downbeat, a brightness cap (0..1, firmware lights too) and\nevening (warmer and dimmer from an hour before sunset).",
         "properties": {
           "brightnessCap": {
             "anyOf": [
               {
+                "maximum": 1.0,
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -1921,6 +1924,8 @@
           "trailsS": {
             "anyOf": [
               {
+                "exclusiveMinimum": 0.0,
+                "maximum": 10.0,
                 "type": "number"
               },
               {
