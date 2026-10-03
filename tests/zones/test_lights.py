@@ -6,14 +6,12 @@ from typing import Any
 
 import pytest
 from conftest import FakeLight, events
-from zone_home import BREATHE_AND_GLOW, GLOW, TILE, Home, HomeFactory, zone_record
+from runtime_fakes import LAMP, TILE
+from zone_home import BREATHE_AND_GLOW, GLOW, Home, HomeFactory, zone_record
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent
 from dj_ledfx.zones.lights import LightMonitor, LightState, combine_states
 from dj_ledfx.zones.model import LightsChanged
-
-LAMP = DeviceCapabilities(protocol="Govee")
 
 
 def _monitor(home: Home, **kwargs: Any) -> LightMonitor:

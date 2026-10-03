@@ -9,6 +9,9 @@ import pytest
 import pytest_asyncio
 from api_home import Api, api_home
 from conftest import FakeLight
+from httpx import Response
+
+from tests.web.conftest import raw_json
 
 BUILT_INS = [
     "sunset",
@@ -165,61 +168,87 @@ async def test_a_look_with_a_colour_it_cannot_use_is_refused(api: Api) -> None:
     assert not_hex.status_code == 400 and "hex colour" in not_hex.json()["detail"]
 
 
-def _raw(body: dict[str, Any]) -> dict[str, Any]:
-    """A body as Python's json writes it, NaN and all, which httpx's json= won't send."""
-    return {"content": json.dumps(body), "headers": {"content-type": "application/json"}}
-
-
-MODIFIERS = {
+LAYER_MODIFIERS = {
     "mask": {"kind": "height", "range": [0.0, 1.0]},
     "mirror": {"axis": "x", "at": None},
     "transform": {"offset": [1.0, 0.0, 0.0], "rotateDeg": 90.0, "scale": 2.0},
 }
+LOOK_MODIFIERS = {"trailsS": 0.5, "downbeatFlash": True, "brightnessCap": 0.6, "evening": True}
 
 
-async def test_a_look_with_layer_modifiers_is_saved_and_served(api: Api) -> None:
+def _modifiers_of(look: dict[str, Any], where: str) -> dict[str, Any]:
+    """A look's first layer ("layer") or its look modifiers ("look")."""
+    part: dict[str, Any] = look["layers"][0] if where == "layer" else look["modifiers"]
+    return part
+
+
+async def _post_changed(api: Api, name: str, where: str, change: dict[str, Any]) -> Response:
+    """Classic Breathe as a new look, with `change` made to its first layer or its look
+    modifiers, posted as written (NaN and all)."""
     draft = (await api.client.get("/api/looks/classic-breathe")).json()
-    draft["name"] = "Low breathe"
-    draft["layers"][0].update(MODIFIERS)
+    draft["name"] = name
+    _modifiers_of(draft, where).update(change)
+    return await api.client.post("/api/looks", **raw_json(json.dumps(draft)))
 
-    created = await api.client.post("/api/looks", json=draft)
+
+@pytest.mark.parametrize(
+    ("where", "change"), [("layer", LAYER_MODIFIERS), ("look", LOOK_MODIFIERS)]
+)
+async def test_a_look_with_modifiers_is_saved_and_served(
+    api: Api, where: str, change: dict[str, Any]
+) -> None:
+    created = await _post_changed(api, "Modified breathe", where, change)
 
     assert created.status_code == 201
-    layer = (await api.client.get(f"/api/looks/{created.json()['id']}")).json()["layers"][0]
-    assert {key: layer[key] for key in MODIFIERS} == MODIFIERS
+    served = (await api.client.get(f"/api/looks/{created.json()['id']}")).json()
+    assert {key: _modifiers_of(served, where)[key] for key in change} == change
 
 
 # Review Focus 4: garbage modifiers from a script or an old client are refused with the
 # reason, and nothing is saved.
 @pytest.mark.parametrize(
-    ("change", "status", "says"),
+    ("where", "change", "status", "says"),
     [
-        ({"mask": {"kind": "outdoors"}}, 422, "outdoors"),
-        ({"mask": {"kind": "height", "range": [float("nan"), 1.0]}}, 422, "nan"),
-        ({"mask": {"kind": "height", "range": [2.0, 1.0]}}, 400, "from low to high"),
-        ({"mask": {"kind": "anchor", "anchor": "sofa", "radius": 0.0}}, 422, "greater than 0"),
-        ({"mirror": {"axis": "w"}}, 422, "'x', 'y' or 'z'"),
-        ({"transform": {"scale": 50.0}}, 422, "less than or equal to 10"),
-        ({"transform": {"offset": [1.0, float("inf"), 0.0]}}, 422, "inf"),
-        ({"transform": {"offset": [1e39, 0.0, 0.0]}}, 422, "less than or equal to 1000"),
-        ({"mirror": {"axis": "x", "at": -1e39}}, 422, "greater than or equal to -1000"),
-        ({"mask": {"kind": "height", "range": [0.0, 5000.0]}}, 422, "less than or equal to 1000"),
+        ("layer", {"mask": {"kind": "outdoors"}}, 422, "outdoors"),
+        ("layer", {"mask": {"kind": "height", "range": [float("nan"), 1.0]}}, 422, "nan"),
+        ("layer", {"mask": {"kind": "height", "range": [2.0, 1.0]}}, 400, "from low to high"),
         (
+            "layer",
+            {"mask": {"kind": "anchor", "anchor": "sofa", "radius": 0.0}},
+            422,
+            "greater than 0",
+        ),
+        ("layer", {"mirror": {"axis": "w"}}, 422, "'x', 'y' or 'z'"),
+        ("layer", {"transform": {"scale": 50.0}}, 422, "less than or equal to 10"),
+        ("layer", {"transform": {"offset": [1.0, float("inf"), 0.0]}}, 422, "inf"),
+        ("layer", {"transform": {"offset": [1e39, 0.0, 0.0]}}, 422, "less than or equal to 1000"),
+        ("layer", {"mirror": {"axis": "x", "at": -1e39}}, 422, "greater than or equal to -1000"),
+        (
+            "layer",
+            {"mask": {"kind": "height", "range": [0.0, 5000.0]}},
+            422,
+            "less than or equal to 1000",
+        ),
+        (
+            "layer",
             {"mask": {"kind": "anchor", "anchor": "sofa", "radius": 5000.0}},
             422,
             "less than or equal to 1000",
         ),
-        ({"opacity": 1.5}, 422, "less than or equal to 1"),
+        ("layer", {"opacity": 1.5}, 422, "less than or equal to 1"),
+        ("look", {"trailsS": 0.0}, 422, "greater than 0"),
+        ("look", {"trailsS": 11.0}, 422, "less than or equal to 10"),
+        ("look", {"trailsS": float("nan")}, 422, "nan"),
+        ("look", {"brightnessCap": 1.5}, 422, "less than or equal to 1"),
+        ("look", {"brightnessCap": -0.1}, 422, "greater than or equal to 0"),
+        ("look", {"brightnessCap": float("inf")}, 422, "inf"),
+        ("look", {"evening": "tonight"}, 422, "boolean"),
     ],
 )
-async def test_garbage_layer_modifiers_are_refused_with_the_reason(
-    api: Api, change: dict[str, Any], status: int, says: str
+async def test_garbage_modifiers_are_refused_with_the_reason(
+    api: Api, where: str, change: dict[str, Any], status: int, says: str
 ) -> None:
-    draft = (await api.client.get("/api/looks/classic-breathe")).json()
-    draft["name"] = "Broken"
-    draft["layers"][0].update(change)
-
-    resp = await api.client.post("/api/looks", **_raw(draft))
+    resp = await _post_changed(api, "Broken", where, change)
 
     assert resp.status_code == status
     assert says in str(resp.json()["detail"])
@@ -248,44 +277,3 @@ async def test_a_firmware_layer_with_a_mask_is_refused(api: Api) -> None:
     resp = await api.client.post("/api/looks", json=firmware)
 
     assert resp.status_code == 400 and "takes no mask" in resp.json()["detail"]
-
-
-async def test_a_look_with_look_modifiers_is_saved_and_served(api: Api) -> None:
-    draft = (await api.client.get("/api/looks/classic-breathe")).json()
-    draft["name"] = "Evening breathe"
-    modifiers = {"trailsS": 0.5, "downbeatFlash": True, "brightnessCap": 0.6, "evening": True}
-    draft["modifiers"] = modifiers
-
-    created = await api.client.post("/api/looks", json=draft)
-
-    assert created.status_code == 201
-    saved = await api.client.get(f"/api/looks/{created.json()['id']}")
-    assert saved.json()["modifiers"] == modifiers
-
-
-# Review Focus 4: garbage look modifiers are refused with the reason, and nothing is saved.
-@pytest.mark.parametrize(
-    ("change", "says"),
-    [
-        ({"trailsS": 0.0}, "greater than 0"),
-        ({"trailsS": 11.0}, "less than or equal to 10"),
-        ({"trailsS": float("nan")}, "nan"),
-        ({"brightnessCap": 1.5}, "less than or equal to 1"),
-        ({"brightnessCap": -0.1}, "greater than or equal to 0"),
-        ({"brightnessCap": float("inf")}, "inf"),
-        ({"evening": "tonight"}, "boolean"),
-    ],
-)
-async def test_garbage_look_modifiers_are_refused_with_the_reason(
-    api: Api, change: dict[str, Any], says: str
-) -> None:
-    draft = (await api.client.get("/api/looks/classic-breathe")).json()
-    draft["name"] = "Broken"
-    draft["modifiers"] = {**draft["modifiers"], **change}
-
-    resp = await api.client.post("/api/looks", **_raw(draft))
-
-    assert resp.status_code == 422
-    assert says in str(resp.json()["detail"])
-    listed = [look["id"] for look in (await api.client.get("/api/looks")).json()]
-    assert listed == BUILT_INS

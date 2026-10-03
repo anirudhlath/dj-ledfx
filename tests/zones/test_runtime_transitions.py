@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import numpy as np
 import pytest
 from loguru import logger
-from map_home import tiny_home
+from map_home import tiny_space
 from runtime_fakes import (
     BULB,
+    FADE,
     TILE,
     FlatField,
     field_layer,
@@ -19,19 +19,16 @@ from runtime_fakes import (
     latest,
     look_of,
     placed_light,
-    register_fields,
     runtime_of,
 )
 
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.ledset import LedSet
-from dj_ledfx.home.map import space_of
 from dj_ledfx.looks.model import Layer, LookModifiers, Transition
 from dj_ledfx.types import FloatRGB
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
-FADE = Transition(kind="fade", duration_s=2.0)
 HORIZON = 0.02 + 1 / 60  # the fake lights' latency and a frame: every frame's lead
 
 
@@ -52,13 +49,14 @@ class CostlyField(FlatField, register=False):
         return super().render(ctx, leds)
 
 
+pytestmark = pytest.mark.usefixtures("_fields")
+
+
 @pytest.fixture(autouse=True)
-def _fields() -> Iterator[None]:
-    register_fields()
-    Effect._registry["broken_field"] = BrokenField
+def _broken_and_costly_fields() -> None:
+    Effect._registry["broken_field"] = BrokenField  # the root conftest drops them after
     Effect._registry["costly_field"] = CostlyField
     CostlyField.spent = 0.0
-    yield
 
 
 def _flat(level: float, **changes: Any) -> ZoneRuntime:
@@ -304,7 +302,7 @@ def test_a_new_space_alone_keeps_the_transition_going() -> None:
     new.tick(1000.0)
     new.tick(1001.0)
 
-    new.set_lights(new.lights, space_of(tiny_home()))
+    new.set_lights(new.lights, tiny_space())
     new.tick(1001.0)
 
     assert new.state == "transition" and _levels(new) == [0.5] * 8

@@ -158,11 +158,10 @@ async def test_a_saved_look_whose_layers_share_an_id_loads(db: StateDB) -> None:
 async def test_saved_looks_with_odd_transition_durations_load_clamped(db: StateDB) -> None:
     now = "2026-09-24T00:00:00+00:00"
     rows = []
-    for look_id, seconds in [("mine-nan", "NaN"), ("mine-minus", "-3"), ("mine-long", "99")]:
+    for look_id, seconds in [("mine-nan", float("nan")), ("mine-minus", -3), ("mine-long", 99)]:
         body = look_to_dict(_mine())
-        body["transition"] = {"kind": "fade", "durationS": 0.0}
-        text = json.dumps(body).replace('"durationS": 0.0', f'"durationS": {seconds}')
-        rows.append((INSERT_LOOK, (look_id, text, now, now)))
+        body["transition"] = {"kind": "fade", "durationS": seconds}
+        rows.append((INSERT_LOOK, (look_id, json.dumps(body), now, now)))  # NaN as JSON's
     await db.write_many(rows)
 
     store = await _loaded(db)

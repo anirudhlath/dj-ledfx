@@ -3,12 +3,21 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from conftest import FakeLight
+from runtime_fakes import register_fields
 from zone_home import Home, HomeFactory, build_home
 
 from dj_ledfx.zones.home_view import HomeView
 from dj_ledfx.zones.model import ZoneRecord
+
+
+@pytest.fixture
+def _fields() -> None:
+    """The fake field effects (runtime_fakes), registered and working; the root conftest
+    drops them after each test."""
+    register_fields()
 
 
 @pytest_asyncio.fixture

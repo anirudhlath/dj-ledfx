@@ -12,7 +12,6 @@ import numpy as np
 from conftest import FakeLight
 from map_home import open_map
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.ledset import NO_SPACE, PlacedLeds, Space
 from dj_ledfx.events import EventBus
@@ -34,7 +33,6 @@ from dj_ledfx.zones.model import HOME_ZONE_ID, HOME_ZONE_NAME, ZoneRecord, Zones
 from dj_ledfx.zones.runtime import ZoneRuntime
 from dj_ledfx.zones.store import ZoneStore
 
-TILE = DeviceCapabilities(protocol="LIFX", matrix=True)
 GLOW_LAYER = Layer(id="glow", name="Glow", type="firmware", kind="glow_firmware")
 GLOW = Look(id="glow", name="Glow look", category="firmware", layers=(GLOW_LAYER,))
 BREATHE_AND_GLOW = Look(

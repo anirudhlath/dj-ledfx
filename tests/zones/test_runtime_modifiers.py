@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
 from dataclasses import replace
 from types import MappingProxyType
 from typing import Any
 
 import numpy as np
 import pytest
-from map_home import tiny_home
+from map_home import tiny_space
 from runtime_fakes import (
-    FlatField,
     PlaceField,
     field_layer,
     glow_layer,
@@ -20,7 +18,6 @@ from runtime_fakes import (
     look_of,
     place_layer,
     placed_light,
-    register_fields,
     runtime_of,
 )
 from tempo_fakes import START, FakeTime, tempo_clock
@@ -30,26 +27,20 @@ from dj_ledfx.effects.context import EVENING, RenderContext
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.home.map import space_of
 from dj_ledfx.looks.model import Layer, LookModifiers, Mirror, RoomMask, SubZoneMask, Transform
 from dj_ledfx.types import FloatRGB
 from dj_ledfx.zones.look_modifiers import EVENING_FULLEST, TRAILS_FALL
 
-SPACE = space_of(tiny_home())  # west and east rooms, the desk in the west's north-west
 WEST = placed_light("west-lamp", (1.0, 1.0, 1.0), (2.0, 1.0, 1.0), room=0)
 EAST = placed_light("east-lamp", (6.0, 1.0, 1.0), (7.0, 1.0, 1.0), room=1)
 
 
-@pytest.fixture(autouse=True)
-def _fields() -> Iterator[None]:
-    register_fields()
-    yield
-    FlatField.mode = "ok"
+pytestmark = pytest.mark.usefixtures("_fields")
 
 
 def test_a_masked_layer_draws_only_where_its_mask_lets_it() -> None:
     look = look_of(field_layer(0.2, id="base"), field_layer(0.8, id="top", mask=RoomMask("east")))
-    runtime = runtime_of(look, [WEST, EAST], space=SPACE)
+    runtime = runtime_of(look, [WEST, EAST], space=tiny_space())
 
     runtime.tick(100.0)
 
@@ -58,7 +49,7 @@ def test_a_masked_layer_draws_only_where_its_mask_lets_it() -> None:
 
 def test_a_masked_bottom_layer_draws_over_black() -> None:
     runtime = runtime_of(
-        look_of(field_layer(0.8, mask=RoomMask("west"))), [WEST, EAST], space=SPACE
+        look_of(field_layer(0.8, mask=RoomMask("west"))), [WEST, EAST], space=tiny_space()
     )
 
     runtime.tick(100.0)
@@ -67,11 +58,13 @@ def test_a_masked_bottom_layer_draws_over_black() -> None:
 
 
 def test_mirror_and_transform_move_where_the_effect_looks() -> None:
-    mirror = runtime_of(look_of(place_layer(mirror=Mirror("x", 4.0))), [WEST, EAST], space=SPACE)
+    mirror = runtime_of(
+        look_of(place_layer(mirror=Mirror("x", 4.0))), [WEST, EAST], space=tiny_space()
+    )
     moved = runtime_of(
         look_of(place_layer(transform=Transform(offset=(1.0, 0.0, 0.0)))),
         [WEST, EAST],
-        space=SPACE,
+        space=tiny_space(),
     )
 
     mirror.tick(100.0)
@@ -83,7 +76,7 @@ def test_mirror_and_transform_move_where_the_effect_looks() -> None:
 
 def test_a_layers_view_is_kept_until_its_modifiers_or_the_leds_change() -> None:
     look = look_of(place_layer(mirror=Mirror("x", 4.0)))
-    runtime = runtime_of(look, [WEST, EAST], space=SPACE)
+    runtime = runtime_of(look, [WEST, EAST], space=tiny_space())
     runtime.tick(100.0)
     runtime.tick(100.1)
     first, again = PlaceField.seen
@@ -96,12 +89,14 @@ def test_a_layers_view_is_kept_until_its_modifiers_or_the_leds_change() -> None:
 
 
 def test_a_map_change_redraws_a_masked_layer() -> None:
-    runtime = runtime_of(look_of(field_layer(0.8, mask=SubZoneMask("desk"))), [WEST], space=SPACE)
+    runtime = runtime_of(
+        look_of(field_layer(0.8, mask=SubZoneMask("desk"))), [WEST], space=tiny_space()
+    )
     runtime.tick(100.0)
     assert np.allclose(latest(runtime)[:, 0], [0.0, 0.0])  # the desk is in the room's corner
 
     nook = ((0.0, 0.0), (3.0, 0.0), (3.0, 2.0), (0.0, 2.0))
-    bigger = replace(SPACE, sub_zone_outlines=MappingProxyType({"desk": nook}))
+    bigger = replace(tiny_space(), sub_zone_outlines=MappingProxyType({"desk": nook}))
     runtime.set_lights([WEST], bigger)
     runtime.tick(100.1)
 
@@ -112,7 +107,7 @@ def test_a_map_change_redraws_a_masked_layer() -> None:
 # outline.
 def test_an_outline_edit_keeps_the_trails_and_redraws_the_mask() -> None:
     nook = ((0.0, 0.0), (3.0, 0.0), (3.0, 2.0), (0.0, 2.0))
-    bigger = replace(SPACE, sub_zone_outlines=MappingProxyType({"desk": nook}))
+    bigger = replace(tiny_space(), sub_zone_outlines=MappingProxyType({"desk": nook}))
     look = look_of(
         field_layer(0.8, mask=SubZoneMask("desk")), modifiers=LookModifiers(trails_s=1.0)
     )
@@ -120,7 +115,7 @@ def test_an_outline_edit_keeps_the_trails_and_redraws_the_mask() -> None:
     runtime.tick(100.0)
     assert np.allclose(latest(runtime)[:, 0], 0.8)  # the desk takes in the west lamp
 
-    runtime.set_lights([WEST], SPACE)  # the desk shrinks back to its corner
+    runtime.set_lights([WEST], tiny_space())  # the desk shrinks back to its corner
     runtime.tick(100.1)
     fading = 0.8 * math.exp(-TRAILS_FALL * 0.1)
     assert np.allclose(latest(runtime)[:, 0], fading, rtol=1e-5)  # a trail, not black

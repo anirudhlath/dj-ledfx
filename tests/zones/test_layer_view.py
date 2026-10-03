@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from map_home import DESK_CORNER, leds_at, tiny_home
+from map_home import DESK_CORNER, leds_at, tiny_space
 
-from dj_ledfx.home.map import space_of
 from dj_ledfx.looks.model import (
     AnchorMask,
     HeightMask,
@@ -19,19 +18,17 @@ from dj_ledfx.looks.model import (
 )
 from dj_ledfx.zones.layer_view import layer_view, mask_weights, mirrored, transformed
 
-SPACE = space_of(tiny_home())  # west and east rooms, the desk in the west, the sofa at 6, 2
-
 
 def test_a_height_mask_shows_the_layer_between_its_heights_with_a_soft_edge() -> None:
     leds = leds_at(
         [[1.0, 1.0, 0.2], [1.0, 1.0, 1.0], [1.0, 1.0, 0.5], [1.0, 1.0, 2.0], [1.0, 1.0, 2.5]],
-        space=SPACE,
+        space=tiny_space(),
     )
     assert np.allclose(mask_weights(HeightMask(0.5, 2.0), leds), [0.0, 1.0, 0.5, 0.5, 0.0])
 
 
 def test_a_room_or_sub_zone_mask_shows_the_layer_inside_its_outline() -> None:
-    leds = leds_at([[1.0, 1.0, 1.0], [6.0, 1.0, 1.0], DESK_CORNER], space=SPACE)
+    leds = leds_at([[1.0, 1.0, 1.0], [6.0, 1.0, 1.0], DESK_CORNER], space=tiny_space())
     assert mask_weights(RoomMask("west"), leds).tolist() == [1.0, 0.0, 1.0]
     assert mask_weights(RoomMask("east"), leds).tolist() == [0.0, 1.0, 0.0]
     assert mask_weights(SubZoneMask("desk"), leds).tolist() == [0.0, 0.0, 1.0]
@@ -41,16 +38,16 @@ def test_a_room_or_sub_zone_mask_shows_the_layer_inside_its_outline() -> None:
 def test_a_room_or_sub_zone_the_map_lacks_shows_the_layer_nowhere(
     mask: RoomMask | SubZoneMask,
 ) -> None:
-    leds = leds_at([[1.0, 1.0, 1.0], [6.0, 1.0, 1.0]], space=SPACE)
+    leds = leds_at([[1.0, 1.0, 1.0], [6.0, 1.0, 1.0]], space=tiny_space())
     assert mask_weights(mask, leds).tolist() == [0.0, 0.0]
 
 
 def test_an_anchor_mask_shows_the_layer_within_its_reach() -> None:
     sofa = (6.0, 2.0, 0.5)
-    leds = leds_at([[6.5, 2.0, 0.5], [7.0, 2.0, 0.5], [8.0, 2.0, 0.5]], space=SPACE)
+    leds = leds_at([[6.5, 2.0, 0.5], [7.0, 2.0, 0.5], [8.0, 2.0, 0.5]], space=tiny_space())
     assert np.allclose(mask_weights(AnchorMask("sofa", 1.0), leds), [1.0, 0.5, 0.0])
     # An anchor the map lacks is the zone's middle, as it is for the effects.
-    middle = leds_at([sofa, [6.0, 2.0, 3.5]], space=SPACE)  # the middle is at z 2.0
+    middle = leds_at([sofa, [6.0, 2.0, 3.5]], space=tiny_space())  # the middle is at z 2.0
     assert np.allclose(mask_weights(AnchorMask("gone", 1.0), middle), [0.0, 0.0])
     assert np.allclose(mask_weights(AnchorMask("gone", 2.0), middle), [1.0, 1.0])
 
@@ -78,13 +75,13 @@ def test_a_transform_moves_turns_and_grows_the_field_about_the_zones_centre() ->
 
 
 def test_a_layer_without_modifiers_draws_on_the_zones_own_leds() -> None:
-    leds = leds_at([[1.0, 1.0, 1.0], [6.0, 1.0, 1.0]], space=SPACE)
+    leds = leds_at([[1.0, 1.0, 1.0], [6.0, 1.0, 1.0]], space=tiny_space())
     view = layer_view(Layer(id="a", name="A", type="field", kind="breathe"), leds)
     assert view.leds is leds and view.weight is None
 
 
 def test_a_moved_view_keeps_the_zones_bounds_and_weighs_by_where_the_leds_are() -> None:
-    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 1.0, 1.0]], space=SPACE)
+    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 1.0, 1.0]], space=tiny_space())
     layer = Layer(
         id="a",
         name="A",

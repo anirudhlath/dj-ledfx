@@ -14,6 +14,7 @@ from conftest import FakeLight
 from dj_ledfx.devices.lights import LightIndex
 from dj_ledfx.web.contract import running_zone_out
 from dj_ledfx.zones.model import RunningZoneInfo, ZoneRecord
+from tests.web.conftest import raw_json
 
 ZONES = [
     ZoneRecord(id="desk", name="Desk", lights=("a", "b")),
@@ -220,9 +221,7 @@ async def test_a_garbage_transition_is_refused_and_nothing_starts(
 ) -> None:
     body = json.dumps({"lookId": "classic-breathe", "transition": transition})
 
-    resp = await api.client.post(
-        "/api/zones/desk/start", content=body, headers={"content-type": "application/json"}
-    )
+    resp = await api.client.post("/api/zones/desk/start", **raw_json(body))
 
     assert resp.status_code == 422 and says in str(resp.json()["detail"])
     assert (await api.client.get("/api/running")).json()["zones"] == []

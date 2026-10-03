@@ -17,7 +17,7 @@ from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.ledset import NO_ROOM, LedSet, PlacedLeds
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.looks.model import Layer, Look, Transition
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import FloatRGB
 from dj_ledfx.zones.runtime import RuntimeEnv, ZoneLight, ZoneRuntime
@@ -26,6 +26,7 @@ TILE = DeviceCapabilities(protocol="LIFX", matrix=True)
 BULB = DeviceCapabilities(protocol="LIFX")
 LAMP = DeviceCapabilities(protocol="Govee")
 LIGHTS = (ZoneLight("tile", 4, TILE), ZoneLight("bulb", 1, BULB), ZoneLight("lamp", 3, LAMP))
+FADE = Transition(kind="fade", duration_s=2.0)
 
 
 class FlatField(FieldEffect, register=False):

@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 from conftest import FakeLight, span
-from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
+from runtime_fakes import TILE
+from zone_home import BREATHE_AND_GLOW, GLOW, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.latency.strategies import StaticLatency

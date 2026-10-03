@@ -11,6 +11,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -94,6 +95,13 @@ def tiny_home(**changes: Any) -> Home:
         location=Location("Test", 10.0, 20.0),
     )
     return replace(home, **changes)
+
+
+@cache
+def tiny_space() -> Space:
+    """The tiny home as a zone's space (one, kept): the west and east rooms, the desk in the
+    west's north-west and the sofa at (6, 2)."""
+    return space_of(tiny_home())
 
 
 def devices_of(lights: Sequence[DeviceAdapter]) -> DeviceManager:

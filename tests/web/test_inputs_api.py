@@ -6,7 +6,6 @@ import time
 from collections.abc import AsyncIterator, Callable
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -18,12 +17,7 @@ from dj_ledfx.prodjlink.listener import Listening
 from dj_ledfx.tempo.model import DjSet, TempoSettings
 from dj_ledfx.tempo.store import TempoStore
 from dj_ledfx.web.app import create_app
-from tests.web.conftest import mock_deps, until
-
-
-def raw_json(body: str | bytes) -> dict[str, Any]:
-    """A request's JSON body sent as written, NaN and all, which httpx's json= won't send."""
-    return {"content": body, "headers": {"content-type": "application/json"}}
+from tests.web.conftest import mock_deps, raw_json, until
 
 
 @pytest_asyncio.fixture

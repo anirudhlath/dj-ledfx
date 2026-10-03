@@ -13,19 +13,15 @@ from typing import Any, ClassVar
 import pytest
 from conftest import FakeLight, events
 from loguru import logger
-from runtime_fakes import FlatField
-from zone_home import GLOW, TILE, HomeFactory, zone_record
+from runtime_fakes import FADE, LAMP, TILE, FlatField
+from zone_home import GLOW, HomeFactory, zone_record
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.looks.model import Layer, Look, Transition
 from dj_ledfx.looks.store import look_body
 from dj_ledfx.main import _switch_at_midpoints
 from dj_ledfx.zones.model import LightsChanged, TransitionInfo, TransitionSwitched
 from dj_ledfx.zones.runtime import ZoneRuntime
-
-FADE = Transition(kind="fade", duration_s=2.0)
-LAMP = DeviceCapabilities(protocol="Govee")
 
 
 def _past_midpoint(runtime: ZoneRuntime) -> None:
@@ -357,9 +353,10 @@ async def test_an_assignment_saved_with_an_odd_transition_resumes(make_home: Hom
     home = await make_home([lamp], [zone_record("z", "lamp")])
     await home.manager.start("z", home.look("classic-breathe"))
     saved = json.loads(look_body(home.look("classic-breathe")))
-    saved["transition"] = {"kind": "dissolve", "durationS": 0.0}
-    text = json.dumps(saved).replace('"durationS": 0.0', '"durationS": NaN')
-    await home.db.write("UPDATE zone_assignments SET look=? WHERE zone_id='z'", (text,))
+    saved["transition"] = {"kind": "dissolve", "durationS": float("nan")}  # dumped as NaN
+    await home.db.write(
+        "UPDATE zone_assignments SET look=? WHERE zone_id='z'", (json.dumps(saved),)
+    )
 
     home = await home.restart()
 

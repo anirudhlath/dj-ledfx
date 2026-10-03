@@ -5,7 +5,7 @@ from __future__ import annotations
 import itertools
 import statistics
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -84,17 +84,14 @@ def tick_times(runtime: ZoneRuntime, ticks: int = 240, start: float = 1000.0) ->
     return durations
 
 
+# Each built-in look as it is, and with every modifier on: spec §5.3's modifiers run
+# inside the same budget.
+@pytest.mark.parametrize(
+    "dressed", [lambda look: look, with_every_modifier], ids=["plain", "every-modifier"]
+)
 @pytest.mark.parametrize("look", builtin_looks(), ids=lambda look: look.id)
-def test_a_zone_frame_renders_in_under_5_ms(look: Look) -> None:
-    runtime = home_runtime(look)
-
-    assert statistics.median(tick_times(runtime)) < FRAME_BUDGET_S
-
-
-# Spec §5.3: the modifiers run inside the same budget.
-@pytest.mark.parametrize("look", builtin_looks(), ids=lambda look: look.id)
-def test_a_zone_frame_with_every_modifier_renders_in_under_5_ms(look: Look) -> None:
-    runtime = home_runtime(with_every_modifier(look), evening=lambda: 0.5)
+def test_a_zone_frame_renders_in_under_5_ms(look: Look, dressed: Callable[[Look], Look]) -> None:
+    runtime = home_runtime(dressed(look), evening=lambda: 0.5)
 
     assert statistics.median(tick_times(runtime)) < FRAME_BUDGET_S
     assert runtime.fps_actual >= 59  # it never dropped to a lower frame rate
@@ -118,8 +115,7 @@ def test_a_zone_frame_that_works_the_evening_out_renders_in_under_5_ms() -> None
 
 def _heavy(look_id: str) -> ZoneRuntime:
     """One of the heaviest looks, every modifier on, on every LED of this home."""
-    look = next(look for look in builtin_looks() if look.id == look_id)
-    return home_runtime(with_every_modifier(look), evening=lambda: 0.5)
+    return home_runtime(with_every_modifier(builtin_look(look_id)), evening=lambda: 0.5)
 
 
 # Spec §5.3: during a transition the zone renders both looks, and both count against the
