@@ -63,6 +63,9 @@ def test_the_evening_through_one_night() -> None:
         (68.0, 20.0, datetime(2026, 5, 20, tzinfo=UTC)),  # the last sunsets before polar day
         (89.0, 0.0, datetime(2026, 9, 22, tzinfo=UTC)),  # the sun along the horizon
         (-90.0, 0.0, datetime(2026, 3, 20, tzinfo=UTC)),
+        (85.0, 20.0, datetime(2026, 4, 1, tzinfo=UTC)),  # the first day of polar day
+        (80.0, -179.9, datetime(2026, 10, 22, tzinfo=UTC)),  # the first of polar night
+        (89.75, 20.0, datetime(2026, 9, 25, tzinfo=UTC)),  # a pole's one evening
     ],
 )
 def test_the_evening_is_in_range_and_continuous_anywhere(
@@ -73,6 +76,23 @@ def test_the_evening_is_in_range_and_continuous_anywhere(
     assert all(0.0 <= amount <= 1.0 for amount in amounts)
     steps = [abs(after - before) for before, after in zip(amounts, amounts[1:], strict=False)]
     assert max(steps) < 0.2  # two minutes never jump more than the fastest dawn moves
+
+
+# M1: at the edges of polar night too. The first sunrise after it fades the night out from
+# civil dawn, the last ones before it start no evening before they rise, and a day the sun
+# only peeks over the horizon has its sunset even when astral finds only its sunrise.
+@pytest.mark.parametrize(
+    "start", [datetime(2026, 1, 13, tzinfo=UTC), datetime(2026, 11, 21, tzinfo=UTC)]
+)
+def test_the_evening_moves_minute_by_minute_at_the_edges_of_polar_night(
+    start: datetime,
+) -> None:
+    week = [start + timedelta(minutes=minute) for minute in range(7 * 24 * 60)]
+    amounts = [evening_amount(70.0, 20.0, at) for at in week]
+
+    steps = [abs(after - before) for before, after in zip(amounts, amounts[1:], strict=False)]
+    assert max(steps) < 0.05
+    assert min(amounts) == 0.0 and max(amounts) == 1.0
 
 
 @pytest.mark.parametrize(("lat", "lon"), [(40.0, -120.0), (-34.0, 151.0), (0.0, 179.9)])
