@@ -474,6 +474,7 @@ async def _run(args: argparse.Namespace) -> None:
     tasks.append(asyncio.create_task(light_monitor.run()))
     tasks.append(asyncio.create_task(attention_feed.run()))
     tasks.append(asyncio.create_task(previews.run()))
+    tasks.append(asyncio.create_task(zone_manager.run()))  # transitions' midpoints
 
     discovery_orchestrator.start()
 

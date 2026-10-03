@@ -38,6 +38,7 @@ from dj_ledfx.zones.model import (
     DERIVED_KINDS,
     Assignment,
     CrashInfo,
+    LightsChanged,
     PreviewOnlyChanged,
     RecentLookInfo,
     RunningZoneInfo,
@@ -59,7 +60,7 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.field import FieldEffect
     from dj_ledfx.effects.ledset import Space
     from dj_ledfx.events import EventBus
-    from dj_ledfx.looks.model import Look
+    from dj_ledfx.looks.model import Look, Transition
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.route import DeviceRoute
@@ -88,9 +89,12 @@ class RouteTable(Protocol):
 
 
 def _applied_key(runtime: ZoneRuntime, device_id: str) -> AppliedKey:
-    """What a light is given once its zone's look is applied to it."""
-    claim = runtime.claim_for(device_id)
-    return runtime.generation, claim[0].id if claim is not None else None
+    """What a light is given once its zone's look is applied to it: the look it follows
+    now (mid-transition, a light that runs a firmware effect keeps the old look's until
+    the midpoint; ZoneRuntime.holder)."""
+    holder = runtime.holder(device_id)
+    claim = holder.claim_for(device_id)
+    return holder.generation, claim[0].id if claim is not None else None
 
 
 def _brightness_of(running: _Running) -> float:
@@ -179,6 +183,9 @@ class ZoneManager:
         # is gone or has no lights.
         self._previews: dict[ZoneRuntime, Callable[[], None]] = {}
         self._lock = asyncio.Lock()
+        # Zones whose transitions passed their midpoints: run() applies their lights.
+        self._switching: set[str] = set()
+        self._switched = asyncio.Event()
 
     async def load(self) -> None:
         await self._load_zones()
@@ -273,12 +280,12 @@ class ZoneManager:
         """How a light shows its zone's look. None when no look drives it: no running zone
         owns it, or its zone's saved look can't be read, which leaves it as it is."""
         runtime = self._runtime_of(device_id)
-        return None if runtime is None else runtime.mode_of(device_id)
+        return None if runtime is None else runtime.holder(device_id).mode_of(device_id)
 
     def effect_name(self, device_id: str) -> str | None:
         """The firmware effect a light runs, or streams a copy of."""
         runtime = self._runtime_of(device_id)
-        return None if runtime is None else runtime.effect_name(device_id)
+        return None if runtime is None else runtime.holder(device_id).effect_name(device_id)
 
     def power_of(self, device_id: str) -> bool | None:
         return self._power.get(device_id)
@@ -290,11 +297,14 @@ class ZoneManager:
 
     # --- commands ---------------------------------------------------------------------
 
-    async def start(self, zone_id: str, look: Look) -> StartResult:
-        """Put a look on a zone. It takes its lights over from running zones (spec §4.3)."""
+    async def start(
+        self, zone_id: str, look: Look, transition: Transition | None = None
+    ) -> StartResult:
+        """Put a look on a zone. It takes its lights over from running zones (spec §4.3),
+        with the transition asked for, or else the look's own (spec §5.3)."""
         validate_look(look)
         async with self._lock:
-            result = await self._start(zone_id, look)
+            result = await self._start(zone_id, look, transition)
         self._event_bus.emit(ZonesChanged())
         return result
 
@@ -460,7 +470,7 @@ class ZoneManager:
             if self._applied.get(device_id) != key:
                 await self._sync([device_id])
                 return
-            claim = runtime.claim_for(device_id)
+            claim = runtime.holder(device_id).claim_for(device_id)
             if claim is None:
                 return
             effect = claim[1]
@@ -767,12 +777,15 @@ class ZoneManager:
             raise ZoneNotRunningError(f"{zone.name} isn't running")
         return running
 
-    async def _start(self, zone_id: str, look: Look) -> StartResult:
+    async def _start(
+        self, zone_id: str, look: Look, transition: Transition | None = None
+    ) -> StartResult:
         validate_look(look)
         zone = self.get_zone(zone_id)
         lights = [light for light in zone.lights if self._adapter(light) is not None]
         if not lights:
             raise ZoneError(f"{zone.name} has no lights")
+        sources = self._sources(zone_id, lights)  # before any light changes hands
         take_overs = await self._take_over(zone_id, lights)
         previous: _Running | None = None
         stopped: list[StoppedLook] = []
@@ -780,6 +793,7 @@ class ZoneManager:
             previous, stopped = self._end_run(zone_id, remember=True)
         brightness = _brightness_of(previous) if previous is not None else 1.0
         runtime = self._new_runtime(zone_id, look, lights, brightness)
+        runtime.begin_transition(look.transition if transition is None else transition, sources)
         running = _Running(
             since=self._now(), lights=lights, runtime=runtime, members=tuple(lights)
         )
@@ -790,6 +804,19 @@ class ZoneManager:
         released = [x for x in previous.lights if x not in lights] if previous else []
         await self._sync([*lights, *released], power_on=lights)
         return StartResult(self._info(zone_id, running), tuple(take_overs))
+
+    def _sources(self, zone_id: str, lights: Sequence[str]) -> list[ZoneRuntime]:
+        """What a start's lights show now, for its transition (spec §5.3): the zone's own
+        runtime, and a twin of each zone it takes lights from (its runtime is about to lose
+        them). A crashed zone's lights fade in from black."""
+        sources: list[ZoneRuntime] = []
+        wanted = set(lights)
+        for other_id, running in self._running.items():
+            runtime = running.runtime
+            if runtime is None or runtime.crash is not None or not wanted & set(running.lights):
+                continue
+            sources.append(runtime if other_id == zone_id else runtime.twin())
+        return sources
 
     def _new_runtime(
         self,
@@ -820,10 +847,40 @@ class ZoneManager:
         )
 
     def _state_changed(self, runtime: ZoneRuntime) -> None:
-        """A running zone crashed, turned slow or recovered by itself (spec §8)."""
+        """A running zone crashed, turned slow or recovered by itself (spec §8), or its
+        transition passed the midpoint or ended (spec §5.3): run() applies its lights."""
         running = self._running.get(runtime.zone_id)
-        if running is not None and running.runtime is runtime:  # not one still starting
-            self._event_bus.emit(ZonesChanged())
+        if running is None or running.runtime is not runtime:  # not one still starting
+            return
+        if runtime.take_switch():
+            self._switching.add(runtime.zone_id)
+            self._switched.set()
+        self._event_bus.emit(ZonesChanged())
+
+    async def run(self) -> None:
+        """Apply the lights' new looks as transitions pass their midpoints, until
+        cancelled (main runs it beside the engine)."""
+        while True:
+            await self._switched.wait()
+            await self.switch_due()
+
+    async def switch_due(self) -> None:
+        """The lights of the zones whose transitions passed their midpoints go over to the
+        new look: each firmware effect starts, or the light streams (spec §5.3)."""
+        self._switched.clear()
+        async with self._lock:
+            zones, self._switching = self._switching, set()
+            lights = [
+                light
+                for zone_id in zones
+                if (running := self._running.get(zone_id)) is not None
+                and running.runtime is not None
+                for light in running.lights
+            ]
+            if not lights:
+                return
+            await self._sync(lights)
+        self._event_bus.emit(LightsChanged())
 
     def _rebuild_broken(self, zone_id: str, running: _Running) -> bool:
         """A zone whose saved look can't be read tries the look saved under its id."""
@@ -974,6 +1031,7 @@ class ZoneManager:
             waiting_for=runtime.waiting_for,
             slow_since=runtime.slow_since,
             covers=self._home.covers(running.lights),
+            transition=runtime.transition_info(),
         )
 
     # --- lights -----------------------------------------------------------------------
@@ -1120,7 +1178,7 @@ class ZoneManager:
         every routed slice either way."""
         route = runtime.route_for(device_id)
         applied = self._applied.get(device_id)
-        ready = applied is not None and applied[0] == runtime.generation
+        ready = applied is not None and applied[0] == runtime.holder(device_id).generation
         if route is not None and route.streaming and (self._preview_only or not ready):
             route = replace(route, streaming=False)
         self._routes.set_route(device_id, route)
@@ -1130,13 +1188,14 @@ class ZoneManager:
         key = _applied_key(runtime, device_id)
         if self._applied.get(device_id) == key:
             return
-        claim = runtime.claim_for(device_id)
+        holder = runtime.holder(device_id)  # the look the light follows now
+        claim = holder.claim_for(device_id)
         if claim is not None:
             layer, effect = claim
             self._routes.set_route(device_id, runtime.route_for(device_id))  # stop frames first
             try:
                 async with adapter.send_lock:
-                    await effect.start(adapter, effect.start_params(runtime.firmware_brightness))
+                    await effect.start(adapter, effect.start_params(holder.firmware_brightness))
             except FirmwareRejected as exc:  # it can't run it: stream a copy (spec §8)
                 logger.warning(
                     "{} refused {} ({}); streaming a copy instead",
@@ -1144,9 +1203,9 @@ class ZoneManager:
                     effect.display_name,
                     exc,
                 )
-                runtime.mark_emulated(device_id)
+                holder.mark_emulated(device_id)
                 claim = None
-                key = (runtime.generation, None)
+                key = (holder.generation, None)
             except Exception as exc:  # no answer: left unapplied, the next poll tries again
                 logger.warning(
                     "{} didn't start {} ({}); trying again at the next poll",
