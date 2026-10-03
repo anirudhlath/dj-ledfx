@@ -32,7 +32,7 @@ from dj_ledfx.home.shapes import (
     led_positions,
 )
 from dj_ledfx.home.store import ScenePlacement
-from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
+from dj_ledfx.spatial.geometry import DeviceGeometry, MatrixGeometry, PointGeometry, StripGeometry
 
 CANDLE = Placement(CylinderShape((1.0, 1.0, 0.8), 0.12, 0.02), "bottom-to-top")
 
@@ -201,6 +201,21 @@ def test_only_many_leds_on_a_point_or_an_upright_lamp_lying_down_hide_a_form() -
     assert (
         in_form(lying, 30, ALONG) and in_form(point, 1, UPRIGHT_LAMP) and in_form(point, 15, None)
     )
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [UPRIGHT_LAMP, DOWN, ALONG, SMALL_MATRIX, MatrixGeometry(()), PointGeometry(), None],
+    ids=["upright", "upside-down", "strip", "matrix", "matrix-without-tiles", "point", "none"],
+)
+@pytest.mark.parametrize("leds", [1, 30])
+def test_a_light_placed_in_its_form_is_in_its_form(
+    geometry: DeviceGeometry | None, leds: int
+) -> None:
+    """One classifier decides a light's form for both, so a placement made in form never
+    hides it, and a refit never makes the same placement again."""
+    placement = placed_in_form(AT, leds, geometry)
+    assert in_form(placement.shape, leds, geometry)
 
 
 def test_a_guess_puts_each_loose_light_in_its_form() -> None:

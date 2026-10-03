@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Collection, Iterable, Sequence
+from typing import Literal
 
 import numpy as np
 from loguru import logger
@@ -35,6 +36,7 @@ SPREAD_RADIUS_M = 0.8
 GUESS_HEIGHT_M = 1.0
 STANDING = (0.0, 90.0, 0.0)  # a grid tilted up to face south, as the scene hung matrices
 UPRIGHT_BASE_M = 0.1  # an upright lamp's LEDs start this far off the floor
+UPRIGHT_RISE = 0.9  # a strip that rises more than this per metre along it is an upright lamp
 # A grid stood up with its first row at the top, as a matrix's own frame has it.
 UPRIGHT_GRID = (0.0, -90.0, 0.0)
 
@@ -109,8 +111,9 @@ def _vec(values: NDArray[np.float64]) -> Vec3:
 
 
 def _rise(geometry: StripGeometry) -> float:
-    """How far up the map a strip runs per metre along it: near ±1 for an upright lamp."""
-    return float(_to_map(geometry.direction)[2])
+    """How far up the map a strip runs per metre along it: near ±1 for an upright lamp. The
+    direction is a unit vector, and its scene y is the map's up (see `_to_map`)."""
+    return geometry.direction[1]
 
 
 def _matrix_size(geometry: MatrixGeometry) -> tuple[float, float]:
@@ -123,42 +126,63 @@ def _matrix_size(geometry: MatrixGeometry) -> tuple[float, float]:
     return right - left, bottom - top
 
 
+Form = Literal["point", "upright", "line", "grid"]
+
+
+def _form(leds: int, geometry: DeviceGeometry | None) -> Form:
+    """The form a light shows on the map (the light-output plan's ruling 19): a strip that
+    runs near vertical is an upright lamp, any other strip a line, and a matrix a grid of
+    its tiles. A light of one LED, of no known form, or a matrix with no tiles is a point.
+    `placed_in_form` and `in_form` both go by it, so a placement made in form stays in it."""
+    if leds <= 1:
+        return "point"
+    if isinstance(geometry, StripGeometry):
+        return "upright" if abs(_rise(geometry)) > UPRIGHT_RISE else "line"
+    if isinstance(geometry, MatrixGeometry) and geometry.tiles:
+        return "grid"
+    return "point"
+
+
 def placed_in_form(at: Vec3, leds: int, geometry: DeviceGeometry | None) -> Placement:
-    """An unconfirmed placement at `at` that shows the light's form (the light-output plan's
-    ruling 19). An upright lamp stands on the floor below `at`, a vertical line as long as
-    its geometry; a strip lies through `at` along its direction; a matrix stands at `at` as
-    a grid of its tiles' size, first row at the top (a chain of tiles is one grid, in rows).
-    A light of one LED, or of no known form, is a point."""
-    if leds > 1 and isinstance(geometry, StripGeometry):
+    """An unconfirmed placement at `at` that shows the light's form. An upright lamp stands
+    on the floor below `at`, a vertical line as long as its geometry; a strip lies through
+    `at` along its direction; a matrix stands at `at` as a grid of its tiles' size, first
+    row at the top (a chain of tiles is one grid, in rows); a point is at `at`."""
+    form = _form(leds, geometry)
+    if form == "upright" and isinstance(geometry, StripGeometry):
         x, y, _ = at
-        if abs(_rise(geometry)) > 0.9:
-            path = ((x, y, UPRIGHT_BASE_M), (x, y, UPRIGHT_BASE_M + geometry.length))
-            order = "along-path" if _rise(geometry) > 0 else "reverse-path"
-            return Placement(LineShape(path), order)
+        path = ((x, y, UPRIGHT_BASE_M), (x, y, UPRIGHT_BASE_M + geometry.length))
+        order = "along-path" if _rise(geometry) > 0 else "reverse-path"
+        return Placement(LineShape(path), order)
+    if form == "line" and isinstance(geometry, StripGeometry):
         half = _to_map(geometry.direction) * geometry.length / 2.0
         centre = np.asarray(at, dtype=np.float64)
         return Placement(LineShape((_vec(centre - half), _vec(centre + half))), "along-path")
-    if leds > 1 and isinstance(geometry, MatrixGeometry) and geometry.tiles:
+    if form == "grid" and isinstance(geometry, MatrixGeometry):
         width, height = _matrix_size(geometry)
         return Placement(GridShape(at, width, height, UPRIGHT_GRID), "rows")
     return Placement(PointShape(at), check_led_order("point", None))
 
 
 def in_form(shape: LightShape, leds: int, geometry: DeviceGeometry | None) -> bool:
-    """Whether a placement shows the light's form. Two things hide it: many LEDs on a
-    point, and an upright lamp lying down. A light of one LED, or of no known form, is
-    always in form."""
-    if leds <= 1 or not isinstance(geometry, StripGeometry | MatrixGeometry):
+    """Whether a placement shows the light's form (see `_form`). Two things hide it: a
+    point for a light that has a form, and an upright lamp lying down."""
+    form = _form(leds, geometry)
+    if form == "point":
         return True
     if isinstance(shape, PointShape):
         return False
-    if isinstance(geometry, StripGeometry) and abs(_rise(geometry)) > 0.9:
-        if isinstance(shape, LineShape | BentLineShape):
-            path = np.asarray(shape.path, dtype=np.float64)
-            height = float(path[:, 2].max() - path[:, 2].min())
-            spread = float(np.linalg.norm(path[:, :2].max(axis=0) - path[:, :2].min(axis=0)))
-            return height >= spread
-    return True
+    return form != "upright" or _stands(shape)
+
+
+def _stands(shape: LightShape) -> bool:
+    """Whether a line rises at least as far as it spreads. Other shapes aren't judged."""
+    if not isinstance(shape, LineShape | BentLineShape):
+        return True
+    path = np.asarray(shape.path, dtype=np.float64)
+    height = float(path[:, 2].max() - path[:, 2].min())
+    spread = float(np.linalg.norm(path[:, :2].max(axis=0) - path[:, :2].min(axis=0)))
+    return height >= spread
 
 
 def _scene_shape(placement: ScenePlacement, at: NDArray[np.float64]) -> LightShape:
