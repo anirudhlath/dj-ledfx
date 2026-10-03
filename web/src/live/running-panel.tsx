@@ -21,6 +21,7 @@ import { ZoneRow } from '@/zones/zone-row'
 import { chipsFor, zoneView } from '@/zones/zone-view'
 import { collapseKey, shapesAt, useCollapse } from './collapse'
 import { NothingRunning } from './nothing-running'
+import { TapeBar } from './preview-only'
 import { runningSummary } from './words'
 
 const NO_OVERLAYS: readonly Overlay[] = []
@@ -71,29 +72,40 @@ export function RunningPanel({ selected, className, onHide, focusHide = false, o
       onFocus={(event) => hover(event.target)}
       onBlur={() => onZoneHover?.(null)}
     >
-      <div className={cx('flex items-center justify-between gap-2 px-5 pt-4', something && 'pb-3')}>
-        <div className="flex min-w-0 items-baseline gap-2">
-          <h2 className="text-section font-semibold">Running</h2>
-          {something && (
-            <span className="truncate text-data text-text-3">{runningSummary(zones, overlays.length, world.lightCount, previewOnly)}</span>
-          )}
+      {/* Every render's header: 10 px between the title and the summary; State-Preview-Only's starts 14 px down
+          to make room for the tape bar under its row. */}
+      <div
+        className={cx(
+          'flex flex-col gap-2 px-5',
+          previewOnly === true ? 'pt-3.5' : 'pt-4',
+          (something || previewOnly === true) && 'pb-3',
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-baseline gap-2.5">
+            <h2 className="text-section font-semibold">Running</h2>
+            {something && (
+              <span className="truncate text-data text-text-3">{runningSummary(zones, overlays.length, world.lightCount, previewOnly)}</span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {something && (
+              <ConfirmDialog
+                trigger={
+                  <Button variant="ghost" size="sm" icon="power">
+                    Stop all
+                  </Button>
+                }
+                title="Stop all?"
+                description="Every zone's look stops, and each light goes back to how it was."
+                confirm="Stop all"
+                onConfirm={stop}
+              />
+            )}
+            {onHide !== undefined && <IconButton icon="x" label="Hide Running" onClick={onHide} autoFocus={focusHide} />}
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {something && (
-            <ConfirmDialog
-              trigger={
-                <Button variant="ghost" size="sm" icon="power">
-                  Stop all
-                </Button>
-              }
-              title="Stop all?"
-              description="Every zone's look stops, and each light goes back to how it was."
-              confirm="Stop all"
-              onConfirm={stop}
-            />
-          )}
-          {onHide !== undefined && <IconButton icon="x" label="Hide Running" onClick={onHide} autoFocus={focusHide} />}
-        </div>
+        {previewOnly === true && <TapeBar />}
       </div>
       <div ref={box} className="min-h-0 grow overflow-y-auto px-4">
         <div ref={listRef} className="flex flex-col gap-3">

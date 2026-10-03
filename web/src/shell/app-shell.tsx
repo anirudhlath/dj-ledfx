@@ -1,11 +1,12 @@
 import { Outlet } from 'react-router'
 import { documentTitle, usePageMeta, type MetaContext } from '@/app/page-meta'
 import { useConnectionNews } from '@/chrome/connection-news'
-import { useConnectionStatus, useServerName, useSunset } from '@/chrome/hooks'
+import { useConnectionStatus, usePreviewOnly, useServerName, useSunset } from '@/chrome/hooks'
 import { ChromeHoldNews, ChromeTempoStrip } from '@/chrome/live'
 import { Announcer } from '@/design/announcer'
 import { cx } from '@/design/cx'
 import { useIsPhone } from '@/lib/use-media-query'
+import { TapeFrame } from '@/live/preview-only'
 import { useNow } from '@/lib/use-now'
 import { PhoneHeader } from './phone-header'
 import { Rail } from './rail'
@@ -54,11 +55,12 @@ export function AppShell() {
         </main>
         {isPhone && <TabBar />}
       </div>
+      <TapeFrame />
     </Announcer>
   )
 }
 
 /** A page's context line. It alone reads the clock, so the minute ticking over redraws just the line. */
 function PageContext({ get }: { get: (at: MetaContext) => string }) {
-  return get({ now: useNow(), sunset: useSunset() })
+  return get({ now: useNow(), sunset: useSunset(), previewOnly: usePreviewOnly() === true })
 }

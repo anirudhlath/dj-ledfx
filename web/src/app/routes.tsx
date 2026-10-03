@@ -13,7 +13,8 @@ const LIVE: PageMeta = {
   title: 'Live',
   context: ({ now }) => formatDayDateTime(now),
   phoneTitle: 'Home',
-  phoneContext: ({ now, sunset }) => `${formatDayTime(now)} · sun sets ${sunset}`,
+  // Phone-State-Preview-Only: "Wed 19:14 · on screen only".
+  phoneContext: ({ now, sunset, previewOnly }) => `${formatDayTime(now)} · ${previewOnly ? 'on screen only' : `sun sets ${sunset}`}`,
   tempoStrip: true,
 }
 const LOOKS: PageMeta = { title: 'Looks' }

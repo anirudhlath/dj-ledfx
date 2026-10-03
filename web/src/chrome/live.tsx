@@ -8,6 +8,7 @@ import { AttentionButton } from './attention-button'
 import { AttentionPopover, AttentionSheet } from './attention-list'
 import { ConnectionIndicator } from './connection-indicator'
 import { useAttentionTotal, useConnection, useConnectionUnlessLive, useHoldNews, usePreviewOnly, useTempo } from './hooks'
+import { usePreviewControl } from './preview-control'
 import { PreviewOnlySwitch } from './preview-only-switch'
 import { TempoModule } from './tempo-module'
 import { TempoSourcePopover } from './tempo-source'
@@ -58,8 +59,9 @@ export function ChromeTempoStrip() {
 
 export function ChromePreviewOnly({ variant }: { variant: Variant }) {
   const on = usePreviewOnly()
+  const control = usePreviewControl()
   if (on === null) return null
-  return <PreviewOnlySwitch variant={variant} on={on} />
+  return <PreviewOnlySwitch variant={variant} on={on} onChange={control.change} disabled={control.pending} />
 }
 
 /** §6.2: the button, and what it opens: the popover on desktop, the sheet on the phone. */

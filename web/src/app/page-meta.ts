@@ -4,6 +4,8 @@ export interface MetaContext {
   now: Date
   /** Today's sunset, 24 h: the fixture until F6 (decision 10). */
   sunset: string
+  /** The server's preview only (§5.6); false until it has said. */
+  previewOnly: boolean
 }
 
 /** What the chrome shows for a route (spec §4.1, §4.2). Set as the route's `handle`. */

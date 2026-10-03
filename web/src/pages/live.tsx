@@ -8,9 +8,11 @@ import { lazy, Suspense, useState } from 'react'
 import { useParams } from 'react-router'
 import type { Id } from '@/api/contract'
 import { queries } from '@/api/queries'
+import { usePreviewOnly } from '@/chrome/hooks'
 import { Button } from '@/design/button'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
+import { PreviewOnlyLabel } from '@/live/preview-only'
 import { RunningPanel } from '@/live/running-panel'
 import { StagePending } from '@/stage/stage-pending'
 import { Placeholder } from './placeholder'
@@ -31,6 +33,7 @@ export function LivePage() {
   const { zoneId } = useParams()
   const phone = useIsPhone()
   const narrow = useMediaQuery(NARROW_QUERY)
+  const previewOnly = usePreviewOnly() === true
   const [panel, setPanel] = useState<NarrowPanel>('open')
   const [hovered, setHovered] = useState<Id | null>(null)
   const [named, setNamed] = useState(zoneId)
@@ -56,7 +59,10 @@ export function LivePage() {
   }
   return (
     <div className="relative flex h-full min-h-0">
-      <div className="relative min-w-0 flex-1">{stage}</div>
+      <div className="relative min-w-0 flex-1">
+        {stage}
+        {previewOnly && <PreviewOnlyLabel />}
+      </div>
       {!narrow && <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} />}
       {narrow && panel !== 'hidden' && (
         <RunningPanel
