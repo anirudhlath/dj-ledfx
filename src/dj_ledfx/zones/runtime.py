@@ -66,15 +66,16 @@ ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5
 # running look shows within the horizon (≤120 ms).
 HORIZON_CAP_S = 0.12
 
-# Process-wide, so no two runtimes ever share a generation: a light applied for one
-# runtime always sees a new look as new.
+# Process-wide, so a light applied for one runtime always sees another look as new; only a
+# twin shares its runtime's generation, on purpose (twin()).
 _GENERATIONS = itertools.count(1)
 
 ZoneState = Literal["running", "slow", "crashed", "waiting", "transition"]
 LightMode = Literal["streaming", "own-effect", "streamed-copy"]
 # What a light was last given: the generation of the look it follows (twins share their
-# runtime's) and the firmware layer it runs (None: it streams).
-AppliedKey = tuple[int, str | None]
+# runtime's), and the firmware layer it runs with the brightness that started it (both None:
+# it streams).
+AppliedKey = tuple[int, str | None, float | None]
 
 
 def _finite(colors: FloatRGB) -> FloatRGB:
@@ -287,11 +288,15 @@ class ZoneRuntime:
 
     def applied_key(self, device_id: str) -> AppliedKey:
         """What the light is given once its zone's look is applied: the generation of the
-        look it follows and the firmware layer it runs there (None: it streams). The zone
-        manager applies the light again whenever this changes."""
+        look it follows, and the firmware layer it runs there with the brightness it starts
+        at (None, None: it streams). The zone manager applies the light again whenever this
+        changes, so a new brightness or cap starts the firmware effects again, and only
+        those."""
         holder = self._holder(device_id)
         claim = self.claim_for(device_id)
-        return holder.generation, None if claim is None else claim[0].id
+        if claim is None:
+            return holder.generation, None, None
+        return holder.generation, claim[0].id, holder._firmware_brightness
 
     def start_brightness(self, device_id: str) -> float:
         """The brightness the light's firmware effect starts at."""
@@ -372,10 +377,9 @@ class ZoneRuntime:
 
     def set_brightness(self, value: float) -> None:
         """The zone's brightness, for the looks a transition replaces too: the whole zone
-        dims together."""
+        dims together. Lights running their own effect start it again at the new
+        brightness (applied_key), the streamed ones are scaled at send."""
         self.brightness = value
-        if self._claims:
-            self.generation = next(_GENERATIONS)  # firmware effects take it when they start
         for source in self.transition_sources:
             source.set_brightness(value)
 
@@ -384,7 +388,8 @@ class ZoneRuntime:
 
         In place keeps each effect's state, so a chase keeps its position while a slider
         moves; blend and opacity are read from the layer each frame. The generation moves
-        on only when firmware lights need their effect again.
+        on only when a firmware layer's settings change; a new cap reaches the lights that
+        run their own effect through their applied key.
         """
         old, self.look = self.look, look
         if look.modifiers.trails_s is None:
@@ -404,9 +409,7 @@ class ZoneRuntime:
                 firmware.set_params(**layer.settings)
                 resend = True
             self._firmware[index] = (layer, firmware)
-        # A new cap changes the brightness the firmware effects run at.
-        recapped = old.modifiers.brightness_cap != look.modifiers.brightness_cap
-        if resend or (recapped and self._claims):
+        if resend:
             self.generation = next(_GENERATIONS)
 
     def restart(self) -> None:

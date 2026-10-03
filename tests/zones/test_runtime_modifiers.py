@@ -161,13 +161,10 @@ def test_the_cap_caps_streamed_lights_and_the_preview_of_firmware_ones() -> None
 def test_a_new_cap_starts_the_firmware_effects_again() -> None:
     look = look_of(field_layer(), glow_layer(), modifiers=LookModifiers(brightness_cap=0.6))
     runtime = runtime_of(look)
-    before = runtime.generation
+    tile, lamp = runtime.applied_key("tile"), runtime.applied_key("lamp")
 
     runtime.update_look(replace(look, modifiers=LookModifiers(brightness_cap=0.8)))
 
-    assert runtime.generation != before
+    assert runtime.applied_key("tile") != tile  # its effect starts again, at 0.8
     assert runtime.start_brightness("tile") == pytest.approx(0.8)
-    streamed = runtime_of(look_of(field_layer(), modifiers=LookModifiers(brightness_cap=0.6)))
-    kept = streamed.generation
-    streamed.update_look(replace(streamed.look, modifiers=LookModifiers(brightness_cap=0.8)))
-    assert streamed.generation == kept  # no light to start again
+    assert runtime.applied_key("lamp") == lamp  # no streamed light starts again

@@ -295,13 +295,15 @@ def test_update_look_keeps_the_effect_when_the_layers_match() -> None:
 
 def test_brightness_resends_firmware_only_when_lights_run_it() -> None:
     streamed = _runtime(_look(_field()))
-    generation = streamed.generation
+    keys = [streamed.applied_key(d) for d in ("tile", "lamp")]
     streamed.set_brightness(0.3)
-    assert streamed.brightness == 0.3 and streamed.generation == generation
+    assert streamed.brightness == 0.3
+    assert [streamed.applied_key(d) for d in ("tile", "lamp")] == keys
     firmware = _runtime(_look(_field(), _glow()))
-    generation = firmware.generation
+    tile, lamp = firmware.applied_key("tile"), firmware.applied_key("lamp")
     firmware.set_brightness(0.3)
-    assert firmware.generation > generation
+    assert firmware.applied_key("tile") != tile  # its effect starts again, at 0.3
+    assert firmware.applied_key("lamp") == lamp  # it streams on as it was
 
 
 class ProbeField(FieldEffect, register=False):

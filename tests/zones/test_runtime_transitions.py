@@ -151,7 +151,7 @@ def test_a_firmware_light_switches_whole_at_the_midpoint() -> None:
     glow = old.claim_for("tile")
     assert new.claim_for("tile") == glow and not new.streams("tile")
     assert new.applied_key("tile") == old.applied_key("tile")  # Glow, not sent again
-    assert new.applied_key("lamp") == (new.generation, None) and new.streams("lamp")
+    assert new.applied_key("lamp") == (new.generation, None, None) and new.streams("lamp")
 
     new.tick(1000.0)  # the transition runs from this frame's time, 1000 + HORIZON
     new.tick(1001.0)  # this frame's time is the midpoint; now isn't there yet
@@ -160,7 +160,7 @@ def test_a_firmware_light_switches_whole_at_the_midpoint() -> None:
     assert _levels(new)[4:] == [0.5] * 4  # the rest: half-way, about
 
     new.tick(1000.0 + 1.0 + HORIZON)
-    assert new.applied_key("tile") == (new.generation, None) and new.streams("tile")
+    assert new.applied_key("tile") == (new.generation, None, None) and new.streams("tile")
     assert switches == [new] and new.handing_over == {"tile"}  # the manager applies it
     new.tick(1000.0 + 1.1 + HORIZON)
     assert switches == [new]  # told once

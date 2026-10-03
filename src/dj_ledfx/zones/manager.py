@@ -1162,8 +1162,7 @@ class ZoneManager:
         light for this runtime, and never while preview-only is on; the web preview gets
         every routed slice either way."""
         route = runtime.route_for(device_id)
-        applied = self._applied.get(device_id)
-        ready = applied is not None and applied[0] == runtime.applied_key(device_id)[0]
+        ready = self._applied.get(device_id) == runtime.applied_key(device_id)
         if route is not None and route.streaming and (self._preview_only or not ready):
             route = replace(route, streaming=False)
         self._routes.set_route(device_id, route)

@@ -392,6 +392,22 @@ async def test_the_brightness_cap_caps_the_firmware_lights_too(make_home: HomeFa
     assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": pytest.approx(0.3)})
 
 
+# H3: a brightness change starts the firmware lights' effects again at the new brightness,
+# and leaves the streamed lights as they are.
+async def test_a_brightness_change_applies_only_the_firmware_lights_again(
+    make_home: HomeFactory,
+) -> None:
+    tile, lamp = FakeLight("tile", caps=TILE), FakeLight("lamp", caps=LAMP)
+    home = await make_home([tile, lamp], [zone_record("z", "tile", "lamp")])
+    await home.manager.start("z", BREATHE_AND_GLOW)
+    tile_calls, lamp_calls = len(tile.calls), len(lamp.calls)
+
+    await home.manager.set_brightness("z", 0.5)
+
+    assert tile.calls[tile_calls:] == [("firmware", {"level": 0.5, "brightness": 0.5})]
+    assert lamp.calls[lamp_calls:] == []  # it isn't prepared again
+
+
 async def test_running_zones_follow_the_managers_evening(make_home: HomeFactory) -> None:
     asked: list[float] = []
 
