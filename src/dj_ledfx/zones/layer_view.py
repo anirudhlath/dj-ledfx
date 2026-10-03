@@ -56,7 +56,7 @@ def layer_view(layer: Layer, leds: LedSet) -> LayerView:
         pos = mirrored(layer.mirror, pos, leds.centre)
     if layer.transform is not None:
         pos = transformed(layer.transform, pos, leds.centre)
-    return LayerView(leds.moved(pos.astype(np.float32)), weight)
+    return LayerView(leds.moved(pos), weight)
 
 
 def mask_weights(mask: Mask, leds: LedSet) -> NDArray[np.float32]:

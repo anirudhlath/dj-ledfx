@@ -746,7 +746,7 @@ class ZoneRuntime:
         """The view of the zone's LEDs for the field layer at `index`, made again only when
         its modifiers or the LED set change, so the effect's per-LED work is kept between
         frames. Kept by place, not id: a saved look may give two layers one id."""
-        modifiers = (layer.mask, layer.mirror, layer.transform)
+        modifiers = layer.modifiers
         kept = self._views.get(index)
         if kept is not None and kept[0] == modifiers:
             return kept[1]

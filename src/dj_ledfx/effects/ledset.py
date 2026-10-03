@@ -14,6 +14,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cached_property
 from types import MappingProxyType
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -33,11 +34,7 @@ Vec3 = tuple[float, float, float]
 Outline = tuple[tuple[float, float], ...]  # a room's or sub-zone's floor polygon, x/y metres
 
 
-def _no_points() -> Mapping[str, NDArray[np.float32]]:
-    return MappingProxyType({})
-
-
-def _no_outlines() -> Mapping[str, Outline]:
+def _empty() -> Mapping[str, Any]:
     return MappingProxyType({})
 
 
@@ -104,13 +101,13 @@ class Space:
     and sub-zone's floor polygon by id, for a layer's mask.
     """
 
-    anchors: Mapping[str, NDArray[np.float32]] = field(default_factory=_no_points)
-    anchor_points: Mapping[str, NDArray[np.float32]] = field(default_factory=_no_points)
+    anchors: Mapping[str, NDArray[np.float32]] = field(default_factory=_empty)
+    anchor_points: Mapping[str, NDArray[np.float32]] = field(default_factory=_empty)
     rooms: tuple[str, ...] = ()
     ceiling: float | None = None
     centre: Vec3 | None = None
-    room_outlines: Mapping[str, Outline] = field(default_factory=_no_outlines)
-    sub_zone_outlines: Mapping[str, Outline] = field(default_factory=_no_outlines)
+    room_outlines: Mapping[str, Outline] = field(default_factory=_empty)
+    sub_zone_outlines: Mapping[str, Outline] = field(default_factory=_empty)
 
     # By value, so a map edit that leaves the geometry as it was (a rename, a light moved
     # elsewhere) leaves the running zones as they are.
@@ -123,8 +120,8 @@ class Space:
             and self.centre == other.centre
             and _same_points(self.anchors, other.anchors)
             and _same_points(self.anchor_points, other.anchor_points)
-            and dict(self.room_outlines) == dict(other.room_outlines)
-            and dict(self.sub_zone_outlines) == dict(other.sub_zone_outlines)
+            and self.room_outlines == other.room_outlines  # a mapping compares by value
+            and self.sub_zone_outlines == other.sub_zone_outlines
         )
 
     def __hash__(self) -> int:
@@ -169,7 +166,7 @@ class LedSet:
     def anchors(self) -> Mapping[str, NDArray[np.float32]]:
         return self.space.anchors
 
-    def moved(self, pos: NDArray[np.float32]) -> LedSet:
+    def moved(self, pos: NDArray[np.floating[Any]]) -> LedSet:
         """These LEDs at other positions, as a layer's mirror or transform sees them. The
         bounds and the normalisation stay this set's, so an effect that fits itself to the
         zone moves with the positions rather than stretching to fit them again."""

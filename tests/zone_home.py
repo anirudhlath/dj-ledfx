@@ -192,7 +192,7 @@ async def build_home(
     view: HomeView | None = None,
     frames_watched: Callable[[], bool] | None = None,
     plan: HomeModel | None = None,
-    evening: Callable[[], float] = lambda: 0.0,
+    evening: Callable[[], float] | None = None,
 ) -> Home:
     db = StateDB(tmp_path / "state.db")
     await db.open()
@@ -225,7 +225,7 @@ async def assemble(
     view: HomeView | None = None,
     frames_watched: Callable[[], bool] | None = None,
     with_map: bool = False,
-    evening: Callable[[], float] = lambda: 0.0,
+    evening: Callable[[], float] | None = None,
 ) -> Home:
     """The app's objects around an open state.db and a set of lights."""
     bus = EventBus()
@@ -270,7 +270,7 @@ async def assemble(
         now=lambda: clock[0],
         home=view or NO_HOME,
         frames_watched=frames_watched or (lambda: True),
-        evening=evening,
+        evening=evening or (lambda: 0.0),
     )
     host.zones = manager
     if home_map is not None:

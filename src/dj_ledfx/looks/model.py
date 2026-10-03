@@ -143,6 +143,11 @@ class Layer:
     mirror: Mirror | None = None
     transform: Transform | None = None
 
+    @property
+    def modifiers(self) -> tuple[Mask | None, Mirror | None, Transform | None]:
+        """The layer modifiers: its mask, mirror and transform."""
+        return (self.mask, self.mirror, self.transform)
+
 
 @dataclass(frozen=True, slots=True)
 class Look:
@@ -531,7 +536,7 @@ def validate_look(look: Look) -> None:
         raise LookError("Home looks (whole-home scope) arrive in M6")
     for layer in look.layers:
         make_effect(layer)
-        modified = (layer.mask, layer.mirror, layer.transform) != (None, None, None)
+        modified = layer.modifiers != (None, None, None)
         if layer.type == "firmware" and modified:
             raise LookError(
                 f"Layer '{layer.name}': a firmware layer runs whole on the lights it picks; "
