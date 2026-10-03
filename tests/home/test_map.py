@@ -6,7 +6,7 @@ from functools import partial
 import numpy as np
 import pytest
 from conftest import KEYBOARD_AND_MOUSE, SERVER, FakeLight, pc_lights
-from map_home import DESK_CORNER, devices_of, open_map, tiny_home
+from map_home import DESK_CORNER, SMALL_MATRIX, UPRIGHT_LAMP, devices_of, open_map, tiny_home
 
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.home.map import HomeMap
@@ -14,7 +14,6 @@ from dj_ledfx.home.model import HomeError, HomeNotFoundError
 from dj_ledfx.home.shapes import GridShape, LineShape, Placement, PointShape, ShapeError
 from dj_ledfx.home.store import HomeStore
 from dj_ledfx.persistence.state_db import StateDB
-from dj_ledfx.spatial.geometry import MatrixGeometry, StripGeometry, TileLayout
 
 NOW = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
 DESK_LAMP = Placement(PointShape(DESK_CORNER), "")
@@ -194,15 +193,10 @@ async def test_a_guess_places_only_unplaced_lights(db: StateDB) -> None:
     assert list(guesses) == ["lamp"] and not guesses["lamp"].confirmed
 
 
-UPRIGHT_LAMP = StripGeometry((0.0, 1.0, 0.0), 1.4)
-SMALL_MATRIX = MatrixGeometry((TileLayout(0.0, 0.0, 5, 6),), pixel_pitch=0.03)
-ON_THE_DESK = Placement(PointShape(DESK_CORNER), "")
-
-
 async def test_online_lights_on_points_are_fitted_to_their_forms(db: StateDB) -> None:
     lamp = FakeLight("lamp", led_count=15, geometry=UPRIGHT_LAMP)
     matrix = FakeLight("matrix", led_count=30, geometry=SMALL_MATRIX)
-    placements = {"lamp": ON_THE_DESK, "matrix": ON_THE_DESK}
+    placements = {"lamp": DESK_LAMP, "matrix": DESK_LAMP}
     home_map = await _map(db, [lamp, matrix], placements=placements, seeded=True)
     changes: list[str] = []
 
@@ -240,9 +234,9 @@ async def test_confirmed_offline_fitting_one_led_and_pc_placements_are_left_alon
     placements = {
         "standing": standing,
         "confirmed": Placement(PointShape(DESK_CORNER), "", confirmed=True),
-        "offline": ON_THE_DESK,
-        "bulb": ON_THE_DESK,
-        SERVER: ON_THE_DESK,
+        "offline": DESK_LAMP,
+        "bulb": DESK_LAMP,
+        SERVER: DESK_LAMP,
     }
     home_map = await _map(db, devices, placements=placements, seeded=True)
 

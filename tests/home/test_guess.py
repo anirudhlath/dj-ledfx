@@ -4,8 +4,9 @@ import math
 
 import numpy as np
 import pytest
-from map_home import tiny_home
+from map_home import SMALL_MATRIX, UPRIGHT_LAMP, tiny_home
 
+from dj_ledfx.devices.govee.adapter_base import UPRIGHT_HEIGHT_M
 from dj_ledfx.devices.lights import LightEntry, LightPart
 from dj_ledfx.home.geometry import point_in_polygon
 from dj_ledfx.home.guess import (
@@ -31,14 +32,15 @@ from dj_ledfx.home.shapes import (
     led_positions,
 )
 from dj_ledfx.home.store import ScenePlacement
-from dj_ledfx.spatial.geometry import MatrixGeometry, PointGeometry, StripGeometry, TileLayout
+from dj_ledfx.spatial.geometry import PointGeometry, StripGeometry
 
 CANDLE = Placement(CylinderShape((1.0, 1.0, 0.8), 0.12, 0.02), "bottom-to-top")
 
 
-def _light(light_id: str, name: str | None = None, *devices: str) -> LightEntry:
-    parts = tuple(LightPart(device, device, 1) for device in devices or (light_id,))
-    return LightEntry(light_id, name or light_id, devices or (light_id,), len(parts), parts)
+def _light(light_id: str, name: str | None = None, *devices: str, leds: int = 1) -> LightEntry:
+    """A light of these devices (just itself by default), each part `leds` LEDs."""
+    parts = tuple(LightPart(device, device, leds) for device in devices or (light_id,))
+    return LightEntry(light_id, name or light_id, devices or (light_id,), leds * len(parts), parts)
 
 
 def _seed(name: str, room: str, placement: Placement = CANDLE) -> SeedLight:
@@ -158,22 +160,14 @@ def test_a_bad_scene_placement_is_skipped_and_its_light_is_guessed_instead() -> 
     assert isinstance(tile, GridShape) and (tile.width, tile.depth) == pytest.approx((0.03, 0.03))
 
 
-UP = StripGeometry((0.0, 1.0, 0.0), 1.4)  # an upright lamp, its first LED at the bottom
-DOWN = StripGeometry((0.0, -1.0, 0.0), 1.4)  # its first LED at the top
+DOWN = StripGeometry((0.0, -1.0, 0.0), UPRIGHT_HEIGHT_M)  # an upright lamp, LED 1 at the top
 ALONG = StripGeometry((1.0, 0.0, 0.0), 1.0)  # a strip, running east
-TILE = MatrixGeometry((TileLayout(0.0, 0.0, 5, 6),), pixel_pitch=0.03)
 AT = (2.0, 2.0, 1.0)
 
 
-def _many(light_id: str, leds: int) -> LightEntry:
-    return LightEntry(
-        light_id, light_id, (light_id,), leds, (LightPart(light_id, light_id, leds),)
-    )
-
-
 def test_an_upright_lamp_stands_on_the_floor_below_its_spot() -> None:
-    top = UPRIGHT_BASE_M + 1.4
-    up = placed_in_form(AT, 15, UP)
+    top = UPRIGHT_BASE_M + UPRIGHT_HEIGHT_M
+    up = placed_in_form(AT, 15, UPRIGHT_LAMP)
     assert up == Placement(LineShape(((2.0, 2.0, UPRIGHT_BASE_M), (2.0, 2.0, top))), "along-path")
     assert placed_in_form(AT, 15, DOWN).led_order == "reverse-path"
     assert not up.confirmed
@@ -185,7 +179,7 @@ def test_a_strip_lies_through_its_spot_along_its_length() -> None:
 
 
 def test_a_matrix_stands_as_a_grid_with_its_first_row_at_the_top() -> None:
-    matrix = placed_in_form(AT, 30, TILE)
+    matrix = placed_in_form(AT, 30, SMALL_MATRIX)
     assert isinstance(matrix.shape, GridShape) and matrix.led_order == "rows"
     assert (matrix.shape.width, matrix.shape.depth) == pytest.approx((0.15, 0.18))
     leds = led_positions(matrix.shape, 30, matrix.led_order).pos
@@ -194,7 +188,7 @@ def test_a_matrix_stands_as_a_grid_with_its_first_row_at_the_top() -> None:
 
 
 def test_a_light_of_one_led_or_of_no_known_form_is_a_point() -> None:
-    for leds, geometry in ((1, UP), (15, None), (15, PointGeometry())):
+    for leds, geometry in ((1, UPRIGHT_LAMP), (15, None), (15, PointGeometry())):
         assert placed_in_form(AT, leds, geometry) == Placement(PointShape(AT), "")
 
 
@@ -202,18 +196,20 @@ def test_only_many_leds_on_a_point_or_an_upright_lamp_lying_down_hide_a_form() -
     point = PointShape(AT)
     lying = LineShape(((1.0, 2.0, 1.0), (2.4, 2.0, 1.0)))
     standing = LineShape(((2.0, 2.0, 0.1), (2.0, 2.0, 1.5)))
-    assert not in_form(point, 15, UP) and not in_form(point, 30, TILE)
-    assert not in_form(lying, 15, UP) and in_form(standing, 15, UP)
-    assert in_form(lying, 30, ALONG) and in_form(point, 1, UP) and in_form(point, 15, None)
+    assert not in_form(point, 15, UPRIGHT_LAMP) and not in_form(point, 30, SMALL_MATRIX)
+    assert not in_form(lying, 15, UPRIGHT_LAMP) and in_form(standing, 15, UPRIGHT_LAMP)
+    assert (
+        in_form(lying, 30, ALONG) and in_form(point, 1, UPRIGHT_LAMP) and in_form(point, 15, None)
+    )
 
 
 def test_a_guess_puts_each_loose_light_in_its_form() -> None:
     guesses = guess_placements(
         tiny_home(),
-        [_many("lamp", 15), _light("bulb")],
+        [_light("lamp", leds=15), _light("bulb")],
         set(),
         [],
-        geometry_of=lambda light: UP if light.id == "lamp" else None,
+        geometry_of=lambda light: UPRIGHT_LAMP if light.id == "lamp" else None,
     )
     lamp = guesses["lamp"].shape
     assert isinstance(lamp, LineShape) and lamp.path[0][2] == UPRIGHT_BASE_M

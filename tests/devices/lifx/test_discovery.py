@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import struct
-from collections.abc import Callable, Collection
 from typing import Any
 
 import numpy as np
@@ -124,25 +123,13 @@ async def test_duplicate_labels_get_a_suffix() -> None:
 
 
 async def test_discover_returns_discovered_devices() -> None:
-    transport = FakeLifxTransport(product=1, label="Right Lamp")
-    record = _record(1)
-
-    async def _fake_discover(
-        timeout_s: float = 1.0,
-        on_record: Callable[[LifxDeviceRecord], None] | None = None,
-        skip_macs: Collection[str] = (),
-    ) -> list[LifxDeviceRecord]:
-        if on_record is not None:
-            on_record(record)
-        return [record]
-
-    transport.discover = _fake_discover  # type: ignore[attr-defined]
+    transport = FakeLifxTransport(product=1, found=[_record(1)])
     config = AppConfig()
     devices = await _backend(transport).discover(config)
 
     (device,) = devices
     assert isinstance(device.adapter, LifxBulbAdapter)
-    assert device.adapter.device_info.name == "Right Lamp"
+    assert device.adapter.device_info.name == transport.label
     assert device.adapter.is_connected
     assert device.max_fps == config.devices.lifx.max_fps
 
@@ -216,20 +203,9 @@ async def test_a_light_is_probed_only_while_its_tracker_saw_a_send() -> None:
 
 async def test_a_known_online_light_is_left_out_before_it_is_asked() -> None:
     transport = FakeLifxTransport(product=1)
-    skipped: list[Collection[str]] = []
-
-    async def _fake_discover(
-        timeout_s: float = 1.0,
-        on_record: Callable[[LifxDeviceRecord], None] | None = None,
-        skip_macs: Collection[str] = (),
-    ) -> list[LifxDeviceRecord]:
-        skipped.append(skip_macs)
-        return []
-
-    transport.discover = _fake_discover  # type: ignore[attr-defined]
     known = {f"lifx:{MAC.hex()}", "govee:test-lamp"}
     await _backend(transport).discover(AppConfig(), skip_ids=known)
-    assert skipped == [{MAC.hex()}]
+    assert transport.skipped == [{MAC.hex()}]
 
 
 # Review Focus 4: a known light that's offline, or half-answers, during discovery keeps its

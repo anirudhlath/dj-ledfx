@@ -293,17 +293,7 @@ async def test_listeners_see_packets_while_a_request_waits() -> None:
         transport.request_response(_request(), ("10.0.0.1", 56700), 107, timeout=0.05)
     )
     await asyncio.sleep(0)
-    service = LifxPacket(
-        tagged=False,
-        source=transport.source_id,
-        target=b"\xbb" * 6 + b"\x00\x00",
-        ack_required=False,
-        res_required=False,
-        sequence=0,
-        msg_type=3,
-        payload=struct.pack("<BI", 1, 56700),
-    )
-    transport._on_packet_received(service.pack(), ("10.0.0.7", 56700))
+    transport._on_packet_received(_service(transport, b"\xbb" * 6), ("127.0.0.1", 56700))
     assert seen == [3]
     await task
 
