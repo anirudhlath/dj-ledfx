@@ -115,6 +115,22 @@ describe('LiveClient', () => {
     }
   })
 
+  // §9.4 Reconnecting: "This is the last frame, from 19:14:32."
+  it('remembers when it last heard the server, on the wall clock, when the link drops', () => {
+    client.start()
+    welcome()
+    const heard = Date.now()
+    vi.advanceTimersByTime(1500)
+    latest().drop()
+    expect(connection()).toEqual({ status: 'reconnecting', attempt: 1 })
+    expect(store.getState().lastHeard).toBe(heard)
+    // A retry that fails changes nothing: the last frame is still the one from before the drop.
+    vi.advanceTimersByTime(backoffMs(1))
+    latest().drop()
+    expect(connection()).toEqual({ status: 'reconnecting', attempt: 2 })
+    expect(store.getState().lastHeard).toBe(heard)
+  })
+
   // Review focus 1: a server that hangs rather than closing.
   it('drops a link that has gone silent for 3 s', () => {
     client.start()

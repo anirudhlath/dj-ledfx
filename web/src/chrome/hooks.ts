@@ -60,6 +60,13 @@ export function useConnectionStatus(): Connection['status'] {
   return useLive((state) => state.connection.status)
 }
 
+/** §9.4 Reconnecting: which try this is, and when the last message came; null while the link isn't down. */
+export function useReconnecting(): { attempt: number; lastHeard: number | null } | null {
+  return useLiveShallow((state) =>
+    state.connection.status === 'reconnecting' ? { attempt: state.connection.attempt, lastHeard: state.lastHeard } : null,
+  )
+}
+
 /** §9.5: the items, and the light and input items apart for the dots on Devices and Inputs. */
 export function countAttention(items: readonly AttentionItem[]): AttentionCounts {
   let lights = 0

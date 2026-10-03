@@ -13,6 +13,7 @@ import { Button } from '@/design/button'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
 import { PreviewOnlyLabel } from '@/live/preview-only'
+import { ReconnectingCard } from '@/live/reconnecting'
 import { RunningPanel } from '@/live/running-panel'
 import { StagePending } from '@/stage/stage-pending'
 import { Placeholder } from './placeholder'
@@ -62,6 +63,7 @@ export function LivePage() {
       <div className="relative min-w-0 flex-1">
         {stage}
         {previewOnly && <PreviewOnlyLabel />}
+        <ReconnectingCard variant="desktop" />
       </div>
       {!narrow && <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} />}
       {narrow && panel !== 'hidden' && (

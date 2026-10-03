@@ -272,7 +272,12 @@ export class LiveClient {
     socket.close()
     if (this.tickTimer === null) return
     this.attempt += 1
-    this.store.setState({ connection: { status: 'reconnecting', attempt: this.attempt } })
+    const wasLive = this.store.getState().connection.status === 'live'
+    this.store.setState({
+      connection: { status: 'reconnecting', attempt: this.attempt },
+      // The client's clock runs from the page's start, so the last message's age turns into a wall time.
+      ...(wasLive ? { lastHeard: Math.round(Date.now() - (this.clock() - this.lastHeardAt) * 1000) } : {}),
+    })
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
       this.connect()

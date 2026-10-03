@@ -7,11 +7,12 @@ import { useEffect, useMemo } from 'react'
 import { failureText, stopAll } from '@/api/actions'
 import type { Id, Overlay } from '@/api/contract'
 import { useLive } from '@/api/live-store'
-import { usePreviewOnly } from '@/chrome/hooks'
+import { useConnectionStatus, usePreviewOnly } from '@/chrome/hooks'
 import { useAnnounce } from '@/design/announce'
 import { Button, ButtonLink, IconButton } from '@/design/button'
 import { ConfirmDialog } from '@/design/confirm-dialog'
 import { cx } from '@/design/cx'
+import { LIVE_SPEC } from '@/design/live-numbers'
 import { useNow } from '@/lib/use-now'
 import { newestFirst } from '@/stage/show'
 import { OverlayCard } from '@/zones/overlay-card'
@@ -43,6 +44,9 @@ export function RunningPanel({ selected, className, onHide, focusHide = false, o
   const running = useLive((state) => state.running?.zones ?? null)
   const overlays = useLive((state) => state.running?.overlays ?? NO_OVERLAYS)
   const previewOnly = usePreviewOnly()
+  // §9.4 Reconnecting: "cards at 45% opacity and inert" (State-Reconnecting dims the footer too, not the header).
+  const frozen = useConnectionStatus() === 'reconnecting'
+  const still = frozen ? { inert: true, style: { opacity: LIVE_SPEC.frozenCardsOpacity } } : {}
   const now = useNow()
   const announce = useAnnounce()
   const zones = useMemo(() => (running === null ? [] : newestFirst(running)), [running])
@@ -107,7 +111,7 @@ export function RunningPanel({ selected, className, onHide, focusHide = false, o
         </div>
         {previewOnly === true && <TapeBar />}
       </div>
-      <div ref={box} className="min-h-0 grow overflow-y-auto px-4">
+      <div ref={box} className="min-h-0 grow overflow-y-auto px-4" {...still}>
         <div ref={listRef} className="flex flex-col gap-3">
           {overlays.map((overlay) => {
             const look = world.looks.get(overlay.lookId)
@@ -125,12 +129,12 @@ export function RunningPanel({ selected, className, onHide, focusHide = false, o
           {nothing && <NothingRunning on={on} total={world.lightCount} />}
         </div>
       </div>
-      <div className="flex flex-col gap-2.5 border-t border-line-soft px-5 pt-4 pb-5">
+      <div className="flex flex-col gap-2.5 border-t border-line-soft px-5 pt-4 pb-5" {...still}>
         <ButtonLink variant="primary" size="lg" icon="plus" to="/live/put" className="w-full">
           Put a look on
         </ButtonLink>
-        {/* F3 decision 34: the sentence goes while the cards are squeezed. */}
-        {something && step === 0 && <p className="text-center text-meta text-text-3">or click a room in the home</p>}
+        {/* F3 decision 34: the sentence goes while the cards are squeezed, and while the frozen stage takes no click. */}
+        {something && step === 0 && !frozen && <p className="text-center text-meta text-text-3">or click a room in the home</p>}
       </div>
     </aside>
   )

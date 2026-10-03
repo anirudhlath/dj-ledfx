@@ -1,5 +1,5 @@
 import { Navigate, type RouteObject } from 'react-router'
-import { formatDayDateTime, formatDayTime } from '@/lib/format'
+import { formatDayDateTime, formatDayTime, formatTimeWithSeconds } from '@/lib/format'
 import { AppError, RootError } from '@/pages/app-error'
 import { LivePage } from '@/pages/live'
 import { NotFound } from '@/pages/not-found'
@@ -13,8 +13,11 @@ const LIVE: PageMeta = {
   title: 'Live',
   context: ({ now }) => formatDayDateTime(now),
   phoneTitle: 'Home',
-  // Phone-State-Preview-Only: "Wed 19:14 · on screen only".
-  phoneContext: ({ now, sunset, previewOnly }) => `${formatDayTime(now)} · ${previewOnly ? 'on screen only' : `sun sets ${sunset}`}`,
+  // Phone-State-Reconnecting: "last frame 19:14:32"; Phone-State-Preview-Only: "Wed 19:14 · on screen only".
+  phoneContext: ({ now, sunset, previewOnly, lastFrame }) =>
+    lastFrame !== null
+      ? `last frame ${formatTimeWithSeconds(new Date(lastFrame))}`
+      : `${formatDayTime(now)} · ${previewOnly ? 'on screen only' : `sun sets ${sunset}`}`,
   tempoStrip: true,
 }
 const LOOKS: PageMeta = { title: 'Looks' }

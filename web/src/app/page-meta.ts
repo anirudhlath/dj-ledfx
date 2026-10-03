@@ -6,6 +6,8 @@ export interface MetaContext {
   sunset: string
   /** The server's preview only (§5.6); false until it has said. */
   previewOnly: boolean
+  /** While the link is down: when the last message came, epoch ms (§9.4); null otherwise. */
+  lastFrame: number | null
 }
 
 /** What the chrome shows for a route (spec §4.1, §4.2). Set as the route's `handle`. */

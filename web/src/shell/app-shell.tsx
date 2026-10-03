@@ -1,7 +1,7 @@
 import { Outlet } from 'react-router'
 import { documentTitle, usePageMeta, type MetaContext } from '@/app/page-meta'
 import { useConnectionNews } from '@/chrome/connection-news'
-import { useConnectionStatus, usePreviewOnly, useServerName, useSunset } from '@/chrome/hooks'
+import { useConnectionStatus, usePreviewOnly, useReconnecting, useServerName, useSunset } from '@/chrome/hooks'
 import { ChromeHoldNews, ChromeTempoStrip } from '@/chrome/live'
 import { Announcer } from '@/design/announcer'
 import { cx } from '@/design/cx'
@@ -62,5 +62,6 @@ export function AppShell() {
 
 /** A page's context line. It alone reads the clock, so the minute ticking over redraws just the line. */
 function PageContext({ get }: { get: (at: MetaContext) => string }) {
-  return get({ now: useNow(), sunset: useSunset(), previewOnly: usePreviewOnly() === true })
+  const lastFrame = useReconnecting()?.lastHeard ?? null
+  return get({ now: useNow(), sunset: useSunset(), previewOnly: usePreviewOnly() === true, lastFrame })
 }
