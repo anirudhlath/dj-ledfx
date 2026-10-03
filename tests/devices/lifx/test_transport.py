@@ -5,9 +5,23 @@ import struct
 import time
 
 import pytest
+from lifx_fakes import MAC, FakeLifxTransport
 
+from dj_ledfx.devices.capabilities import NoAnswer
 from dj_ledfx.devices.lifx import transport as lifx_transport
-from dj_ledfx.devices.lifx.packet import GET_VERSION, STATE_UNHANDLED, STATE_VERSION, LifxPacket
+from dj_ledfx.devices.lifx.packet import (
+    GET_DEVICE_CHAIN,
+    GET_HOST_FIRMWARE,
+    GET_VERSION,
+    STATE_DEVICE_CHAIN,
+    STATE_HOST_FIRMWARE,
+    STATE_UNHANDLED,
+    STATE_VERSION,
+    LifxPacket,
+    parse_state_device_chain,
+    parse_state_host_firmware,
+    parse_state_version,
+)
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
@@ -310,8 +324,59 @@ async def test_query_host_firmware() -> None:
 @pytest.mark.asyncio
 async def test_query_version_retries_once_then_gives_up() -> None:
     transport, sent = _transport()
-    assert await transport.query_version(b"\xaa" * 6, "127.0.0.1", 56700) is None
+    with pytest.raises(NoAnswer):
+        await transport.query_version(b"\xaa" * 6, "127.0.0.1", 56700)
     assert [p.msg_type for p, _ in sent.packets] == [GET_VERSION, GET_VERSION]
+
+
+async def test_a_light_that_can_t_say_its_version_has_none() -> None:
+    light = FakeLifxTransport(unhandled={GET_VERSION})
+    assert await light.query_version(MAC, "127.0.0.1", 56700) is None
+
+
+ADDR = ("127.0.0.1", 56700)
+
+
+def _unreadable(payload: bytes) -> object:
+    raise ValueError("not a reply anyone can read")
+
+
+async def test_an_answer_is_parsed_none_when_the_light_can_t_say_and_silence_raises() -> None:
+    """The transport tells a light that can't say (StateUnhandled, or a reply that doesn't
+    parse) from one that stays silent, once, for every caller."""
+    light = FakeLifxTransport(product=57, unhandled={GET_DEVICE_CHAIN}, quiet={GET_HOST_FIRMWARE})
+
+    version = await light.answer(MAC, ADDR, GET_VERSION, b"", STATE_VERSION, parse_state_version)
+    assert version is not None and version[1] == 57
+    chain = await light.answer(
+        MAC, ADDR, GET_DEVICE_CHAIN, b"", STATE_DEVICE_CHAIN, parse_state_device_chain
+    )
+    assert chain is None  # it answered StateUnhandled: it can't say
+    assert await light.answer(MAC, ADDR, GET_VERSION, b"", STATE_VERSION, _unreadable) is None
+    with pytest.raises(NoAnswer):
+        await light.answer(
+            MAC,
+            ADDR,
+            GET_HOST_FIRMWARE,
+            b"",
+            STATE_HOST_FIRMWARE,
+            parse_state_host_firmware,
+            tries=2,
+        )
+    assert light.types().count(GET_HOST_FIRMWARE) == 2  # asked twice, then silence
+
+
+async def test_a_query_is_none_either_way() -> None:
+    """The adapters' reads can't say whether a light refused or stayed silent: None."""
+    light = FakeLifxTransport(unhandled={GET_DEVICE_CHAIN}, quiet={GET_HOST_FIRMWARE})
+    firmware = await light.query(
+        MAC, ADDR, GET_HOST_FIRMWARE, b"", STATE_HOST_FIRMWARE, parse_state_host_firmware
+    )
+    chain = await light.query(
+        MAC, ADDR, GET_DEVICE_CHAIN, b"", STATE_DEVICE_CHAIN, parse_state_device_chain
+    )
+    assert firmware is None and chain is None
+    assert await light.query(MAC, ADDR, GET_VERSION, b"", STATE_VERSION, _unreadable) is None
 
 
 @pytest.mark.asyncio

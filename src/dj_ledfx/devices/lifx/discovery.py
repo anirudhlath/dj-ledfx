@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial
-from typing import Any, TypeVar
+from typing import Any
 
 from loguru import logger
 
 from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice, configured_fps
+from dj_ledfx.devices.capabilities import NoAnswer
 from dj_ledfx.devices.lifx.base import LifxAdapterBase
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.packet import (
@@ -35,8 +36,6 @@ from dj_ledfx.types import DeviceInfo
 
 LIFX_PORT = 56700
 
-T = TypeVar("T")
-
 
 def _label_of(payload: bytes) -> str:
     *_colour, label = parse_light_state(payload)
@@ -46,10 +45,6 @@ def _label_of(payload: bytes) -> str:
 def _zone_count_of(payload: bytes) -> int:
     zone_count, _index, _colours = parse_state_extended_color_zones(payload)
     return zone_count
-
-
-class _Silent(Exception):
-    """A light stayed silent to a setup query: it's set up when a later scan finds it."""
 
 
 class LifxBackend(DeviceBackend):
@@ -129,7 +124,10 @@ class LifxBackend(DeviceBackend):
                 )
                 return None
             mac = bytes.fromhex(mac_hex)
-            version = await transport.query_version(mac, ip, LIFX_PORT)
+            try:
+                version = await transport.query_version(mac, ip, LIFX_PORT)
+            except NoAnswer:
+                version = None
             if version is None:
                 logger.info(
                     "Known LIFX device '{}' didn't answer; it stays offline", row.get("name")
@@ -164,7 +162,7 @@ class LifxBackend(DeviceBackend):
         assert self._transport is not None
         try:
             adapter = await self._create_adapter(record, config)
-        except _Silent as silent:
+        except NoAnswer as silent:  # set up from silence, it would be the wrong kind or size
             logger.info("{}; it's left as it was until a later scan", silent)
             return None
         if adapter is None:
@@ -189,8 +187,15 @@ class LifxBackend(DeviceBackend):
     ) -> LifxAdapterBase | None:
         assert self._transport is not None
         transport = self._transport
-        firmware = await self._query(
-            record, GET_HOST_FIRMWARE, STATE_HOST_FIRMWARE, parse_state_host_firmware, 0.5
+        # A setup query a light can't answer falls back; one it's silent to raises NoAnswer.
+        firmware = await transport.answer(
+            record.mac,
+            (record.ip, record.port),
+            GET_HOST_FIRMWARE,
+            b"",
+            STATE_HOST_FIRMWARE,
+            parse_state_host_firmware,
+            tries=2,
         )
         caps, relays = lifx_capabilities(record.product, firmware, record.vendor)
         if relays:
@@ -259,50 +264,38 @@ class LifxBackend(DeviceBackend):
         self._names[name] = stable_id
         return name
 
-    async def _query(
-        self,
-        record: LifxDeviceRecord,
-        msg_type: int,
-        reply_type: int,
-        parse: Callable[[bytes], T],
-        timeout: float,
-    ) -> T | None:
-        """Ask the light, twice if it must, and parse its reply. None when it answers that
-        it can't (StateUnhandled) or with a reply that doesn't parse: the caller falls back.
-        Raises _Silent when it doesn't answer: a light set up from silence would be the
-        wrong kind or size."""
-        assert self._transport is not None
-        reply = await self._transport.ask(
-            record.mac,
-            (record.ip, record.port),
-            msg_type,
-            b"",
-            reply_type,
-            tries=2,
-            timeout=timeout,
-        )
-        if reply is None:
-            raise _Silent(f"LIFX {record.ip} didn't answer message {msg_type}")
-        if reply.msg_type != reply_type:
-            return None
-        try:
-            return parse(reply.payload)
-        except ValueError:
-            return None
-
     async def _query_label(self, record: LifxDeviceRecord) -> str | None:
-        label = await self._query(record, GET_COLOR, LIGHT_STATE, _label_of, 0.5)
+        assert self._transport is not None
+        label = await self._transport.answer(
+            record.mac, (record.ip, record.port), GET_COLOR, b"", LIGHT_STATE, _label_of, tries=2
+        )
         return label or None
 
     async def _query_chain(self, record: LifxDeviceRecord) -> list[TileInfo]:
-        tiles = await self._query(
-            record, GET_DEVICE_CHAIN, STATE_DEVICE_CHAIN, parse_state_device_chain, 1.0
+        assert self._transport is not None
+        tiles = await self._transport.answer(
+            record.mac,
+            (record.ip, record.port),
+            GET_DEVICE_CHAIN,
+            b"",
+            STATE_DEVICE_CHAIN,
+            parse_state_device_chain,
+            tries=2,
+            timeout=1.0,
         )
         return tiles or []
 
     async def _query_zone_count(self, record: LifxDeviceRecord) -> int:
-        count = await self._query(
-            record, GET_EXTENDED_COLOR_ZONES, STATE_EXTENDED_COLOR_ZONES, _zone_count_of, 1.0
+        assert self._transport is not None
+        count = await self._transport.answer(
+            record.mac,
+            (record.ip, record.port),
+            GET_EXTENDED_COLOR_ZONES,
+            b"",
+            STATE_EXTENDED_COLOR_ZONES,
+            _zone_count_of,
+            tries=2,
+            timeout=1.0,
         )
         if count is None:
             logger.warning("LIFX {} didn't report its zone count; assuming 1", record.ip)

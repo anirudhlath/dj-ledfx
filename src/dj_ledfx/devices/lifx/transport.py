@@ -9,6 +9,7 @@ from typing import TypeVar
 
 from loguru import logger
 
+from dj_ledfx.devices.capabilities import NoAnswer
 from dj_ledfx.devices.lifx.packet import (
     GET_HOST_FIRMWARE,
     GET_VERSION,
@@ -29,6 +30,17 @@ GET_SERVICE_GAP_S = 1.0  # discovery broadcasts GetService three times, this far
 
 PacketListener = Callable[[LifxPacket, tuple[str, int]], None]
 _Waiter = tuple[frozenset[int], "asyncio.Future[LifxPacket]"]
+
+
+def parsed(reply: LifxPacket, reply_type: int, parse: Callable[[bytes], T]) -> T | None:
+    """A reply's payload, parsed. None when the light can't say: it answered something else
+    (StateUnhandled, 223) or a reply that doesn't parse."""
+    if reply.msg_type != reply_type:
+        return None
+    try:
+        return parse(reply.payload)
+    except ValueError:
+        return None
 
 
 class LifxTransport:
@@ -198,6 +210,28 @@ class LifxTransport:
                 return reply
         return None
 
+    async def answer(
+        self,
+        mac: bytes,
+        addr: tuple[str, int],
+        msg_type: int,
+        payload: bytes,
+        reply_type: int,
+        parse: Callable[[bytes], T],
+        *,
+        tries: int = 1,
+        timeout: float = 0.5,
+    ) -> T | None:
+        """Ask a light and parse its reply: None when it can't say (`parsed`). Raises
+        NoAnswer when it stays silent: setting a light up from silence would make it the
+        wrong kind or size, so its caller leaves it for a later scan."""
+        reply = await self.ask(
+            mac, addr, msg_type, payload, reply_type, tries=tries, timeout=timeout
+        )
+        if reply is None:
+            raise NoAnswer(f"LIFX {addr[0]} didn't answer message {msg_type}")
+        return parsed(reply, reply_type, parse)
+
     async def query(
         self,
         mac: bytes,
@@ -210,17 +244,12 @@ class LifxTransport:
         tries: int = 1,
         timeout: float = 0.5,
     ) -> T | None:
-        """Ask a light and parse its reply. None when it stays silent, answers something
-        else (StateUnhandled) or sends a reply that doesn't parse."""
+        """Ask a light and parse its reply. None either way: when it stays silent, and when
+        it can't say (`parsed`). For reads that only want to know what the light says."""
         reply = await self.ask(
             mac, addr, msg_type, payload, reply_type, tries=tries, timeout=timeout
         )
-        if reply is None or reply.msg_type != reply_type:
-            return None
-        try:
-            return parse(reply.payload)
-        except ValueError:
-            return None
+        return None if reply is None else parsed(reply, reply_type, parse)
 
     def start_probing(self, interval_s: float = 2.0) -> None:
         if self._probe_task is None or self._probe_task.done():
@@ -286,7 +315,10 @@ class LifxTransport:
         results: list[LifxDeviceRecord] = []
 
         async def _query_version_and_record(mac: bytes, ip: str, port: int) -> None:
-            version = await self.query_version(mac, ip, port)
+            try:
+                version = await self.query_version(mac, ip, port)
+            except NoAnswer:
+                version = None
             if version is None:
                 logger.info("LIFX {} didn't answer GetVersion; a later scan asks again", ip)
                 return
@@ -362,7 +394,10 @@ class LifxTransport:
 
         results: list[LifxDeviceRecord] = []
         for mac, ip, port in discovered.values():
-            version = await self.query_version(mac, ip, port)
+            try:
+                version = await self.query_version(mac, ip, port)
+            except NoAnswer:
+                version = None
             if version is None:
                 logger.info("LIFX {} didn't answer GetVersion; a later scan asks again", ip)
                 continue
@@ -375,8 +410,9 @@ class LifxTransport:
         return results
 
     async def query_version(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
-        """(vendor, product), or None if the light doesn't answer two tries."""
-        version = await self.query(
+        """(vendor, product), or None if the light can't say. Raises NoAnswer if it doesn't
+        answer two tries."""
+        version = await self.answer(
             mac, (ip, port), GET_VERSION, b"", STATE_VERSION, parse_state_version, tries=2
         )
         return None if version is None else (int(version[0]), int(version[1]))
