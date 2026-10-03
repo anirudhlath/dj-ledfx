@@ -15,6 +15,7 @@ from dj_ledfx.home.guess import (
     UPRIGHT_BASE_M,
     UPRIGHT_GRID,
     first_placements,
+    fitted,
     guess_placements,
     in_form,
     largest_room,
@@ -219,15 +220,34 @@ def test_a_light_of_one_led_or_of_no_known_form_is_a_point() -> None:
         assert placed_in_form(AT, leds, geometry) == Placement(PointShape(AT), "")
 
 
-def test_only_many_leds_on_a_point_or_an_upright_lamp_lying_down_hide_a_form() -> None:
-    point = PointShape(AT)
-    lying = LineShape(((1.0, 2.0, 1.0), (2.4, 2.0, 1.0)))
-    standing = LineShape(((2.0, 2.0, 0.1), (2.0, 2.0, 1.5)))
+def test_many_leds_on_a_point_and_an_upright_lamp_lying_down_hide_a_form() -> None:
+    point = Placement(PointShape(AT), "")
+    lying = Placement(LineShape(((1.0, 2.0, 1.0), (2.4, 2.0, 1.0))), "along-path")
+    standing = Placement(LineShape(((2.0, 2.0, 0.1), (2.0, 2.0, 1.5))), "along-path")
     assert not in_form(point, 15, UPRIGHT_LAMP) and not in_form(point, 30, SMALL_MATRIX)
     assert not in_form(lying, 15, UPRIGHT_LAMP) and in_form(standing, 15, UPRIGHT_LAMP)
     assert (
         in_form(lying, 30, ALONG) and in_form(point, 1, UPRIGHT_LAMP) and in_form(point, 15, None)
     )
+
+
+def test_a_candle_whose_rows_run_up_has_them_turned_where_it_stands() -> None:
+    """On the lights, a candle's and a tube's first row is at the top (the light-output
+    plan's Task 8), and home.json's seeds run their rows bottom to top: the fit turns the
+    rows and keeps the seed's spot and size."""
+    assert not in_form(CANDLE, 30, ROUND_MATRIX)
+    turned = fitted(CANDLE, 30, ROUND_MATRIX)
+    assert turned == Placement(CANDLE.shape, "top-to-bottom")  # a refit's, so a guess
+    z = led_positions(turned.shape, 30, turned.led_order, ROUND_MATRIX).pos[:, 2]
+    assert z[0] == pytest.approx(z.max())  # row 0 at the top
+    assert fitted(turned, 30, ROUND_MATRIX) is None
+    assert in_form(CANDLE, 30, SMALL_MATRIX)  # a flat matrix's rows aren't judged on one
+
+
+def test_any_other_placement_that_hides_a_form_is_made_again_at_its_centre() -> None:
+    point = Placement(PointShape(AT), "")
+    assert fitted(point, 15, UPRIGHT_LAMP) == placed_in_form(AT, 15, UPRIGHT_LAMP)
+    assert fitted(point, 1, UPRIGHT_LAMP) is None  # one LED has no form to hide
 
 
 @pytest.mark.parametrize(
@@ -260,7 +280,7 @@ def test_a_light_placed_in_its_form_is_in_its_form(
     """One classifier decides a light's form for both, so a placement made in form never
     hides it, and a refit never makes the same placement again."""
     placement = placed_in_form(AT, leds, geometry)
-    assert in_form(placement.shape, leds, geometry)
+    assert in_form(placement, leds, geometry) and fitted(placement, leds, geometry) is None
 
 
 def test_a_guess_puts_each_loose_light_in_its_form() -> None:

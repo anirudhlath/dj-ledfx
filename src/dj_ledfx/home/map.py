@@ -24,9 +24,8 @@ from dj_ledfx.home.geometry import point_in_polygon
 from dj_ledfx.home.guess import (
     GUESS_HEIGHT_M,
     first_placements,
+    fitted,
     guess_placements,
-    in_form,
-    placed_in_form,
 )
 from dj_ledfx.home.model import (
     Anchor,
@@ -409,19 +408,18 @@ class HomeMap:
     async def refit(self, device_id: str) -> Placement | None:
         """Fit the placement of the light that just came online to its form, where it hides
         it (the light-output plan's ruling 19): many LEDs on a point, an upright lamp lying
-        down. Its coming online is when its form is known. Only a seed's or a guess's
-        unconfirmed placement is fitted: the owner's, a confirmed one, the PC's and a form
-        nobody knows are left alone. Returns the new placement, or None."""
+        down, a candle's rows running up. Its coming online is when its form is known. Only
+        a seed's or a guess's unconfirmed placement is fitted: the owner's, a confirmed one,
+        the PC's and a form nobody knows are left alone. Returns the new placement, or None."""
         async with self._lock:
             index = self.lights()
             light = index.get(index.light_of(device_id))
             old = self._placements.get(light.id) if light is not None else None
             if light is None or old is None or old.confirmed or old.source == "owner":
                 return None
-            geometry = self._geometry(light)
-            if in_form(old.shape, light.leds, geometry):
+            placement = fitted(old, light.leds, self._geometry(light))
+            if placement is None:
                 return None
-            placement = placed_in_form(shape_centre(old.shape), light.leds, geometry)
             await self._put({light.id: placement})
         logger.info("Fitted light {}'s placement to its form", light.id)
         await self._changed()

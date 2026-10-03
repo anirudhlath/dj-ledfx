@@ -29,6 +29,7 @@ from dj_ledfx.home.shapes import (
     Placement,
     PointShape,
     check_led_order,
+    shape_centre,
 )
 from dj_ledfx.home.store import ScenePlacement
 from dj_ledfx.spatial.geometry import DeviceGeometry, MatrixGeometry, StripGeometry
@@ -40,6 +41,9 @@ UPRIGHT_RISE = 0.9  # a strip that rises more than this per metre along it is an
 # A grid stood up to face south with its first row at the top, as a matrix's own frame has
 # it: how every matrix stands, fitted or moved from an old scene.
 UPRIGHT_GRID = (0.0, -90.0, 0.0)
+# A candle's and a tube's first row is at the top on the lights too (the light-output plan's
+# Task 8)
+CYLINDER_ROWS = "top-to-bottom"
 
 
 def seed_matches(lights: Iterable[LightEntry], seeds: Sequence[SeedLight]) -> dict[str, SeedLight]:
@@ -168,19 +172,34 @@ def placed_in_form(at: Vec3, leds: int, geometry: DeviceGeometry | None) -> Plac
         around, height = _matrix_size(geometry)
         x, y, z = at
         shape = CylinderShape((x, y, z - height / 2.0), height, around / (2.0 * math.pi))
-        return Placement(shape, "top-to-bottom")
+        return Placement(shape, CYLINDER_ROWS)
     return Placement(PointShape(at), check_led_order("point", None))
 
 
-def in_form(shape: LightShape, leds: int, geometry: DeviceGeometry | None) -> bool:
-    """Whether a placement shows the light's form (see `_form`). Two things hide it: a
-    point for a light that has a form, and an upright lamp lying down."""
+def in_form(placement: Placement, leds: int, geometry: DeviceGeometry | None) -> bool:
+    """Whether a placement shows the light's form (see `_form`). Three things hide it: a
+    point for a light that has a form, an upright lamp lying down, and a candle's or a
+    tube's rows running bottom to top (home.json's seeds)."""
     form = _form(leds, geometry)
+    shape = placement.shape
     if form == "point":
         return True
     if isinstance(shape, PointShape):
         return False
+    if form == "cylinder" and isinstance(shape, CylinderShape):
+        return placement.led_order == CYLINDER_ROWS
     return form != "upright" or _stands(shape)
+
+
+def fitted(placement: Placement, leds: int, geometry: DeviceGeometry | None) -> Placement | None:
+    """The placement fitted to the light's form, or None when it shows it already. A
+    cylinder whose rows run the wrong way keeps its spot and size and has its rows turned;
+    any other placement is made again in form at its centre."""
+    if in_form(placement, leds, geometry):
+        return None
+    if isinstance(placement.shape, CylinderShape) and _form(leds, geometry) == "cylinder":
+        return Placement(placement.shape, CYLINDER_ROWS)
+    return placed_in_form(shape_centre(placement.shape), leds, geometry)
 
 
 def _stands(shape: LightShape) -> bool:

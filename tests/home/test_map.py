@@ -6,18 +6,36 @@ from functools import partial
 import numpy as np
 import pytest
 from conftest import KEYBOARD_AND_MOUSE, SERVER, FakeLight, pc_lights
-from map_home import DESK_CORNER, SMALL_MATRIX, UPRIGHT_LAMP, devices_of, open_map, tiny_home
+from map_home import (
+    DESK_CORNER,
+    ROUND_MATRIX,
+    SMALL_MATRIX,
+    UPRIGHT_LAMP,
+    devices_of,
+    open_map,
+    tiny_home,
+)
 
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import HomeError, HomeNotFoundError
-from dj_ledfx.home.shapes import GridShape, LineShape, Placement, PointShape, ShapeError
+from dj_ledfx.home.shapes import (
+    CylinderShape,
+    GridShape,
+    LineShape,
+    Placement,
+    PointShape,
+    ShapeError,
+)
 from dj_ledfx.home.store import HomeStore
 from dj_ledfx.persistence.state_db import StateDB
 
 NOW = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
 DESK_LAMP = Placement(PointShape(DESK_CORNER), "")
 ROPE = Placement(LineShape(((5.0, 1.0, 2.0), (7.0, 1.0, 2.0))), "along-path")
+SEEDED_CANDLE = Placement(
+    CylinderShape((1.0, 3.5, 0.8), 0.12, 0.02), "bottom-to-top", source="seed"
+)  # home.json's order
 
 
 _map = partial(open_map, home=tiny_home(), now=lambda: NOW)
@@ -240,6 +258,19 @@ async def test_an_owner_s_placement_survives_its_light_coming_online(db: StateDB
 
     assert await home_map.refit("lamp") is None  # unconfirmed, and out of form, but the owner's
     assert home_map.placement("lamp") == laid_down
+
+
+async def test_a_seeded_candle_s_rows_are_turned_when_it_comes_online(db: StateDB) -> None:
+    candles = [FakeLight(name, led_count=30, geometry=ROUND_MATRIX) for name in ("seeded", "own")]
+    home_map = await _map(db, candles, placements={"seeded": SEEDED_CANDLE}, seeded=True)
+    own = await home_map.set_placement("own", SEEDED_CANDLE.shape, "bottom-to-top")
+
+    turned = await home_map.refit("seeded")
+
+    assert turned == Placement(SEEDED_CANDLE.shape, "top-to-bottom")  # its spot and size kept
+    assert await HomeStore(db).load_placements() == {"seeded": turned, "own": own}
+    assert await home_map.refit("seeded") is None  # its rows run down now
+    assert await home_map.refit("own") is None  # the owner chose its order
 
 
 async def test_confirmed_offline_fitting_one_led_and_pc_placements_are_left_alone(
