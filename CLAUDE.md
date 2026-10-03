@@ -187,7 +187,7 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4 
 ## Key Design Decisions
 
 - Ring buffer stores FUTURE frames. High-latency devices read newer (further-future) frames.
-- Each zone runtime renders at `now + horizon` into its own ring buffer: its lights' largest latency plus a frame, at most 120 ms (`HORIZON_CAP_S`) and within the lookahead; a light slower than that gets the newest frame and runs late by the difference. Scheduler picks frame at `now + device_latency`.
+- Each zone runtime renders at `now + horizon` into its own ring buffer: its lights' largest latency plus a frame, at most 120 ms (`HORIZON_CAP_S`) and within the lookahead; a light slower than that gets the newest frame and runs late by the difference. A LIFX matrix sits just past the cap (about 123 ms with its display delay, so about 3 ms late, against a measured p95 lateness of 42 ms); the cap stays, since raising it delays every look change in its zone (the light-output plan's ruling 1). Scheduler picks frame at `now + device_latency`.
 - A frame in a ring buffer is never changed after it's written: the runtime renders a new array every tick, `find_nearest` hands out the frame itself, and a route's `to_device_colors` makes the new 8-bit array each send uses.
 - Passive Pro DJ Link mode for MVP (no virtual CDJ handshake needed for beat packets).
 - One `TempoClock`, always running (spec §7.2): Pro DJ Link while a DJ plays, the music's beat from M7, then the internal clock (a BPM, taps, nudges). A takeover snaps the phase once onto the nearest beat and keeps the beat and bar counts; after that, drift is corrected softly under 5 ms and snapped at 5 ms or more. A source quiet for 2 s hands back at the last BPM and phase.
