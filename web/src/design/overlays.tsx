@@ -44,18 +44,35 @@ export function Tooltip({ content, children, side = 'top' }: TooltipProps) {
   )
 }
 
-const SURFACE = 'rounded-card border border-line-strong bg-raised shadow-pop outline-none'
-const HEAD = 'text-section font-semibold text-text'
+/** What every popup's surface is. */
+export const SURFACE = 'rounded-card border border-line-strong bg-raised shadow-pop outline-none'
+/** A popup's title. */
+export const HEAD = 'text-section font-semibold text-text'
 
-/** §6.1 Popover: anchored to its trigger. */
-export function Popover({ trigger, title, children, open, onOpenChange, align = 'center' }: OverlayProps & { align?: 'start' | 'center' | 'end' }) {
+/**
+ * §6.1 Popover: anchored to its trigger. `width` in px, never wider than the viewport allows; `aside` sits
+ * at the title row's end (the attention popover's count, §6.2, State-Problems).
+ */
+export function Popover({
+  trigger,
+  title,
+  children,
+  open,
+  onOpenChange,
+  align = 'center',
+  width,
+  aside,
+}: OverlayProps & { align?: 'start' | 'center' | 'end'; width?: number; aside?: ReactNode }) {
   return (
     <BasePopover.Root open={open} onOpenChange={onOpenChange}>
       <BasePopover.Trigger render={trigger} />
       <BasePopover.Portal>
         <BasePopover.Positioner sideOffset={8} align={align} className="z-50">
-          <BasePopover.Popup className={`overflow-hidden ${SURFACE}`}>
-            <BasePopover.Title className={`px-3.5 py-3 ${HEAD}`}>{title}</BasePopover.Title>
+          <BasePopover.Popup className={`max-w-[calc(100vw-2rem)] overflow-hidden ${SURFACE}`} style={width === undefined ? undefined : { width }}>
+            <div className="flex items-baseline justify-between gap-2 px-3.5 py-3">
+              <BasePopover.Title className={HEAD}>{title}</BasePopover.Title>
+              {aside}
+            </div>
             {children}
           </BasePopover.Popup>
         </BasePopover.Positioner>

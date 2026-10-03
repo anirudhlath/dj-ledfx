@@ -5,6 +5,18 @@ import { Button } from './button'
 import { Dialog, Popover, Sheet, Tooltip } from './overlays'
 
 describe('overlays', () => {
+  it('Popover takes a width, and a count beside its title', async () => {
+    render(
+      <Popover trigger={<button type="button">Open</button>} title="Needs attention" width={430} aside={<span>4</span>}>
+        <p>Items</p>
+      </Popover>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Needs attention' })
+    expect(dialog).toHaveTextContent('Needs attention4')
+    expect(dialog.style.width).toBe('430px')
+  })
+
   // The tooltip is visual only: the trigger's own label names it, and the popup, loose in <body>,
   // stays out of the accessibility tree (and out of axe's region rule).
   it('Tooltip shows on keyboard focus, out of the accessibility tree', async () => {
