@@ -325,6 +325,32 @@ describe('LiveClient', () => {
     expect(latest().sent.map((command) => command.action)).toEqual(['subscribe_beat', 'subscribe_frames', 'subscribe_signals'])
   })
 
+  it("sends a tap with the client's time, and settles it by the server's ack", async () => {
+    client.start()
+    welcome()
+    const tapped = client.tap(1_790_000_000.25)!
+    const id = latest().idOf('tap')
+    expect(latest().sent.at(-1)).toEqual({ action: 'tap', client_time: 1_790_000_000.25, id })
+    latest().say({ channel: 'ack', id, action: 'tap' })
+    await expect(tapped).resolves.toBeUndefined()
+  })
+
+  it('refuses a tap the server refuses, and one the link dropped before it answered', async () => {
+    client.start()
+    welcome()
+    const refused = client.tap(1)!
+    latest().say({ channel: 'error', id: latest().idOf('tap'), detail: 'The tempo is locked to Pro DJ Link: choose Auto or Internal to set it here' })
+    await expect(refused).rejects.toThrow(/locked to Pro DJ Link/)
+    const lost = client.tap(2)!
+    latest().drop()
+    await expect(lost).rejects.toMatchObject({ status: 0 })
+  })
+
+  it('leaves a tap to REST while the link is down', () => {
+    client.start()
+    expect(client.tap(1)).toBeNull()
+  })
+
   it('stops for good: it closes the socket and never retries', () => {
     client.start()
     welcome()

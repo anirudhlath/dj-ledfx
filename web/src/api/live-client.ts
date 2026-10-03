@@ -6,6 +6,7 @@ import { ClockOffset, clientNow, normaliseBeat, type BeatClock } from './beat'
 import type { FrameStream } from './contract'
 import { decodeFrame, type FrameStore, type FrameVersion } from './frames'
 import { applyMessage, type LiveStore } from './live-store'
+import { ApiError } from './rest'
 import { parseMessage, type Command } from './ws-messages'
 
 const BACKOFF_S = [1, 2, 4, 8, 10]
@@ -92,6 +93,8 @@ export class LiveClient {
   private signals: string[] | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private tickTimer: ReturnType<typeof setInterval> | null = null
+  /** Taps sent and not yet answered, by command id: the server's ack settles one, its error refuses it. */
+  private readonly taps = new Map<number, { resolve: () => void; reject: (error: Error) => void }>()
 
   constructor(options: LiveClientOptions) {
     this.url = options.url
@@ -141,6 +144,18 @@ export class LiveClient {
   subscribeSignals(names: string[] = []): void {
     this.signals = names
     if (this.opened) this.sendSignals(names)
+  }
+
+  /**
+   * §6.2's TAP over the socket (§12.4), timed by the client's clock in epoch seconds. Null while the link
+   * isn't open, so the caller uses REST. The promise settles on the server's answer; a drop before it
+   * counts as no answer.
+   */
+  tap(clientTime: number): Promise<void> | null {
+    if (!this.opened) return null
+    return new Promise((resolve, reject) => {
+      this.taps.set(this.send({ action: 'tap', client_time: clientTime }), { resolve, reject })
+    })
   }
 
   private connect(): void {
@@ -233,6 +248,13 @@ export class LiveClient {
       this.frameAskV2 = false
       return
     }
+    if ((message.channel === 'ack' || message.channel === 'error') && typeof message.id === 'number' && this.taps.has(message.id)) {
+      const tap = this.taps.get(message.id)!
+      this.taps.delete(message.id)
+      if (message.channel === 'ack') tap.resolve()
+      else tap.reject(new Error(message.detail))
+      return
+    }
     if (message.channel === 'beat') {
       // The store and the clock share the one Beat.
       const beat = normaliseBeat(message, now)
@@ -268,6 +290,8 @@ export class LiveClient {
     this.socket = null
     this.opened = false
     this.frameVersion = null
+    for (const tap of this.taps.values()) tap.reject(new ApiError(0, 'no answer', '/ws'))
+    this.taps.clear()
   }
 
   /** Once a second: the silence watchdog, and the frame rate for "Live 60 fps". */

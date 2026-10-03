@@ -1,6 +1,6 @@
 // The app's one data layer: a frame store, a beat clock, and the live client that fills them and
-// the live store. main.tsx starts it once; F3's "Try now" and F6/F8's signal subscriptions reach the
-// client through liveClient().
+// the live store. main.tsx starts it once; F3's "Try now" and TAP (actions.ts) and F6/F8's signal
+// subscriptions reach the client through liveClient().
 import { BeatClock } from './beat'
 import { FrameStore } from './frames'
 import { LiveClient, liveSocketUrl, type OpenSocket } from './live-client'

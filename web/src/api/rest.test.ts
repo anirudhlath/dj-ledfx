@@ -54,6 +54,11 @@ const CALLS: { name: string; run: () => Promise<unknown>; method: string; path: 
   { name: 'stopPreview', run: () => api.stopPreview('preview-1'), method: 'DELETE', path: '/api/preview/preview-1' },
   { name: 'recentLooks', run: () => api.recentLooks(), method: 'GET', path: '/api/running/recent' },
   { name: 'inputs', run: () => api.inputs(), method: 'GET', path: '/api/inputs' },
+  { name: 'setTempo', run: () => api.setTempo({ lock: 'auto' }), method: 'PUT', path: '/api/inputs/tempo', body: { lock: 'auto' } },
+  { name: 'tap', run: () => api.tap(1_790_000_000.25), method: 'POST', path: '/api/inputs/tempo/tap', body: { clientTime: 1_790_000_000.25 } },
+  { name: 'nudge', run: () => api.nudge(-0.25), method: 'POST', path: '/api/inputs/tempo/nudge', body: { delta: -0.25 } },
+  { name: 'scanDevices', run: () => api.scanDevices(), method: 'POST', path: '/api/devices/scan' },
+  { name: 'config', run: () => api.config(), method: 'GET', path: '/api/config' },
   { name: 'signals', run: () => api.signals(), method: 'GET', path: '/api/signals' },
 ]
 

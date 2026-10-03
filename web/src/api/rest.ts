@@ -2,8 +2,9 @@
 // call fetch (§12). Paths are checked against the backend's schema (ApiPath) or §12.3 (PendingPath).
 import type {
   Anchor, AnchorIn, AnchorUpdate, ApiPath, AttentionItem, CreateGroup, Home, HomeSettings, Id, Inputs, Light, Look,
-  PendingPath, Placement, PlacementIn, PreviewRequest, PreviewStarted, PreviewUpdate, RecentLook, Running, RunningZone,
-  Signal, StartRequest, StartResponse, SubZone, SubZoneIn, SubZoneUpdate, UpdateGroup, Zone,
+  NudgeRequest, PendingPath, Placement, PlacementIn, PreviewRequest, PreviewStarted, PreviewUpdate, RecentLook, Running,
+  RunningZone, Signal, StartRequest, StartResponse, SubZone, SubZoneIn, SubZoneUpdate, TapRequest, TempoInput, TempoRequest,
+  UpdateGroup, Zone,
 } from './contract'
 
 /** A request that failed. `status` 0 means no answer at all: the server is down, or the network. */
@@ -129,7 +130,17 @@ export const api = {
   /** "Start again" (§9.4): the looks that stopped, newest first (engine M2 plan, Spec Ruling 19). */
   recentLooks: () => request<RecentLook[]>('GET', apiPath('/api/running/recent')),
 
-  // Pending: engine M3, M6 and M7 (mocked until they land)
+  // Served since engine M3: the inputs and the tempo clock's controls (§11.5)
   inputs: () => request<Inputs>('GET', apiPath('/api/inputs')),
+  setTempo: (body: TempoRequest) => request<TempoInput>('PUT', apiPath('/api/inputs/tempo'), body),
+  /** A tap timed by the client's clock, epoch seconds: a hint the engine checks (CLAUDE.md, Key Design Decisions). */
+  tap: (clientTime: number) => request<TempoInput>('POST', apiPath('/api/inputs/tempo/tap'), { clientTime } satisfies TapRequest),
+  nudge: (delta: number) => request<TempoInput>('POST', apiPath('/api/inputs/tempo/nudge'), { delta } satisfies NudgeRequest),
+  /** §9.4 First run's "Find new lights": a discovery scan. The schema leaves its answer untyped. */
+  scanDevices: () => request<Record<string, unknown>>('POST', apiPath('/api/devices/scan')),
+  /** The engine's config, untyped in the schema: §9.4 First run reads which integrations are on. */
+  config: () => request<Record<string, unknown>>('GET', apiPath('/api/config')),
+
+  // Pending: engine M6 and M7 (mocked until they land)
   signals: () => request<Signal[]>('GET', apiPath('/api/signals')),
 }

@@ -30,6 +30,20 @@ export const queries = {
   home: () => queryOptions({ queryKey: ['home'], queryFn: api.home, ...changesElsewhere }),
   inputs: () => queryOptions({ queryKey: ['inputs'], queryFn: api.inputs }),
   signals: () => queryOptions({ queryKey: ['signals'], queryFn: api.signals }),
+  /** §9.4's "Start again": read afresh each time it's shown, as a stop anywhere changes it. */
+  recentLooks: () => queryOptions({ queryKey: ['running', 'recent'], queryFn: api.recentLooks, staleTime: 0 }),
+  /** §9.4 First run: which integrations the engine's config has on. */
+  integrations: () => queryOptions({ queryKey: ['config'], queryFn: api.config, select: integrationsOn }),
+}
+
+const INTEGRATIONS = { openrgb: 'OpenRGB', lifx: 'LIFX', govee: 'Govee' } as const
+
+/** The integrations a config has on, by name. A missing flag is on: the engine's default. */
+export function integrationsOn(config: Record<string, unknown>): string[] {
+  const devices = (config.devices ?? {}) as Record<string, { enabled?: unknown } | undefined>
+  return Object.entries(INTEGRATIONS)
+    .filter(([key]) => devices[key]?.enabled !== false)
+    .map(([, name]) => name)
 }
 
 /** After a reconnect: every query goes stale, and the ones on screen fetch again. */
