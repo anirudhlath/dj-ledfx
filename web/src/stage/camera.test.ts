@@ -89,6 +89,15 @@ describe('the camera (§7.2)', () => {
   })
 
   // Review focus 4: a narrow window, a phone's stage, or one not laid out yet.
+  // §7.2: "Focus framing (zone detail, editor preview, composer on phone): fit the zone's polygon, tilt …°".
+  it('tilts as it is asked, and still looks straight down in Plan', () => {
+    expect(fitPose(OUTLINE, MAIN_STAGE, FIT_VIEW, SPEC.camera.tiltDeg)).toEqual(fitPose(OUTLINE, MAIN_STAGE, FIT_VIEW))
+    const focused = fitPose(OUTLINE, MAIN_STAGE, FIT_VIEW, SPEC.focus.tiltDeg)!
+    expect((Math.asin(focused.back[1]) * 180) / Math.PI).toBeCloseTo(SPEC.focus.tiltDeg, 6)
+    const plan = { ...FIT_VIEW, mode: 'plan' } as const
+    expect(fitPose(OUTLINE, MAIN_STAGE, plan, SPEC.focus.tiltDeg)).toEqual(fitPose(OUTLINE, MAIN_STAGE, plan))
+  })
+
   it('fits a 320 px stage and a zero-size one without NaN', () => {
     const narrow = fitPose(OUTLINE, { width: 320, height: 220 }, FIT_VIEW)!
     expect([...narrow.target, narrow.zoom].every(Number.isFinite)).toBe(true)

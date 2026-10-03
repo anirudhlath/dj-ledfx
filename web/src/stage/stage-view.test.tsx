@@ -9,16 +9,18 @@ import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
 import { pushFrame } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
-import { drawn, heroPose, loadedStage, MAIN_STAGE, seedStage } from '@/test/stage'
+import { drawn, heroPose, loadedStage, MAIN_STAGE, seedStage, stageWriter } from '@/test/stage'
 import { setReducedMotion, setViewportWidth } from '@/test/viewport'
 import { lightBodies } from './bodies'
-import { FIT_VIEW, projectPoint } from './camera'
+import { FIT_VIEW, fitPose, projectPoint } from './camera'
 import { SPEC } from './design-numbers'
 import { anchorOf } from './marks'
 import { STAGE_LABEL } from './stage-pending'
 import { sunPosition, sunScene } from './sun'
+import Stage from './stage'
 import { readStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
+import { zonePolygons } from './zone-shape'
 
 // jsdom has no WebGL: the canvas is src/test/stage.ts's stand-in, which keeps the props it was given
 // last in `drawn`. The rest of the stage (the SVG layer, the overlays, the pointer) is the real one.
@@ -286,5 +288,32 @@ describe('the stage on Live (§7, §8.1)', () => {
     await openLive('transition')
     const stage = screen.getByRole('region', { name: STAGE_LABEL })
     expect(within(stage).getByText(/^Fireflies → Embers · dissolving/)).toHaveTextContent('Fireflies → Embers · dissolving 62%')
+  })
+})
+
+describe('the stage in focus (§7.6)', () => {
+  it("frames the zone at the focus tilt, hides the other zones' lights, and keeps the frame through a drop", async () => {
+    const state = seedStage('hero')
+    renderApp('/next/focus', { routes: [{ path: '/focus', element: <Stage variant="phone" focus="living" /> }] })
+    await loadedStage()
+    act(() => resizeObserved(390, 280))
+    const zone = state.zones.find((each) => each.id === 'living')!
+    const framed = fitPose(zonePolygons(state.home, zone, state.lights).flat(), { width: 390, height: 280 }, FIT_VIEW, SPEC.focus.tiltDeg)
+    expect(drawn.props!.pose).toEqual(framed)
+    // The canvas draws the zone's lights as it would draw them in the whole home (an offline light is a
+    // mark, not a light), and none of the lights round it.
+    const lightIds = (entries: readonly { body: { lightId: string } }[]) => entries.map((entry) => entry.body.lightId)
+    const inZone = state.lights.filter((light) => zone.lights.includes(light.id))
+    const zoneDrawn = lightIds(stageWriter(inZone, { rooms: state.home.rooms }).entries)
+    expect(lightIds(drawn.props!.entries)).toEqual(zoneDrawn)
+    expect(lightIds(stageWriter(state.lights, { rooms: state.home.rooms }).entries).length).toBeGreaterThan(zoneDrawn.length)
+    // The picture alone: no room links, no overlays, and a vignette over it.
+    expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
+    expect(picture().querySelector('[data-vignette]')).not.toBeNull()
+
+    act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
+    expect(drawn.props!.pose).toEqual(framed)
+    expect(picture().style.filter).toBe(`grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`)
   })
 })

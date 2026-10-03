@@ -1,11 +1,14 @@
 // §7.6's modes table in code: what the stage does in each mode, on each variant (§8.10's phone).
 // StageView asks once and hands the answers down; nothing else checks the mode or the variant. The
-// modes F3, F4 and F7 bring (compose, focus, map) extend it.
+// modes F4 and F7 bring (compose, map) extend it.
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { SPEC } from './design-numbers'
 
-/** §7.6's modes so far: `live`, and `frozen` while the link is down (§9.4 Reconnecting). */
-export type StageMode = 'live' | 'frozen'
+/**
+ * §7.6's modes so far: `live`; `focus`, framed on one zone (Zone detail; the editor's preview and the
+ * phone's tweak later); and `frozen` while the link is down (§9.4 Reconnecting), on either.
+ */
+export type StageMode = 'live' | 'focus' | 'frozen'
 /** The phone's stage is §8.10's: no labels, no overlays. */
 export type StageVariant = 'desktop' | 'phone'
 
@@ -43,12 +46,14 @@ export interface StageBehaviour {
 export function stageBehaviour({ mode, variant, reducedMotion, labels }: StageOptions): StageBehaviour {
   const live = mode === 'live'
   const phone = variant === 'phone'
+  // §7.6 focus is the zone's picture alone: what frames it and hides the other lights is StageView's `focus`.
+  const focus = mode === 'focus'
   return {
     interactive: live,
-    overlays: !phone,
-    labels: !phone && labels,
-    sunLabel: !phone,
-    greyed: !live,
-    cadenceMs: !live ? null : reducedMotion ? LIVE_SPEC.reducedMotionMs : 1000 / (phone ? SPEC.phoneFps : SPEC.target.fps),
+    overlays: !phone && !focus,
+    labels: !phone && !focus && labels,
+    sunLabel: !phone && !focus,
+    greyed: mode === 'frozen',
+    cadenceMs: mode === 'frozen' ? null : reducedMotion ? LIVE_SPEC.reducedMotionMs : 1000 / (phone ? SPEC.phoneFps : SPEC.target.fps),
   }
 }

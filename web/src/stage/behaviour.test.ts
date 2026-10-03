@@ -19,6 +19,19 @@ describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)",
     expect(behaviour({ labels: false })).toMatchObject({ labels: false, sunLabel: true })
   })
 
+  // §7.6 focus: "Framed on one zone, other zones' lights hidden, soft vignette": the picture alone.
+  it('draws the picture alone in focus, at the rate of its variant', () => {
+    expect(behaviour({ mode: 'focus', variant: 'phone' })).toEqual({
+      interactive: false,
+      overlays: false,
+      labels: false,
+      sunLabel: false,
+      greyed: false,
+      cadenceMs: 1000 / SPEC.phoneFps,
+    })
+    expect(behaviour({ mode: 'focus' })).toMatchObject({ overlays: false, labels: false, cadenceMs: 1000 / SPEC.target.fps })
+  })
+
   it("has no labels or overlays on the phone, and draws at the phone's rate", () => {
     expect(behaviour({ variant: 'phone' })).toMatchObject({ interactive: true, overlays: false, labels: false, sunLabel: false })
     expect(behaviour({ variant: 'phone' }).cadenceMs).toBeCloseTo(1000 / SPEC.phoneFps)

@@ -87,12 +87,12 @@ export function fitPadding(size: ElementSize): Padding {
 
 /**
  * The pose that fits the outline, from the floor to SPEC.fit.heightM, inside the padding, for the
- * view; null while the stage has no size or the home no outline.
+ * view, tilted `tiltDeg` above the horizon (§7.2; focus framing tilts SPEC.focus.tiltDeg); Plan looks
+ * straight down whatever the tilt. Null while the stage has no size or the outline no points.
  */
-export function fitPose(outline: readonly Vec2[], size: ElementSize, view: View): CameraPose | null {
+export function fitPose(outline: readonly Vec2[], size: ElementSize, view: View, tiltDeg: number = SPEC.camera.tiltDeg): CameraPose | null {
   if (!(size.width > 0 && size.height > 0) || outline.length === 0) return null
-  const tiltDeg = view.mode === 'plan' ? 90 : SPEC.camera.tiltDeg
-  const { right, up, back } = axes(bearingDeg(view.rotateDeg), tiltDeg)
+  const { right, up, back } = axes(bearingDeg(view.rotateDeg), view.mode === 'plan' ? 90 : tiltDeg)
   const corners = outline.flatMap(([x, y]) => [toWorld([x, y, 0]), toWorld([x, y, SPEC.fit.heightM])])
   const span = (axis: Vec3): Vec2 => {
     const values = corners.map((corner) => dot(corner, axis))

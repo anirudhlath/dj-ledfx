@@ -10,8 +10,16 @@ import { useStageData } from './use-stage-data'
 /** "Click a room → /live/put?zone=<room>" (§8.1): a room's zone has the room's id. */
 const composerFor = (room: Room) => `/live/put?zone=${encodeURIComponent(room.id)}`
 
-export default function Stage({ variant, outlined = null }: { variant: StageVariant; outlined?: Id | null }) {
+export interface StageProps {
+  variant: StageVariant
+  /** The zone to outline (Task 12). */
+  outlined?: Id | null
+  /** §7.6 focus: the zone the stage frames (Zone detail). */
+  focus?: Id | null
+}
+
+export default function Stage({ variant, outlined = null, focus = null }: StageProps) {
   const data = useStageData()
   if (data === null) return <StagePending />
-  return <StageView data={data} variant={variant} route="live" roomTo={composerFor} outlined={outlined} />
+  return <StageView data={data} variant={variant} route="live" roomTo={composerFor} outlined={outlined} focus={focus} />
 }
