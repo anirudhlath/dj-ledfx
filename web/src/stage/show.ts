@@ -11,11 +11,19 @@ export interface LightState {
   since: string
   power: boolean | null
   colour: RGB | null
+  /** The built-in effect it runs, or streams a copy of; null for none (§9.1). */
+  ownEffect: string | null
 }
 
 export function lightState(light: Light, update: LightUpdate | undefined): LightState {
   const from = update ?? light
-  return { status: from.status, since: from.statusSince, power: from.power ?? null, colour: parseHex(from.colour) }
+  return {
+    status: from.status,
+    since: from.statusSince,
+    power: from.power ?? null,
+    colour: parseHex(from.colour),
+    ownEffect: from.ownEffect ?? null,
+  }
 }
 
 /** Each light's state, from its REST record and the latest push's update for it, if any. */

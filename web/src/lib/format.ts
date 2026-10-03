@@ -39,3 +39,26 @@ export function formatTrackBpm(bpm: number): string {
 export function formatPitch(percent: number): string {
   return `${percent >= 0 ? '+' : ''}${percent.toFixed(1)}%`
 }
+
+/** "19:14:05": the phone's "last frame" while the link is down (Phone-State-Reconnecting). */
+export function formatTimeWithSeconds(date: Date): string {
+  return `${formatTime(date)}:${pad(date.getSeconds())}`
+}
+
+/**
+ * A duration as §10 writes it: "42 s", "9 m", "1 h 10 m", "2 h". `'min'` writes the minutes as the slow
+ * note does ("for 2 min", State-Problems). Floored, and never below zero.
+ */
+export function formatDuration(ms: number, minutes: 'm' | 'min' = 'm'): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  if (seconds < 60) return `${seconds} s`
+  const total = Math.floor(seconds / 60)
+  const [hours, rest] = [Math.floor(total / 60), total % 60]
+  if (hours === 0) return `${rest} ${minutes}`
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} ${minutes}`
+}
+
+/** "2.4 s left": an overlay's time (Live-Doorbell), never below zero. */
+export function formatSecondsLeft(ms: number): string {
+  return `${(Math.max(0, ms) / 1000).toFixed(1)} s left`
+}

@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { HERO_NOW } from '@/test/live'
-import { formatBpm, formatDayDateTime, formatDayTime, formatLatency, formatPitch, formatTime, formatTrackBpm } from './format'
+import {
+  formatBpm,
+  formatDayDateTime,
+  formatDayTime,
+  formatDuration,
+  formatLatency,
+  formatPitch,
+  formatSecondsLeft,
+  formatTime,
+  formatTimeWithSeconds,
+  formatTrackBpm,
+} from './format'
 
 describe('format', () => {
   const hero = HERO_NOW
@@ -32,5 +43,22 @@ describe('format', () => {
   it('writes a latency in whole ms, an estimate with a tilde', () => {
     expect(formatLatency(38.4)).toBe('38 ms')
     expect(formatLatency(40, true)).toBe('~40 ms')
+  })
+
+  // §10: "Durations: 1 h 10 m, 9 m, 42 s". §14 Unit: "formatters (durations)".
+  it('writes durations as §10 does, floored and never negative', () => {
+    expect(formatDuration(42_000)).toBe('42 s')
+    expect(formatDuration(9 * 60_000 + 59_000)).toBe('9 m')
+    expect(formatDuration(70 * 60_000)).toBe('1 h 10 m')
+    expect(formatDuration(120 * 60_000)).toBe('2 h')
+    // State-Problems: "38 of 60 fps for 2 min".
+    expect(formatDuration(2 * 60_000 + 30_000, 'min')).toBe('2 min')
+    expect(formatDuration(-5_000)).toBe('0 s')
+  })
+
+  it("writes an overlay's time left, never below zero, and a clock with seconds", () => {
+    expect(formatSecondsLeft(2_400)).toBe('2.4 s left')
+    expect(formatSecondsLeft(-300)).toBe('0.0 s left')
+    expect(formatTimeWithSeconds(new Date(2026, 8, 23, 19, 14, 5))).toBe('19:14:05')
   })
 })
