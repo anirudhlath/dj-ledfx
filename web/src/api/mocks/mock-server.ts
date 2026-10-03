@@ -563,7 +563,9 @@ export class MockServer {
       for (const id of zone.lights) {
         const light = lights.get(id)
         if (light === undefined || !STREAMED.has(light.status)) continue
-        this.live.push(this.painted(id, light.leds, spec, zone.brightness, zone.state === 'crashed'))
+        // A zone waiting for its input waits dark (§6.3).
+        const brightness = zone.state === 'waiting' ? 0 : zone.brightness
+        this.live.push(this.painted(id, light.leds, spec, brightness, zone.state === 'crashed'))
       }
     }
   }

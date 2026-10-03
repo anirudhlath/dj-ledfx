@@ -46,6 +46,17 @@ function decoded(frames: ArrayBuffer[], version: 1 | 2) {
 }
 
 describe('a connection', () => {
+  it('streams black to the lights of a zone that waits for its input', () => {
+    const socket = connect(startMockServer({ scenario: 'waiting' }))
+    socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live'] })
+    vi.advanceTimersByTime(200)
+    const frames = decoded(socket.binary(), 2)
+    const waiting = buildScenario('waiting', HERO_NOW).running.find((zone) => zone.state === 'waiting')!
+    const streamed = waiting.lights.filter((id) => frames.live.has(id))
+    expect(streamed.length).toBeGreaterThan(0)
+    for (const id of streamed) expect(frames.live.get(id)!.rgb.every((byte) => byte === 0)).toBe(true)
+  })
+
   it('hears the snapshots first, v2 adding decks and inputs', () => {
     expect(connect(startMockServer()).json().map((message) => message.channel)).toEqual([
       'running', 'lights', 'attention', 'transport', 'decks', 'inputs',

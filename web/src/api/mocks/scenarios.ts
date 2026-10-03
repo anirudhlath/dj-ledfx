@@ -22,6 +22,8 @@ export const SCENARIOS = [
   'reconnecting',
   'dj-playing',
   'preview-only',
+  'waiting',
+  'first-run',
 ] as const
 export type ScenarioName = (typeof SCENARIOS)[number]
 
@@ -281,6 +283,13 @@ function heroSignals(): Signal[] {
   ]
 }
 
+/** Main.png's Home sunset card carries the Evening modifier (F3 decision 11); looks.json's has none. */
+function withEvening(looks: Look[]): Look[] {
+  const sunset = looks.find((look) => look.id === 'homesunset')
+  if (sunset?.modifiers != null) sunset.modifiers.evening = true
+  return looks
+}
+
 function base(name: ScenarioName, now: Date): ScenarioState {
   const home = structuredClone(homeFixture)
   const lights = lightFixtures(after(now, -70 * MINUTE))
@@ -288,7 +297,7 @@ function base(name: ScenarioName, now: Date): ScenarioState {
     name,
     home,
     lights,
-    looks: structuredClone(lookFixtures),
+    looks: withEvening(structuredClone(lookFixtures)),
     zones: zoneFixtures(home, lights),
     running: [],
     overlays: [],
@@ -328,9 +337,26 @@ function hero(state: ScenarioState, now: Date): void {
 }
 
 /** State-Inputs-Down: the music went quiet 42 s ago, so the tempo fell back to Internal. */
-function inputsDown(state: ScenarioState, now: Date): void {
+/** With no music and no DJ, the tempo falls back to Internal, at the hero's tapped 118 BPM. */
+function onInternal(state: ScenarioState): void {
   state.beat = { ...state.beat, source: 'internal', bpm: 118 }
   state.inputs.tempo = { ...state.inputs.tempo, source: 'internal', bpm: 118, stale: false }
+}
+
+/** "Music Assistant: nothing playing." (Phone-Tempo): connected, and no track. */
+function musicIdle(state: ScenarioState): void {
+  state.inputs.music = {
+    ...state.inputs.music,
+    state: 'idle',
+    track: null,
+    loudness: 0,
+    spectrum: SPECTRUM.map(() => 0),
+    onsets: { kick: 0, snare: 0, hihat: 0 },
+  }
+}
+
+function inputsDown(state: ScenarioState, now: Date): void {
+  onInternal(state)
   state.inputs.music = { ...state.inputs.music, state: 'stale', updatedAt: after(now, -42 * SECOND) }
   state.inputs.homeAssistant = {
     ...state.inputs.homeAssistant,
@@ -384,7 +410,8 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
   firmware(state, now) {
     run(state, HOME_ZONE, 'firmware', after(now, -10 * MINUTE), 0.9)
     for (const light of state.lights) {
-      if (light.builtInEffects.length === 0) setLight(state, light.id, { status: 'streamed-copy' })
+      // State-Firmware: "Streamed copy of Flame". The engine names the effect a copy streams in ownEffect.
+      if (light.builtInEffects.length === 0) setLight(state, light.id, { status: 'streamed-copy', ownEffect: 'LIFX Flame' })
       else setLight(state, light.id, { status: 'own-effect', ownEffect: light.builtInEffects[0] })
     }
   },
@@ -432,19 +459,29 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
     ] // engine M3 hears a deck once it plays, and can't tell an empty one (its ruling 6)
     state.inputs.tempo = { ...state.inputs.tempo, source: 'prodjlink', bpm: state.beat.bpm, stale: false }
     state.inputs.prodjlink = { ...state.inputs.prodjlink, state: 'connected' }
-    // "Music Assistant: nothing playing."
-    state.inputs.music = {
-      ...state.inputs.music,
-      state: 'idle',
-      track: null,
-      loudness: 0,
-      spectrum: SPECTRUM.map(() => 0),
-      onsets: { kick: 0, snare: 0, hihat: 0 },
-    }
+    musicIdle(state)
   },
   'preview-only'(state, now) {
     hero(state, now)
     state.previewOnly = true
+  },
+  waiting(state, now) {
+    hero(state, now)
+    musicIdle(state)
+    onInternal(state)
+    // §6.3: "Nothing playing on Music Assistant. The look waits dark and starts with the music."
+    Object.assign(runningOf(state, 'living'), {
+      lookId: 'spectrum',
+      lookName: lookName('spectrum'),
+      since: after(now, -2 * MINUTE),
+      state: 'waiting',
+      waitingFor: ['music'],
+    } satisfies Partial<RunningZone>)
+  },
+  'first-run'(state) {
+    // §9.4: "First run, no lights found". The home map is there; no light is.
+    state.lights = []
+    state.zones = zoneFixtures(state.home, [])
   },
 }
 
