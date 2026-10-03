@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
-from conftest import builtin_look, span
+from conftest import builtin_look, nearest_frame, span
 from loguru import logger
 from tempo_fakes import START, FakeTime, tempo_clock
 
@@ -106,13 +106,11 @@ def _runtime(
 
 
 def _latest(runtime: ZoneRuntime) -> np.ndarray:
-    frame = runtime.ring.find_nearest(1e9)
-    assert frame is not None
-    return frame.colors
+    return nearest_frame(runtime.ring, 1e9).colors
 
 
 def _sent(runtime: ZoneRuntime, light: str, at: float, leds: int) -> np.ndarray:
-    """What a light's route sends of the frame nearest `at`, to a device of `leds` LEDs."""
+    """What a light's route sends at `at`, to a device of `leds` LEDs."""
     route = runtime.route_for(light)
     assert route is not None
     sent = route.colors_at(at, leds)
@@ -165,8 +163,7 @@ def test_a_streamed_copy_is_drawn_as_on_the_whole_zone() -> None:
     runtime = _runtime(_look(_field(), flame), lights, clock=clock)
     runtime.mark_emulated("tile")
     runtime.tick(100.0)
-    frame = runtime.ring.find_nearest(1e9)
-    assert frame is not None
+    frame = nearest_frame(runtime.ring, 1e9)
     ctx = render_context(clock, frame.target_time, 1 / 60)
     whole = LifxFlame().emulate(ctx, runtime.leds)
     assert np.array_equal(frame.colors[1:5], whole[1:5])
@@ -199,8 +196,7 @@ def test_each_tick_renders_a_new_frame(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_frames_are_rendered_for_now_plus_the_horizon() -> None:
     runtime = _runtime(_look(_field()), latencies={"lamp": 0.1})
     runtime.tick(100.0)
-    frame = runtime.ring.find_nearest(100.0)
-    assert frame is not None
+    frame = nearest_frame(runtime.ring, 100.0)
     assert frame.target_time == pytest.approx(100.0 + 0.1 + 1 / 60)
     assert frame.colors.dtype == np.float32 and frame.colors.shape == (8, 3)
 
@@ -219,6 +215,15 @@ def test_the_horizon_counts_only_connected_lights_that_stream() -> None:
     runtime = _runtime(_look(_field(), _glow()), latencies=latencies)
     assert runtime.mode_of("tile") == "own-effect"
     assert runtime.horizon_s == pytest.approx(0.1 + 1 / 60)
+
+
+# A zone over its frame budget renders every few ticks, so its newest frame can be that many
+# ticks old: the horizon adds a rendered frame, and its slowest light still has a frame after
+# its moment to blend toward.
+def test_a_zone_over_its_budget_renders_a_rendered_frame_further_ahead() -> None:
+    runtime = _runtime(_look(_field()), timer=itertools.count(0.0, 0.011).__next__)
+    runtime.tick(100.0)  # 11 ms a frame, over the 5 ms budget: every third tick
+    assert runtime.horizon_s == pytest.approx(0.02 + 3 / 60)
 
 
 def test_opacity_scales_the_frame_and_brightness_the_send() -> None:
@@ -344,8 +349,8 @@ def test_a_route_follows_its_zone_when_the_zone_rebuilds_its_leds() -> None:
     runtime.set_lights([ZoneLight("lamp", 3, LAMP), ZoneLight("tile", 4, TILE)])
     runtime.tick(100.0)
 
-    frame = runtime.ring.find_nearest(1e9)
-    assert frame is not None and span(lamp) == (0, 3)
+    frame = nearest_frame(runtime.ring, 1e9)
+    assert span(lamp) == (0, 3)
     colours = lamp.colors_at(frame.target_time, 3)
     assert colours is not None and np.array_equal(colours, to_device_colors(frame.colors[:3], 3))
 

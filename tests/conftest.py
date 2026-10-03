@@ -31,7 +31,7 @@ from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.route import DeviceRoute
 from dj_ledfx.spatial.geometry import DeviceGeometry
 from dj_ledfx.tempo.timeline import beat_and_bar
-from dj_ledfx.types import DeviceInfo, DeviceStats, FloatRGB
+from dj_ledfx.types import DeviceInfo, DeviceStats, FloatRGB, RenderedFrame
 
 
 class MockDeviceAdapter(DeviceAdapter):
@@ -312,6 +312,14 @@ def ring_route(
     """A route to LEDs start..stop of ring's frames, sent at this brightness."""
     leds = build_ledset([LedSource("before", start), LedSource("light", stop - start)])
     return DeviceRoute(RingSource(ring, leds, brightness), "light", streaming)
+
+
+def nearest_frame(ring: RingBuffer, target_time: float) -> RenderedFrame:
+    """The frame in ring nearest target_time (1e9: the newest); the ring must hold one."""
+    found = ring.find_around(target_time)
+    assert found is not None
+    first, second, weight = found
+    return second if weight > 0.5 else first
 
 
 def span(route: DeviceRoute) -> tuple[int, int]:

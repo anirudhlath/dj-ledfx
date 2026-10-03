@@ -29,17 +29,6 @@ def to_device_colors(colors: FloatRGB, led_count: int, scale: float = 1.0) -> ND
     return out
 
 
-def slice_colors(
-    colors: FloatRGB, start: int, stop: int, led_count: int, scale: float = 1.0
-) -> NDArray[np.uint8] | None:
-    """LEDs start..stop of a zone frame in 8 bits, for a device of led_count LEDs, scaled by
-    the zone's brightness. None when the frame is shorter: it was rendered for an LED set
-    since rebuilt."""
-    if colors.shape[0] < stop:
-        return None
-    return to_device_colors(colors[start:stop], led_count, scale)
-
-
 class FrameSource(Protocol):
     """What a route reads: a zone's runtime (zones/runtime.py)."""
 
@@ -63,13 +52,12 @@ class DeviceRoute:
     streaming: bool  # False while the light runs a firmware layer itself
 
     def colors_at(self, target_time: float, led_count: int) -> NDArray[np.uint8] | None:
-        """This device's slice of the zone frame nearest target_time, or None."""
+        """This device's slice of its zone's frames at target_time, blended from the two
+        either side of it, in 8 bits, or None."""
         piece = self.source.leds.slice_for(self.device_id)
         if piece is None or piece.count == 0:
             return None
-        frame = self.source.ring.find_nearest(target_time)
-        if frame is None:
+        colors = self.source.ring.colors_at(target_time, piece.start, piece.stop)
+        if colors is None:
             return None
-        return slice_colors(
-            frame.colors, piece.start, piece.stop, led_count, self.source.brightness
-        )
+        return to_device_colors(colors, led_count, self.source.brightness)

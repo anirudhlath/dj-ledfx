@@ -199,16 +199,17 @@ class ZoneRuntime:
 
     @property
     def horizon_s(self) -> float:
-        """The largest latency of the zone's lights that take its frames, plus one frame,
-        capped at HORIZON_CAP_S and the lookahead. A light running its own effect, or not
-        connected (latency None), takes none."""
+        """The largest latency of the zone's lights that take its frames, plus one rendered
+        frame (a zone over its budget renders every few ticks), capped at HORIZON_CAP_S and
+        the lookahead. A light running its own effect, or not connected (latency None), takes
+        none."""
         latency = 0.0
         for light in self._lights:
             if light.device_id not in self._claims:
                 light_s = self._latency_s(light.device_id)
                 if light_s is not None and light_s > latency:
                     latency = light_s
-        return min(latency + 1.0 / self._fps, HORIZON_CAP_S, self._max_lookahead_s)
+        return min(latency + self._stride / self._fps, HORIZON_CAP_S, self._max_lookahead_s)
 
     def claim_for(self, device_id: str) -> tuple[Layer, FirmwareEffect] | None:
         index = self._claims.get(device_id)

@@ -6,6 +6,8 @@ Turn dj-ledfx from a Pro-DJ-Link-driven LED strip engine into an always-on effec
 
 **Amended 2026-10-01** by [the light-output plan](../plans/2026-10-01-light-output-fixes.md) (the owner's rulings O1–O3, and the plan's rulings 1–22 with 20 replaced by the owner's ruling that no design file changes): a zone renders at most 120 ms ahead; latency is one way, measured while a device streams, plus its display delay; each device is sent at its own rate, and an unchanged frame isn't sent again; brightness applies at send; placements fit each light's form; Govee lamps stream per segment by razer, and each lamp keeps its own output. §3, §4.1, §4.3, §6.1, §6.3 and §8 say how. Aurora's curtains reach the floor by default; the band stays the look's setting.
 
+**Amended 2026-10-02:** a device's send loop, and the web app's live stream, blend the two frames either side of their moment, where they read the nearest one (§4.1). A light's moment shifts by less than a frame each time its latency is measured again, and the engine's and the distributor's ticks are stamped with the time each ran, which wanders by a millisecond or so; near half-way between two frames, the nearest frame showed that as one frame sent twice and the next skipped. A zone over its frame budget adds a rendered frame to its horizon, not a tick, and still sends each device at the device's own rate, the blend filling in between the frames it renders. A flash shorter than a frame now reaches a light spread over two sends at lower levels, and a device past the horizon cap still gets the newest frame alone.
+
 ## 1. Goals and Scope
 
 **Goals**
@@ -46,7 +48,7 @@ That is 29 looks: 1 + 6 + 4 + 11 + 3 + 4.
 |---|---|
 | Effects render a 1D strip: `render(ctx: BeatContext, led_count)` | Effects render every LED of a zone at its 3D position; 1D effects keep working through a strip adapter |
 | `SpatialCompositor` maps the strip onto devices with `LinearMapping` / `RadialMapping` | Removed, except inside the strip adapter |
-| `EffectEngine.tick()` renders each `ScenePipeline` at `now + max_lookahead_s` (1 s) | Renders each zone at `now + horizon`; the horizon is the zone's slowest device latency plus one frame, at most 120 ms |
+| `EffectEngine.tick()` renders each `ScenePipeline` at `now + max_lookahead_s` (1 s) | Renders each zone at `now + horizon`; the horizon is the zone's slowest device latency plus one rendered frame, at most 120 ms |
 | `BeatContext`: `beat_phase`, `bar_phase`, `bpm`, `dt` | `RenderContext` adds absolute time, beat and bar index, and signals, all sampled at the frame's target time |
 | Global transport: STOPPED / PLAYING / SIMULATING; devices only receive frames while PLAYING | No global play. Assigning a look starts it; Off stops it. A global preview-only toggle replaces SIMULATING |
 | Scenes with placements; activating a scene is refused while one of its devices is in another active scene | Zones on one home map; a device is in at most one active zone, and the newest assignment takes it over |
@@ -69,13 +71,13 @@ ZoneRuntime (one per active zone; preview runtimes render for the web app only)
   Look: layers + modifiers ── render(ctx at target time) ──► ring buffer
                                   (float RGB, every LED in the zone)
                                                │
-LookaheadScheduler: per-device send loop ── frame at now + latency ──► device slice ──► adapter
+LookaheadScheduler: per-device send loop ── frames either side of now + latency, blended ──► device slice ──► adapter
 Firmware layers ──► effect start/stop on the device (that device skips streaming)
 ```
 
 - A **zone runtime** owns the look instance, the zone's `LedSet` (every LED of every device in the zone, in a fixed order), the zone's ring buffer, and each device's slice `[offset, offset + led_count)`.
-- The engine renders each zone's frame for `now + horizon`. The horizon is the zone's largest device latency plus one frame, at most 120 ms (`HORIZON_CAP_S`), so reactive looks stay responsive: a device slower than that gets the newest frame and runs late by the difference. The ring buffer only needs to cover the horizon.
-- Each device's send loop reads the frame nearest `now + its latency`, takes its slice, scales it by the zone's brightness, converts float RGB to the device format and sends it, at the device's own rate: LIFX strips and matrices at most 20 a second (LIFX's documented ceiling), a Govee lamp 30 a second by razer and 10 by `colorwc`. A frame equal to the last one sent isn't sent again for up to a second; a route set (a new look, or a light readied again), a new adapter or a drop-out sends the next frame whatever it is. Devices claimed by a firmware layer skip streaming.
+- The engine renders each zone's frame for `now + horizon`. The horizon is the zone's largest device latency plus one rendered frame (a zone over its frame budget renders every few ticks), at most 120 ms (`HORIZON_CAP_S`), so reactive looks stay responsive: a device slower than that gets the newest frame and runs late by the difference. The ring buffer only needs to cover the horizon.
+- Each device's send loop reads its slice of the two frames either side of `now + its latency`, blended by where that moment falls between them (a moment before the first frame or past the last reads that frame alone), scales it by the zone's brightness, converts float RGB to the device format and sends it, at the device's own rate: LIFX strips and matrices at most 20 a second (LIFX's documented ceiling), a Govee lamp 30 a second by razer and 10 by `colorwc`. A frame equal to the last one sent isn't sent again for up to a second; a route set (a new look, or a light readied again), a new adapter or a drop-out sends the next frame whatever it is. Devices claimed by a firmware layer skip streaming. The web app's live stream reads the zone's colours at now the same way, blended.
 - A device's latency is one way: half of each round trip (a LIFX echo probe's, a Govee status read's), counted only within 0.5 s of a frame sent to that device (idle round trips run long under Wi-Fi power save), in a windowed median of 9, plus the device's display delay: half a LIFX fade, and for a matrix `MATRIX_DISPLAY_MS` more, measured on the real lights.
 - A **preview runtime** is a zone runtime whose frames go only to the web app's preview stream. The web app uses one to show a look before it starts and while it is being edited. It never sends to devices and never touches captured state.
 - Colour stays float RGB through the whole layer stack and is clamped and converted once, at send.

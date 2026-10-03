@@ -3,10 +3,11 @@ from __future__ import annotations
 from functools import partial
 
 import numpy as np
-from conftest import FakeLight
+from conftest import FakeLight, nearest_frame
 from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
 
 from dj_ledfx.scheduling.route import to_device_colors
+from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.frames import FrameFeed, Watchers
 from dj_ledfx.zones.preview import PreviewManager
 
@@ -44,8 +45,8 @@ async def test_the_live_stream_has_every_zone_light_and_the_preview_stream_its_o
     runtime.tick(100.0)
 
     live = feed.frames("live")
-    frame = runtime.ring.find_nearest(100.0)
-    assert frame is not None and set(live) == {"lamp", "tile"}
+    frame = nearest_frame(runtime.ring, 100.0)
+    assert set(live) == {"lamp", "tile"}
     assert np.array_equal(live["lamp"], to_device_colors(frame.colors[:4], 4))
     assert home.routes.routes["tile"].streaming is False  # never sent to the tile...
     assert np.array_equal(live["tile"], to_device_colors(frame.colors[4:], 4))  # ...but shown
@@ -86,7 +87,23 @@ async def test_a_zone_draws_lights_running_their_own_effect_only_while_live_is_w
     watchers.set(tab, ["live"])
     now[0] = 100.2
     runtime.tick(100.2)
+    now[0] = 100.2 + runtime.horizon_s  # the moment that frame is for
     assert feed.frames("live")["tile"].min() == 128  # Glow's level, 0.5, drawn for the stage
+
+
+# The live stream is what each light shows now: blended from the frames either side of
+# now, as the lights are sent them.
+async def test_the_web_app_sees_a_zone_blended_between_its_frames(make_home: HomeFactory) -> None:
+    home = await make_home([FakeLight("lamp")], [zone_record("z", "lamp")])
+    await home.manager.start("z", GLOW)
+    feed = FrameFeed(
+        home.manager.live_runtimes, home.manager.preview_runtimes, clock=lambda: 100.25
+    )
+    runtime = home.host.runtimes["z"]
+    count = runtime.leds.count
+    for t, level in ((100.0, 0.0), (101.0, 1.0)):
+        runtime.ring.write(RenderedFrame(np.full((count, 3), level, np.float32), t, 0.0, 0.0))
+    assert feed.frames("live")["lamp"].tolist() == [[64, 64, 64]] * count  # a quarter of 255
 
 
 async def test_the_web_app_sees_a_zone_at_its_brightness(make_home: HomeFactory) -> None:
@@ -98,8 +115,8 @@ async def test_the_web_app_sees_a_zone_at_its_brightness(make_home: HomeFactory)
     )
     runtime = home.host.runtimes["z"]
     runtime.tick(100.0)
-    frame = runtime.ring.find_nearest(100.0)
-    assert frame is not None and np.allclose(frame.colors, 0.5)  # Glow's level, at full brightness
+    frame = nearest_frame(runtime.ring, 100.0)
+    assert np.allclose(frame.colors, 0.5)  # Glow's level, at full brightness
     count = runtime.leds.count
     expected = to_device_colors(frame.colors[:count] * np.float32(0.5), count)
     assert np.array_equal(feed.frames("live")["lamp"], expected)

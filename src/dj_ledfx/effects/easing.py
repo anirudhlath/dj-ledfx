@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 import math
-from typing import overload
+from typing import Any, overload
 
 import numpy as np
 from numpy.typing import NDArray
 
 
-def lerp(a: float, b: float, t: float | NDArray[np.float64]) -> float | NDArray[np.float64]:
+@overload
+def lerp(a: float, b: float, t: float | NDArray[np.float64]) -> float | NDArray[np.float64]: ...
+
+
+@overload
+def lerp(a: NDArray[np.float32], b: NDArray[np.float32], t: float) -> NDArray[np.float32]: ...
+
+
+def lerp(
+    a: float | NDArray[np.float32],
+    b: float | NDArray[np.float32],
+    t: float | NDArray[np.float64],
+) -> float | NDArray[np.floating[Any]]:
     return a + (b - a) * t
 
 

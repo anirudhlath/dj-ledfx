@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.scheduling.route import slice_colors
+from dj_ledfx.scheduling.route import to_device_colors
 
 if TYPE_CHECKING:
     from dj_ledfx.zones.runtime import ZoneRuntime
@@ -63,8 +63,9 @@ class FrameFeed:
     def frames(
         self, stream: Stream, wanted: Collection[str] | None = None
     ) -> dict[str, NDArray[np.uint8]]:
-        """Each device's colours now, in 8 bits, by device id: every device's, or the wanted
-        ones'. A runtime's frame is converted once, and only when a device in it is wanted."""
+        """Each device's colours now, blended as a light's are, in 8 bits, by device id: every
+        device's, or the wanted ones'. A runtime's colours are converted once, and only when a
+        device in it is wanted."""
         now = self._clock()
         out: dict[str, NDArray[np.uint8]] = {}
         for runtime in self._runtimes[stream]():
@@ -74,13 +75,11 @@ class FrameFeed:
                 if wanted is None or light.device_id in wanted
                 if (piece := runtime.leds.slice_for(light.device_id)) is not None and piece.count
             ]
-            frame = runtime.ring.find_nearest(now) if pieces else None
-            if frame is None:
-                continue
             count = runtime.leds.count
-            whole = slice_colors(frame.colors, 0, count, count, runtime.brightness)
-            if whole is None:
+            colors = runtime.ring.colors_at(now, 0, count) if pieces else None
+            if colors is None:
                 continue
+            whole = to_device_colors(colors, count, runtime.brightness)
             for piece in pieces:
                 out[piece.device_id] = whole[piece.start : piece.stop]
         return out
