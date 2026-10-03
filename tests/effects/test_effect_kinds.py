@@ -167,6 +167,18 @@ def test_leds_spanning_under_5_cm_along_the_projection_play_in_led_order(
     assert np.allclose(adapter.render(render_ctx(), leds_at(points, ceiling=None))[:, 0], RAMP)
 
 
+def test_a_moved_set_moves_the_strip_along_the_zone() -> None:
+    leds = leds_at([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+    adapter = StripAdapter(_Ramp())
+    assert np.allclose(adapter.render(render_ctx(), leds)[:, 0], RAMP)
+
+    # A layer's transform moves the field 1 m east: each LED sees the strip a metre west of
+    # it, and the LED past the west end takes the strip's first sample.
+    moved = leds.moved(leds.pos - np.array([1.0, 0.0, 0.0], dtype=np.float32))
+
+    assert np.allclose(adapter.render(render_ctx(), moved)[:, 0], RAMP[[0, 0, 1, 2]])
+
+
 def test_strip_adapter_forwards_parameters() -> None:
     inner = _Ramp()
     adapter = StripAdapter(inner)

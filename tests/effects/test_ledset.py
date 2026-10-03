@@ -171,3 +171,26 @@ def test_placed_leds_compare_by_value() -> None:
     assert PlacedLeds.from_positions(points) == same
     assert hash(PlacedLeds.from_positions(points)) == hash(same)
     assert PlacedLeds.from_positions(points) != PlacedLeds.from_positions(points * 2)
+
+
+def test_a_moved_set_keeps_its_bounds_and_normalisation() -> None:
+    leds = build_ledset([LedSource("a", 2, placed=_placed((0.0, 0.0, 0.0), (4.0, 2.0, 1.0)))])
+    shifted = leds.pos + np.float32(1.0)
+
+    moved = leds.moved(shifted)
+
+    assert np.allclose(moved.pos, shifted)
+    assert all(np.allclose(m, b) for m, b in zip(moved.bounds, leds.bounds, strict=True))
+    assert np.allclose(moved.centre, leds.centre)
+    assert np.allclose(moved.npos, [[0.25, 0.5, 1.0], [1.25, 1.5, 2.0]])  # past the bounds
+    assert moved.slices == leds.slices and moved.space is leds.space
+    assert leds.frame is None and np.allclose(leds.bounds[1], [4.0, 2.0, 1.0])  # unchanged
+
+
+def test_spaces_differ_when_an_outline_changes() -> None:
+    west = ((0.0, 0.0), (4.0, 0.0), (4.0, 4.0))
+    space = Space(rooms=("west",), room_outlines=MappingProxyType({"west": west}))
+    same = Space(rooms=("west",), room_outlines=MappingProxyType({"west": west}))
+    assert space == same
+    assert space != Space(rooms=("west",), room_outlines=MappingProxyType({"west": west[:2]}))
+    assert space != Space(rooms=("west",), sub_zone_outlines=MappingProxyType({"desk": west}))

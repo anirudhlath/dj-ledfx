@@ -8,14 +8,19 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
     from dj_ledfx.types import FloatRGB
 
 BLEND_MODES = ("normal", "add", "screen", "multiply", "max")
 
 
-def blend_into(base: FloatRGB, top: FloatRGB, mode: str, opacity: float) -> None:
-    """Composite `top` onto `base`, in place, at `opacity` (0..1)."""
-    weight = np.float32(opacity)
+def blend_into(
+    base: FloatRGB, top: FloatRGB, mode: str, opacity: float | NDArray[np.float32]
+) -> None:
+    """Composite `top` onto `base`, in place, at `opacity` (0..1): one for every LED, or
+    each LED its own, shape (N, 1) (a layer's mask)."""
+    weight = np.float32(opacity) if isinstance(opacity, float | int) else opacity
     if mode == "add":
         base += top * weight
         return

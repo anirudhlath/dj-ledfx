@@ -32,3 +32,14 @@ def test_each_blend_mode(mode: str, opacity: float, expected: tuple[float, ...])
 def test_an_unknown_blend_mode_is_refused() -> None:
     with pytest.raises(ValueError, match="dodge"):
         blend_into(np.zeros((1, 3), np.float32), np.zeros((1, 3), np.float32), "dodge", 1.0)
+
+
+@pytest.mark.parametrize(("mode", "expected"), [("normal", 0.5), ("add", 0.5)])
+def test_each_led_can_have_its_own_opacity(mode: str, expected: float) -> None:
+    base = np.zeros((3, 3), dtype=np.float32)
+    weights = np.array([[0.0], [0.5], [1.0]], dtype=np.float32)
+
+    blend_into(base, np.ones((3, 3), dtype=np.float32), mode, weights)
+
+    assert base.dtype == np.float32
+    assert np.allclose(base[:, 0], [0.0, expected, 1.0])

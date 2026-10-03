@@ -92,11 +92,15 @@ class StripAdapter(FieldEffect, register=False):
             centre = anchor_or_centre(leds, self._projection["centre"]).astype(np.float64)
             along = np.linalg.norm(positions - centre, axis=1)
             low = 0.0
+            span = float(along.max())
         else:
-            along = positions @ np.asarray(AXES[self._projection["axis"]], dtype=np.float64)
-            low = float(along.min())
-        span = float(along.max()) - low
+            # Along the zone's bounds, so a layer's mirror or transform moves the strip (a
+            # moved set keeps the bounds it was moved from; LedSet.moved).
+            axis = np.asarray(AXES[self._projection["axis"]], dtype=np.float64)
+            lowest, highest = (float(corner.astype(np.float64) @ axis) for corner in leds.bounds)
+            along = positions @ axis
+            low, span = lowest, highest - lowest
         if span < MIN_SPAN_M:
             return None
-        place: NDArray[np.float64] = (along - low) / span
+        place: NDArray[np.float64] = np.clip((along - low) / span, 0.0, 1.0)
         return place

@@ -91,7 +91,8 @@ def _checked(home: Home) -> Home:
 
 
 def space_of(home: Home) -> Space:
-    """What a zone's effects know of the map: anchors, rooms, ceiling and the centre."""
+    """What a zone's effects know of the map: anchors, rooms, ceiling, the centre, and the
+    rooms' and sub-zones' outlines."""
     anchors = {a.id: np.asarray(a.position, dtype=np.float32) for a in home.anchors}
     points = {
         a.id: np.asarray(a.points or (a.position,), dtype=np.float32).reshape(-1, 3)
@@ -105,6 +106,8 @@ def space_of(home: Home) -> Space:
         rooms=tuple(room.id for room in home.rooms),
         ceiling=home.ceiling,
         centre=((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0, GUESS_HEIGHT_M),
+        room_outlines=MappingProxyType({room.id: room.polygon for room in home.rooms}),
+        sub_zone_outlines=MappingProxyType({sub.id: sub.polygon for sub in home.sub_zones}),
     )
 
 
