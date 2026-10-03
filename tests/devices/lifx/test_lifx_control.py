@@ -22,6 +22,7 @@ from dj_ledfx.devices.lifx.packet import (
     SET_MULTIZONE_EFFECT,
     SET_TILE_EFFECT,
     SET_TILE_STATE_64,
+    LifxPacket,
     MultiZoneEffectType,
     TileEffectType,
     hsbk_to_rgb,
@@ -50,6 +51,26 @@ async def test_read_light_raises_when_the_light_is_silent() -> None:
     transport = FakeLifxTransport(silent=True)
     with pytest.raises(NoAnswer):
         await lifx_bulb(transport).read_light()
+
+
+def test_a_light_was_last_heard_when_its_transport_last_heard_it() -> None:
+    transport = FakeLifxTransport()
+    bulb = lifx_bulb(transport)
+    assert bulb.last_heard is None
+    host, port = bulb.device_info.address.rsplit(":", 1)
+    service = LifxPacket(
+        tagged=False,
+        source=transport.source_id,
+        target=MAC + b"\x00\x00",
+        ack_required=False,
+        res_required=False,
+        sequence=0,
+        msg_type=3,
+        payload=struct.pack("<BI", 1, int(port)),
+    )
+    transport._on_packet_received(service.pack(), (host, int(port)))
+    heard = transport.last_heard(host)
+    assert heard is not None and bulb.last_heard == heard
 
 
 async def test_set_power_sends_set_light_power() -> None:

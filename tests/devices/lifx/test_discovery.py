@@ -1,17 +1,26 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import struct
 from typing import Any
 
+import numpy as np
 import pytest
 from lifx_fakes import FakeLifxTransport
 
-from dj_ledfx.config import AppConfig, DevicesConfig, LIFXConfig
+from dj_ledfx.config import LIFX_MATRIX_FPS, AppConfig, DevicesConfig, EngineConfig, LIFXConfig
+from dj_ledfx.devices.lifx.base import stream_fade_ms
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.discovery import LifxBackend
-from dj_ledfx.devices.lifx.packet import GET_DEVICE_CHAIN
+from dj_ledfx.devices.lifx.packet import (
+    GET_COLOR,
+    GET_DEVICE_CHAIN,
+    GET_EXTENDED_COLOR_ZONES,
+    GET_HOST_FIRMWARE,
+    SET_COLOR,
+)
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
-from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
+from dj_ledfx.devices.lifx.tile_chain import MATRIX_DISPLAY_MS, LifxTileChainAdapter
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
 MAC = b"\xd0\x73\xd5\x00\x00\x01"
@@ -56,6 +65,7 @@ async def test_candle_is_a_matrix_sized_from_its_device_chain() -> None:
     assert adapter.device_info.name == "Candle 1"
     assert adapter.device_info.device_type == "lifx_tile"
     assert adapter.capabilities.model == "LIFX Candle C"
+    assert adapter.geometry.form == "cylinder"  # its matrix wraps round it
     assert adapter.capabilities.firmware_version == "3.90"
 
 
@@ -64,6 +74,7 @@ async def test_tile_without_a_chain_reply_falls_back_to_five_8x8_tiles() -> None
     adapter = await _backend(transport)._create_adapter(_record(55), AppConfig())
     assert isinstance(adapter, LifxTileChainAdapter)
     assert adapter.led_count == 5 * 64
+    assert adapter.geometry.form == "flat"
 
 
 async def test_neon_is_a_strip_sized_from_its_zones() -> None:
@@ -114,23 +125,13 @@ async def test_duplicate_labels_get_a_suffix() -> None:
 
 
 async def test_discover_returns_discovered_devices() -> None:
-    transport = FakeLifxTransport(product=1, label="Right Lamp")
-    record = _record(1)
-
-    async def _fake_discover(
-        timeout_s: float = 1.0, on_record: Callable[[LifxDeviceRecord], None] | None = None
-    ) -> list[LifxDeviceRecord]:
-        if on_record is not None:
-            on_record(record)
-        return [record]
-
-    transport.discover = _fake_discover  # type: ignore[attr-defined]
+    transport = FakeLifxTransport(product=1, found=[_record(1)])
     config = AppConfig()
     devices = await _backend(transport).discover(config)
 
     (device,) = devices
     assert isinstance(device.adapter, LifxBulbAdapter)
-    assert device.adapter.device_info.name == "Right Lamp"
+    assert device.adapter.device_info.name == transport.label
     assert device.adapter.is_connected
     assert device.max_fps == config.devices.lifx.max_fps
 
@@ -153,3 +154,85 @@ async def test_connect_known_skips_rows_without_an_address() -> None:
     transport = FakeLifxTransport()
     assert await _backend(transport).connect_known([_row(ip=None)], AppConfig()) == []
     assert transport.sent == []
+
+
+async def test_a_matrix_streams_at_its_rate_and_its_latency_counts_its_display() -> None:
+    transport = FakeLifxTransport(product=57, chain=[(5, 6)])
+    device = await _backend(transport)._setup(_record(57), AppConfig())
+    assert device is not None and isinstance(device.adapter, LifxTileChainAdapter)
+    assert device.max_fps == LIFX_MATRIX_FPS
+    display = stream_fade_ms(LIFX_MATRIX_FPS) / 2 + MATRIX_DISPLAY_MS
+    assert device.adapter.display_ms == display
+    assert device.tracker.effective_latency_ms == AppConfig().devices.lifx.latency_ms + display
+
+
+async def test_a_light_fades_over_the_engine_s_gap_when_the_engine_is_slower() -> None:
+    transport = FakeLifxTransport(product=1)
+    config = AppConfig(engine=EngineConfig(fps=30))  # below LIFX's max_fps of 60
+    device = await _backend(transport)._setup(_record(1), config)
+    assert device is not None and isinstance(device.adapter, LifxBulbAdapter)
+    assert device.max_fps == device.adapter.stream_fps == 30
+    fade = stream_fade_ms(30)
+    assert device.adapter.display_ms == fade / 2  # half-way through a 31 ms fade
+    assert device.tracker.effective_latency_ms == config.devices.lifx.latency_ms + fade / 2
+
+    await device.adapter.send_frame(np.full((1, 3), 200, dtype=np.uint8))
+    *_, duration = struct.unpack("<B4HI", transport.last(SET_COLOR).payload)
+    assert duration == fade == 31
+
+
+ECHO_REQUEST = 58
+
+
+async def test_a_light_is_probed_only_while_its_tracker_saw_a_send() -> None:
+    """Its echo round trips count only while it streams, so an idle light isn't asked."""
+    transport = FakeLifxTransport(product=1)
+    record = LifxDeviceRecord(mac=MAC, ip="127.0.0.1", port=56700, vendor=1, product=1)
+    device = await _backend(transport)._setup(record, AppConfig())
+    assert device is not None and device.on_accepted is not None
+    device.on_accepted()
+    probing = asyncio.create_task(transport._probe_loop(0.01))
+    try:
+        await asyncio.sleep(0.05)
+        assert ECHO_REQUEST not in transport.types()
+
+        device.tracker.note_send()  # it streams: a frame went out
+        await asyncio.sleep(0.05)
+        assert ECHO_REQUEST in transport.types()
+    finally:
+        probing.cancel()
+
+
+async def test_a_known_online_light_is_left_out_before_it_is_asked() -> None:
+    transport = FakeLifxTransport(product=1)
+    known = {f"lifx:{MAC.hex()}", "govee:test-lamp"}
+    await _backend(transport).discover(AppConfig(), skip_ids=known)
+    assert transport.skipped == [{MAC.hex()}]
+
+
+# Review Focus 4: a known light that's offline, or half-answers, during discovery keeps its
+# ghost and its row. Set up from a silent reply, it would come back the wrong kind or size.
+@pytest.mark.parametrize(
+    ("product", "quiet"),
+    [
+        (57, GET_HOST_FIRMWARE),
+        (57, GET_COLOR),
+        (57, GET_DEVICE_CHAIN),
+        (141, GET_EXTENDED_COLOR_ZONES),
+    ],
+)
+async def test_a_known_light_offline_during_discovery_keeps_its_row(
+    product: int, quiet: int
+) -> None:
+    zones = [(0, 0, 65535, 3500)] * 36
+    transport = FakeLifxTransport(
+        product=product, chain=[(5, 6)], zones=zones, firmware=(4, 10), quiet={quiet}
+    )
+    assert await _backend(transport)._setup(_record(product), AppConfig()) is None
+    assert transport.types().count(quiet) == 2  # asked twice, then left for a later scan
+
+
+async def test_connect_known_leaves_a_half_answering_light_offline() -> None:
+    transport = FakeLifxTransport(product=57, chain=[(5, 6)], quiet={GET_DEVICE_CHAIN})
+    row = _row(name="Test matrix")
+    assert await _backend(transport).connect_known([row], AppConfig()) == []

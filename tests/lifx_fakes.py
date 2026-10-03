@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import struct
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,7 +37,7 @@ from dj_ledfx.devices.lifx.packet import (
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter
 from dj_ledfx.devices.lifx.transport import LifxTransport
-from dj_ledfx.devices.lifx.types import TileInfo
+from dj_ledfx.devices.lifx.types import LifxDeviceRecord, TileInfo
 from dj_ledfx.types import DeviceInfo
 
 if TYPE_CHECKING:
@@ -63,6 +63,8 @@ class FakeLifxTransport(LifxTransport):
         chain: Sequence[tuple[int, int]] = (),
         unhandled: Collection[int] = (),
         silent: bool = False,
+        quiet: Collection[int] = (),
+        found: Sequence[LifxDeviceRecord] = (),
     ) -> None:
         super().__init__()
         self._source_id = 4242
@@ -78,6 +80,9 @@ class FakeLifxTransport(LifxTransport):
         self.multizone_effect: tuple[int, int, bool] = (0, 0, False)
         self.unhandled = set(unhandled)
         self.silent = silent
+        self.quiet = set(quiet)  # message types it never answers
+        self.found = list(found)  # the lights a discover finds
+        self.skipped: list[Collection[str]] = []  # each discover's skip_macs
         self.sent: list[LifxPacket] = []
 
     def send_packet(self, packet: LifxPacket, addr: tuple[str, int]) -> None:
@@ -92,7 +97,7 @@ class FakeLifxTransport(LifxTransport):
         timeout: float = 1.0,
     ) -> LifxPacket | None:
         self.sent.append(packet)
-        if self.silent:
+        if self.silent or packet.msg_type in self.quiet:
             return None
         if packet.msg_type in self.unhandled:
             return self._reply(STATE_UNHANDLED, struct.pack("<H", packet.msg_type))
@@ -101,6 +106,21 @@ class FakeLifxTransport(LifxTransport):
 
     def start_probing(self, interval_s: float = 2.0) -> None:
         pass  # the real one would send echo requests from a background task
+
+    async def discover(
+        self,
+        timeout_s: float = 1.0,
+        on_record: Callable[[LifxDeviceRecord], None] | None = None,
+        skip_macs: Collection[str] = (),
+    ) -> list[LifxDeviceRecord]:
+        """Finds `found` at once, leaving out a light in skip_macs as discovery does, and
+        notes each call's skip_macs in `skipped`."""
+        self.skipped.append(skip_macs)
+        records = [record for record in self.found if record.mac.hex() not in skip_macs]
+        for record in records:
+            if on_record is not None:
+                on_record(record)
+        return records
 
     def types(self) -> list[int]:
         return [packet.msg_type for packet in self.sent]
@@ -245,7 +265,9 @@ def lifx_candle(
 ) -> LifxTileChainAdapter:
     """A Candle C: one 5x6 matrix."""
     tile = TileInfo(user_x=0.0, user_y=0.0, width=5, height=6, accel_x=0, accel_y=0, accel_z=0)
-    return LifxTileChainAdapter(transport, lifx_info("tile", 30), MAC, tiles=[tile], caps=caps)
+    return LifxTileChainAdapter(
+        transport, lifx_info("tile", 30), MAC, tiles=[tile], caps=caps, form="cylinder"
+    )
 
 
 def read_hex(path: Path) -> bytes:

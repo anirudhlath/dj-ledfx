@@ -19,8 +19,6 @@ class GhostAdapter(DeviceAdapter):
     All frame sends raise ConnectionError to prevent silent drops.
     """
 
-    supports_latency_probing = False
-
     def __init__(
         self,
         device_info: DeviceInfo,

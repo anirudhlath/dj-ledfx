@@ -6,18 +6,36 @@ from functools import partial
 import numpy as np
 import pytest
 from conftest import KEYBOARD_AND_MOUSE, SERVER, FakeLight, pc_lights
-from map_home import DESK_CORNER, open_map, tiny_home
+from map_home import (
+    DESK_CORNER,
+    ROUND_MATRIX,
+    SMALL_MATRIX,
+    UPRIGHT_LAMP,
+    devices_of,
+    open_map,
+    tiny_home,
+)
 
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import HomeError, HomeNotFoundError
-from dj_ledfx.home.shapes import GridShape, LineShape, Placement, PointShape, ShapeError
+from dj_ledfx.home.shapes import (
+    CylinderShape,
+    GridShape,
+    LineShape,
+    Placement,
+    PointShape,
+    ShapeError,
+)
 from dj_ledfx.home.store import HomeStore
 from dj_ledfx.persistence.state_db import StateDB
 
 NOW = datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
 DESK_LAMP = Placement(PointShape(DESK_CORNER), "")
 ROPE = Placement(LineShape(((5.0, 1.0, 2.0), (7.0, 1.0, 2.0))), "along-path")
+SEEDED_CANDLE = Placement(
+    CylinderShape((1.0, 3.5, 0.8), 0.12, 0.02), "bottom-to-top", source="seed"
+)  # home.json's order
 
 
 _map = partial(open_map, home=tiny_home(), now=lambda: NOW)
@@ -71,8 +89,9 @@ async def test_a_light_is_placed_moved_confirmed_and_removed(db: StateDB) -> Non
 
     moved = await home_map.set_placement("lamp", LineShape(((0, 0, 1), (1, 0, 1))))
     assert (moved.led_order, moved.confirmed) == ("along-path", False)  # moving doesn't confirm
+    assert moved.source == "owner"
     confirmed = await home_map.confirm("lamp")
-    assert (confirmed.confirmed, confirmed.confirmed_at) == (True, NOW)
+    assert (confirmed.confirmed, confirmed.confirmed_at, confirmed.source) == (True, NOW, "owner")
     again = await home_map.set_placement("lamp", LineShape(((0, 0, 1), (2, 0, 1))))
     assert again.confirmed and again.led_order == "along-path"
     await home_map.remove_placement("lamp")
@@ -191,3 +210,100 @@ async def test_a_guess_places_only_unplaced_lights(db: StateDB) -> None:
     await home_map.remove_placement("lamp")
     guesses = await home_map.guess()
     assert list(guesses) == ["lamp"] and not guesses["lamp"].confirmed
+    assert guesses["lamp"].source == "guess"
+    assert await HomeStore(db).load_placements() == guesses
+
+
+async def test_online_lights_on_points_are_fitted_to_their_forms(db: StateDB) -> None:
+    lamp = FakeLight("lamp", led_count=15, geometry=UPRIGHT_LAMP)
+    matrix = FakeLight("matrix", led_count=30, geometry=SMALL_MATRIX)
+    placements = {"lamp": DESK_LAMP, "matrix": DESK_LAMP}
+    home_map = await _map(db, [lamp, matrix], placements=placements, seeded=True)
+    changes: list[str] = []
+
+    async def changed() -> None:
+        changes.append("map")
+
+    home_map.on_change(changed)
+
+    fitted = {light: await home_map.refit(light) for light in ("lamp", "matrix")}
+
+    lamp = fitted["lamp"]
+    assert lamp is not None and isinstance(lamp.shape, LineShape) and not lamp.confirmed
+    (x0, y0, z0), (x1, y1, z1) = lamp.shape.path
+    assert (x0, y0) == (x1, y1) == DESK_CORNER[:2] and z0 < z1
+    matrix = fitted["matrix"]
+    assert matrix is not None and isinstance(matrix.shape, GridShape)
+    assert dict(home_map.placements) == fitted
+    assert await HomeStore(db).load_placements() == fitted
+    assert changes == ["map", "map"]  # told once for each
+    assert await home_map.refit("lamp") is None  # it fits now
+
+
+async def test_only_the_light_that_came_online_is_fitted(db: StateDB) -> None:
+    lights = [FakeLight(light, led_count=15, geometry=UPRIGHT_LAMP) for light in ("lamp", "twin")]
+    placements = {"lamp": DESK_LAMP, "twin": DESK_LAMP}
+    home_map = await _map(db, lights, placements=placements, seeded=True)
+
+    fitted = await home_map.refit("lamp")
+
+    assert fitted is not None and isinstance(fitted.shape, LineShape)
+    assert home_map.placement("twin") == DESK_LAMP  # its own coming online fits it
+
+
+async def test_an_owner_s_placement_survives_its_light_coming_online(db: StateDB) -> None:
+    lamp = FakeLight("lamp", led_count=15, geometry=UPRIGHT_LAMP)
+    home_map = await _map(db, [lamp], seeded=True)
+    laid_down = await home_map.set_placement("lamp", LineShape(((1.0, 1.0, 1.0), (2.4, 1.0, 1.0))))
+
+    assert await home_map.refit("lamp") is None  # unconfirmed, and out of form, but the owner's
+    assert home_map.placement("lamp") == laid_down
+
+
+async def test_a_seeded_candle_s_rows_are_turned_when_it_comes_online(db: StateDB) -> None:
+    candles = [FakeLight(name, led_count=30, geometry=ROUND_MATRIX) for name in ("seeded", "own")]
+    home_map = await _map(db, candles, placements={"seeded": SEEDED_CANDLE}, seeded=True)
+    own = await home_map.set_placement("own", SEEDED_CANDLE.shape, "bottom-to-top")
+
+    turned = await home_map.refit("seeded")
+
+    assert turned == Placement(SEEDED_CANDLE.shape, "top-to-bottom")  # its spot and size kept
+    assert await HomeStore(db).load_placements() == {"seeded": turned, "own": own}
+    assert await home_map.refit("seeded") is None  # its rows run down now
+    assert await home_map.refit("own") is None  # the owner chose its order
+
+
+async def test_confirmed_offline_fitting_one_led_and_pc_placements_are_left_alone(
+    db: StateDB,
+) -> None:
+    lights = [
+        FakeLight("standing", led_count=15, geometry=UPRIGHT_LAMP),
+        FakeLight("confirmed", led_count=15, geometry=UPRIGHT_LAMP),
+        FakeLight("offline", led_count=15, geometry=UPRIGHT_LAMP),
+        FakeLight("bulb", led_count=1),
+        *pc_lights(*KEYBOARD_AND_MOUSE),
+    ]
+    devices = devices_of(lights)
+    devices.demote_device("offline")
+    standing = Placement(LineShape(((1.0, 3.5, 0.1), (1.0, 3.5, 1.5))), "along-path")
+    placements = {
+        "standing": standing,
+        "confirmed": Placement(PointShape(DESK_CORNER), "", confirmed=True),
+        "offline": DESK_LAMP,
+        "bulb": DESK_LAMP,
+        SERVER: DESK_LAMP,
+    }
+    home_map = await _map(db, devices, placements=placements, seeded=True)
+
+    for target in [*placements, f"{SERVER}:0", "unplaced"]:
+        assert await home_map.refit(target) is None
+    assert dict(home_map.placements) == placements
+
+
+async def test_a_guess_places_a_light_in_its_form(db: StateDB) -> None:
+    lamp = FakeLight("lamp", led_count=15, geometry=UPRIGHT_LAMP)
+    home_map = await _map(db, [lamp], seeded=True)
+
+    guesses = await home_map.guess()
+
+    assert isinstance(guesses["lamp"].shape, LineShape)

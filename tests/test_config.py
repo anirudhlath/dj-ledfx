@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from dj_ledfx.config import (
+    GOVEE_RAZER_FPS,
+    LATENCY_WINDOW,
     AppConfig,
     DevicesConfig,
     DiscoveryConfig,
@@ -16,6 +18,7 @@ from dj_ledfx.config import (
     load_config,
     save_config,
 )
+from dj_ledfx.latency.strategies import STRATEGIES
 
 
 def test_default_config() -> None:
@@ -118,7 +121,9 @@ def test_lifx_config_defaults() -> None:
     assert config.devices.lifx.enabled is True
     assert config.devices.lifx.default_kelvin == 3500
     assert config.devices.lifx.max_fps == 60
-    assert config.devices.lifx.latency_strategy == "ema"
+    assert config.devices.lifx.latency_strategy == "windowed_median"
+    assert config.devices.lifx.latency_ms == 10.0  # one way, while streaming
+    assert config.devices.lifx.latency_window_size == LATENCY_WINDOW
     assert config.devices.lifx.echo_probe_interval_s == 2.0
 
 
@@ -150,8 +155,9 @@ class TestGoveeConfigValidation:
     def test_govee_defaults(self) -> None:
         config = AppConfig()
         assert config.devices.govee.enabled is True
-        assert config.devices.govee.max_fps == 40
-        assert config.devices.govee.latency_strategy == "ema"
+        assert config.devices.govee.max_fps == GOVEE_RAZER_FPS
+        assert config.devices.govee.latency_strategy == "windowed_median"
+        assert config.devices.govee.latency_window_size == LATENCY_WINDOW
         assert config.devices.govee.latency_ms == 100.0
         assert config.devices.govee.segment_override is None
 
@@ -166,10 +172,6 @@ class TestGoveeConfigValidation:
     def test_govee_discovery_timeout_must_be_positive(self) -> None:
         with pytest.raises(ValueError, match="govee discovery_timeout_s"):
             AppConfig(devices=DevicesConfig(govee=GoveeConfig(discovery_timeout_s=0)))
-
-    def test_govee_probe_interval_must_be_positive(self) -> None:
-        with pytest.raises(ValueError, match="govee probe_interval_s"):
-            AppConfig(devices=DevicesConfig(govee=GoveeConfig(probe_interval_s=0)))
 
     def test_govee_latency_ms_must_be_non_negative(self) -> None:
         with pytest.raises(ValueError, match="govee latency_ms"):
@@ -398,3 +400,14 @@ def test_save_config_leaves_a_file_it_cannot_replace(
 
     assert path.read_text() == "[engine]\nfps = 30\n"
     assert not (tmp_path / "config.tmp").exists()
+
+
+@pytest.mark.parametrize("name", STRATEGIES)
+def test_each_device_config_takes_every_strategy(name: str) -> None:
+    AppConfig(
+        devices=DevicesConfig(
+            openrgb=OpenRGBConfig(latency_strategy=name),
+            lifx=LIFXConfig(latency_strategy=name),
+            govee=GoveeConfig(latency_strategy=name),
+        )
+    )

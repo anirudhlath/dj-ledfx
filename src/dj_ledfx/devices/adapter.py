@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -19,8 +20,10 @@ class DeviceAdapter(ABC):
     between device types (TCP for OpenRGB, UDP broadcast for Govee/LIFX).
     """
 
-    supports_latency_probing: bool = True
     _send_lock: asyncio.Lock | None = None
+    # The most frames a second this kind of light takes; None: no cap of its own.
+    stream_fps_cap: ClassVar[float | None] = None
+    _max_fps: float | None = None  # the configured rate it was built with, if any
 
     @property
     def send_lock(self) -> asyncio.Lock:
@@ -41,6 +44,24 @@ class DeviceAdapter(ABC):
     @property
     @abstractmethod
     def led_count(self) -> int: ...
+
+    @property
+    def stream_fps(self) -> float | None:
+        """The most frames a second it streams: the configured rate it was built with,
+        within its kind's cap. None: the scheduler's rate."""
+        rates = [rate for rate in (self._max_fps, self.stream_fps_cap) if rate is not None]
+        return min(rates, default=None)
+
+    @property
+    def display_ms(self) -> float:
+        """How long after a frame lands the light shows it. Default: at once."""
+        return 0.0
+
+    @property
+    def last_heard(self) -> float | None:
+        """When the light last answered anything, on time.monotonic's clock. None: never
+        heard, or the protocol can't tell (the default)."""
+        return None
 
     @property
     def geometry(self) -> DeviceGeometry | None:

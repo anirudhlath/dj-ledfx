@@ -42,13 +42,11 @@ class MockDeviceAdapter(DeviceAdapter):
         name: str = "TestDevice",
         led_count: int = 10,
         connected: bool = True,
-        supports_probing: bool = True,
         geometry: DeviceGeometry | None = None,
     ) -> None:
         self._name = name
         self._led_count = led_count
         self._connected = connected
-        self.supports_latency_probing = supports_probing
         self._geometry = geometry
         self.send_frame_calls: list[NDArray[np.uint8]] = []
         self.connect_count = 0
@@ -114,8 +112,6 @@ class Hold:
 class FakeLight(DeviceAdapter):
     """A light that records what the app asks of it. Power and colour are readable."""
 
-    supports_latency_probing = False
-
     def __init__(
         self,
         stable_id: str,
@@ -142,6 +138,7 @@ class FakeLight(DeviceAdapter):
         self.reject_firmware = False
         self.silent_firmware = False  # firmware commands get no answer
         self.silent = False  # reads get no answer (it's unplugged, or cut at the wall)
+        self.heard: float | None = None  # when it last answered anything (last_heard)
         self.firmware_checks = 0  # how often the app asked whether its effect still runs
         self._holds: dict[str, Hold] = {}
         self._power_at_capture: bool | None = None
@@ -175,6 +172,10 @@ class FakeLight(DeviceAdapter):
     @property
     def geometry(self) -> DeviceGeometry | None:
         return self._geometry
+
+    @property
+    def last_heard(self) -> float | None:
+        return self.heard
 
     @property
     def capabilities(self) -> DeviceCapabilities:
@@ -297,14 +298,20 @@ class RingSource:
 
     ring: RingBuffer
     leds: LedSet
+    brightness: float = 1.0
 
 
 def ring_route(
-    ring: RingBuffer, *, start: int = 0, stop: int = 10, streaming: bool = True
+    ring: RingBuffer,
+    *,
+    start: int = 0,
+    stop: int = 10,
+    streaming: bool = True,
+    brightness: float = 1.0,
 ) -> DeviceRoute:
-    """A route to LEDs start..stop of ring's frames."""
+    """A route to LEDs start..stop of ring's frames, sent at this brightness."""
     leds = build_ledset([LedSource("before", start), LedSource("light", stop - start)])
-    return DeviceRoute(RingSource(ring, leds), "light", streaming)
+    return DeviceRoute(RingSource(ring, leds, brightness), "light", streaming)
 
 
 def span(route: DeviceRoute) -> tuple[int, int]:
@@ -406,6 +413,17 @@ def _effect_registry() -> Iterator[None]:
     yield
     Effect._registry.clear()
     Effect._registry.update(_EFFECTS)
+
+
+async def as_schema(db: StateDB, version: int) -> None:
+    """Make an open state.db look as schema `version` left it, for an upgrade test: its
+    version, and no placements.source when it's older than 9 (the one column a migration
+    adds that can't be added twice)."""
+    if version < 9:
+        await db.write("ALTER TABLE placements DROP COLUMN source")
+    await db.write(
+        "UPDATE config SET value=? WHERE section='_meta' AND key='schema_version'", (str(version),)
+    )
 
 
 @pytest_asyncio.fixture

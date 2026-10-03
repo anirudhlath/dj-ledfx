@@ -1,38 +1,40 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
-from typing import Any, TypeVar
+from collections.abc import Callable, Mapping, Sequence
+from functools import partial
+from typing import Any
 
 from loguru import logger
 
 from dj_ledfx.config import AppConfig
-from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
+from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice, configured_fps
+from dj_ledfx.devices.capabilities import NoAnswer
 from dj_ledfx.devices.lifx.base import LifxAdapterBase
 from dj_ledfx.devices.lifx.bulb import LifxBulbAdapter
 from dj_ledfx.devices.lifx.packet import (
     GET_COLOR,
     GET_DEVICE_CHAIN,
     GET_EXTENDED_COLOR_ZONES,
+    GET_HOST_FIRMWARE,
     LIGHT_STATE,
     STATE_DEVICE_CHAIN,
     STATE_EXTENDED_COLOR_ZONES,
+    STATE_HOST_FIRMWARE,
     parse_light_state,
     parse_state_device_chain,
     parse_state_extended_color_zones,
+    parse_state_host_firmware,
 )
-from dj_ledfx.devices.lifx.products import lifx_capabilities
+from dj_ledfx.devices.lifx.products import lifx_capabilities, matrix_form
 from dj_ledfx.devices.lifx.strip import LifxStripAdapter
 from dj_ledfx.devices.lifx.tile_chain import LifxTileChainAdapter, tile_sizes
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord, TileInfo
-from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
-from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.latency.tracker import tracker_for
 from dj_ledfx.types import DeviceInfo
 
 LIFX_PORT = 56700
-
-T = TypeVar("T")
 
 
 def _label_of(payload: bytes) -> str:
@@ -64,6 +66,7 @@ class LifxBackend(DeviceBackend):
         config: AppConfig,
         on_found: Callable[[DiscoveredDevice], Any] | None = None,
         skip_ids: set[str] | None = None,
+        known: Sequence[Mapping[str, Any]] = (),
     ) -> list[DiscoveredDevice]:
         lifx = config.devices.lifx
         transport = await self._open_transport()
@@ -71,8 +74,6 @@ class LifxBackend(DeviceBackend):
         setup_tasks: list[asyncio.Task[None]] = []
 
         async def _setup_device(record: LifxDeviceRecord) -> None:
-            if skip_ids and f"lifx:{record.mac.hex()}" in skip_ids:
-                return
             try:
                 device = await self._setup(record, config)
             except Exception:
@@ -89,7 +90,11 @@ class LifxBackend(DeviceBackend):
         def _on_record(record: LifxDeviceRecord) -> None:
             setup_tasks.append(asyncio.create_task(_setup_device(record)))
 
-        await transport.discover(timeout_s=lifx.discovery_timeout_s, on_record=_on_record)
+        # Known lights that are online are left out before they're asked anything.
+        online = {sid.removeprefix("lifx:") for sid in skip_ids or () if sid.startswith("lifx:")}
+        await transport.discover(
+            timeout_s=lifx.discovery_timeout_s, on_record=_on_record, skip_macs=online
+        )
         if setup_tasks:
             await asyncio.gather(*setup_tasks, return_exceptions=True)
 
@@ -118,17 +123,10 @@ class LifxBackend(DeviceBackend):
                     "Skipping known LIFX device '{}': missing ip or mac", row.get("name")
                 )
                 return None
-            mac = bytes.fromhex(mac_hex)
-            version = await transport.query_version(mac, ip, LIFX_PORT)
-            if version is None:
-                logger.info(
-                    "Known LIFX device '{}' didn't answer; it stays offline", row.get("name")
-                )
+            record = await transport.record_of(bytes.fromhex(mac_hex), ip, LIFX_PORT)
+            if record is None:
+                logger.info("Known LIFX device '{}' stays offline for now", row.get("name"))
                 return None
-            vendor, product = version
-            record = LifxDeviceRecord(
-                mac=mac, ip=ip, port=LIFX_PORT, vendor=vendor, product=product
-            )
             return await self._setup(record, config)
 
         outcomes = await asyncio.gather(*(_reconnect(row) for row in rows), return_exceptions=True)
@@ -152,17 +150,26 @@ class LifxBackend(DeviceBackend):
 
     async def _setup(self, record: LifxDeviceRecord, config: AppConfig) -> DiscoveredDevice | None:
         assert self._transport is not None
-        adapter = await self._create_adapter(record, config)
+        try:
+            adapter = await self._create_adapter(record, config)
+        except NoAnswer as silent:  # set up from silence, it would be the wrong kind or size
+            logger.info("{}; it's left as it was until a later scan", silent)
+            return None
         if adapter is None:
             return None
-        tracker = self._create_tracker(config)
+        tracker = tracker_for(config.devices.lifx, display_ms=adapter.display_ms)
         await adapter.connect()
-        self._transport.register_device(
+        # Probed while it streams, its echoes timed for this tracker, once the orchestrator
+        # takes it in
+        transport = self._transport
+        register = partial(
+            transport.register_device,
             record,
-            rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
+            rtt_callback=tracker.update_rtt,
+            streaming=lambda: tracker.streaming,
         )
         return DiscoveredDevice(
-            adapter=adapter, tracker=tracker, max_fps=config.devices.lifx.max_fps
+            adapter=adapter, tracker=tracker, max_fps=adapter.stream_fps, on_accepted=register
         )
 
     async def _create_adapter(
@@ -170,7 +177,16 @@ class LifxBackend(DeviceBackend):
     ) -> LifxAdapterBase | None:
         assert self._transport is not None
         transport = self._transport
-        firmware = await transport.query_host_firmware(record.mac, record.ip, record.port)
+        # A setup query a light can't answer falls back; one it's silent to raises NoAnswer.
+        firmware = await transport.answer(
+            record.mac,
+            (record.ip, record.port),
+            GET_HOST_FIRMWARE,
+            b"",
+            STATE_HOST_FIRMWARE,
+            parse_state_host_firmware,
+            tries=2,
+        )
         caps, relays = lifx_capabilities(record.product, firmware, record.vendor)
         if relays:
             logger.debug("Skipping LIFX switch {} ({})", record.ip, caps.model)
@@ -179,6 +195,7 @@ class LifxBackend(DeviceBackend):
         label = await self._query_label(record)
         name = self._unique_name(label or f"{caps.model} ({record.ip})", stable_id)
         kelvin = config.devices.lifx.default_kelvin
+        rate = configured_fps(config, config.devices.lifx.max_fps)  # each kind caps its own
 
         def _info(device_type: str, led_count: int) -> DeviceInfo:
             return DeviceInfo(
@@ -205,6 +222,8 @@ class LifxBackend(DeviceBackend):
                 kelvin=kelvin,
                 tiles=tiles,
                 caps=caps,
+                max_fps=rate,
+                form=matrix_form(caps.model),
             )
         if caps.multizone and caps.extended_multizone:
             zones = await self._query_zone_count(record)
@@ -215,11 +234,17 @@ class LifxBackend(DeviceBackend):
                 zone_count=zones,
                 kelvin=kelvin,
                 caps=caps,
+                max_fps=rate,
             )
         if caps.multizone:
             logger.info("LIFX '{}' has no extended multizone; it plays as one colour", name)
         return LifxBulbAdapter(
-            transport, _info("lifx_bulb", 1), record.mac, kelvin=kelvin, caps=caps
+            transport,
+            _info("lifx_bulb", 1),
+            record.mac,
+            kelvin=kelvin,
+            caps=caps,
+            max_fps=rate,
         )
 
     def _unique_name(self, wanted: str, stable_id: str) -> str:
@@ -230,48 +255,40 @@ class LifxBackend(DeviceBackend):
         self._names[name] = stable_id
         return name
 
-    async def _query(
-        self,
-        record: LifxDeviceRecord,
-        msg_type: int,
-        reply_type: int,
-        parse: Callable[[bytes], T],
-        timeout: float,
-    ) -> T | None:
-        assert self._transport is not None
-        return await self._transport.query(
-            record.mac, (record.ip, record.port), msg_type, b"", reply_type, parse, timeout=timeout
-        )
-
     async def _query_label(self, record: LifxDeviceRecord) -> str | None:
-        label = await self._query(record, GET_COLOR, LIGHT_STATE, _label_of, 0.5)
+        assert self._transport is not None
+        label = await self._transport.answer(
+            record.mac, (record.ip, record.port), GET_COLOR, b"", LIGHT_STATE, _label_of, tries=2
+        )
         return label or None
 
     async def _query_chain(self, record: LifxDeviceRecord) -> list[TileInfo]:
-        tiles = await self._query(
-            record, GET_DEVICE_CHAIN, STATE_DEVICE_CHAIN, parse_state_device_chain, 1.0
+        assert self._transport is not None
+        tiles = await self._transport.answer(
+            record.mac,
+            (record.ip, record.port),
+            GET_DEVICE_CHAIN,
+            b"",
+            STATE_DEVICE_CHAIN,
+            parse_state_device_chain,
+            tries=2,
+            timeout=1.0,
         )
         return tiles or []
 
     async def _query_zone_count(self, record: LifxDeviceRecord) -> int:
-        count = await self._query(
-            record, GET_EXTENDED_COLOR_ZONES, STATE_EXTENDED_COLOR_ZONES, _zone_count_of, 1.0
+        assert self._transport is not None
+        count = await self._transport.answer(
+            record.mac,
+            (record.ip, record.port),
+            GET_EXTENDED_COLOR_ZONES,
+            b"",
+            STATE_EXTENDED_COLOR_ZONES,
+            _zone_count_of,
+            tries=2,
+            timeout=1.0,
         )
         if count is None:
             logger.warning("LIFX {} didn't report its zone count; assuming 1", record.ip)
             return 1
         return max(1, count)
-
-    def _create_tracker(self, config: AppConfig) -> LatencyTracker:
-        lifx = config.devices.lifx
-        strategy: StaticLatency | EMALatency | WindowedMeanLatency
-        if lifx.latency_strategy == "static":
-            strategy = StaticLatency(lifx.latency_ms)
-        elif lifx.latency_strategy == "ema":
-            strategy = EMALatency(initial_value_ms=lifx.latency_ms)
-        else:
-            strategy = WindowedMeanLatency(
-                window_size=lifx.latency_window_size,
-                initial_value_ms=lifx.latency_ms,
-            )
-        return LatencyTracker(strategy=strategy, manual_offset_ms=lifx.manual_offset_ms)

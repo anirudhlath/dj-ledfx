@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -17,24 +18,32 @@ RESPONSE_PORT = 4002
 COMMAND_PORT = 4003
 
 
-class GoveeTransport:
-    """Shared UDP transport for all Govee devices on the LAN."""
+@dataclass
+class _StatusQuery:
+    """A status query in flight to one lamp. Whoever asks the lamp meanwhile shares it: a
+    devStatus reply carries nothing that says which query it answers."""
 
-    def __init__(self) -> None:
+    reply: asyncio.Future[dict[str, Any]]
+    sent_at: float  # on the transport's clock: the reply times the lamp's round trip
+    waiting: int = 0  # callers still waiting for the reply
+
+
+class GoveeTransport:
+    """Shared UDP transport for all Govee devices on the LAN. A lamp's round trips come from
+    its status reads: each query that gets its reply times one."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._send_transport: asyncio.DatagramTransport | None = None
         self._recv_transport: asyncio.DatagramTransport | None = None
         self._is_open = False
-        self._probe_task: asyncio.Task[None] | None = None
+        self._clock = clock
 
         # Response routing: cmd → handler
         self._cmd_handlers: dict[str, Callable[[dict[str, Any], tuple[str, int]], None]] = {}
-        # Registered devices for probing
-        self._devices: dict[str, GoveeDeviceRecord] = {}  # ip → record
         self._rtt_callbacks: dict[str, Callable[[float], None]] = {}  # ip → callback
-        # Pending status queries: ip → (event, result_container)
-        self._pending_status: dict[str, tuple[asyncio.Event, list[dict[str, Any]]]] = {}
-        # Probe RTT tracking: ip → send_time (monotonic)
-        self._probe_times: dict[str, float] = {}
+        # Status queries in flight, one per lamp: ip → query
+        self._pending_status: dict[str, _StatusQuery] = {}
+        self._heard: dict[str, float] = {}  # ip → when its last status reply came
 
     @property
     def is_open(self) -> bool:
@@ -89,19 +98,11 @@ class GoveeTransport:
         logger.debug("Govee transport opened")
 
     async def close(self) -> None:
-        self.stop_probing()
-        if self._probe_task and not self._probe_task.done():
-            self._probe_task.cancel()
-            try:
-                await self._probe_task
-            except asyncio.CancelledError:
-                pass
         if self._recv_transport:
             self._recv_transport.close()
         if self._send_transport:
             self._send_transport.close()
         self._is_open = False
-        self._devices.clear()
         self._rtt_callbacks.clear()
         self._pending_status.clear()
         self._cmd_handlers.clear()
@@ -144,64 +145,35 @@ class GoveeTransport:
         logger.info("Govee discovery found {} devices", len(discovered))
         return list(discovered.values())
 
-    async def unicast_sweep(
-        self,
-        hosts: list[str],
-        concurrency: int = 50,
-        timeout_s: float = 0.5,
-    ) -> list[GoveeDeviceRecord]:
-        """Send scan command to every IP on port 4001."""
-        discovered: dict[str, GoveeDeviceRecord] = {}  # device_id → record
-
-        self._cmd_handlers["scan"] = self._make_scan_handler(discovered)
-
-        try:
-            scan_msg = build_scan_message()
-            scan_data = json.dumps(scan_msg).encode("utf-8")
-
-            sem = asyncio.Semaphore(concurrency)
-
-            async def _probe_host(ip: str) -> None:
-                async with sem:
-                    if self._send_transport:
-                        self._send_transport.sendto(scan_data, (ip, DISCOVERY_PORT))
-
-            await asyncio.gather(*[_probe_host(ip) for ip in hosts])
-            await asyncio.sleep(timeout_s)
-        finally:
-            self._cmd_handlers.pop("scan", None)
-
-        logger.info("Govee unicast sweep found {} devices", len(discovered))
-        return list(discovered.values())
-
     async def query_status(self, ip: str, timeout_s: float = 2.0) -> dict[str, Any] | None:
-        event = asyncio.Event()
-        result: list[dict[str, Any]] = []
-        self._pending_status[ip] = (event, result)
-
+        """The lamp's status, or None when no reply comes within timeout_s. A query to the
+        lamp already in flight is shared, not sent again: each caller gets its one reply."""
+        query = self._pending_status.get(ip)
+        ask = query is None
+        if query is None:
+            reply: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+            query = self._pending_status[ip] = _StatusQuery(reply, self._clock())
+        query.waiting += 1
         try:
-            await self.send_command(ip, build_status_query())
-            try:
-                await asyncio.wait_for(event.wait(), timeout=timeout_s)
-            except TimeoutError:
-                return None
-            return result[0] if result else None
+            if ask:
+                await self.send_command(ip, build_status_query())
+            return await asyncio.wait_for(asyncio.shield(query.reply), timeout=timeout_s)
+        except TimeoutError:
+            return None
         finally:
-            self._pending_status.pop(ip, None)
+            query.waiting -= 1
+            if query.waiting == 0 and self._pending_status.get(ip) is query:
+                del self._pending_status[ip]  # nobody waits for it any more
+
+    def last_heard(self, ip: str) -> float | None:
+        """When the lamp at ip last sent a status reply, on the transport's clock, or None."""
+        return self._heard.get(ip)
 
     def register_device(
         self, record: GoveeDeviceRecord, rtt_callback: Callable[[float], None]
     ) -> None:
-        self._devices[record.ip] = record
+        """Send the lamp's round trips, in ms, to rtt_callback."""
         self._rtt_callbacks[record.ip] = rtt_callback
-
-    def start_probing(self, interval_s: float = 5.0) -> None:
-        if self._probe_task is None or self._probe_task.done():
-            self._probe_task = asyncio.create_task(self._probe_loop(interval_s))
-
-    def stop_probing(self) -> None:
-        if self._probe_task and not self._probe_task.done():
-            self._probe_task.cancel()
 
     def _make_scan_handler(
         self,
@@ -225,20 +197,6 @@ class GoveeTransport:
 
         return _handler
 
-    async def _probe_loop(self, interval_s: float) -> None:
-        while self._is_open:
-            for ip in list(self._devices):
-                self._probe_times[ip] = time.monotonic()
-                await self.send_command(ip, build_status_query())
-
-            await asyncio.sleep(interval_s)
-
-            # Clean stale entries
-            now = time.monotonic()
-            stale = [ip for ip, t in self._probe_times.items() if now - t > interval_s]
-            for ip in stale:
-                self._probe_times.pop(ip, None)
-
     def _on_datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         try:
             msg = json.loads(data)
@@ -253,29 +211,25 @@ class GoveeTransport:
         if handler:
             handler(inner, addr)
 
-        # Handle devStatus responses for query_status and probing
         if cmd == "devStatus":
             self._handle_status_response(inner, addr)
 
     def _handle_status_response(self, msg: dict[str, Any], addr: tuple[str, int]) -> None:
+        """A status reply says the lamp was heard, answers the query in flight to it and
+        times its round trip. One that no query waits for (late, or another program's)
+        times nothing."""
         ip = addr[0]
-
-        # Check pending query_status calls first
-        pending = self._pending_status.get(ip)
-        if pending:
-            event, result = pending
-            result.append(msg.get("data", {}))
-            event.set()
+        self._heard[ip] = self._clock()
+        query = self._pending_status.pop(ip, None)
+        if query is None:
             return
-
-        # Otherwise, it's a probe response — measure RTT
-        send_time = self._probe_times.pop(ip, None)
-        if send_time is not None:
-            rtt_ms = (time.monotonic() - send_time) * 1000.0
-            callback = self._rtt_callbacks.get(ip)
-            if callback:
-                callback(rtt_ms)
-                logger.trace("Govee RTT for {}: {:.1f}ms", ip, rtt_ms)
+        if not query.reply.done():
+            query.reply.set_result(msg.get("data", {}))
+        rtt_ms = (self._clock() - query.sent_at) * 1000.0
+        callback = self._rtt_callbacks.get(ip)
+        if callback is not None:
+            callback(rtt_ms)
+            logger.trace("Govee RTT for {}: {:.1f}ms", ip, rtt_ms)
 
 
 class _GoveeUDPProtocol(asyncio.DatagramProtocol):

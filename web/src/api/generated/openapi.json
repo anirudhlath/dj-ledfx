@@ -1108,6 +1108,78 @@
         "title": "InternalTempo",
         "type": "object"
       },
+      "LampOutput": {
+        "description": "How a Govee lamp plays now, and its own setting.",
+        "properties": {
+          "lightId": {
+            "title": "Lightid",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "segments",
+              "colour"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "online": {
+            "title": "Online",
+            "type": "boolean"
+          },
+          "own": {
+            "$ref": "#/components/schemas/LampOutputSetting"
+          },
+          "segments": {
+            "title": "Segments",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lightId",
+          "mode",
+          "segments",
+          "own",
+          "online"
+        ],
+        "title": "LampOutput",
+        "type": "object"
+      },
+      "LampOutputSetting": {
+        "description": "A Govee lamp's own output (the light-output plan's ruling 17; outside the web spec\nuntil a design handoff adds it): razer segments or one colour, and its segment count.\nNull leaves either to the config and the lamp's model.",
+        "properties": {
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "segments",
+                  "colour"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "segments": {
+            "anyOf": [
+              {
+                "maximum": 255.0,
+                "minimum": 2.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segments"
+          }
+        },
+        "title": "LampOutputSetting",
+        "type": "object"
+      },
       "Layer": {
         "properties": {
           "blend": {
@@ -3592,6 +3664,7 @@
     },
     "/api/devices/discover": {
       "post": {
+        "description": "The old UI's scan: a scan, as POST /devices/scan runs, answered with the names of the\ndevices online now that weren't when it was asked.",
         "operationId": "discover_devices_api_devices_discover_post",
         "responses": {
           "200": {
@@ -3713,7 +3786,7 @@
     },
     "/api/devices/scan": {
       "post": {
-        "description": "Trigger device discovery via DiscoveryOrchestrator if available, else fallback.",
+        "description": "Run a scan now, beside the discovery loop's: how many devices it found or brought back\nonline.",
         "operationId": "scan_devices_api_devices_scan_post",
         "responses": {
           "200": {
@@ -4505,6 +4578,94 @@
           }
         },
         "summary": "Guess Placements"
+      }
+    },
+    "/api/lights/{light_id}/output": {
+      "get": {
+        "description": "A Govee lamp's output: how it plays (razer segments or one colour, and how many\nsegments), as its adapter plays while it's online and as a scan will set it up while\nit's offline; and its own setting, which the config and its model fill in.",
+        "operationId": "get_lamp_output_api_lights__light_id__output_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "light_id",
+            "required": true,
+            "schema": {
+              "title": "Light Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LampOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Lamp Output"
+      },
+      "put": {
+        "description": "Set a Govee lamp's own output; a field left null goes back to the default. A lamp\nthat's online plays it at once; one that's offline (online is false) takes it when a\nscan finds it.",
+        "operationId": "set_lamp_output_api_lights__light_id__output_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "light_id",
+            "required": true,
+            "schema": {
+              "title": "Light Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LampOutputSetting"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LampOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Lamp Output"
       }
     },
     "/api/lights/{light_id}/placement": {

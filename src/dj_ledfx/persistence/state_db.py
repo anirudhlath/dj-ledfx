@@ -323,14 +323,37 @@ class StateDB:
         "extra",
     )
 
+    async def _device_rows(
+        self, where: str = "", params: tuple[Any, ...] = ()
+    ) -> list[dict[str, Any]]:
+        """Device rows as dicts, those `where` picks (all of them without it)."""
+        columns = ", ".join(self._DEVICE_COLUMNS)
+        rows = await self._execute_read(f"SELECT {columns} FROM devices {where}", params)
+        return [dict(zip(self._DEVICE_COLUMNS, row, strict=True)) for row in rows]
+
     async def load_devices(self) -> list[dict[str, Any]]:
         """Return all device rows as dicts."""
-        rows = await self._execute_read(f"SELECT {', '.join(self._DEVICE_COLUMNS)} FROM devices")
-        return [dict(zip(self._DEVICE_COLUMNS, row, strict=True)) for row in rows]
+        return await self._device_rows()
 
     async def upsert_device(self, data: dict[str, Any]) -> None:
         """Insert or replace a device record. Must include 'id', 'name', 'backend'."""
         await self._upsert("devices", self._DEVICE_COLUMNS, data, pk_columns=("id",))
+
+    async def load_device(self, stable_id: str) -> dict[str, Any] | None:
+        """One device row by its stable id, or None."""
+        rows = await self._device_rows("WHERE id=?", (stable_id,))
+        return rows[0] if rows else None
+
+    async def set_device_extra(self, stable_id: str, key: str, value: Any) -> None:
+        """Set one key of a device row's extra, a JSON object, keeping its other keys; None
+        removes the key. An upsert without extra leaves it alone."""
+        path = f"$.{key}"
+        if value is None:
+            sql = "UPDATE devices SET extra=json_remove(COALESCE(extra, '{}'), ?) WHERE id=?"
+            await self._execute_write(sql, (path, stable_id))
+            return
+        sql = "UPDATE devices SET extra=json_set(COALESCE(extra, '{}'), ?, json(?)) WHERE id=?"
+        await self._execute_write(sql, (path, json.dumps(value), stable_id))
 
     async def delete_device(self, device_id: str) -> None:
         """Delete a device by stable ID."""

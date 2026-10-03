@@ -1,9 +1,10 @@
 import asyncio
 
 import pytest
+import tomli_w
 from fastapi.testclient import TestClient
 
-from dj_ledfx.config import AppConfig
+from dj_ledfx.config import AppConfig, load_config
 from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.web.app import create_app
 from tests.web.conftest import mock_deps
@@ -50,6 +51,24 @@ def test_import_config(client):
     resp = client.post("/api/config/import", content=toml_str)
     assert resp.status_code == 200
     assert resp.json()["engine"]["fps"] == 120
+
+
+# Keys a deployed config.toml and state.db carry that nothing reads (rulings A5 and C2).
+# Each section is built from its dataclass, which refuses a key it doesn't have, so the
+# fields stay until every way in ignores keys it doesn't know.
+UNREAD = {
+    "discovery": {"unicast_concurrency": 50, "unicast_timeout_s": 0.5, "subnet_mask": 24},
+    "devices": {"govee": {"probe_interval_s": 5.0}},
+}
+
+
+def test_a_config_that_carries_unread_keys_still_loads(client, tmp_path):
+    old_backup = tomli_w.dumps(UNREAD)
+    assert client.post("/api/config/import", content=old_backup).status_code == 200
+    assert client.put("/api/config", json=UNREAD).status_code == 200
+    config_toml = tmp_path / "old.toml"
+    config_toml.write_text(old_backup)
+    assert load_config(config_toml).discovery.subnet_mask == 24
 
 
 def test_state_export_no_db(client):

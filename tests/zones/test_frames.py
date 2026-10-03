@@ -87,3 +87,19 @@ async def test_a_zone_draws_lights_running_their_own_effect_only_while_live_is_w
     now[0] = 100.2
     runtime.tick(100.2)
     assert feed.frames("live")["tile"].min() == 128  # Glow's level, 0.5, drawn for the stage
+
+
+async def test_the_web_app_sees_a_zone_at_its_brightness(make_home: HomeFactory) -> None:
+    home = await make_home([FakeLight("lamp")], [zone_record("z", "lamp")])
+    await home.manager.start("z", GLOW)  # this lamp can't run Glow: a streamed copy
+    await home.manager.set_brightness("z", 0.5)
+    feed = FrameFeed(
+        home.manager.live_runtimes, home.manager.preview_runtimes, clock=lambda: 100.0
+    )
+    runtime = home.host.runtimes["z"]
+    runtime.tick(100.0)
+    frame = runtime.ring.find_nearest(100.0)
+    assert frame is not None and np.allclose(frame.colors, 0.5)  # Glow's level, at full brightness
+    count = runtime.leds.count
+    expected = to_device_colors(frame.colors[:count] * np.float32(0.5), count)
+    assert np.array_equal(feed.frames("live")["lamp"], expected)

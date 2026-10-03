@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC
 from functools import partial
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import httpx
@@ -18,6 +19,7 @@ from fastapi import FastAPI
 from zone_home import Home, build_home
 
 from dj_ledfx.config import AppConfig
+from dj_ledfx.devices.discovery import DiscoveryOrchestrator
 from dj_ledfx.home.model import Home as HomeModel
 from dj_ledfx.prodjlink.listener import Listening
 from dj_ledfx.types import DeviceStats
@@ -39,6 +41,7 @@ class Api:
     stats: list[DeviceStats]  # what the scheduler reports; tests append to it
     previews: PreviewManager
     watchers: Watchers  # who watches which frame stream; the previews ask it
+    discovery: Any = None  # what stands in for the discovery orchestrator, if anything
 
 
 @asynccontextmanager
@@ -49,8 +52,17 @@ async def api_home(
     *,
     plan: HomeModel | None = None,
     listening: Listening | None = None,
+    discovery: Any = None,
+    backends: Sequence[Any] | None = None,
 ) -> AsyncIterator[Api]:
+    """discovery stands in for the discovery orchestrator: POST /devices/scan and the lamp
+    outputs ask it. backends, instead, gives the app a real orchestrator over the home's
+    devices and state.db, scanning those backends."""
     home = await build_home(tmp_path, lights, zones, plan=plan)
+    config = AppConfig()  # one config, the orchestrator's and the app's
+    if backends is not None:
+        discovery = DiscoveryOrchestrator(config, home.devices, home.bus, state_db=home.db)
+        discovery._backends = list(backends)
     watchers = Watchers()
     previews = PreviewManager(home.manager, partial(watchers.watching, "preview"))
     stats: list[DeviceStats] = []
@@ -74,7 +86,7 @@ async def api_home(
         preset_store=MagicMock(),
         scene_model=None,
         compositor=None,
-        config=AppConfig(),
+        config=config,
         config_path=None,
         state_db=home.db,
         event_bus=home.bus,
@@ -85,11 +97,12 @@ async def api_home(
         home_map=home.home_map,
         previews=previews,
         listening=listening,
+        discovery_orchestrator=discovery,
     )
     transport = httpx.ASGITransport(app=app)
     try:
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            yield Api(home, app, client, monitor, feed, stats, previews, watchers)
+            yield Api(home, app, client, monitor, feed, stats, previews, watchers, discovery)
     finally:
         previews.close()
         await home.db.close()

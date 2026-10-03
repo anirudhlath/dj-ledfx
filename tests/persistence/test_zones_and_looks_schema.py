@@ -4,12 +4,13 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from conftest import as_schema
 
 from dj_ledfx.persistence.state_db import StateDB
 
 
-async def test_schema_version_is_8(db: StateDB) -> None:
-    assert await db.get_schema_version() == 8
+async def test_schema_version_is_9(db: StateDB) -> None:
+    assert await db.get_schema_version() == 9
 
 
 async def test_new_tables_exist(db: StateDB) -> None:
@@ -64,13 +65,13 @@ async def test_upgrade_clears_what_the_old_transport_left(tmp_path: Path) -> Non
     await db.save_device_states({"lifx:aa": b"old"})
     await db.save_config_key("engine", "unassigned_device_mode", '"idle"')
     await db.save_config_key("engine", "fps", "60")
-    await db.write("UPDATE config SET value='3' WHERE section='_meta' AND key='schema_version'")
+    await as_schema(db, 3)
     await db.close()
 
     db = StateDB(path)
     await db.open()
     try:
-        assert await db.get_schema_version() == 8
+        assert await db.get_schema_version() == 9
         assert await db.load_all_device_states() == {}
         assert await db.load_config("engine") == {"fps": "60"}
     finally:

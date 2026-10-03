@@ -4,8 +4,10 @@ Zone lights are read every 5 s: their power goes to the zone manager (a light sw
 elsewhere drops out and rejoins when it's back on) and their firmware effects are checked.
 Idle lights are read every 30 s so the web app can show them as they are; they are never
 changed. A light whose read fails three times in a row is reported offline: a light cut at
-the wall switch doesn't answer, and UDP sends never fail. A light that answers but can't
-say its power (OpenRGB, or Govee while HA holds its port) isn't missing.
+the wall switch doesn't answer, and UDP sends never fail. A failed read isn't a miss when
+the light was heard from since its last read (an echo, a late answer): a reply was lost,
+and the light isn't silent. A light set up again starts counting afresh. A light that
+answers but can't say its power (OpenRGB, or Govee while HA holds its port) isn't missing.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from dj_ledfx.devices.capabilities import LightReading, try_read
-from dj_ledfx.events import DeviceOfflineEvent
+from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent
 from dj_ledfx.timing import utcnow
 from dj_ledfx.zones.model import LightsChanged, ZonesChanged
 from dj_ledfx.zones.runtime import LightMode
@@ -84,6 +86,7 @@ class LightMonitor:
         zone_poll_s: float = ZONE_POLL_S,
         idle_poll_s: float = IDLE_POLL_S,
         now: Callable[[], datetime] = utcnow,
+        clock: Callable[[], float] = time.monotonic,  # the adapters' last_heard clock
     ) -> None:
         self._devices = devices
         self._zones = zones
@@ -91,11 +94,15 @@ class LightMonitor:
         self._zone_poll_s = zone_poll_s
         self._idle_poll_s = idle_poll_s
         self._now = now
+        self._clock = clock
         self._states: dict[str, LightState] = {}
         self._readings: dict[str, LightReading] = {}
         self._missed: dict[str, int] = {}
+        self._read_at: dict[str, float] = {}  # when each light's last read ended
         self._running = False
         event_bus.subscribe(ZonesChanged, lambda _event: self.refresh())
+        event_bus.subscribe(DeviceOnlineEvent, self._count_afresh)
+        event_bus.subscribe(DeviceDiscoveredEvent, self._count_afresh)
 
     def states(self) -> list[LightState]:
         return list(self._states.values())
@@ -162,6 +169,10 @@ class LightMonitor:
     def stop(self) -> None:
         self._running = False
 
+    def _count_afresh(self, event: DeviceOnlineEvent | DeviceDiscoveredEvent) -> None:
+        """A light set up again (found by a scan, or its output changed) has missed nothing."""
+        self._missed.pop(event.stable_id, None)
+
     def _status_of(self, device_id: str, managed: ManagedDevice) -> tuple[LightStatus, str | None]:
         if managed.status == "reconnecting":
             return "reconnecting", None
@@ -207,9 +218,18 @@ class LightMonitor:
         await self._zones.verify_firmware(device_id)
 
     async def _read(self, device_id: str, managed: ManagedDevice) -> LightReading | None:
-        """Read a light. None: it didn't answer; three in a row and it's offline."""
+        """Read a light. None: it didn't answer; three misses in a row and it's offline. A
+        failed read is no miss when the light was heard from since its last read ended (or,
+        before its first, within a poll interval): the answer to that read came before it
+        ended, so only something newer counts."""
+        since = self._read_at.get(device_id, self._clock() - self._zone_poll_s)
         reading = await try_read(managed.adapter)
+        self._read_at[device_id] = self._clock()
         if reading is None:
+            heard = managed.adapter.last_heard
+            if heard is not None and heard > since:  # a reply was lost, not the light
+                self._missed.pop(device_id, None)
+                return None
             missed = self._missed.get(device_id, 0) + 1
             self._missed[device_id] = missed
             if missed >= MISSED_POLLS_OFFLINE:

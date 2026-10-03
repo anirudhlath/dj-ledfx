@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping, Sequence
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
@@ -10,15 +11,14 @@ from loguru import logger
 
 from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
+from dj_ledfx.devices.govee.output import OUTPUT_KEY, LampOutputReport, lamp_report, planned
 from dj_ledfx.devices.manager import DeviceManager
-from dj_ledfx.events import (
-    DeviceDiscoveredEvent,
-    DeviceOnlineEvent,
-    EventBus,
-)
+from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOnlineEvent, EventBus
 
 if TYPE_CHECKING:
     from dj_ledfx.devices.adapter import DeviceAdapter
+    from dj_ledfx.devices.govee.output import GoveeOutput
+    from dj_ledfx.latency.tracker import LatencyTracker
     from dj_ledfx.persistence.state_db import StateDB
 
 
@@ -38,6 +38,10 @@ class DiscoveryOrchestrator:
         self._state_db = state_db
         self._running = False
         self._task: asyncio.Task[None] | None = None
+        # One scan at a time: a Govee scan has one reply handler, so two at once would cut
+        # each other short (POST /api/devices/scan beside the loop). A lamp's output change
+        # holds it too, so it never races a scan's swap of the same lamp.
+        self._scan_lock = asyncio.Lock()
 
         # Instantiate backends once; filter by is_enabled
         self._backends: list[DeviceBackend] = []
@@ -56,21 +60,48 @@ class DiscoveryOrchestrator:
         Returns the number of devices promoted from offline to online.
         """
         promoted = 0
-        for backend in self._backends:
-            try:
-                discovered = await backend.connect_known(device_rows, self._config)
-            except Exception:
-                logger.exception("connect_known failed for {}", type(backend).__name__)
-                continue
-
-            for device in discovered:
-                if self._merge(device):
-                    promoted += 1
-                    await self._persist_device(device.adapter)
+        for device in await self._connect_rows(device_rows):
+            if self._merge(device):
+                promoted += 1
+                await self._persist_device(device.adapter)
 
         if promoted:
             logger.info("Fast reconnect: {} device(s) online immediately", promoted)
         return promoted
+
+    async def output_of(self, stable_id: str) -> LampOutputReport | None:
+        """A Govee lamp's own output, and how it plays: as its adapter plays while it's
+        online, else as a scan will set it up. None: no Govee lamp has that id."""
+        row = await self._lamp_row(stable_id)
+        return self._report(row) if row is not None else None
+
+    async def set_output(self, stable_id: str, own: GoveeOutput) -> LampOutputReport | None:
+        """Keep a Govee lamp's own output in its row and play it at once (the light-output
+        plan's ruling 17). An online lamp is set up again from its row with no network: the
+        light monitor still says whether it answers. One that's offline takes the output
+        when a scan finds it. None: no Govee lamp has that id."""
+        async with self._scan_lock:
+            if self._state_db is None or await self._lamp_row(stable_id) is None:
+                return None
+            await self._state_db.set_device_extra(stable_id, OUTPUT_KEY, own.to_extra())
+            row = await self._lamp_row(stable_id)
+            if row is None:
+                return None
+            await self._play(row)
+            return self._report(row)
+
+    async def apply_outputs(self) -> None:
+        """Play each online Govee lamp's output as its row now holds it, where that isn't
+        how it plays: a restored backup's outputs apply at once."""
+        if self._state_db is None:
+            return
+        async with self._scan_lock:
+            for row in await self._state_db.load_devices():
+                if row.get("backend") != "govee":
+                    continue
+                report = self._report(row)
+                if report.online and report.plays != planned(row, self._segment_override):
+                    await self._play(row)
 
     async def run_scan(self) -> int:
         """Run a single discovery scan across all backends.
@@ -78,10 +109,12 @@ class DiscoveryOrchestrator:
         Returns total new devices found. Each device fires an event via
         the on_found callback as soon as it responds — no batching.
         """
-        results = await asyncio.gather(
-            *(self._discover_backend(b) for b in self._backends),
-            return_exceptions=True,
-        )
+        async with self._scan_lock:
+            known = await self._state_db.load_devices() if self._state_db else []
+            results = await asyncio.gather(
+                *(self._discover_backend(b, known) for b in self._backends),
+                return_exceptions=True,
+            )
         found = 0
         for result in results:
             if isinstance(result, Exception):
@@ -109,8 +142,10 @@ class DiscoveryOrchestrator:
         """Start the continuous discovery loop as a background task."""
         self._task = asyncio.create_task(self.run())
 
-    async def _discover_backend(self, backend: DeviceBackend) -> int:
-        """Discover devices from a single backend.
+    async def _discover_backend(
+        self, backend: DeviceBackend, known: Sequence[Mapping[str, Any]]
+    ) -> int:
+        """Discover devices from a single backend, given the known devices' rows.
 
         Devices are promoted/added and events emitted via *on_found* as soon
         as each device is ready, rather than waiting for the full scan timeout.
@@ -135,7 +170,9 @@ class DiscoveryOrchestrator:
         }
 
         try:
-            await backend.discover(self._config, on_found=_on_found, skip_ids=skip_ids)
+            await backend.discover(
+                self._config, on_found=_on_found, skip_ids=skip_ids, known=known
+            )
         except Exception:
             logger.exception("Discovery failed for {}", type(backend).__name__)
             return 0
@@ -145,6 +182,68 @@ class DiscoveryOrchestrator:
             await asyncio.gather(*persist_tasks, return_exceptions=True)
 
         return new_count
+
+    async def _connect_rows(self, rows: list[dict[str, Any]]) -> list[DiscoveredDevice]:
+        """Each backend's known lights, set up from their rows at once; a backend that
+        fails is logged and skipped."""
+        found: list[DiscoveredDevice] = []
+        for backend in self._backends:
+            try:
+                found += await backend.connect_known(rows, self._config)
+            except Exception:
+                logger.exception("connect_known failed for {}", type(backend).__name__)
+        return found
+
+    @property
+    def _segment_override(self) -> int | None:
+        """The config's Govee segment count, as the lamps were set up with it."""
+        return self._config.devices.govee.segment_override
+
+    async def _lamp_row(self, stable_id: str) -> dict[str, Any] | None:
+        """A Govee lamp's device row; None for any other id."""
+        if self._state_db is None:
+            return None
+        row = await self._state_db.load_device(stable_id)
+        return row if row is not None and row.get("backend") == "govee" else None
+
+    def _report(self, row: Mapping[str, Any]) -> LampOutputReport:
+        managed = self._manager.get_by_stable_id(row["id"])
+        live = managed.adapter if managed is not None and managed.status == "online" else None
+        return lamp_report(row, live, self._segment_override)
+
+    async def _play(self, row: Mapping[str, Any]) -> None:
+        """Set an online light up again from its row, with no network, so that it plays what
+        the row holds. An offline one takes it when a scan finds it."""
+        managed = self._manager.get_by_stable_id(row["id"])
+        if managed is None or managed.status != "online":
+            return
+        device = self._rebuild(row, managed.tracker)
+        if device is None:
+            name = managed.adapter.device_info.name
+            logger.warning("{} plays as it did until it's set up again", name)
+            return
+        self._promote(row["id"], device)
+        await self._persist_device(device.adapter)
+
+    def _rebuild(self, row: Mapping[str, Any], tracker: LatencyTracker) -> DiscoveredDevice | None:
+        """A light set up again from its row by its backend, with no network."""
+        for backend in self._backends:
+            try:
+                device = backend.rebuild(row, self._config, tracker)
+            except Exception:
+                logger.exception("Setting {} up again failed", row.get("id"))
+                continue
+            if device is not None:
+                return device
+        return None
+
+    def _promote(self, managed_id: str, device: DiscoveredDevice) -> None:
+        """Put a set-up device in place of a managed one, online, and say so: the zone
+        manager prepares it again, and the light monitor counts its misses afresh."""
+        self._manager.replace_adapter(managed_id, device)
+        device.accepted()
+        info = device.adapter.device_info
+        self._event_bus.emit(DeviceOnlineEvent(stable_id=info.effective_id, name=info.name))
 
     def _merge(self, device: DiscoveredDevice) -> bool:
         """Take a found device in. True when it's new here or came back online.
@@ -163,17 +262,12 @@ class DiscoveryOrchestrator:
                 existing = named[0]
         if existing is None:
             self._manager.add_device(device.adapter, device.tracker, device.max_fps)
+            device.accepted()
             self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
             return True
         if existing.status != "offline":
-            return False
-        self._manager.promote_device(
-            existing.adapter.device_info.effective_id,
-            device.adapter,
-            tracker=device.tracker,
-            max_fps=device.max_fps,
-        )
-        self._event_bus.emit(DeviceOnlineEvent(stable_id=stable_id, name=name))
+            return False  # a duplicate: its tracker never gets the light's round trips
+        self._promote(existing.adapter.device_info.effective_id, device)
         return True
 
     async def _persist_device(self, adapter: DeviceAdapter) -> None:

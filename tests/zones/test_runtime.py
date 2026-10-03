@@ -25,7 +25,7 @@ from dj_ledfx.looks.selectors import parse_selector
 from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import FloatRGB, RenderedFrame
-from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import HORIZON_CAP_S, ZoneLight, ZoneRuntime
 
 TILE = DeviceCapabilities(protocol="LIFX", matrix=True)
 BULB = DeviceCapabilities(protocol="LIFX")
@@ -111,6 +111,15 @@ def _latest(runtime: ZoneRuntime) -> np.ndarray:
     return frame.colors
 
 
+def _sent(runtime: ZoneRuntime, light: str, at: float, leds: int) -> np.ndarray:
+    """What a light's route sends of the frame nearest `at`, to a device of `leds` LEDs."""
+    route = runtime.route_for(light)
+    assert route is not None
+    sent = route.colors_at(at, leds)
+    assert sent is not None
+    return sent
+
+
 def test_firmware_runs_where_supported_and_the_field_plays_elsewhere() -> None:
     runtime = _runtime(_look(_field(), _glow()))
     claim = runtime.claim_for("tile")
@@ -127,7 +136,8 @@ def test_a_firmware_only_look_streams_its_copy_to_lights_that_cannot_run_it() ->
     assert runtime.mode_of("lamp") == "streamed-copy"
     assert runtime.effect_name("lamp") == "Glow"
     runtime.tick(100.0)
-    assert np.allclose(_latest(runtime), 0.2)  # the copy everywhere, at half brightness
+    assert np.allclose(_latest(runtime), 0.4)  # the copy everywhere; brightness waits for the send
+    assert np.all(_sent(runtime, "lamp", 100.0, 3) == 51)  # 0.4 at half brightness, in 8 bits
 
 
 def test_the_top_firmware_layer_claims_first() -> None:
@@ -195,9 +205,11 @@ def test_frames_are_rendered_for_now_plus_the_horizon() -> None:
     assert frame.colors.dtype == np.float32 and frame.colors.shape == (8, 3)
 
 
-def test_the_horizon_is_capped_by_the_lookahead() -> None:
+def test_the_horizon_is_capped() -> None:
     runtime = _runtime(_look(_field()), latencies={"lamp": 5.0}, max_lookahead_s=1.0)
-    assert runtime.horizon_s == 1.0
+    assert runtime.horizon_s == HORIZON_CAP_S
+    shorter = _runtime(_look(_field()), latencies={"lamp": 5.0}, max_lookahead_s=0.05)
+    assert shorter.horizon_s == 0.05
 
 
 # B13: a light that runs its own effect gets no frames, and a light that isn't connected
@@ -209,10 +221,18 @@ def test_the_horizon_counts_only_connected_lights_that_stream() -> None:
     assert runtime.horizon_s == pytest.approx(0.1 + 1 / 60)
 
 
-def test_brightness_and_opacity_scale_the_frame() -> None:
+def test_opacity_scales_the_frame_and_brightness_the_send() -> None:
     runtime = _runtime(_look(_field(level=0.8, opacity=0.5)), brightness=0.5)
     runtime.tick(100.0)
-    assert np.allclose(_latest(runtime), 0.2)
+    assert np.allclose(_latest(runtime), 0.4)
+    assert np.all(_sent(runtime, "bulb", 100.0, 1) == 51)
+
+
+def test_a_light_slower_than_the_cap_gets_the_newest_frame() -> None:
+    runtime = _runtime(_look(_field(level=0.8)), latencies={"lamp": 0.5})
+    assert runtime.horizon_s == HORIZON_CAP_S
+    runtime.tick(100.0)
+    assert np.all(_sent(runtime, "lamp", 100.0 + 0.5, 3) == 204)  # 0.8 in 8 bits: late, not dark
 
 
 def test_a_crash_holds_the_last_good_frame_and_is_logged_once() -> None:

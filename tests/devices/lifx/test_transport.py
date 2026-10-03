@@ -5,8 +5,23 @@ import struct
 import time
 
 import pytest
+from lifx_fakes import MAC, FakeLifxTransport
 
-from dj_ledfx.devices.lifx.packet import STATE_UNHANDLED, LifxPacket
+from dj_ledfx.devices.capabilities import NoAnswer
+from dj_ledfx.devices.lifx import transport as lifx_transport
+from dj_ledfx.devices.lifx.packet import (
+    GET_DEVICE_CHAIN,
+    GET_HOST_FIRMWARE,
+    GET_VERSION,
+    STATE_DEVICE_CHAIN,
+    STATE_HOST_FIRMWARE,
+    STATE_UNHANDLED,
+    STATE_VERSION,
+    LifxPacket,
+    parse_state_device_chain,
+    parse_state_host_firmware,
+    parse_state_version,
+)
 from dj_ledfx.devices.lifx.transport import LifxTransport
 from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
@@ -88,15 +103,22 @@ async def test_rtt_probe_correlation() -> None:
     await transport.close()
 
 
+@pytest.fixture
+def quick_broadcasts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Discovery broadcasts GetService 10 ms apart instead of a second apart."""
+    monkeypatch.setattr(lifx_transport, "GET_SERVICE_GAP_S", 0.01)
+
+
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("quick_broadcasts")
 async def test_discover_sends_broadcast() -> None:
-    """Discovery sends GetService(2) with tagged=1."""
-    transport = LifxTransport()
-    await transport.open()
-    # Discovery with 0.1s timeout returns empty list (no devices on test network)
+    """Discovery broadcasts GetService (2), tagged, three times; with no light answering,
+    it finds nothing."""
+    transport, sent = _transport()
     devices = await transport.discover(timeout_s=0.1)
-    assert isinstance(devices, list)
-    await transport.close()
+    assert devices == []
+    broadcasts = [(packet.msg_type, packet.tagged, addr) for packet, addr in sent.packets]
+    assert broadcasts == [(2, True, ("255.255.255.255", 56700))] * 3
 
 
 class _Sent:
@@ -143,6 +165,20 @@ def _reply(transport: LifxTransport, request: LifxPacket, msg_type: int, payload
         sequence=request.sequence,
         msg_type=msg_type,
         payload=payload,
+    ).pack()
+
+
+def _service(transport: LifxTransport, mac: bytes) -> bytes:
+    """A light's StateService: it speaks UDP on 56700."""
+    return LifxPacket(
+        tagged=False,
+        source=transport.source_id,
+        target=mac + b"\x00\x00",
+        ack_required=False,
+        res_required=False,
+        sequence=0,
+        msg_type=3,
+        payload=struct.pack("<BI", 1, 56700),
     ).pack()
 
 
@@ -257,36 +293,163 @@ async def test_listeners_see_packets_while_a_request_waits() -> None:
         transport.request_response(_request(), ("10.0.0.1", 56700), 107, timeout=0.05)
     )
     await asyncio.sleep(0)
-    service = LifxPacket(
-        tagged=False,
-        source=transport.source_id,
-        target=b"\xbb" * 6 + b"\x00\x00",
-        ack_required=False,
-        res_required=False,
-        sequence=0,
-        msg_type=3,
-        payload=struct.pack("<BI", 1, 56700),
-    )
-    transport._on_packet_received(service.pack(), ("10.0.0.7", 56700))
+    transport._on_packet_received(_service(transport, b"\xbb" * 6), ("127.0.0.1", 56700))
     assert seen == [3]
     await task
 
 
 @pytest.mark.asyncio
-async def test_query_host_firmware() -> None:
+async def test_query_version_retries_once_then_gives_up() -> None:
     transport, sent = _transport()
-    task = asyncio.create_task(transport.query_host_firmware(b"\xaa" * 6, "10.0.0.1", 56700))
-    await asyncio.sleep(0)
-    request, _ = sent.packets[0]
-    assert request.msg_type == 14
-    transport._on_packet_received(
-        _reply(transport, request, 15, struct.pack("<QQHH", 0, 0, 77, 2)), ("10.0.0.1", 56700)
+    with pytest.raises(NoAnswer):
+        await transport.query_version(b"\xaa" * 6, "127.0.0.1", 56700)
+    assert [p.msg_type for p, _ in sent.packets] == [GET_VERSION, GET_VERSION]
+
+
+async def test_a_light_that_can_t_say_its_version_has_none() -> None:
+    light = FakeLifxTransport(unhandled={GET_VERSION})
+    assert await light.query_version(MAC, "127.0.0.1", 56700) is None
+
+
+async def test_a_light_s_record_comes_from_its_version_or_there_is_none() -> None:
+    """Discovery and the reconnect at start build a record one way: a light silent to
+    GetVersion, or one that can't say it, gives none, and a later scan asks again."""
+    light = FakeLifxTransport(product=57)
+    record = await light.record_of(MAC, "127.0.0.1", 56700)
+    assert record == LifxDeviceRecord(MAC, "127.0.0.1", 56700, vendor=1, product=57)
+
+    for light in (FakeLifxTransport(silent=True), FakeLifxTransport(unhandled={GET_VERSION})):
+        assert await light.record_of(MAC, "127.0.0.1", 56700) is None
+        assert light.types() == [GET_VERSION] * (2 if light.silent else 1)
+
+
+ADDR = ("127.0.0.1", 56700)
+
+
+def _unreadable(payload: bytes) -> object:
+    raise ValueError("not a reply anyone can read")
+
+
+async def test_an_answer_is_parsed_none_when_the_light_can_t_say_and_silence_raises() -> None:
+    """The transport tells a light that can't say (StateUnhandled, or a reply that doesn't
+    parse) from one that stays silent, once, for every caller."""
+    light = FakeLifxTransport(product=57, unhandled={GET_DEVICE_CHAIN}, quiet={GET_HOST_FIRMWARE})
+
+    version = await light.answer(MAC, ADDR, GET_VERSION, b"", STATE_VERSION, parse_state_version)
+    assert version is not None and version[1] == 57
+    chain = await light.answer(
+        MAC, ADDR, GET_DEVICE_CHAIN, b"", STATE_DEVICE_CHAIN, parse_state_device_chain
     )
-    assert await task == (2, 77)
+    assert chain is None  # it answered StateUnhandled: it can't say
+    assert await light.answer(MAC, ADDR, GET_VERSION, b"", STATE_VERSION, _unreadable) is None
+    with pytest.raises(NoAnswer):
+        await light.answer(
+            MAC,
+            ADDR,
+            GET_HOST_FIRMWARE,
+            b"",
+            STATE_HOST_FIRMWARE,
+            parse_state_host_firmware,
+            tries=2,
+        )
+    assert light.types().count(GET_HOST_FIRMWARE) == 2  # asked twice, then silence
+
+
+async def test_a_query_is_none_either_way() -> None:
+    """The adapters' reads can't say whether a light refused or stayed silent: None."""
+    light = FakeLifxTransport(unhandled={GET_DEVICE_CHAIN}, quiet={GET_HOST_FIRMWARE})
+    firmware = await light.query(
+        MAC, ADDR, GET_HOST_FIRMWARE, b"", STATE_HOST_FIRMWARE, parse_state_host_firmware
+    )
+    chain = await light.query(
+        MAC, ADDR, GET_DEVICE_CHAIN, b"", STATE_DEVICE_CHAIN, parse_state_device_chain
+    )
+    assert firmware is None and chain is None
+    assert await light.query(MAC, ADDR, GET_VERSION, b"", STATE_VERSION, _unreadable) is None
 
 
 @pytest.mark.asyncio
-async def test_query_version_retries_once_then_defaults_to_a_bulb() -> None:
+@pytest.mark.usefixtures("quick_broadcasts")
+async def test_discovery_skips_known_lights_and_leaves_silent_ones_for_later() -> None:
     transport, sent = _transport()
-    assert await transport._query_version(b"\xaa" * 6, "10.0.0.1", 56700) == (1, 0)
-    assert [p.msg_type for p, _ in sent.packets] == [32, 32]
+    known, silent, new = (bytes.fromhex(f"d073d500000{i}") for i in (1, 2, 3))
+    found: list[LifxDeviceRecord] = []
+    scan = asyncio.create_task(
+        transport.discover(timeout_s=0.1, on_record=found.append, skip_macs={known.hex()})
+    )
+    await asyncio.sleep(0.01)
+    for mac in (known, silent, new):
+        transport._on_packet_received(_service(transport, mac), ("127.0.0.1", 56700))
+    await asyncio.sleep(0.01)  # every light that isn't skipped is asked its version
+    asked = [p for p, _ in sent.packets if p.msg_type == GET_VERSION]
+    assert {p.target[:6] for p in asked} == {silent, new}
+    request = next(p for p in asked if p.target[:6] == new)
+    transport._on_packet_received(
+        _reply(transport, request, STATE_VERSION, struct.pack("<III", 1, 57, 0)),
+        ("127.0.0.1", 56700),
+    )
+
+    records = await scan
+
+    assert [(r.mac, r.product) for r in records] == [(new, 57)]
+    assert found == records
+    retried = [p for p, _ in sent.packets if p.msg_type == GET_VERSION and p.target[:6] == silent]
+    assert len(retried) == 2  # asked twice, then left for a later scan: no made-up bulb
+
+
+def test_every_reply_stamps_when_the_light_was_heard() -> None:
+    now = [100.0]
+    transport = LifxTransport(clock=lambda: now[0])
+    assert transport.last_heard("127.0.0.1") is None
+
+    transport._on_packet_received(_service(transport, b"\xaa" * 6), ("127.0.0.1", 56700))
+    assert transport.last_heard("127.0.0.1") == 100.0
+
+    now[0] = 102.0
+    echo = LifxPacket(
+        tagged=False,
+        source=transport.source_id,
+        target=b"\xaa" * 6 + b"\x00\x00",
+        ack_required=False,
+        res_required=False,
+        sequence=0,
+        msg_type=59,
+        payload=bytes(64),  # an echo reply to a probe it no longer waits for
+    )
+    transport._on_packet_received(echo.pack(), ("127.0.0.1", 56700))
+    assert transport.last_heard("127.0.0.1") == 102.0
+
+    now[0] = 104.0
+    transport._on_packet_received(b"not a LIFX packet", ("127.0.0.1", 56700))
+    assert transport.last_heard("127.0.0.1") == 102.0
+
+
+ECHO_REQUEST = 58
+
+
+@pytest.mark.asyncio
+async def test_the_probe_loop_asks_a_light_only_while_it_streams() -> None:
+    """An idle light's round trip wouldn't count (its Wi-Fi dozes), so it isn't asked."""
+    transport, sent = _transport()
+    streams = [False]
+    record = LifxDeviceRecord(mac=b"\xaa" * 6, ip="127.0.0.1", port=56700, vendor=1, product=1)
+    transport.register_device(record, rtt_callback=lambda rtt: None, streaming=lambda: streams[0])
+    transport.start_probing(interval_s=0.01)
+    await asyncio.sleep(0.05)
+    assert [packet.msg_type for packet, _ in sent.packets] == []
+
+    streams[0] = True
+    await asyncio.sleep(0.05)
+    assert {packet.msg_type for packet, _ in sent.packets} == {ECHO_REQUEST}
+    await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_a_light_registered_without_a_streaming_check_is_always_probed() -> None:
+    transport, sent = _transport()
+    record = LifxDeviceRecord(mac=b"\xaa" * 6, ip="127.0.0.1", port=56700, vendor=1, product=1)
+    transport.register_device(record)
+    transport.start_probing(interval_s=0.01)
+    await asyncio.sleep(0.03)
+    assert {packet.msg_type for packet, _ in sent.packets} == {ECHO_REQUEST}
+    await transport.close()

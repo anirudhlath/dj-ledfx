@@ -39,10 +39,11 @@ def _placement_statement(target_id: str, placement: Placement) -> Statement:
     confirmed_at = placement.confirmed_at.isoformat() if placement.confirmed_at else None
     return (
         "INSERT INTO placements "
-        "(target_id, shape, led_order, confirmed, confirmed_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(target_id) DO UPDATE SET "
+        "(target_id, shape, led_order, confirmed, confirmed_at, updated_at, source) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(target_id) DO UPDATE SET "
         "shape=excluded.shape, led_order=excluded.led_order, confirmed=excluded.confirmed, "
-        "confirmed_at=excluded.confirmed_at, updated_at=excluded.updated_at",
+        "confirmed_at=excluded.confirmed_at, updated_at=excluded.updated_at, "
+        "source=excluded.source",
         (
             target_id,
             json.dumps(shape_to_dict(placement.shape)),
@@ -50,8 +51,13 @@ def _placement_statement(target_id: str, placement: Placement) -> Statement:
             int(placement.confirmed),
             confirmed_at,
             utcnow().isoformat(),
+            placement.source,
         ),
     )
+
+
+def _placement_statements(placements: Mapping[str, Placement]) -> list[Statement]:
+    return [_placement_statement(target, placement) for target, placement in placements.items()]
 
 
 def _vec(x: Any, y: Any, z: Any) -> Vec3 | None:
@@ -109,11 +115,11 @@ class HomeStore:
         """Every readable placement by target id. An unreadable one is logged and left out,
         so its light is placed again."""
         rows = await self._db.fetch_all(
-            "SELECT target_id, shape, led_order, confirmed, confirmed_at FROM placements "
-            "ORDER BY target_id"
+            "SELECT target_id, shape, led_order, confirmed, confirmed_at, source "
+            "FROM placements ORDER BY target_id"
         )
         placements: dict[str, Placement] = {}
-        for target_id, shape_json, led_order, confirmed, confirmed_at in rows:
+        for target_id, shape_json, led_order, confirmed, confirmed_at, source in rows:
             try:
                 placements[target_id] = placement_from_dict(
                     {
@@ -121,6 +127,7 @@ class HomeStore:
                         "led_order": led_order,
                         "confirmed": bool(confirmed),
                         "confirmed_at": confirmed_at,
+                        "source": source,
                     }
                 )
             except (ValueError, TypeError) as exc:
@@ -131,6 +138,10 @@ class HomeStore:
         sql, params = _placement_statement(target_id, placement)
         await self._db.write(sql, params)
 
+    async def save_placements(self, placements: Mapping[str, Placement]) -> None:
+        """Save several placements as one transaction."""
+        await self._db.write_many(_placement_statements(placements))
+
     async def delete_placement(self, target_id: str) -> None:
         await self._db.write("DELETE FROM placements WHERE target_id=?", (target_id,))
 
@@ -140,11 +151,9 @@ class HomeStore:
     async def mark_placements_seeded(self, placements: Mapping[str, Placement]) -> None:
         """Save the first placements and the mark that they were made, as one transaction,
         so a crash between the two can't seed twice."""
-        statements = [
-            _placement_statement(target, placement) for target, placement in placements.items()
-        ]
-        statements.append(self._db.mark_statement(_SEEDED_KEY))
-        await self._db.write_many(statements)
+        await self._db.write_many(
+            [*_placement_statements(placements), self._db.mark_statement(_SEEDED_KEY)]
+        )
 
     # --- the old scenes --------------------------------------------------------------
 

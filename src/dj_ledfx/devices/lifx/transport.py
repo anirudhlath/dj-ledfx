@@ -9,15 +9,13 @@ from typing import TypeVar
 
 from loguru import logger
 
+from dj_ledfx.devices.capabilities import NoAnswer
 from dj_ledfx.devices.lifx.packet import (
-    GET_HOST_FIRMWARE,
     GET_VERSION,
-    STATE_HOST_FIRMWARE,
     STATE_UNHANDLED,
     STATE_VERSION,
     LifxPacket,
     build_echo_request,
-    parse_state_host_firmware,
     parse_state_service,
     parse_state_version,
 )
@@ -25,8 +23,21 @@ from dj_ledfx.devices.lifx.types import LifxDeviceRecord
 
 T = TypeVar("T")
 
+GET_SERVICE_GAP_S = 1.0  # discovery broadcasts GetService three times, this far apart
+
 PacketListener = Callable[[LifxPacket, tuple[str, int]], None]
 _Waiter = tuple[frozenset[int], "asyncio.Future[LifxPacket]"]
+
+
+def parsed(reply: LifxPacket, reply_type: int, parse: Callable[[bytes], T]) -> T | None:
+    """A reply's payload, parsed. None when the light can't say: it answered something else
+    (StateUnhandled, 223) or a reply that doesn't parse."""
+    if reply.msg_type != reply_type:
+        return None
+    try:
+        return parse(reply.payload)
+    except ValueError:
+        return None
 
 
 class LifxTransport:
@@ -37,7 +48,8 @@ class LifxTransport:
     add_listener() instead of replacing the packet handler.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock  # stamps when each light was last heard
         self._source_id = random.randint(2, 0xFFFFFFFF)
         self._sequence_counter = 0
         self._socket: asyncio.DatagramTransport | None = None
@@ -49,11 +61,14 @@ class LifxTransport:
         self._devices: dict[tuple[str, int], LifxDeviceRecord] = {}
         # RTT callbacks: ip -> callback(rtt_ms)
         self._rtt_callbacks: dict[str, Callable[[float], None]] = {}
+        # Whether each light streams, by ip: a light that doesn't isn't probed
+        self._streaming: dict[str, Callable[[], bool]] = {}
         # Pending echo probes: sequence_counter -> (device_ip, send_time)
         self._pending_probes: dict[int, tuple[str, float]] = {}
         # Requests waiting for a reply: (ip, wire sequence) -> (accepted types, future)
         self._waiters: dict[tuple[str, int], _Waiter] = {}
         self._listeners: list[PacketListener] = []
+        self._heard: dict[str, float] = {}  # ip → when it last sent us anything
 
     @property
     def source_id(self) -> int:
@@ -62,6 +77,11 @@ class LifxTransport:
     @property
     def is_open(self) -> bool:
         return self._is_open
+
+    def last_heard(self, ip: str) -> float | None:
+        """When the light at ip last sent any reply, an echo included, on the transport's
+        clock, or None."""
+        return self._heard.get(ip)
 
     def next_sequence(self) -> int:
         self._sequence_counter += 1
@@ -91,6 +111,7 @@ class LifxTransport:
         self._is_open = False
         self._devices.clear()
         self._rtt_callbacks.clear()
+        self._streaming.clear()
         self._pending_probes.clear()
         for _types, future in self._waiters.values():
             future.cancel()
@@ -119,11 +140,20 @@ class LifxTransport:
         self,
         record: LifxDeviceRecord,
         rtt_callback: Callable[[float], None] | None = None,
+        *,
+        streaming: Callable[[], bool] | None = None,
     ) -> None:
+        """Probe the light, handing its echo round trips to rtt_callback, but only while
+        streaming() says it streams (with none, always): an idle light's Wi-Fi dozes, and
+        its round trips, running long, wouldn't count."""
         key = (record.ip, record.port)
         self._devices[key] = record
         if rtt_callback:
             self._rtt_callbacks[record.ip] = rtt_callback
+        if streaming is None:
+            self._streaming.pop(record.ip, None)
+        else:
+            self._streaming[record.ip] = streaming
 
     def add_listener(self, listener: PacketListener) -> None:
         self._listeners.append(listener)
@@ -177,6 +207,28 @@ class LifxTransport:
                 return reply
         return None
 
+    async def answer(
+        self,
+        mac: bytes,
+        addr: tuple[str, int],
+        msg_type: int,
+        payload: bytes,
+        reply_type: int,
+        parse: Callable[[bytes], T],
+        *,
+        tries: int = 1,
+        timeout: float = 0.5,
+    ) -> T | None:
+        """Ask a light and parse its reply: None when it can't say (`parsed`). Raises
+        NoAnswer when it stays silent: setting a light up from silence would make it the
+        wrong kind or size, so its caller leaves it for a later scan."""
+        reply = await self.ask(
+            mac, addr, msg_type, payload, reply_type, tries=tries, timeout=timeout
+        )
+        if reply is None:
+            raise NoAnswer(f"LIFX {addr[0]} didn't answer message {msg_type}")
+        return parsed(reply, reply_type, parse)
+
     async def query(
         self,
         mac: bytes,
@@ -189,17 +241,12 @@ class LifxTransport:
         tries: int = 1,
         timeout: float = 0.5,
     ) -> T | None:
-        """Ask a light and parse its reply. None when it stays silent, answers something
-        else (StateUnhandled) or sends a reply that doesn't parse."""
+        """Ask a light and parse its reply. None either way: when it stays silent, and when
+        it can't say (`parsed`). For reads that only want to know what the light says."""
         reply = await self.ask(
             mac, addr, msg_type, payload, reply_type, tries=tries, timeout=timeout
         )
-        if reply is None or reply.msg_type != reply_type:
-            return None
-        try:
-            return parse(reply.payload)
-        except ValueError:
-            return None
+        return None if reply is None else parsed(reply, reply_type, parse)
 
     def start_probing(self, interval_s: float = 2.0) -> None:
         if self._probe_task is None or self._probe_task.done():
@@ -213,6 +260,9 @@ class LifxTransport:
                 del self._pending_probes[k]
 
             for (ip, port), record in self._devices.items():
+                streaming = self._streaming.get(ip)
+                if streaming is not None and not streaming():
+                    continue  # idle: its round trip wouldn't count
                 seq = self.next_sequence()
                 self._pending_probes[seq] = (record.ip, now)
                 pkt = LifxPacket(
@@ -248,25 +298,26 @@ class LifxTransport:
         self,
         timeout_s: float = 1.0,
         on_record: Callable[[LifxDeviceRecord], None] | None = None,
+        skip_macs: Collection[str] = (),
     ) -> list[LifxDeviceRecord]:
         """Broadcast GetService, collect responses, query versions.
 
-        If *on_record* is provided it is called as soon as each device's
-        version query completes, rather than waiting for all devices.
+        A light whose MAC (hex) is in `skip_macs` is known and online: it's never asked.
+        A light that doesn't answer GetVersion gives no record; a later scan asks again.
+        If *on_record* is provided it is called as soon as each device's version query
+        completes, rather than waiting for all devices.
         """
         discovered: dict[str, tuple[bytes, str, int]] = {}  # mac_hex -> (mac, ip, port)
-        version_tasks: list[asyncio.Task[LifxDeviceRecord | None]] = []
+        version_tasks: list[asyncio.Task[None]] = []
         results: list[LifxDeviceRecord] = []
 
-        async def _query_version_and_record(
-            mac: bytes, ip: str, port: int
-        ) -> LifxDeviceRecord | None:
-            vendor, product = await self._query_version(mac, ip, port)
-            record = LifxDeviceRecord(mac=mac, ip=ip, port=port, vendor=vendor, product=product)
+        async def _record(mac: bytes, ip: str, port: int) -> None:
+            record = await self.record_of(mac, ip, port)
+            if record is None:
+                return
             results.append(record)
             if on_record is not None:
                 on_record(record)
-            return record
 
         def _on_state_service(pkt: LifxPacket, addr: tuple[str, int]) -> None:
             if pkt.msg_type != 3:
@@ -275,20 +326,20 @@ class LifxTransport:
             if service != 1:  # UDP
                 return
             mac = pkt.target[:6]
-            if mac.hex() not in discovered:
-                discovered[mac.hex()] = (mac, addr[0], port)
-                version_tasks.append(
-                    asyncio.create_task(_query_version_and_record(mac, addr[0], port))
-                )
+            mac_hex = mac.hex()
+            if mac_hex in skip_macs or mac_hex in discovered:
+                return
+            discovered[mac_hex] = (mac, addr[0], port)
+            version_tasks.append(asyncio.create_task(_record(mac, addr[0], port)))
 
         self.add_listener(_on_state_service)
         try:
-            # Broadcast GetService 3 times, 1 second apart; dedup by MAC
+            # Broadcast GetService 3 times, GET_SERVICE_GAP_S apart; dedup by MAC
             for i in range(3):
                 self._broadcast_get_service(("255.255.255.255", 56700))
                 if i < 2:
-                    await asyncio.sleep(1.0)
-            remaining = timeout_s - 2.0
+                    await asyncio.sleep(GET_SERVICE_GAP_S)
+            remaining = timeout_s - 2 * GET_SERVICE_GAP_S
             if remaining > 0:
                 await asyncio.sleep(remaining)
         finally:
@@ -300,72 +351,35 @@ class LifxTransport:
         logger.info("LIFX discovery found {} devices", len(results))
         return results
 
-    async def unicast_sweep(
-        self,
-        subnet_hosts: list[str],
-        concurrency: int = 50,
-        timeout_s: float = 0.5,
-    ) -> list[LifxDeviceRecord]:
-        """Send GetService to every IP in the list. Rate-limited."""
-        discovered: dict[str, tuple[bytes, str, int]] = {}  # mac_hex -> (mac, ip, port)
-
-        def _on_state_service(pkt: LifxPacket, addr: tuple[str, int]) -> None:
-            if pkt.msg_type != 3:
-                return
-            service, port = parse_state_service(pkt.payload)
-            if service == 1:  # UDP
-                mac = pkt.target[:6]
-                discovered[mac.hex()] = (mac, addr[0], port)
-
-        self.add_listener(_on_state_service)
+    async def record_of(self, mac: bytes, ip: str, port: int) -> LifxDeviceRecord | None:
+        """The light's record, from its answer to GetVersion (asked twice). None when it
+        stays silent or can't say what product it is: a later scan asks again, since a
+        light recorded from a guess would be set up as the wrong kind."""
         try:
-            sem = asyncio.Semaphore(concurrency)
-
-            async def _probe_host(ip: str) -> None:
-                async with sem:
-                    self._broadcast_get_service((ip, 56700))
-
-            await asyncio.gather(*[_probe_host(ip) for ip in subnet_hosts])
-            await asyncio.sleep(timeout_s)
-        finally:
-            self.remove_listener(_on_state_service)
-
-        results: list[LifxDeviceRecord] = []
-        for mac, ip, port in discovered.values():
-            vendor, product = await self._query_version(mac, ip, port)
-            results.append(
-                LifxDeviceRecord(mac=mac, ip=ip, port=port, vendor=vendor, product=product)
-            )
-
-        logger.info("LIFX unicast sweep found {} devices", len(results))
-        return results
+            version = await self.query_version(mac, ip, port)
+        except NoAnswer:
+            logger.info("LIFX {} didn't answer GetVersion; a later scan asks again", ip)
+            return None
+        if version is None:
+            logger.info("LIFX {} can't say what product it is; a later scan asks again", ip)
+            return None
+        vendor, product = version
+        return LifxDeviceRecord(mac=mac, ip=ip, port=port, vendor=vendor, product=product)
 
     async def query_version(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
-        """(vendor, product), or None if the light doesn't answer two tries."""
-        version = await self.query(
+        """(vendor, product), or None if the light can't say. Raises NoAnswer if it doesn't
+        answer two tries."""
+        version = await self.answer(
             mac, (ip, port), GET_VERSION, b"", STATE_VERSION, parse_state_version, tries=2
         )
         return None if version is None else (int(version[0]), int(version[1]))
-
-    async def _query_version(self, mac: bytes, ip: str, port: int) -> tuple[int, int]:
-        """Query a device's vendor and product. Returns (1, 0) if it never answers."""
-        version = await self.query_version(mac, ip, port)
-        if version is None:
-            logger.warning("LIFX device {} did not respond to GetVersion, defaulting to bulb", ip)
-            return 1, 0
-        return version
-
-    async def query_host_firmware(self, mac: bytes, ip: str, port: int) -> tuple[int, int] | None:
-        """(major, minor) of the light's firmware, or None if it doesn't answer."""
-        return await self.query(
-            mac, (ip, port), GET_HOST_FIRMWARE, b"", STATE_HOST_FIRMWARE, parse_state_host_firmware
-        )
 
     def _on_packet_received(self, data: bytes, addr: tuple[str, int]) -> None:
         try:
             pkt = LifxPacket.unpack(data)
         except Exception:
             return
+        self._heard[addr[0]] = self._clock()
 
         if pkt.msg_type == 59:  # EchoResponse
             self._handle_echo_response(pkt, addr)

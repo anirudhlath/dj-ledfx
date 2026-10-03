@@ -1,6 +1,6 @@
 # dj-ledfx
 
-Beat-synced LED lighting engine driven by Pioneer Pro DJ Link. A passive UDP listener picks beat packets straight off the DJ booth network, a 60 fps effect engine renders frames ahead of time into a future-frame ring buffer, and a lookahead scheduler sends each device the frame that matches its measured latency — so USB peripherals (~5 ms), LIFX (~50 ms), and Govee (~100 ms) fixtures all hit the beat together. Ships with a FastAPI + WebSocket backend, a React control UI with a three.js 3D scene editor, and Prometheus/Grafana monitoring.
+Beat-synced LED lighting engine driven by Pioneer Pro DJ Link. A passive UDP listener picks beat packets straight off the DJ booth network, a 60 fps effect engine renders frames ahead of time into a future-frame ring buffer, and a lookahead scheduler sends each device the frame that matches its measured latency — so USB peripherals (~5 ms), LIFX (~20 ms a bulb, ~35 ms a strip, ~120 ms a matrix), and Govee (~100 ms) fixtures all hit the beat together. Ships with a FastAPI + WebSocket backend, a React control UI with a three.js 3D scene editor, and Prometheus/Grafana monitoring.
 
 ## How it works
 
@@ -10,20 +10,20 @@ CDJ/XDJ decks ──UDP:50001──▶ Pro DJ Link listener ──▶ TempoClock
                      ring buffer of FUTURE frames ◀── 60 fps effect engine
                                                               │
                 LookaheadScheduler — per-device send loops pick the frame at
-                now + device_latency (static / EMA / windowed-mean strategies)
+                now + device_latency (one way, measured while streaming)
                                                               │
                         OpenRGB · LIFX LAN · Govee LAN adapters
 ```
 
-The key idea: the ring buffer stores *future* frames. The engine renders at `now + max_lookahead`; each device's send loop picks the frame at `now + device_latency`, so higher-latency devices simply read further into the future.
+The key idea: the ring buffer stores *future* frames. Each zone renders at `now + horizon` (its slowest light's latency plus a frame, at most 120 ms); each device's send loop picks the frame at `now + device_latency`, so higher-latency devices simply read further into the future.
 
 ## Features
 
 - **Passive Pro DJ Link listener** — parses broadcast beat packets on UDP 50001 with no virtual-CDJ handshake. BPM is pitch-adjusted (`track_bpm * (1 + pitch/100)`) and the TempoClock follows one deck with drift correction (soft-correct under 5 ms, hard snap above). Currently supports CDJ-3000-generation beat packets.
 - **Always-running tempo clock** — with no DJ, an internal clock keeps the tempo: set a BPM, tap it or nudge the phase from the web app, and it's kept across restarts. A DJ who starts playing takes over; when the decks go quiet, the clock carries on at the DJ's last tempo without a jump.
 - **60 fps effect engine** — effects are pure-NumPy render functions behind an auto-registry, with a hot-swappable effect deck, runtime-introspectable parameters, and TOML presets. Built-in effects: beat_pulse, breathe, color_chase, fire_storm, rainbow_wave, strobe.
-- **Per-device latency compensation** — per-device send loops run at each device's natural FPS; latency is estimated by static, EMA, or windowed-mean strategies, seeded with device-type heuristics.
-- **Device adapters** — OpenRGB (USB/desktop RGB), LIFX LAN (bulbs, strips, tile chains), Govee LAN (UDP segment control with SKU registry). Discovery orchestrator with multi-wave scanning, fast reconnect, and ghost placeholders for offline devices.
+- **Per-device latency compensation** — per-device send loops run at each device's own rate (LIFX strips and matrices at most 20 a second, a Govee lamp 30 by razer or 10 in one colour) and skip a frame the device already shows; latency is one way, half the round trips measured while a device streams (a LIFX echo probe's, a Govee status read's), in a windowed median (static, EMA and windowed-mean strategies remain), plus the device's display delay.
+- **Device adapters** — OpenRGB (USB/desktop RGB), LIFX LAN (bulbs, strips, tile chains), Govee LAN (one colour per segment by razer, or one colour, with an SKU registry and each lamp's own output). Discovery orchestrator with multi-wave scanning, fast reconnect, and ghost placeholders for offline devices.
 - **Multi-scene 3D spatial mapping** — place devices in 3D space, map effects spatially (linear/radial), and run independent scene pipelines with conflict detection.
 - **Web control** — FastAPI REST + WebSocket backend (binary LED frame broadcast) with a React 19 + TypeScript UI: live performance view, effect deck, transport controls, device monitor, and a react-three-fiber 3D scene editor.
 - **Persistence** — SQLite state DB as the runtime source of truth, with TOML import/export and debounced writes.

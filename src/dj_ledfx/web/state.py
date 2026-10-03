@@ -11,6 +11,7 @@ from dj_ledfx.prodjlink.listener import Listening
 if TYPE_CHECKING:
     from fastapi import Request
 
+    from dj_ledfx.devices.discovery import DiscoveryOrchestrator
     from dj_ledfx.home.map import HomeMap
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
@@ -73,6 +74,10 @@ def get_home_map(request: Request) -> HomeMap:
 
 def get_previews(request: Request) -> PreviewManager:
     return cast("PreviewManager", _required(request, "previews", "Previews"))
+
+
+def get_discovery(request: Request) -> DiscoveryOrchestrator:
+    return cast("DiscoveryOrchestrator", _required(request, "discovery_orchestrator", "Scans"))
 
 
 def listening(app: Any) -> Listening:

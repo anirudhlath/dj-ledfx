@@ -8,7 +8,9 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import numpy as np
 from loguru import logger
+from numpy.typing import NDArray
 
 from dj_ledfx import metrics
 from dj_ledfx.devices.manager import ManagedDevice
@@ -16,9 +18,15 @@ from dj_ledfx.events import DeviceOfflineEvent, EventBus
 from dj_ledfx.timing import paced, trim_window
 from dj_ledfx.types import DeviceStats
 
+# A frame equal to the last one sent goes out again only this often: the light already shows
+# it, and a lamp that drops a packet gets it back within a second. A route set again, a new
+# adapter or a drop-out sends it at once.
+KEEPALIVE_S = 1.0
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from dj_ledfx.devices.adapter import DeviceAdapter
     from dj_ledfx.scheduling.route import DeviceRoute
 
 
@@ -32,12 +40,10 @@ class FrameSlot:
     def __init__(self) -> None:
         self._event = asyncio.Event()
         self._target_time: float = 0.0
-        self._put_count: int = 0
 
     def put(self, target_time: float) -> None:
         """Write target_time and signal. Must not await — single synchronous step."""
         self._target_time = target_time
-        self._put_count += 1
         self._event.set()
 
     async def take(self, timeout: float = 1.0) -> float:
@@ -46,13 +52,22 @@ class FrameSlot:
         self._event.clear()
         return self._target_time
 
+    def discard(self) -> None:
+        """Forget a pending target_time: one written before a drop-out is stale."""
+        self._event.clear()
+
     @property
     def has_pending(self) -> bool:
         return self._event.is_set()
 
-    @property
-    def put_count(self) -> int:
-        return self._put_count
+
+@dataclass(frozen=True, slots=True)
+class LastSend:
+    """The last frame a device was sent: through which adapter, its bytes, and when."""
+
+    adapter: DeviceAdapter
+    data: bytes
+    at: float
 
 
 @dataclass
@@ -64,6 +79,9 @@ class DeviceSendState:
     send_count: int = 0
     send_task: asyncio.Task[None] | None = None
     sent_at: deque[float] = field(default_factory=deque)  # send times in the last second
+    last: LastSend | None = None  # None: the next frame goes out, whatever it is
+    due_at: float = 0.0  # when the send loop next wakes for a frame (monotonic)
+    dropped: int = 0  # frames overwritten untaken a period after it was due
 
 
 class LookaheadScheduler:
@@ -98,11 +116,15 @@ class LookaheadScheduler:
         return managed.adapter.device_info.effective_id
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None:
-        """Where a device's frames come from; None stops them."""
+        """Where a device's frames come from; None stops them. A route set (the light may
+        have been readied again) sends its next frame, even one the light showed before."""
         if route is None:
             self._routes.pop(device_id, None)
         else:
             self._routes[device_id] = route
+        state = self._device_state.get(device_id)
+        if state is not None:
+            state.last = None
 
     def add_device(self, managed: ManagedDevice) -> None:
         """Add a device dynamically. Spawns a send task if the scheduler is running."""
@@ -151,13 +173,20 @@ class LookaheadScheduler:
         logger.info("LookaheadScheduler stopped")
 
     def _distribute(self, now: float) -> None:
-        """Tell each streaming device which moment its next frame is for: now + its latency."""
+        """Tell each streaming device which moment its next frame is for: now plus its
+        latency. A device is written from the tick before its send loop wakes, so a light
+        slower than the engine is written about as often as it sends; a frame still untaken a
+        whole period after the light was due is overwritten, and that's a frame dropped."""
+        period = self._frame_period
         for key, state in self._device_state.items():
             route = self._routes.get(key)
-            if route is None or not route.streaming:
+            if route is None or not route.streaming or not state.managed.adapter.is_connected:
                 continue
-            if state.slot.has_pending:
-                logger.trace("Frame overwritten for '{}': it drains slower than the engine", key)
+            if now < state.due_at - period:
+                continue  # it isn't due yet: this frame would only be overwritten
+            if state.slot.has_pending and now >= state.due_at + period:
+                logger.trace("Frame dropped for '{}': it was due and didn't take it", key)
+                state.dropped += 1
                 metrics.FRAMES_DROPPED.labels(device=key).inc()
             state.slot.put(now + state.managed.tracker.effective_latency_s)
 
@@ -169,6 +198,7 @@ class LookaheadScheduler:
 
         while self._running and key in self._device_state:
             if not device.adapter.is_connected:
+                state.last = None  # a light back from a drop-out gets its frame at once
                 if was_connected:
                     logger.warning("Device '{}' disconnected", device.adapter.device_info.name)
                     if self._event_bus is not None:
@@ -179,12 +209,14 @@ class LookaheadScheduler:
                             )
                         )
                 was_connected = False
+                state.due_at = time.monotonic() + self._disconnect_backoff_s  # none till then
                 await asyncio.sleep(self._disconnect_backoff_s)
                 continue
 
             if not was_connected:
                 logger.info("Device '{}' reconnected", device.adapter.device_info.name)
                 device.tracker.reset()
+                slot.discard()  # its frame comes from the next tick
                 was_connected = True
 
             try:
@@ -196,37 +228,67 @@ class LookaheadScheduler:
             if route is None or not route.streaming:
                 continue  # it stopped streaming after the slot was filled
             colors = route.colors_at(target_time, device.adapter.led_count)
-            device_name = device.adapter.device_info.name
             if colors is None:
-                logger.trace("No frame yet for '{}' (target {:.3f})", device_name, target_time)
+                logger.trace(
+                    "No frame yet for '{}' (target {:.3f})",
+                    device.adapter.device_info.name,
+                    target_time,
+                )
                 continue
 
-            async with device.adapter.send_lock:
-                current = self._routes.get(key)  # a restore may have run meanwhile
-                if current is None or not current.streaming:
+            data = colors.tobytes()
+            now = time.monotonic()
+            last = state.last
+            shown = (  # the light shows this already: it counts as sent, and nothing goes out
+                last is not None
+                and now - last.at < KEEPALIVE_S
+                and device.adapter is last.adapter
+                and data == last.data
+            )
+            if not shown:
+                sent = await self._send(state, key, colors, data)
+                if sent is None:
                     continue
-                send_start = time.monotonic()
-                try:
-                    await device.adapter.send_frame(colors)
-                except Exception:
-                    logger.warning("Send failed for '{}'", device_name)
-                    continue
-            sent = time.monotonic()
-            metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
-            if device.adapter.supports_latency_probing:
-                device.tracker.update((sent - send_start) * 1000.0)
+                now = sent
             state.send_count += 1
-            state.sent_at.append(sent)
-            trim_window(state.sent_at, sent)
-            metrics.DEVICE_LATENCY.labels(device=key).set(device.tracker.effective_latency_s)
-            metrics.DEVICE_FPS.labels(device=key).set(device.max_fps)
+            state.sent_at.append(now)
+            trim_window(state.sent_at, now)
 
-            last_send_time += 1.0 / device.max_fps
-            remaining = last_send_time - time.monotonic()
-            if remaining > 0:
-                await asyncio.sleep(remaining)
-            else:  # fell behind: snap to now rather than burst to catch up
-                last_send_time = time.monotonic()
+            # The next frame is due a period on; a loop that fell behind starts again from now
+            # rather than bursting to catch up.
+            now = time.monotonic()
+            last_send_time = max(last_send_time + 1.0 / self._rate(device), now)
+            state.due_at = last_send_time
+            if last_send_time > now:
+                await asyncio.sleep(last_send_time - now)
+
+    async def _send(
+        self, state: DeviceSendState, key: str, colors: NDArray[np.uint8], data: bytes
+    ) -> float | None:
+        """Send a device its frame under its adapter's send lock. When it went out, or None:
+        the route stopped streaming meanwhile (a restore may have run), or the send failed."""
+        device = state.managed
+        adapter = device.adapter
+        async with adapter.send_lock:
+            route = self._routes.get(key)
+            if route is None or not route.streaming:
+                return None
+            send_start = time.monotonic()
+            try:
+                await adapter.send_frame(colors)
+            except Exception:
+                logger.warning("Send failed for '{}'", adapter.device_info.name)
+                return None
+        sent = time.monotonic()
+        device.tracker.note_send()  # its probes' round trips count from now
+        # A route set while the frame went out may have readied the light again: the next
+        # frame goes out whatever it is, as it would had the route been set before.
+        rerouted = self._routes.get(key) is not route
+        state.last = None if rerouted else LastSend(adapter, data, sent)
+        metrics.DEVICE_SEND_DURATION.labels(device=key).observe(sent - send_start)
+        metrics.DEVICE_LATENCY.labels(device=key).set(device.tracker.effective_latency_s)
+        metrics.DEVICE_FPS.labels(device=key).set(self._rate(device))
+        return sent
 
     def get_device_stats(self) -> list[DeviceStats]:
         """Per-device send statistics; rates cover the last second."""
@@ -241,7 +303,7 @@ class LookaheadScheduler:
                     device_name=device.adapter.device_info.name,
                     effective_latency_ms=device.tracker.effective_latency_ms,
                     send_fps=send_fps,
-                    frames_dropped=max(0, state.slot.put_count - state.send_count),
+                    frames_dropped=state.dropped,
                     connected=device.adapter.is_connected,
                     device_id=key,
                     dropped_pct=self._dropped_pct(key, state, send_fps),
@@ -254,5 +316,10 @@ class LookaheadScheduler:
         route = self._routes.get(key)
         if route is None or not route.streaming or not state.managed.adapter.is_connected:
             return 0.0
-        expected = min(self._fps, state.managed.max_fps)
+        expected = self._rate(state.managed)
         return max(0.0, 1.0 - send_fps / expected) * 100.0
+
+    def _rate(self, device: ManagedDevice) -> float:
+        """The most frames a second a device is sent: its own rate (the adapter's), within
+        the engine's; a device with none of its own gets the engine's."""
+        return self._fps if device.max_fps is None else min(self._fps, device.max_fps)

@@ -2,20 +2,35 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from typing import Any
 
 from loguru import logger
 
 from dj_ledfx.config import AppConfig
-from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
-from dj_ledfx.devices.govee.segment import GoveeSegmentAdapter
-from dj_ledfx.devices.govee.sku_registry import get_device_capability, get_segment_count
-from dj_ledfx.devices.govee.solid import GoveeSolidAdapter
+from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice, configured_fps
+from dj_ledfx.devices.govee.adapter_base import GoveeAdapterBase
+from dj_ledfx.devices.govee.colour import GoveeColourAdapter
+from dj_ledfx.devices.govee.output import GoveeOutput, lamp_plan
+from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
+from dj_ledfx.devices.govee.sku_registry import get_device_capability
 from dj_ledfx.devices.govee.transport import GoveeTransport
 from dj_ledfx.devices.govee.types import GoveeDeviceRecord
-from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
-from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.latency.tracker import LatencyTracker, tracker_for
+
+
+def _record_of(row: Mapping[str, Any]) -> GoveeDeviceRecord | None:
+    """A known lamp's record from its device row; None without an address."""
+    ip = row.get("ip") or ""
+    device_id = row.get("device_id") or ""
+    if not device_id:  # from its stable id, "govee:{device_id}"
+        device_id = (row.get("id") or "").removeprefix("govee:")
+    if not ip:
+        return None
+    return GoveeDeviceRecord(
+        ip=ip, device_id=device_id, sku=row.get("sku") or "", wifi_version="", ble_version=""
+    )
 
 
 class GoveeBackend(DeviceBackend):
@@ -30,8 +45,16 @@ class GoveeBackend(DeviceBackend):
         config: AppConfig,
         on_found: Callable[[DiscoveredDevice], Any] | None = None,
         skip_ids: set[str] | None = None,
+        known: Sequence[Mapping[str, Any]] = (),
     ) -> list[DiscoveredDevice]:
+        """A lamp found is set up playing its own output, from its row in *known*; a lamp
+        with no row plays as the config and the SKU table say."""
         govee = config.devices.govee
+        outputs = {
+            row["id"]: GoveeOutput.from_extra(row.get("extra"))
+            for row in known
+            if row.get("backend") == "govee"
+        }
         # Reuse existing transport if already open (e.g. multi-wave discovery)
         if self._transport is None or not self._transport.is_open:
             self._transport = GoveeTransport()
@@ -48,62 +71,31 @@ class GoveeBackend(DeviceBackend):
         transport = self._transport  # local ref for closure
 
         async def _setup_device(record: GoveeDeviceRecord) -> None:
+            stable_id = f"govee:{record.device_id}"
+            if skip_ids and stable_id in skip_ids:
+                return
+            output = outputs.get(stable_id, GoveeOutput())
             try:
-                stable_id = f"govee:{record.device_id}"
-                if skip_ids and stable_id in skip_ids:
-                    return
-
-                capability = get_device_capability(record.sku)
-                segment_count = get_segment_count(
-                    record.sku, config_override=govee.segment_override
-                )
-
-                if capability.is_rgbic and segment_count > 0:
-                    adapter: GoveeSegmentAdapter | GoveeSolidAdapter = GoveeSegmentAdapter(
-                        transport, record, num_segments=segment_count
-                    )
-                    logger.info(
-                        "Govee {} at {} → segment adapter ({} segments)",
-                        record.sku,
-                        record.ip,
-                        segment_count,
-                    )
-                else:
-                    adapter = GoveeSolidAdapter(transport, record)
-                    logger.info(
-                        "Govee {} at {} → solid adapter",
-                        record.sku,
-                        record.ip,
-                    )
-
-                await adapter.connect()
-                tracker = self._create_tracker(config)
-
-                transport.register_device(
-                    record,
-                    rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
-                )
-
-                device = DiscoveredDevice(
-                    adapter=adapter,
-                    tracker=tracker,
-                    max_fps=govee.max_fps,
-                )
-                results.append(device)
-                if on_found is not None:
-                    on_found(device)
+                device = await self._setup(transport, record, config, output)
+            except ConnectionError as silent:
+                logger.warning("{}: a later scan tries it again", silent)
+                return
             except Exception:
                 logger.exception(
                     "Failed to set up Govee device {} (sku={})",
                     record.ip,
                     record.sku,
                 )
+                return
+            results.append(device)
+            if on_found is not None:
+                on_found(device)
 
         def _on_record(record: GoveeDeviceRecord) -> None:
             task = asyncio.create_task(_setup_device(record))
             setup_tasks.append(task)
 
-        await self._transport.discover(
+        await transport.discover(
             timeout_s=govee.discovery_timeout_s,
             on_record=_on_record,
         )
@@ -115,9 +107,6 @@ class GoveeBackend(DeviceBackend):
         if not results:
             logger.info("No Govee devices found — ensure LAN control is enabled in Govee app")
 
-        if results:
-            self._transport.start_probing(interval_s=govee.probe_interval_s)
-
         return results
 
     async def connect_known(
@@ -128,8 +117,6 @@ class GoveeBackend(DeviceBackend):
         if not govee_rows:
             return []
 
-        govee_cfg = config.devices.govee
-
         # Open transport if not already open
         if self._transport is None or not self._transport.is_open:
             self._transport = GoveeTransport()
@@ -139,85 +126,95 @@ class GoveeBackend(DeviceBackend):
                 logger.exception("Failed to open Govee transport (port 4002 in use?)")
                 self._transport = None
                 return []
+        transport = self._transport
 
         results: list[DiscoveredDevice] = []
         for row in govee_rows:
+            name = row.get("name") or f"Govee ({row.get('ip') or '?'})"
+            record = _record_of(row)
+            if record is None:
+                logger.warning("Skipping known Govee device '{}': missing ip", name)
+                continue
+            output = GoveeOutput.from_extra(row.get("extra"))
             try:
-                ip = row.get("ip") or ""
-                device_id = row.get("device_id") or ""
-                sku = row.get("sku") or ""
-                # Fallback: extract device_id from stable_id (format: "govee:{device_id}")
-                if not device_id:
-                    stable_id = row.get("id") or ""
-                    if stable_id.startswith("govee:"):
-                        device_id = stable_id[len("govee:") :]
-                name = row.get("name") or f"Govee ({ip})"
-
-                if not ip:
-                    logger.warning("Skipping known Govee device '{}': missing ip", name)
-                    continue
-
-                record = GoveeDeviceRecord(
-                    ip=ip,
-                    device_id=device_id,
-                    sku=sku,
-                    wifi_version="",
-                    ble_version="",
-                )
-
-                capability = get_device_capability(sku)
-                segment_count = get_segment_count(sku, config_override=govee_cfg.segment_override)
-
-                adapter: GoveeSegmentAdapter | GoveeSolidAdapter
-                if capability.is_rgbic and segment_count > 0:
-                    adapter = GoveeSegmentAdapter(
-                        self._transport, record, num_segments=segment_count
-                    )
-                else:
-                    adapter = GoveeSolidAdapter(self._transport, record)
-
-                await adapter.connect()
-                tracker = self._create_tracker(config)
-
-                self._transport.register_device(
-                    record,
-                    rtt_callback=lambda rtt, t=tracker: t.update(rtt),  # type: ignore[misc]
-                )
-
-                results.append(
-                    DiscoveredDevice(
-                        adapter=adapter,
-                        tracker=tracker,
-                        max_fps=govee_cfg.max_fps,
-                    )
-                )
-                logger.info("Reconnected known Govee device '{}' at {}", name, ip)
+                results.append(await self._setup(transport, record, config, output))
+            except ConnectionError:
+                logger.warning("Known Govee lamp '{}' didn't answer; it stays offline", name)
+                continue
             except Exception:
-                logger.exception(
-                    "Failed to reconnect known Govee device '{}'", row.get("name", "?")
-                )
-
-        if results:
-            self._transport.start_probing(interval_s=govee_cfg.probe_interval_s)
+                logger.exception("Failed to reconnect known Govee device '{}'", name)
+                continue
+            logger.info("Reconnected known Govee device '{}' at {}", name, record.ip)
 
         return results
 
+    def rebuild(
+        self, row: Mapping[str, Any], config: AppConfig, tracker: LatencyTracker
+    ) -> DiscoveredDevice | None:
+        """An online lamp set up again from its row, playing its own output as the row now
+        holds it. No network: it's connected as the adapter it replaces was, and the light
+        monitor still says whether it answers. Its tracker keeps the lamp's round trips."""
+        record = _record_of(row) if row.get("backend") == "govee" else None
+        if record is None or self._transport is None:
+            return None
+        output = GoveeOutput.from_extra(row.get("extra"))
+        adapter = self._adapter(self._transport, record, config, output, connected=True)
+        return DiscoveredDevice(adapter=adapter, tracker=tracker, max_fps=adapter.stream_fps)
+
     async def shutdown(self) -> None:
         if self._transport:
-            self._transport.stop_probing()
             await self._transport.close()
             self._transport = None
 
-    def _create_tracker(self, config: AppConfig) -> LatencyTracker:
+    async def _setup(
+        self,
+        transport: GoveeTransport,
+        record: GoveeDeviceRecord,
+        config: AppConfig,
+        output: GoveeOutput,
+    ) -> DiscoveredDevice:
+        """Connect a lamp as its plan says it plays; once the orchestrator takes it in, its
+        status reads time its round trips. Raises ConnectionError when it doesn't answer."""
+        adapter = self._adapter(transport, record, config, output)
+        await adapter.connect()
+        tracker = tracker_for(config.devices.govee, display_ms=adapter.display_ms)
+        return DiscoveredDevice(
+            adapter=adapter,
+            tracker=tracker,
+            max_fps=adapter.stream_fps,
+            on_accepted=partial(transport.register_device, record, tracker.update_rtt),
+        )
+
+    def _adapter(
+        self,
+        transport: GoveeTransport,
+        record: GoveeDeviceRecord,
+        config: AppConfig,
+        output: GoveeOutput,
+        *,
+        connected: bool = False,
+    ) -> GoveeAdapterBase:
+        """The adapter a lamp plays through, as its plan says (razer, or one colour on any
+        number of segments), built at the configured rate: a colour adapter caps its own."""
         govee = config.devices.govee
-        strategy: StaticLatency | EMALatency | WindowedMeanLatency
-        if govee.latency_strategy == "static":
-            strategy = StaticLatency(govee.latency_ms)
-        elif govee.latency_strategy == "ema":
-            strategy = EMALatency(initial_value_ms=govee.latency_ms)
-        else:
-            strategy = WindowedMeanLatency(
-                window_size=govee.latency_window_size,
-                initial_value_ms=govee.latency_ms,
-            )
-        return LatencyTracker(strategy=strategy, manual_offset_ms=govee.manual_offset_ms)
+        capability = get_device_capability(record.sku)
+        plan = lamp_plan(capability, output, govee.segment_override)
+        kind: type[GoveeAdapterBase] = GoveeRazerAdapter if plan.razer else GoveeColourAdapter
+        adapter = kind(
+            transport,
+            record,
+            plan.segments,
+            form=capability.form,
+            from_top=capability.segments_from_top,
+            connected=connected,
+            max_fps=configured_fps(config, govee.max_fps),
+        )
+        logger.info(
+            "Govee {} at {}: {} segment(s), {}, {} frames a second",
+            record.sku,
+            record.ip,
+            plan.segments,
+            "razer" if plan.razer else "one colour",
+            adapter.stream_fps,
+        )
+        return adapter

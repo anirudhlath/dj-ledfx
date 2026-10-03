@@ -74,9 +74,10 @@ async def test_openrgb_truncates_colors() -> None:
         assert len(sent_colors) == 5
 
 
-def test_supports_latency_probing_is_false() -> None:
-    adapter = OpenRGBAdapter()
-    assert adapter.supports_latency_probing is False
+def test_an_adapter_streams_at_the_rate_it_was_built_with() -> None:
+    assert OpenRGBAdapter(max_fps=30).stream_fps == 30
+    assert OpenRGBAdapter().stream_fps is None  # the scheduler's rate
+    assert OpenRGBAdapter().display_ms == 0.0
 
 
 async def test_send_frame_connection_error_disconnects() -> None:

@@ -8,6 +8,8 @@ from conftest import FakeLight, device_stats
 from zone_home import GLOW
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.latency.strategies import LATENCY_WINDOW, WindowedMedianLatency
+from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.zones.model import ZoneRecord
 
 TILE = DeviceCapabilities(protocol="LIFX", model="LIFX Tile", matrix=True, firmware_version="3.70")
@@ -73,6 +75,20 @@ async def test_lights_come_with_their_status_and_numbers(tmp_path: Path) -> None
         39.5,
         1.25,
     )
+
+
+async def test_a_latency_is_estimated_until_a_round_trip_is_measured(tmp_path: Path) -> None:
+    async with api_home(tmp_path, [FakeLight("tile", name="Tile", caps=TILE)], []) as api:
+        managed = api.home.devices.get_by_stable_id("tile")
+        assert managed is not None
+        managed.tracker = LatencyTracker(WindowedMedianLatency(LATENCY_WINDOW, 10.0))
+        (seeded,) = (await api.client.get("/api/lights")).json()
+        managed.tracker.note_send()
+        managed.tracker.update_rtt(60.0)  # a probe's round trip while the light streams
+        (measured,) = (await api.client.get("/api/lights")).json()
+
+    assert seeded["latency"] == {"measuredMs": 10.0, "overrideMs": None, "estimated": True}
+    assert measured["latency"] == {"measuredMs": 30.0, "overrideMs": None, "estimated": False}
 
 
 async def test_attention_lists_what_needs_the_owner(tmp_path: Path) -> None:

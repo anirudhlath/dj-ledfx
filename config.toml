@@ -37,20 +37,20 @@ enabled = true
 discovery_timeout_s = 10.0
 default_kelvin = 3500
 echo_probe_interval_s = 2.0
-latency_strategy = "ema"
-latency_ms = 50.0
+latency_strategy = "windowed_median"
+latency_ms = 10.0
 manual_offset_ms = 0.0
 max_fps = 60
-latency_window_size = 60
+latency_window_size = 9
 
 [devices.govee]
 enabled = true
 discovery_timeout_s = 5.0
-latency_strategy = "ema"
+latency_strategy = "windowed_median"
 latency_ms = 100.0
 manual_offset_ms = 0.0
-max_fps = 40
-latency_window_size = 60
+max_fps = 30
+latency_window_size = 9
 probe_interval_s = 5.0
 
 [discovery]

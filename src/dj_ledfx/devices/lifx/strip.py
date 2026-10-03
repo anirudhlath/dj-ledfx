@@ -7,6 +7,7 @@ import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
 
+from dj_ledfx.config import LIFX_STRIP_FPS
 from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected, NoAnswer
 from dj_ledfx.devices.lifx.base import RESTORE_FADE_MS, LifxAdapterBase, hsbk_from_json
 from dj_ledfx.devices.lifx.packet import (
@@ -43,6 +44,7 @@ class LifxStripAdapter(LifxAdapterBase):
     """Extended-multizone lights: Z, Beam, Neon, String."""
 
     _effect_key = "multizone_effect"
+    stream_fps_cap = LIFX_STRIP_FPS
 
     def __init__(
         self,
@@ -53,6 +55,7 @@ class LifxStripAdapter(LifxAdapterBase):
         kelvin: int = 3500,
         *,
         caps: DeviceCapabilities | None = None,
+        max_fps: float | None = None,
     ) -> None:
         super().__init__(
             transport,
@@ -61,6 +64,7 @@ class LifxStripAdapter(LifxAdapterBase):
             kelvin=kelvin,
             caps=caps
             or DeviceCapabilities(protocol="LIFX", multizone=True, extended_multizone=True),
+            max_fps=max_fps,
         )
         self._zone_count = zone_count
 
@@ -79,7 +83,7 @@ class LifxStripAdapter(LifxAdapterBase):
             values: list[HSBK] = [(int(c[0]), int(c[1]), int(c[2]), int(c[3])) for c in chunk]
             self._send(
                 SET_EXTENDED_COLOR_ZONES,
-                build_set_extended_color_zones(0, 1, start, len(values), values),
+                build_set_extended_color_zones(self._fade_ms, 1, start, len(values), values),
             )
 
     async def set_zone_colours(self, colours: Sequence[HSBK], duration_ms: int = 0) -> None:

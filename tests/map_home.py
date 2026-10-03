@@ -19,6 +19,7 @@ import numpy as np
 
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.capabilities import DeviceCapabilities
+from dj_ledfx.devices.govee.adapter_base import UPRIGHT_HEIGHT_M
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.ledset import NO_ROOM, LedSet, LedSource, PlacedLeds, Space, build_ledset
 from dj_ledfx.home.map import HomeMap, space_of
@@ -29,6 +30,7 @@ from dj_ledfx.home.store import HomeStore
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.persistence.state_db import StateDB
+from dj_ledfx.spatial.geometry import MatrixGeometry, StripGeometry, TileLayout
 from dj_ledfx.timing import utcnow
 from dj_ledfx.zones.runtime import ZoneLight
 
@@ -43,6 +45,13 @@ DESK_CORNER = (1.0, 3.5, 1.0)
 EAST_SPOT = (6.0, 3.0, 1.0)
 IN_THE_DESK_CORNER = {"kind": "point", "position": list(DESK_CORNER)}
 IN_THE_EAST_ROOM = {"kind": "point", "position": list(EAST_SPOT)}
+
+# Two lights' forms: an upright lamp, its first LED at the bottom (as a Govee adapter gives
+# it), and a matrix of one 5 x 6 tile.
+UPRIGHT_LAMP = StripGeometry((0.0, 1.0, 0.0), UPRIGHT_HEIGHT_M)
+SMALL_MATRIX = MatrixGeometry((TileLayout(0.0, 0.0, 5, 6),), pixel_pitch=0.03)
+# A candle's matrix: one tile, its columns round a cylinder and its rows up it.
+ROUND_MATRIX = MatrixGeometry((TileLayout(0.0, 0.0, 5, 6),), pixel_pitch=0.03, form="cylinder")
 
 # The design handoff's files, which the vendored copies must equal byte for byte.
 DESIGN = Path(__file__).parents[1] / "docs" / "design" / "web-app"

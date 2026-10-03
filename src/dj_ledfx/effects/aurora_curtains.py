@@ -1,7 +1,10 @@
-"""Aurora's field (looks.json "aurora"): curtains that drift near the ceiling.
+"""Aurora's field (looks.json "aurora"): curtains that hang in a band of the room's height.
 
-Folds run across the room and wander with seeded 3D noise; the colour climbs the palette
-with height, green low in the curtain to violet at its top.
+The band is the look's setting, the user's to choose; by default it runs from the floor to
+the ceiling, so lights at every height join in. Folds run across the room and wander with
+seeded 3D noise; the colour climbs the palette with height, green low in the curtain to
+violet at its top. A curtain fades in from the band's foot to its middle, so the lights
+lowest in the room glow dimly.
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ if TYPE_CHECKING:
 
 # Low in the curtain to high (ruling 17). Task 20's Morph layer shares it.
 AURORA_PALETTE = ("#1cff8e", "#00c9a7", "#2a7fff", "#8b3dff")
-DEFAULT_BAND = (0.55, 1.0)
+DEFAULT_BAND = (0.0, 1.0)  # floor to ceiling (the owner's ruling O1, light-output plan)
 F32 = NDArray[np.float32]
 F64 = NDArray[np.float64]
 

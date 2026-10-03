@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, Literal, cast, get_args
 
 import numpy as np
 from numpy.typing import NDArray
@@ -123,6 +123,13 @@ class GridShape:
 LightShape = PointShape | LineShape | BentLineShape | CylinderShape | GridShape
 
 
+# Where a placement came from: home.json's seed, the app's guess (a spread spot, or a refit
+# to the light's form), or the owner (placed through the API, or an old scene's placement
+# moved onto the map). A refit never moves the owner's.
+PlacementSource = Literal["seed", "guess", "owner"]
+PLACEMENT_SOURCES: tuple[PlacementSource, ...] = get_args(PlacementSource)
+
+
 @dataclass(frozen=True, slots=True)
 class Placement:
     """A light's (or a PC part's) place on the map. Moving it doesn't confirm it."""
@@ -131,6 +138,7 @@ class Placement:
     led_order: str
     confirmed: bool = False
     confirmed_at: datetime | None = None
+    source: PlacementSource = "guess"
 
 
 def check_led_order(kind: str, order: str | None) -> str:
@@ -215,8 +223,9 @@ def placement_to_dict(placement: Placement) -> dict[str, Any]:
 
 def placement_from_dict(data: Mapping[str, Any]) -> Placement:
     """A stored placement, checked as a new one is: the kind's default LED order when it
-    has none, confirmed only when confirmed is true, and confirmed_at a datetime or ISO
-    text. Raises ValueError (a ShapeError, when it's the shape)."""
+    has none, confirmed only when confirmed is true, confirmed_at a datetime or ISO text,
+    and its source a guess unless it names another (the store's and a backup's field, not
+    the contract's). Raises ValueError (a ShapeError, when it's the shape)."""
     raw = data.get("shape")
     if not isinstance(raw, Mapping):
         raise ShapeError("A placement needs a shape")
@@ -225,11 +234,13 @@ def placement_from_dict(data: Mapping[str, Any]) -> Placement:
     at = data.get("confirmed_at")
     if isinstance(at, str) and at:
         at = datetime.fromisoformat(at)
+    source = data.get("source")
     return Placement(
         shape,
         check_led_order(shape.kind, order if isinstance(order, str) else None),
         data.get("confirmed") is True,
         as_utc(at) if isinstance(at, datetime) else None,
+        source if source in PLACEMENT_SOURCES else "guess",
     )
 
 

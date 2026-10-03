@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
+import pytest
 from conftest import FakeLight, events
 from zone_home import BREATHE_AND_GLOW, GLOW, TILE, Home, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
-from dj_ledfx.events import DeviceOfflineEvent
+from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent
 from dj_ledfx.zones.lights import LightMonitor, LightState, combine_states
 from dj_ledfx.zones.model import LightsChanged
 
 LAMP = DeviceCapabilities(protocol="Govee")
 
 
-def _monitor(home: Home, **kwargs: float) -> LightMonitor:
+def _monitor(home: Home, **kwargs: Any) -> LightMonitor:
     return LightMonitor(
         devices=home.devices,
         zones=home.manager,
@@ -201,6 +203,68 @@ async def test_a_light_that_misses_three_reads_is_reported_offline(
         DeviceOfflineEvent(stable_id="bulb", name="bulb"),
         DeviceOfflineEvent(stable_id="lamp", name="lamp"),
     ]
+
+
+async def test_a_light_heard_from_since_its_last_read_is_not_missing(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp", caps=LAMP)
+    home = await make_home([lamp], [])
+    clock = [100.0]
+    monitor = _monitor(home, clock=lambda: clock[0])
+    offline = events(home.bus, DeviceOfflineEvent)
+    lamp.silent = True  # its reads are lost, but it answers something else between them
+
+    for _ in range(4):
+        lamp.heard = clock[0] + 1.0
+        clock[0] += 5.0
+        await monitor.poll_idle_lights()
+    assert offline == []
+
+    for _ in range(3):  # now it's silent through and through
+        clock[0] += 5.0
+        await monitor.poll_idle_lights()
+    assert offline == [DeviceOfflineEvent(stable_id="lamp", name="lamp")]
+
+
+async def test_the_answer_to_its_last_read_does_not_excuse_the_next(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp", caps=LAMP)
+    home = await make_home([lamp], [])
+    clock = [100.0]
+    monitor = _monitor(home, clock=lambda: clock[0])
+    offline = events(home.bus, DeviceOfflineEvent)
+    lamp.heard = clock[0]  # it answers the first read
+    await monitor.poll_idle_lights()
+
+    lamp.silent = True
+    for _ in range(3):
+        clock[0] += 1.0  # well within a poll interval of that answer
+        await monitor.poll_idle_lights()
+
+    assert offline == [DeviceOfflineEvent(stable_id="lamp", name="lamp")]
+
+
+@pytest.mark.parametrize("back", [DeviceOnlineEvent, DeviceDiscoveredEvent])
+async def test_a_light_brought_back_starts_counting_misses_again(
+    make_home: HomeFactory, back: type[DeviceOnlineEvent | DeviceDiscoveredEvent]
+) -> None:
+    lamp = FakeLight("lamp", caps=LAMP)
+    home = await make_home([lamp], [])
+    monitor = _monitor(home)
+    offline = events(home.bus, DeviceOfflineEvent)
+    lamp.silent = True
+    for _ in range(2):
+        await monitor.poll_idle_lights()
+
+    home.bus.emit(back(stable_id="lamp", name="lamp"))  # a scan set it up again
+    for _ in range(2):
+        await monitor.poll_idle_lights()
+    assert offline == []
+
+    await monitor.poll_idle_lights()
+    assert offline == [DeviceOfflineEvent(stable_id="lamp", name="lamp")]
 
 
 async def test_run_polls_zone_lights_often_and_idle_lights_rarely(

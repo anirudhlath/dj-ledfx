@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities, LightProtocol
+from dj_ledfx.devices.govee.output import MAX_SEGMENTS, MIN_SEGMENTS, GoveeMode
 from dj_ledfx.devices.lights import LightEntry, LightIndex
 from dj_ledfx.devices.manager import ManagedDevice
 from dj_ledfx.effects.color import rgb_to_hex
@@ -48,6 +49,9 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
 )
 from dj_ledfx.zones.runtime import ZoneState
+
+if TYPE_CHECKING:
+    from dj_ledfx.devices.govee.output import LampOutputReport
 
 
 class ContractModel(BaseModel):
@@ -536,7 +540,7 @@ def _placed(home_map: HomeMap | None, target_id: str) -> dict[str, Any]:
 class LightLatency(ContractModel):
     measured_ms: float | None
     override_ms: float | None = None  # overrides move to PUT /lights/{id}/latency (F6)
-    estimated: bool  # the light can't be probed: the type's heuristic
+    estimated: bool  # nothing measured while it streamed since it came online: the seed
 
 
 class LightPart(ContractModel):
@@ -583,6 +587,36 @@ class LightUpdate(ContractModel):
     own_effect: str | None = None
     power: bool | None = None
     colour: str | None = None
+
+
+class LampOutputSetting(ContractModel):
+    """A Govee lamp's own output (the light-output plan's ruling 17; outside the web spec
+    until a design handoff adds it): razer segments or one colour, and its segment count.
+    Null leaves either to the config and the lamp's model."""
+
+    mode: GoveeMode | None = None
+    segments: int | None = Field(None, ge=MIN_SEGMENTS, le=MAX_SEGMENTS)
+
+
+class LampOutput(ContractModel):
+    """How a Govee lamp plays now, and its own setting."""
+
+    light_id: str
+    mode: GoveeMode
+    segments: int  # 1: one colour, with no segments to light
+    own: LampOutputSetting
+    online: bool  # false: it didn't answer, and takes its output when a scan finds it
+
+
+def lamp_output_out(report: LampOutputReport) -> LampOutput:
+    own = report.own
+    return LampOutput(
+        light_id=report.light_id,
+        mode=report.plays.mode,
+        segments=report.plays.segments,
+        own=LampOutputSetting(mode=own.mode, segments=own.segments),
+        online=report.online,
+    )
 
 
 class AttentionSubject(ContractModel):
@@ -663,7 +697,7 @@ def light_out(
                     round(m.tracker.effective_latency_ms - m.tracker.manual_offset_ms, 1)
                     for m in parts
                 ),
-                "estimated": any(not m.adapter.supports_latency_probing for m in parts),
+                "estimated": any(not m.tracker.measured for m in parts),
             },
             "send_fps": round(send_fps, 1),
             "dropped_pct": round(dropped_pct, 2),

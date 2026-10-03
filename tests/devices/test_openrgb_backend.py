@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from dj_ledfx.config import AppConfig, DevicesConfig, OpenRGBConfig
+from dj_ledfx.config import AppConfig, DevicesConfig, EngineConfig, OpenRGBConfig
 from dj_ledfx.devices.openrgb_backend import OpenRGBBackend
 
 
@@ -38,4 +38,20 @@ async def test_discover_returns_connected_adapters() -> None:
         devices = await backend.discover(config)
         assert len(devices) == 1
         assert devices[0].adapter is mock_adapter
-        assert devices[0].max_fps == config.devices.openrgb.max_fps
+        assert devices[0].max_fps is mock_adapter.stream_fps  # the rate the adapter states
+        MockAdapter.assert_called_once_with(
+            host="127.0.0.1", port=6742, device_index=0, max_fps=config.devices.openrgb.max_fps
+        )
+
+
+async def test_an_adapter_is_built_at_the_engine_s_rate_when_that_is_lower() -> None:
+    mock_info = MagicMock(led_count=10)
+    mock_adapter = MagicMock(is_connected=True, device_info=mock_info, connect=AsyncMock())
+    mock_adapter.device_info.name = "TestDevice"
+    with patch("dj_ledfx.devices.openrgb_backend.OpenRGBAdapter") as MockAdapter:
+        MockAdapter.discover = AsyncMock(return_value=[mock_info])
+        MockAdapter.return_value = mock_adapter
+        (device,) = await OpenRGBBackend().discover(AppConfig(engine=EngineConfig(fps=30)))
+
+    MockAdapter.assert_called_once_with(host="127.0.0.1", port=6742, device_index=0, max_fps=30)
+    assert device.max_fps is mock_adapter.stream_fps

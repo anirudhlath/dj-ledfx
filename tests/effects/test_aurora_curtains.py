@@ -10,11 +10,10 @@ LOW_AND_HIGH = [(1.0, 1.0, 0.3), (1.0, 1.0, 2.7)]
 UNDER_THE_CEILING = [(x * 0.5, 1.0, 2.7) for x in range(10)]
 
 
-def test_the_curtains_hang_near_the_ceiling() -> None:
+def test_the_curtains_reach_down_to_the_floor() -> None:
     frame = AuroraCurtains().render(render_ctx(t=100.0), leds_at(LOW_AND_HIGH))
 
-    assert np.all(frame[0] == 0.0)
-    assert frame[1].max() > 0.1
+    assert 0.0 < frame[0].max() < frame[1].max()  # dim low in the room, brighter up high
 
 
 def test_the_band_says_where_they_hang() -> None:

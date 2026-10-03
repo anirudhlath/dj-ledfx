@@ -135,6 +135,8 @@ Since OpenRGB's `set_colors` is fire-and-forget (the server processes commands a
 
 **For future direct adapters (Govee LAN, LIFX LAN)**: The send loop's RTT measurement captures real network round-trip time. `supports_latency_probing = True` (the default) enables `tracker.update(rtt_ms)`, and the `WindowedMeanLatency(60)` window fills with real samples, providing true adaptive latency compensation. Zero code changes needed in the scheduler — the same send loop works for all adapter types.
 
+Superseded by the light-output fixes (2026-10-02): the scheduler never times a send, and `supports_latency_probing` is gone. A send returns before the light shows the frame, so latency samples come only from probe round trips counted while the light streams (LIFX echoes, Govee status reads), and the API marks a light's latency `estimated` until one has landed (`LatencyTracker.measured`).
+
 **Why OpenRGB can't probe**: The OpenRGB server's `UpdateLEDs()` sets a flag and returns instantly. A background `DeviceCallThread` picks up the flag and calls the device-specific `DeviceUpdateLEDs()` asynchronously. Neither `fast=True` nor `fast=False` on the SDK client reflects actual hardware update time. This is a fundamental limitation of the SDK's fire-and-forget architecture.
 
 `manual_offset_ms` on `LatencyTracker` remains as the fine-tuning escape hatch on top of any latency estimation method.

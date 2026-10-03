@@ -2,10 +2,12 @@
 
 import errno
 import json
+import tomllib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from conftest import as_schema
 from map_home import DESK_CORNER, tiny_home
 
 from dj_ledfx.home.shapes import CylinderShape, GridShape, Placement, PointShape
@@ -456,7 +458,7 @@ async def test_a_database_that_held_config_before_the_mark_isn_t_migrated_again(
     await db.open()
     await db.write("DELETE FROM config WHERE section='_meta' AND key != 'schema_version'")
     await db.save_config_key("engine", "fps", "60")
-    await db.write("UPDATE config SET value='7' WHERE section='_meta' AND key='schema_version'")
+    await as_schema(db, 7)
     await db.close()
     config_toml = tmp_path / "config.toml"
     config_toml.write_text("[engine]\nfps = 90\n")
@@ -481,7 +483,7 @@ async def test_a_database_with_only_tempo_settings_still_migrates(tmp_path: Path
     await db.open()
     await db.write("DELETE FROM config WHERE section='_meta' AND key != 'schema_version'")
     await db.save_config_key("tempo", "internal_bpm", "97.0")
-    await db.write("UPDATE config SET value='7' WHERE section='_meta' AND key='schema_version'")
+    await as_schema(db, 7)
     await db.close()
     config_toml = tmp_path / "config.toml"
     config_toml.write_text("[engine]\nfps = 90\n")
@@ -503,10 +505,12 @@ async def test_the_map_and_the_placements_round_trip(db, tmp_path: Path) -> None
     store = HomeStore(db)
     await store.save_home(tiny_home(ceiling=2.6))
     confirmed = Placement(
-        PointShape(DESK_CORNER), "", True, datetime(2026, 9, 24, 19, 0, tzinfo=UTC)
+        PointShape(DESK_CORNER), "", True, datetime(2026, 9, 24, 19, 0, tzinfo=UTC), "seed"
     )
     await store.save_placement("lamp", confirmed)
-    part = Placement(GridShape((6.0, 3.0, 1.0), 0.4, 0.2, (0.0, 90.0, 0.0)), "columns")
+    part = Placement(
+        GridShape((6.0, 3.0, 1.0), 0.4, 0.2, (0.0, 90.0, 0.0)), "columns", source="owner"
+    )
     await store.save_placement("openrgb:localhost:6742:1", part)
     text = await export_toml(db)
 
@@ -563,6 +567,7 @@ shape = "a point"
 [placements.tube]
 confirmed = true
 shape = { kind = "cylinder", base = [1.0, 1.0, 0.0], height = 0.5, radius = 0.05 }
+source = "someone"
 """
     await import_toml(db, text)
 
@@ -623,3 +628,59 @@ stopped_at = 2026-09-24T19:05:00Z
     assert await ZoneStore(db).load_recent() == [
         StoppedLook("desk", "classic-breathe", at, at + timedelta(minutes=5))
     ]
+
+
+LAMP_OUTPUT = json.dumps({"output": {"mode": "colour", "segments": 10}})
+TABLE_FORM = """
+[devices."Test lamp"]
+backend = "govee"
+device_id = "test-lamp"
+
+[devices."Test lamp".extra.output]
+mode = "segments"
+
+[devices."Other lamp"]
+backend = "govee"
+device_id = "other-lamp"
+extra = "not JSON"
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_lamp_s_own_output_travels_in_the_backup(db, tmp_path: Path) -> None:
+    await db.upsert_device(
+        {
+            "id": "govee:test-lamp",
+            "name": "Test lamp",
+            "backend": "govee",
+            "device_id": "test-lamp",
+            "extra": LAMP_OUTPUT,
+        }
+    )
+    text = await export_toml(db)
+
+    fresh = StateDB(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        await import_toml(fresh, text)
+        row = await fresh.load_device("govee:test-lamp")
+        assert row is not None and json.loads(row["extra"]) == json.loads(LAMP_OUTPUT)
+
+        await import_toml(fresh, TABLE_FORM)  # a hand-edited backup: a table, or bad text
+
+        row = await fresh.load_device("govee:test-lamp")
+        assert row is not None and json.loads(row["extra"]) == {"output": {"mode": "segments"}}
+        other = await fresh.load_device("govee:other-lamp")
+        assert other is not None and other["extra"] is None
+    finally:
+        await fresh.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unset_config_value_is_left_out_of_the_backup(db: StateDB) -> None:
+    await db.save_config_key("web", "static_dir", json.dumps(None))  # as the app saves None
+    await db.save_config_key("web", "port", "8080")
+
+    config = tomllib.loads(await export_toml(db))["config"]
+
+    assert config["web"] == {"port": 8080}

@@ -96,7 +96,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Discover Devices */
+        /**
+         * Discover Devices
+         * @description The old UI's scan: a scan, as POST /devices/scan runs, answered with the names of the
+         *     devices online now that weren't when it was asked.
+         */
         post: operations["discover_devices_api_devices_discover_post"];
         delete?: never;
         options?: never;
@@ -150,7 +154,8 @@ export interface paths {
         put?: never;
         /**
          * Scan Devices
-         * @description Trigger device discovery via DiscoveryOrchestrator if available, else fallback.
+         * @description Run a scan now, beside the discovery loop's: how many devices it found or brought back
+         *     online.
          */
         post: operations["scan_devices_api_devices_scan_post"];
         delete?: never;
@@ -464,6 +469,34 @@ export interface paths {
          * @description Spread the unplaced lights around their rooms, unconfirmed (spec §6.2).
          */
         post: operations["guess_placements_api_lights_placement_guess_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lights/{light_id}/output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Lamp Output
+         * @description A Govee lamp's output: how it plays (razer segments or one colour, and how many
+         *     segments), as its adapter plays while it's online and as a scan will set it up while
+         *     it's offline; and its own setting, which the config and its model fill in.
+         */
+        get: operations["get_lamp_output_api_lights__light_id__output_get"];
+        /**
+         * Set Lamp Output
+         * @description Set a Govee lamp's own output; a field left null goes back to the default. A lamp
+         *     that's online plays it at once; one that's offline (online is false) takes it when a
+         *     scan finds it.
+         */
+        put: operations["set_lamp_output_api_lights__light_id__output_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1378,6 +1411,36 @@ export interface components {
              * @enum {string}
              */
             how: "default" | "set" | "tapped" | "kept";
+        };
+        /**
+         * LampOutput
+         * @description How a Govee lamp plays now, and its own setting.
+         */
+        LampOutput: {
+            /** Lightid */
+            lightId: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "segments" | "colour";
+            /** Online */
+            online: boolean;
+            own: components["schemas"]["LampOutputSetting"];
+            /** Segments */
+            segments: number;
+        };
+        /**
+         * LampOutputSetting
+         * @description A Govee lamp's own output (the light-output plan's ruling 17; outside the web spec
+         *     until a design handoff adds it): razer segments or one colour, and its segment count.
+         *     Null leaves either to the config and the lamp's model.
+         */
+        LampOutputSetting: {
+            /** Mode */
+            mode?: ("segments" | "colour") | null;
+            /** Segments */
+            segments?: number | null;
         };
         /** Layer */
         Layer: {
@@ -3080,6 +3143,72 @@ export interface operations {
                     "application/json": {
                         [key: string]: components["schemas"]["Placement"];
                     };
+                };
+            };
+        };
+    };
+    get_lamp_output_api_lights__light_id__output_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                light_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LampOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_lamp_output_api_lights__light_id__output_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                light_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LampOutputSetting"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LampOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
+from dj_ledfx.config import LIFX_MATRIX_FPS
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.lifx.base import LifxAdapterBase, hsbk_from_json
 from dj_ledfx.devices.lifx.packet import (
@@ -23,7 +24,7 @@ from dj_ledfx.devices.lifx.packet import (
     rgb_array_to_hsbk,
 )
 from dj_ledfx.devices.lifx.types import TileInfo
-from dj_ledfx.spatial.geometry import MatrixGeometry, TileLayout
+from dj_ledfx.spatial.geometry import MatrixForm, MatrixGeometry, TileLayout
 from dj_ledfx.types import DeviceInfo
 
 if TYPE_CHECKING:
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
 PIXELS_PER_PACKET = 64
 DEFAULT_TILE_SIZE = (8, 8)
 PIXEL_PITCH_M = 0.03
+# How much later than half its fade a matrix shows a frame: derived from the 2026-10-01
+# baseline, and corrected by measuring the lights (the light-output plan's Task 15).
+MATRIX_DISPLAY_MS = 80
 
 
 def tile_sizes(tiles: Sequence[TileInfo], tile_count: int) -> list[tuple[int, int]]:
@@ -42,9 +46,11 @@ def tile_sizes(tiles: Sequence[TileInfo], tile_count: int) -> list[tuple[int, in
 
 
 class LifxTileChainAdapter(LifxAdapterBase):
-    """Matrix lights: Tile, Candle, Tube, Spot, Path, Ceiling. Sized from StateDeviceChain."""
+    """Matrix lights: Tile, Candle, Tube, Spot, Path, Ceiling. Sized from StateDeviceChain;
+    `form` says how the light holds its matrix (a candle's and a tube's wrap round them)."""
 
     _effect_key = "tile_effect"
+    stream_fps_cap = LIFX_MATRIX_FPS
 
     def __init__(
         self,
@@ -56,6 +62,8 @@ class LifxTileChainAdapter(LifxAdapterBase):
         *,
         tiles: Sequence[TileInfo] = (),
         caps: DeviceCapabilities | None = None,
+        max_fps: float | None = None,
+        form: MatrixForm = "flat",
     ) -> None:
         super().__init__(
             transport,
@@ -63,10 +71,12 @@ class LifxTileChainAdapter(LifxAdapterBase):
             target_mac,
             kelvin=kelvin,
             caps=caps or DeviceCapabilities(protocol="LIFX", matrix=True),
+            max_fps=max_fps,
         )
         self._tiles: list[TileInfo] = list(tiles)
         self._sizes = tile_sizes(self._tiles, tile_count)
         self._led_count = sum(width * height for width, height in self._sizes)
+        self._form: MatrixForm = form
 
     @property
     def tiles(self) -> list[TileInfo]:
@@ -75,6 +85,11 @@ class LifxTileChainAdapter(LifxAdapterBase):
     @property
     def led_count(self) -> int:
         return self._led_count
+
+    @property
+    def display_ms(self) -> float:
+        """Half its fade, plus the time a matrix takes to show a frame it has."""
+        return super().display_ms + MATRIX_DISPLAY_MS
 
     @property
     def geometry(self) -> MatrixGeometry:
@@ -89,7 +104,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
             else:
                 offset = (index * (width + 1) * PIXEL_PITCH_M, 0.0)
             layouts.append(TileLayout(offset[0], offset[1], width, height))
-        return MatrixGeometry(tiles=tuple(layouts), pixel_pitch=PIXEL_PITCH_M)
+        return MatrixGeometry(tiles=tuple(layouts), pixel_pitch=PIXEL_PITCH_M, form=self._form)
 
     async def send_frame(self, colors: NDArray[np.uint8]) -> None:
         hsbk = rgb_array_to_hsbk(colors, kelvin=self._kelvin)
@@ -102,7 +117,7 @@ class LifxTileChainAdapter(LifxAdapterBase):
                 values: list[HSBK] = [(int(c[0]), int(c[1]), int(c[2]), int(c[3])) for c in chunk]
                 self._send(
                     SET_TILE_STATE_64,
-                    build_set_tile_state64(tile_index, 1, 0, row, width, 0, values),
+                    build_set_tile_state64(tile_index, 1, 0, row, width, self._fade_ms, values),
                 )
             start += width * height
 

@@ -132,7 +132,7 @@ Device names are not stable (LIFX names include IP, OpenRGB uses indices). The `
 
 **Note:** `DeviceInfo` is `frozen=True, slots=True`. New fields use defaults so all existing positional constructors remain valid. The two backend families differ in how they construct `DeviceInfo`:
 - **LIFX adapters** (`LifxBulbAdapter`, `LifxStripAdapter`, `LifxTileChainAdapter`) receive `DeviceInfo` at `__init__` and store it as `self._device_info`. The `mac`/`stable_id` kwargs are added at the construction site in `lifx/discovery.py`.
-- **Govee adapters** (`GoveeSegmentAdapter`, `GoveeSolidAdapter`) construct `DeviceInfo` inside a `@property` method (computed on every access). The `stable_id` kwarg is added to the `DeviceInfo(...)` call inside each `@property`, using `self._record.device_id`.
+- **Govee adapters** (`GoveeRazerAdapter`, `GoveeColourAdapter`, since the light-output fixes) construct `DeviceInfo` inside their base's `@property` method (computed on every access). The `stable_id` kwarg is added to the `DeviceInfo(...)` call inside it, using `self._record.device_id`.
 
 **Display names vs stable IDs in APIs:** All REST and WebSocket APIs use display names (`DeviceInfo.name`) in responses. Stable IDs are internal only — used for DB keys, device matching, and FK references. The web layer maps between display names and stable IDs. API routes use display names in paths (e.g., `PUT /api/scenes/{scene_id}/devices/{device_name}`).
 
@@ -261,7 +261,7 @@ Conflicts are checked at two points:
 
 `ManagedDevice` gains:
 - `status: Literal["online", "offline", "reconnecting"]`
-- `adapter: DeviceAdapter` — uses a `GhostAdapter` when offline instead of `None`. `GhostAdapter` is a concrete `DeviceAdapter` subclass that: provides stored `device_info`/`led_count`/`is_connected=False`, `supports_latency_probing=False`, raises on `send_frame()`. This avoids null-safety refactoring across scheduler, web routers, and all code that accesses `device.adapter.*`.
+- `adapter: DeviceAdapter` — uses a `GhostAdapter` when offline instead of `None`. `GhostAdapter` is a concrete `DeviceAdapter` subclass that: provides stored `device_info`/`led_count`/`is_connected=False`, raises on `send_frame()`. This avoids null-safety refactoring across scheduler, web routers, and all code that accesses `device.adapter.*`.
 - Device info always available (from ghost adapter when offline, from real adapter when online)
 
 Scheduler skips devices where `adapter.is_connected == False` (ghost returns `False`; existing check at `scheduler.py:138` already handles this).
@@ -272,7 +272,7 @@ Scheduler skips devices where `adapter.is_connected == False` (ghost returns `Fa
 - `promote_device(stable_id, adapter)` — swap ghost for real adapter, set status to online
 - `demote_device(stable_id)` — swap real adapter for ghost, set status to offline
 - `remove_device(stable_id)` — remove from managed list entirely
-- `rediscover()` — deprecated, replaced by DiscoveryOrchestrator
+- `rediscover()` — removed: the DiscoveryOrchestrator replaces it
 - Device list is dynamic: scheduler handles add/remove at runtime (see Scheduler section)
 
 ### Scheduler Dynamic Device Handling
@@ -327,6 +327,8 @@ Wave N:
 
 ### Subnet-wide Unicast Probing
 
+Superseded by the light-output fixes (2026-10-02): the orchestrator never ran these sweeps, and both are gone, so discovery only broadcasts. `DiscoveryConfig` keeps `unicast_concurrency`, `unicast_timeout_s` and `subnet_mask`, unread, so a config file or export that carries them still loads.
+
 After each broadcast wave, send unicast probes to every IP in the subnet:
 
 **LIFX:**
@@ -379,7 +381,7 @@ For offline devices specifically:
 
 ### API Endpoints
 
-- `POST /api/devices/scan` — trigger immediate full multi-wave scan (including subnet sweep). Replaces existing `POST /api/devices/discover`.
+- `POST /api/devices/scan` — trigger immediate full multi-wave scan. `POST /api/devices/discover` stays for the old UI: it runs the same scan and names the devices it brought online.
 - `POST /api/devices/scan?wave=1` — single wave (quick check)
 - `DELETE /api/devices/{device_name}` — unregister device from DB (cascades to groups and scene_placements). Resolves display name to stable ID internally.
 - `PUT /api/devices/{device_name}` — edit device metadata (rename, override LED count, etc.)
@@ -501,14 +503,13 @@ TOML export/import uses **display names** for devices (human-readable). On impor
 - `config.py` — `load_config()` reads from StateDB instead of TOML; `AppConfig` gains `DiscoveryConfig` dataclass; `EffectConfig` removed from `AppConfig` (effect state now lives in `scene_effect_state` table, not config)
 - `types.py` — `DeviceInfo` gains `mac: str | None = None` and `stable_id: str | None = None` fields (frozen dataclass, added with defaults so all existing constructors remain valid)
 - `main.py` — new startup flow (DB init → load state → build ScenePipelines → background discovery → reconnect loop)
-- `devices/backend.py` — `discover_all()` deprecated; individual `discover()` methods retained, called by `DiscoveryOrchestrator`
-- `devices/manager.py` — `ManagedDevice` gains `status` field; add `promote_device()`/`demote_device()`; device list becomes dynamic; `rediscover()` deprecated
+- `devices/backend.py` — `discover_all()` removed; individual `discover()` methods retained, called by `DiscoveryOrchestrator`
+- `devices/manager.py` — `ManagedDevice` gains `status` field; add `promote_device()`/`demote_device()`; device list becomes dynamic; `rediscover()` removed
 - `devices/lifx/transport.py` — unicast sweep, increased timeouts (100ms→500ms), broadcast retries (3x)
 - `devices/lifx/discovery.py` — `DeviceInfo(...)` construction calls (at adapter creation time, not @property — LIFX adapters store `device_info` at `__init__`) pass `mac=record.mac.hex()`, `stable_id=f"lifx:{record.mac.hex()}"` for all three adapter types
 - `devices/govee/transport.py` — unicast sweep, port 4002 bind retry with backoff (socket creation), increased window (5s→10s)
 - `devices/govee/backend.py` — discovery orchestration changes to support new transport capabilities
-- `devices/govee/segment.py` — `device_info` @property passes `stable_id=f"govee:{self._record.device_id}"` to `DeviceInfo`
-- `devices/govee/solid.py` — `device_info` @property passes `stable_id=f"govee:{self._record.device_id}"` to `DeviceInfo`
+- `devices/govee/adapter_base.py` (since the light-output fixes; `segment.py` and `solid.py` before them) — `device_info` @property passes `stable_id=f"govee:{self._record.device_id}"` to `DeviceInfo`
 - `devices/openrgb_backend.py` — connection timeout (5s), retry on failure
 - `effects/deck.py` — auto-save effect state on swap/param change (calls StateDB via callback)
 - `effects/presets.py` — `PresetStore` backed by StateDB instead of TOML file
@@ -520,7 +521,7 @@ TOML export/import uses **display names** for devices (human-readable). On impor
 - `web/router_config.py` — reads/writes config via StateDB
 - `web/router_effects.py` — effect changes trigger auto-save; scene-aware effect endpoints
 - `web/router_scene.py` — rewritten for multi-scene CRUD, activation/deactivation, per-scene placements/effects/mapping. Routes use display names. Replaces single-scene endpoints.
-- `web/router_devices.py` — `POST /devices/discover` replaced by `POST /devices/scan`; device status field in responses
+- `web/router_devices.py` — `POST /devices/scan` added; `POST /devices/discover` runs the same scan for the old UI; device status field in responses
 - `web/ws.py` — device stats include `status` field; frame channel uses display names (no change to protocol)
 - `events.py` — add event types: `DeviceDiscoveredEvent`, `DeviceOnlineEvent`, `DeviceOfflineEvent`, `DiscoveryWaveCompleteEvent`, `DiscoveryCompleteEvent`, `SceneActivatedEvent`, `SceneDeactivatedEvent`
 
@@ -530,7 +531,7 @@ TOML export/import uses **display names** for devices (human-readable). On impor
 - `persistence/migrations/` — sequential SQL migration scripts (`001_initial.sql`, etc.)
 - `persistence/toml_io.py` — TOML ↔ DB marshaling for import/export (handles `position_x/y/z` ↔ `position = [x,y,z]`, `section+key` ↔ nested tables, display name ↔ stable ID resolution)
 - `devices/discovery.py` — `DiscoveryOrchestrator` (backend lifecycle, multi-wave scanning, subnet probing, reconnect loop, interface resolution for "auto")
-- `devices/ghost.py` — `GhostAdapter(DeviceAdapter)` with `is_connected=False`, `supports_latency_probing=False`, stored `device_info`/`led_count`, raises on `send_frame()`
+- `devices/ghost.py` — `GhostAdapter(DeviceAdapter)` with `is_connected=False`, stored `device_info`/`led_count`, raises on `send_frame()`
 - `spatial/pipeline.py` — `ScenePipeline` dataclass: bundles `EffectDeck`, `RingBuffer`, `SpatialCompositor`, device list, mapping per active scene
 
 ### Files Removed (after migration)

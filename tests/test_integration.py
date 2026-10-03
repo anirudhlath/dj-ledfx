@@ -1,19 +1,30 @@
 import asyncio
 import time
+from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
 from conftest import MockDeviceAdapter, builtin_look
+from govee_fakes import LAMP, STATUS, TEST_MODEL, UPRIGHT, lamp_row, lamp_transport, sent
 from tempo_fakes import beat_event
 
+from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.capabilities import DeviceCapabilities
-from dj_ledfx.devices.manager import ManagedDevice
+from dj_ledfx.devices.discovery import DiscoveryOrchestrator
+from dj_ledfx.devices.govee.backend import GoveeBackend
+from dj_ledfx.devices.govee.protocol import build_razer_switch
+from dj_ledfx.devices.govee.sku_registry import SKU_REGISTRY
+from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
 from dj_ledfx.effects.engine import EffectEngine
+from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent, EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.tempo.clock import TempoClock
+from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
 
 
@@ -86,17 +97,16 @@ async def test_two_zones_play_their_own_looks() -> None:
 
 
 async def test_rtt_callback_updates_tracker() -> None:
-    """RTT callback from transport updates latency tracker."""
+    """A round trip from the transport, while the light streams, updates its latency."""
     from dj_ledfx.latency.strategies import EMALatency
 
     strategy = EMALatency(initial_value_ms=50.0)
     tracker = LatencyTracker(strategy=strategy)
     initial = tracker.effective_latency_ms
 
-    # Simulate RTT callback (same path as LifxTransport probe callback)
-    tracker.update(25.0)
-    assert tracker.effective_latency_ms != initial
-    # RTT of 25ms should pull EMA down from 50ms initial
+    tracker.note_send()  # a frame went out: the light streams
+    tracker.update_rtt(50.0)  # as LifxTransport's probe callback calls it: 25 ms one way
+    # 25 ms one way pulls the EMA down from its 50 ms seed
     assert tracker.effective_latency_ms < initial
 
 
@@ -108,9 +118,9 @@ async def test_rtt_feedback_shifts_frame_selection() -> None:
     tracker = LatencyTracker(strategy=strategy)
 
     high_latency = tracker.effective_latency_s
-    # Simulate many low-RTT probes
-    for _ in range(20):
-        tracker.update(10.0)
+    tracker.note_send()  # the light streams
+    for _ in range(20):  # many short round trips
+        tracker.update_rtt(20.0)
     low_latency = tracker.effective_latency_s
 
     assert low_latency < high_latency
@@ -125,7 +135,7 @@ async def test_startup_with_fresh_db(tmp_path: Path) -> None:
     db = StateDB(tmp_path / "state.db")
     await db.open()
     version = await db.get_schema_version()
-    assert version == 8
+    assert version == 9
     devices = await db.load_devices()
     assert devices == []
     scenes = await db.load_scenes()
@@ -171,3 +181,80 @@ async def test_startup_with_migrated_toml(tmp_path: Path) -> None:
     assert not config_toml.exists()
     assert (tmp_path / "config.toml.bak").exists()
     await db.close()
+
+
+async def _until(condition: Callable[[], bool], timeout_s: float = 3.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        await asyncio.sleep(0.01)
+
+
+# Review Focus 1, end to end: a lamp that goes silent mid-look misses three polls, goes
+# offline and gets no frames; a scan finds it again, and its first frame switches razer on.
+async def test_a_silent_lamp_goes_offline_until_a_scan_finds_it_and_razer_re_arms(
+    monkeypatch: pytest.MonkeyPatch, db: StateDB
+) -> None:
+    monkeypatch.setitem(SKU_REGISTRY, TEST_MODEL, UPRIGHT)
+    bus, devices = EventBus(), DeviceManager()
+    govee = GoveeBackend()
+    transport = govee._transport = lamp_transport()
+    orchestrator = DiscoveryOrchestrator(AppConfig(), devices, bus, state_db=db)
+    orchestrator._backends = [govee]
+    scheduler = LookaheadScheduler(fps=60, disconnect_backoff_s=0.02, event_bus=bus)
+    zones = MagicMock(on_power_reading=AsyncMock(), verify_firmware=AsyncMock())
+    zones.light_mode.return_value = None
+    monitor = LightMonitor(devices=devices, zones=zones, event_bus=bus, zone_poll_s=0.05)
+
+    def _offline(event: DeviceOfflineEvent) -> None:  # as main wires it
+        managed = devices.get_by_stable_id(event.stable_id)
+        if managed is not None and managed.status != "offline":
+            devices.demote_device(event.stable_id)
+
+    def _back(event: DeviceOnlineEvent | DeviceDiscoveredEvent) -> None:
+        managed = devices.get_by_stable_id(event.stable_id)
+        if managed is not None and not scheduler.has_device(event.stable_id):
+            scheduler.add_device(managed)
+
+    bus.subscribe(DeviceOfflineEvent, _offline)
+    bus.subscribe(DeviceOnlineEvent, _back)
+    bus.subscribe(DeviceDiscoveredEvent, _back)
+    await db.upsert_device(lamp_row())
+    await orchestrator.connect_known_devices(await db.load_devices())
+    lamp = devices.get_by_stable_id(LAMP)
+    assert lamp is not None
+    zone = ZoneRuntime(
+        "lamp",
+        builtin_look("classic-rainbow-wave"),
+        [ZoneLight(LAMP, lamp.adapter.led_count, lamp.adapter.capabilities)],
+        clock=_clock(),
+        latency_s=lambda _light: lamp.tracker.effective_latency_s,
+    )
+    engine = EffectEngine(fps=60)
+    engine.add_runtime(zone)
+    scheduler.set_route(LAMP, zone.route_for(LAMP))
+    razer_on = build_razer_switch(on=True)
+    tasks = [asyncio.create_task(job) for job in (engine.run(), scheduler.run(), monitor.run())]
+    try:
+        await _until(lambda: len(sent(transport)) >= 3)  # it plays
+        assert sent(transport)[0] == razer_on
+
+        transport.query_status.return_value = None  # it goes silent
+        await _until(lambda: lamp.status == "offline")
+        assert transport.query_status.await_count >= 3 * 2  # three polls, each asked twice
+        await asyncio.sleep(0.05)  # a frame already on its way lands
+        silenced = len(sent(transport))
+        await asyncio.sleep(0.3)
+        assert len(sent(transport)) == silenced  # no frames while it's offline
+
+        transport.query_status.return_value = STATUS  # it answers again
+        assert await orchestrator.run_scan() == 1
+        assert lamp.status == "online"
+        await _until(lambda: len(sent(transport)) >= silenced + 2)
+        first, frame = sent(transport)[silenced : silenced + 2]
+        assert first == razer_on and frame["msg"]["cmd"] == "razer"  # razer re-armed
+    finally:
+        engine.stop()
+        scheduler.stop()
+        monitor.stop()
+        await asyncio.gather(*tasks)

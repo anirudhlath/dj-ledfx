@@ -1,16 +1,23 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from loguru import logger
 
-from dj_ledfx.config import AppConfig
-from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice
+from dj_ledfx.config import AppConfig, OpenRGBConfig
+from dj_ledfx.devices.backend import DeviceBackend, DiscoveredDevice, configured_fps
 from dj_ledfx.devices.heuristics import estimate_device_latency_ms
 from dj_ledfx.devices.openrgb import OpenRGBAdapter
-from dj_ledfx.latency.strategies import EMALatency, StaticLatency, WindowedMeanLatency
-from dj_ledfx.latency.tracker import LatencyTracker
+from dj_ledfx.latency.tracker import LatencyTracker, tracker_for
+
+
+def _tracker(cfg: OpenRGBConfig, adapter: OpenRGBAdapter) -> LatencyTracker:
+    """A static strategy keeps the configured latency; the others start from the heuristic
+    for the device's name (OpenRGB can't be probed)."""
+    static = cfg.latency_strategy == "static"
+    seed = None if static else estimate_device_latency_ms(adapter.device_info.name)
+    return tracker_for(cfg, seed_ms=seed, display_ms=adapter.display_ms)
 
 
 class OpenRGBBackend(DeviceBackend):
@@ -22,6 +29,7 @@ class OpenRGBBackend(DeviceBackend):
         config: AppConfig,
         on_found: Callable[[DiscoveredDevice], Any] | None = None,
         skip_ids: set[str] | None = None,
+        known: Sequence[Mapping[str, Any]] = (),
     ) -> list[DiscoveredDevice]:
         orgb = config.devices.openrgb
         discovered = await OpenRGBAdapter.discover(host=orgb.host, port=orgb.port)
@@ -37,29 +45,14 @@ class OpenRGBBackend(DeviceBackend):
                     host=orgb.host,
                     port=orgb.port,
                     device_index=i,
+                    max_fps=configured_fps(config, orgb.max_fps),
                 )
                 await adapter.connect()
 
-                heuristic_ms = estimate_device_latency_ms(adapter.device_info.name)
-                strategy: StaticLatency | EMALatency | WindowedMeanLatency
-                if orgb.latency_strategy == "static":
-                    strategy = StaticLatency(orgb.latency_ms)
-                elif orgb.latency_strategy == "ema":
-                    strategy = EMALatency(initial_value_ms=heuristic_ms)
-                else:
-                    strategy = WindowedMeanLatency(
-                        window_size=orgb.latency_window_size,
-                        initial_value_ms=heuristic_ms,
-                    )
-
-                tracker = LatencyTracker(
-                    strategy=strategy,
-                    manual_offset_ms=orgb.manual_offset_ms,
-                )
                 device = DiscoveredDevice(
                     adapter=adapter,
-                    tracker=tracker,
-                    max_fps=orgb.max_fps,
+                    tracker=_tracker(orgb, adapter),
+                    max_fps=adapter.stream_fps,
                 )
                 results.append(device)
                 if on_found is not None:
@@ -95,30 +88,19 @@ class OpenRGBBackend(DeviceBackend):
                     port = orgb_cfg.port
                     device_index = 0
 
-                adapter = OpenRGBAdapter(host=host, port=port, device_index=device_index)
+                adapter = OpenRGBAdapter(
+                    host=host,
+                    port=port,
+                    device_index=device_index,
+                    max_fps=configured_fps(config, orgb_cfg.max_fps),
+                )
                 await adapter.connect()
 
-                heuristic_ms = estimate_device_latency_ms(adapter.device_info.name)
-                strategy: StaticLatency | EMALatency | WindowedMeanLatency
-                if orgb_cfg.latency_strategy == "static":
-                    strategy = StaticLatency(orgb_cfg.latency_ms)
-                elif orgb_cfg.latency_strategy == "ema":
-                    strategy = EMALatency(initial_value_ms=heuristic_ms)
-                else:
-                    strategy = WindowedMeanLatency(
-                        window_size=orgb_cfg.latency_window_size,
-                        initial_value_ms=heuristic_ms,
-                    )
-
-                tracker = LatencyTracker(
-                    strategy=strategy,
-                    manual_offset_ms=orgb_cfg.manual_offset_ms,
-                )
                 results.append(
                     DiscoveredDevice(
                         adapter=adapter,
-                        tracker=tracker,
-                        max_fps=orgb_cfg.max_fps,
+                        tracker=_tracker(orgb_cfg, adapter),
+                        max_fps=adapter.stream_fps,
                     )
                 )
                 logger.info("Reconnected known OpenRGB device '{}' at {}:{}", name, host, port)

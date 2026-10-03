@@ -32,14 +32,14 @@ READ_FRESH_S = 1.0  # a poll's read and its effect check share one device.update
 
 
 class OpenRGBAdapter(DeviceAdapter):
-    supports_latency_probing = False
-
     def __init__(
         self,
         host: str = "127.0.0.1",
         port: int = 6742,
         device_index: int = 0,
+        max_fps: float | None = None,
     ) -> None:
+        self._max_fps = max_fps
         self._host = host
         self._port = port
         self._device_index = device_index

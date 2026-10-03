@@ -91,7 +91,7 @@ Owns the single asyncio UDP socket for all LIFX communication.
 - Created by `LifxBackend.discover()` before any device discovery occurs
 - Passed to all LIFX adapters via constructor injection
 - `LifxBackend.discover()` returns the transport as part of the backend's internal state
-- Shutdown: `LifxTransport.close()` cancels the receive loop and echo probe tasks, then closes the UDP socket. Called from `LifxBackend.shutdown()`, which is invoked by `DeviceBackend.shutdown_all()` (new class method called from `main.py` after `device_manager.disconnect_all()`)
+- Shutdown: `LifxTransport.close()` cancels the receive loop and echo probe tasks, then closes the UDP socket. Called from `LifxBackend.shutdown()`, which `DiscoveryOrchestrator.shutdown()` invokes from `main.py` at shutdown (this design's `DeviceBackend.shutdown_all()` is gone)
 
 **Responsibilities:**
 - UDP socket lifecycle (bind once, talk to all devices on subnet)
@@ -111,7 +111,7 @@ Owns the single asyncio UDP socket for all LIFX communication.
 **RTT probe design:**
 - Probe task starts only after all adapters have registered their callbacks (at the end of `LifxBackend.discover()`, not during discovery broadcast). This prevents EchoResponses arriving before any callback is registered.
 - Runs as async task at configurable interval (default 2s)
-- Iterates registered devices, sends EchoRequest with unique sequence per device
+- Iterates registered devices, sends EchoRequest with unique sequence per device. Since the light-output fixes it skips a light that doesn't stream (its tracker's `streaming`: no frame within `STREAMING_WINDOW_S`), whose round trip the tracker would ignore
 - On EchoResponse: computes `rtt_ms = (now - send_time) * 1000`, calls registered callback
 - RTT callbacks must be synchronous and non-blocking (<1ms), consistent with EventBus callback policy. The `tracker.update()` call is pure arithmetic — sub-microsecond.
 - Callbacks registered by adapters on connect, forward to their LatencyTracker
@@ -153,7 +153,7 @@ All inherit from `DeviceAdapter` ABC, receive shared `LifxTransport` instance.
 
 - `led_count` -> 1
 - `send_frame(colors)` -> `colors[0]` -> RGB->HSBK -> one SetColor(102) packet. Uses index 0 (first pixel) for simplicity. Future logical bulb grouping may use mean-color or dominant-color strategies at the effect layer.
-- `supports_latency_probing = False` (RTT managed by transport's echo probes, not scheduler)
+- RTT managed by the transport's echo probes, not the scheduler
 - `connect()` -> no-op beyond power check
 - `disconnect()` -> clears internal state
 
@@ -163,7 +163,7 @@ All inherit from `DeviceAdapter` ABC, receive shared `LifxTransport` instance.
 
 - `led_count` -> actual zone count (queried on connect via GetExtendedColorZones)
 - `send_frame(colors)` -> RGB array -> HSBK array -> SetExtendedColorZones(510). If `led_count > 82`, chunks into multiple packets with incrementing `zone_index` (e.g., zones 0-81 in first packet, 82-163 in second).
-- `supports_latency_probing = False` (RTT via transport echo probes)
+- RTT via the transport's echo probes
 - `connect()` -> queries zone count from device
 
 #### LifxTileChainAdapter
@@ -172,7 +172,7 @@ All inherit from `DeviceAdapter` ABC, receive shared `LifxTransport` instance.
 
 - `led_count` -> `tiles_in_chain * 64` (e.g., 5 * 64 = 320)
 - `send_frame(colors)` -> splits 320-LED array into 5x 64-pixel chunks -> RGB->HSBK each -> 5x SetTileState64(715) packets sent sequentially. At WiFi speeds (~1-2ms per packet), tiles in the chain see the new frame within ~10ms of each other. This is below visual perception threshold and acceptable.
-- `supports_latency_probing = False` (RTT via transport echo probes)
+- RTT via the transport's echo probes
 - `connect()` -> queries StateDeviceChain(702), stores TileInfo metadata
 - TileInfo stored but not used yet — available for future spatial mapping and Taichi matrix effects
 
@@ -206,7 +206,7 @@ def __init__(self, transport: LifxTransport, device_info: DeviceInfo, target_mac
 5. Adapter callback calls `self._tracker.update(rtt_ms)` (adapter holds a reference to its tracker)
 6. Scheduler reads `tracker.effective_latency_s` as normal — no scheduler changes needed
 
-Note: `supports_latency_probing = False` on all LIFX adapters prevents the scheduler from measuring `send_frame()` RTT. The transport's echo probes are the sole source of latency samples.
+Note: the scheduler never times `send_frame()`: the transport's echo probes are the sole source of latency samples. (This design's `supports_latency_probing = False` flag went in the light-output fixes, when the scheduler stopped timing sends for every adapter.)
 
 ### DeviceBackend ABC (vendor-agnostic discovery)
 
@@ -250,6 +250,9 @@ class DeviceBackend(ABC):
         """Clean up backend resources (e.g., shared transport). Default no-op."""
         pass
 
+    # Superseded (2026-10-01): discover_all() and shutdown_all() are gone. The
+    # DiscoveryOrchestrator (devices/discovery.py) instantiates the enabled backends and
+    # calls each one's discover(), connect_known() and shutdown().
     @classmethod
     async def discover_all(cls, config: AppConfig) -> list[DiscoveredDevice]:
         # Note: single-call assumption — calling again overwrites _instances
@@ -311,7 +314,7 @@ class LifxDeviceRecord:
 
 ### Integration with main.py
 
-Discovery collapses to:
+Superseded: `main.py` now hands discovery to the `DiscoveryOrchestrator` (fast reconnect from the device rows, then its scan loop), and `DiscoveryOrchestrator.shutdown()` shuts the backends down. This design's version:
 ```python
 # Startup
 devices = await DeviceBackend.discover_all(config)

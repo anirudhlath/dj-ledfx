@@ -53,13 +53,3 @@ async def test_send_frame_splits_into_per_tile_packets(mock_transport: MagicMock
     for call in mock_transport.send_packet.call_args_list:
         pkt = call[0][0]
         assert pkt.msg_type == 715
-
-
-def test_supports_latency_probing_false(mock_transport: MagicMock) -> None:
-    adapter = LifxTileChainAdapter(
-        mock_transport,
-        DeviceInfo("Tile", "lifx_tile", 320, "1.2.3.4:56700"),
-        target_mac=b"\xaa\xbb\xcc\xdd\xee\xff",
-        tile_count=5,
-    )
-    assert adapter.supports_latency_probing is False

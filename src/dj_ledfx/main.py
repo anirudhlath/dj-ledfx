@@ -187,6 +187,21 @@ class _WebServer:
             await asyncio.gather(self.task, return_exceptions=True)
 
 
+def _spawn(background: set[asyncio.Task[object]], work: Coroutine[Any, Any, object]) -> None:
+    """Run an event handler's work off the event bus, keeping a reference to it while it
+    runs (shutdown cancels what's left). Nothing awaits it, so a failure is logged here."""
+    name = getattr(work, "__qualname__", None)
+    task: asyncio.Task[object] = asyncio.create_task(work, name=name)
+    background.add(task)
+    task.add_done_callback(partial(_finished, background))
+
+
+def _finished(background: set[asyncio.Task[object]], task: asyncio.Task[object]) -> None:
+    background.discard(task)
+    if not task.cancelled() and (error := task.exception()) is not None:
+        logger.opt(exception=error).error("{} failed", task.get_name())
+
+
 async def _run(args: argparse.Namespace) -> None:
     metrics.init(enabled=args.metrics, port=args.metrics_port)
 
@@ -305,20 +320,14 @@ async def _run(args: argparse.Namespace) -> None:
         event_bus=event_bus,
     )
 
-    background: set[asyncio.Task[None]] = set()
-
-    def _spawn(work: Coroutine[Any, Any, None]) -> None:
-        """Run a zone manager handler off the event bus, keeping a reference to it."""
-        task = asyncio.create_task(work)
-        background.add(task)
-        task.add_done_callback(background.discard)
+    background: set[asyncio.Task[object]] = set()
 
     def _on_device_offline(event: DeviceOfflineEvent) -> None:
         managed = device_manager.get_by_stable_id(event.stable_id)
         if managed is None or managed.status == "offline":
             return  # the scheduler and the light monitor can both report the same light
         device_manager.demote_device(event.stable_id)
-        _spawn(zone_manager.on_device_offline(event.stable_id))
+        _spawn(background, zone_manager.on_device_offline(event.stable_id))
         light_monitor.refresh()
 
     def _on_device_back(event: DeviceOnlineEvent | DeviceDiscoveredEvent) -> None:
@@ -328,10 +337,12 @@ async def _run(args: argparse.Namespace) -> None:
         if not scheduler.has_device(event.stable_id):
             scheduler.add_device(managed)
         if isinstance(event, DeviceDiscoveredEvent):
-            _spawn(zone_manager.on_device_discovered(event.stable_id))
+            _spawn(background, zone_manager.on_device_discovered(event.stable_id))
         else:
-            _spawn(zone_manager.on_device_online(event.stable_id))
+            _spawn(background, zone_manager.on_device_online(event.stable_id))
         light_monitor.refresh()
+        # The light back online shows its form (ruling 19).
+        _spawn(background, home_map.refit(event.stable_id))
 
     event_bus.subscribe(DeviceOfflineEvent, _on_device_offline)
     event_bus.subscribe(DeviceOnlineEvent, _on_device_back)
@@ -387,6 +398,7 @@ async def _run(args: argparse.Namespace) -> None:
             frame_feed=frame_feed,
             frame_watchers=watchers,
             listening=listening,
+            discovery_orchestrator=discovery_orchestrator,
         )
 
         try:

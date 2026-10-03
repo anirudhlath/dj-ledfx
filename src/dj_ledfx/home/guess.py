@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Collection, Iterable, Sequence
+from typing import Literal
 
 import numpy as np
 from loguru import logger
@@ -20,18 +21,29 @@ from dj_ledfx.home.geometry import point_in_polygon, polygon_area
 from dj_ledfx.home.model import Home, Room, Vec3
 from dj_ledfx.home.seed import SeedLight, normalise_name
 from dj_ledfx.home.shapes import (
+    BentLineShape,
+    CylinderShape,
     GridShape,
     LightShape,
     LineShape,
     Placement,
     PointShape,
     check_led_order,
+    shape_centre,
 )
 from dj_ledfx.home.store import ScenePlacement
+from dj_ledfx.spatial.geometry import DeviceGeometry, MatrixGeometry, StripGeometry
 
 SPREAD_RADIUS_M = 0.8
 GUESS_HEIGHT_M = 1.0
-STANDING = (0.0, 90.0, 0.0)  # a grid tilted up to face south, as the scene hung matrices
+UPRIGHT_BASE_M = 0.1  # an upright lamp's LEDs start this far off the floor
+UPRIGHT_RISE = 0.9  # a strip that rises more than this per metre along it is an upright lamp
+# A grid stood up to face south with its first row at the top, as a matrix's own frame has
+# it: how every matrix stands, fitted or moved from an old scene.
+UPRIGHT_GRID = (0.0, -90.0, 0.0)
+# A candle's and a tube's first row is at the top on the lights too (the light-output plan's
+# Task 8)
+CYLINDER_ROWS = "top-to-bottom"
 
 
 def seed_matches(lights: Iterable[LightEntry], seeds: Sequence[SeedLight]) -> dict[str, SeedLight]:
@@ -65,17 +77,22 @@ def _spread(home: Home, count: int) -> list[Vec3]:
     return points
 
 
+def _no_form(light: LightEntry) -> DeviceGeometry | None:
+    return None
+
+
 def guess_placements(
     home: Home,
     lights: Sequence[LightEntry],
     placed: Collection[str],
     seeds: Sequence[SeedLight],
+    geometry_of: Callable[[LightEntry], DeviceGeometry | None] = _no_form,
 ) -> dict[str, Placement]:
-    """A guess for each light not in `placed`: its seed's placement, or a point spread
-    round the largest room."""
+    """A guess for each light not in `placed`: its seed's placement, or a spot round the
+    largest room, in the light's form there (geometry_of gives a light's geometry)."""
     matches = seed_matches(lights, seeds)
     guesses: dict[str, Placement] = {}
-    loose: list[str] = []
+    loose: list[LightEntry] = []
     for light in lights:
         if light.id in placed:
             continue
@@ -83,9 +100,9 @@ def guess_placements(
         if seed is not None:
             guesses[light.id] = seed.placement
         else:
-            loose.append(light.id)
-    for light_id, point in zip(loose, _spread(home, len(loose)), strict=True):
-        guesses[light_id] = Placement(PointShape(point), check_led_order("point", None))
+            loose.append(light)
+    for light, point in zip(loose, _spread(home, len(loose)), strict=True):
+        guesses[light.id] = placed_in_form(point, light.leds, geometry_of(light))
     return guesses
 
 
@@ -98,6 +115,103 @@ def _vec(values: NDArray[np.float64]) -> Vec3:
     return (float(values[0]), float(values[1]), float(values[2]))
 
 
+def _rise(geometry: StripGeometry) -> float:
+    """How far up the map a strip runs per metre along it: near ±1 for an upright lamp. The
+    direction is a unit vector, and its scene y is the map's up (see `_to_map`)."""
+    return geometry.direction[1]
+
+
+def _matrix_size(geometry: MatrixGeometry) -> tuple[float, float]:
+    """The width and height the matrix's tiles cover, in metres."""
+    pitch = geometry.pixel_pitch
+    left = min(tile.offset_x for tile in geometry.tiles)
+    right = max(tile.offset_x + tile.width * pitch for tile in geometry.tiles)
+    top = min(tile.offset_y for tile in geometry.tiles)
+    bottom = max(tile.offset_y + tile.height * pitch for tile in geometry.tiles)
+    return right - left, bottom - top
+
+
+Form = Literal["point", "upright", "line", "grid", "cylinder"]
+
+
+def _form(leds: int, geometry: DeviceGeometry | None) -> Form:
+    """The form a light shows on the map (the light-output plan's ruling 19): a strip that
+    runs near vertical is an upright lamp, any other strip a line, and a matrix a grid of
+    its tiles, or a cylinder when the light wraps it round one (a candle, a tube). A light
+    of one LED, of no known form, or a matrix with no tiles is a point. `placed_in_form`
+    and `in_form` both go by it, so a placement made in form stays in it."""
+    if leds <= 1:
+        return "point"
+    if isinstance(geometry, StripGeometry):
+        return "upright" if abs(_rise(geometry)) > UPRIGHT_RISE else "line"
+    if isinstance(geometry, MatrixGeometry) and geometry.tiles:
+        return "cylinder" if geometry.form == "cylinder" else "grid"
+    return "point"
+
+
+def placed_in_form(at: Vec3, leds: int, geometry: DeviceGeometry | None) -> Placement:
+    """An unconfirmed placement at `at` that shows the light's form. An upright lamp stands
+    on the floor below `at`, a vertical line as long as its geometry; a strip lies through
+    `at` along its direction; a matrix stands at `at` as a grid of its tiles' size, first
+    row at the top (a chain of tiles is one grid, in rows), or as a cylinder round `at`,
+    its columns round it and its first row at the top; a point is at `at`."""
+    form = _form(leds, geometry)
+    if form == "upright" and isinstance(geometry, StripGeometry):
+        x, y, _ = at
+        path = ((x, y, UPRIGHT_BASE_M), (x, y, UPRIGHT_BASE_M + geometry.length))
+        order = "along-path" if _rise(geometry) > 0 else "reverse-path"
+        return Placement(LineShape(path), order)
+    if form == "line" and isinstance(geometry, StripGeometry):
+        half = _to_map(geometry.direction) * geometry.length / 2.0
+        centre = np.asarray(at, dtype=np.float64)
+        return Placement(LineShape((_vec(centre - half), _vec(centre + half))), "along-path")
+    if form == "grid" and isinstance(geometry, MatrixGeometry):
+        width, height = _matrix_size(geometry)
+        return Placement(GridShape(at, width, height, UPRIGHT_GRID), "rows")
+    if form == "cylinder" and isinstance(geometry, MatrixGeometry):
+        around, height = _matrix_size(geometry)
+        x, y, z = at
+        shape = CylinderShape((x, y, z - height / 2.0), height, around / (2.0 * math.pi))
+        return Placement(shape, CYLINDER_ROWS)
+    return Placement(PointShape(at), check_led_order("point", None))
+
+
+def in_form(placement: Placement, leds: int, geometry: DeviceGeometry | None) -> bool:
+    """Whether a placement shows the light's form (see `_form`). Three things hide it: a
+    point for a light that has a form, an upright lamp lying down, and a candle's or a
+    tube's rows running bottom to top (home.json's seeds)."""
+    form = _form(leds, geometry)
+    shape = placement.shape
+    if form == "point":
+        return True
+    if isinstance(shape, PointShape):
+        return False
+    if form == "cylinder" and isinstance(shape, CylinderShape):
+        return placement.led_order == CYLINDER_ROWS
+    return form != "upright" or _stands(shape)
+
+
+def fitted(placement: Placement, leds: int, geometry: DeviceGeometry | None) -> Placement | None:
+    """The placement fitted to the light's form, or None when it shows it already. A
+    cylinder whose rows run the wrong way keeps its spot and size and has its rows turned;
+    any other placement is made again in form at its centre."""
+    if in_form(placement, leds, geometry):
+        return None
+    if isinstance(placement.shape, CylinderShape) and _form(leds, geometry) == "cylinder":
+        return Placement(placement.shape, CYLINDER_ROWS)
+    return placed_in_form(shape_centre(placement.shape), leds, geometry)
+
+
+def _stands(shape: LightShape) -> bool:
+    """Whether a line rises at least as far as it spreads. Other shapes aren't judged."""
+    if not isinstance(shape, LineShape | BentLineShape):
+        return True
+    path = np.asarray(shape.path, dtype=np.float64)
+    height = float(path[:, 2].max() - path[:, 2].min())
+    spread = float(np.linalg.norm(path[:, :2].max(axis=0) - path[:, :2].min(axis=0)))
+    return height >= spread
+
+
 def _scene_shape(placement: ScenePlacement, at: NDArray[np.float64]) -> LightShape:
     if placement.geometry == "strip" and placement.direction is not None and placement.length:
         direction = _to_map(placement.direction)
@@ -106,7 +220,7 @@ def _scene_shape(placement: ScenePlacement, at: NDArray[np.float64]) -> LightSha
             return LineShape((_vec(at), _vec(at + direction / norm * placement.length)))
     if placement.geometry == "matrix":
         columns, rows = max(placement.cols or 1, 1), max(placement.rows or 1, 1)
-        return GridShape(_vec(at), columns * LED_PITCH_M, rows * LED_PITCH_M, STANDING)
+        return GridShape(_vec(at), columns * LED_PITCH_M, rows * LED_PITCH_M, UPRIGHT_GRID)
     return PointShape(_vec(at))
 
 
@@ -144,7 +258,10 @@ def moved_scene_placements(
             except ValueError as exc:  # a ShapeError too
                 _skipped(member, str(exc))
                 continue
-            moved[member.device_id] = Placement(shape, check_led_order(shape.kind, None))
+            # The owner placed it on the old scene page.
+            moved[member.device_id] = Placement(
+                shape, check_led_order(shape.kind, None), source="owner"
+            )
     return moved
 
 
