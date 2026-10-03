@@ -91,6 +91,15 @@ describe('TempoModule', () => {
     expect(source).toHaveClass('text-text-3', 'border-line', 'bg-transparent')
   })
 
+  // F3 decisions 5 and 6.
+  it('says when Internal holds the tempo, and disables TAP under a Pro DJ Link or Music lock', () => {
+    const { rerender } = render(<TempoModule variant="bar" {...HERO_CHROME.tempo} source="internal" held />)
+    expect(screen.getByRole('button', { name: 'Internal · held' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Tap' })).toBeEnabled()
+    rerender(<TempoModule variant="bar" {...HERO_CHROME.tempo} source="prodjlink" lock="prodjlink" />)
+    expect(screen.getByRole('button', { name: 'Tap' })).toBeDisabled()
+  })
+
   // Engine M1's beat counts no bars (decision 9).
   it('leaves the bar out when the source counts none', () => {
     render(<TempoModule variant="bar" {...HERO_CHROME.tempo} bars={false} />)

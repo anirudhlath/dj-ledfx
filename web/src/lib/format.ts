@@ -29,3 +29,13 @@ export function formatBpm(bpm: number): string {
 export function formatLatency(ms: number, estimated = false): string {
   return `${estimated ? '~' : ''}${Math.round(ms)} ms`
 }
+
+/** "124.00": a deck's track BPM, as §10 writes Pro DJ Link's raw tempo. */
+export function formatTrackBpm(bpm: number): string {
+  return bpm.toFixed(2)
+}
+
+/** "+1.2%": a deck's pitch, always signed. */
+export function formatPitch(percent: number): string {
+  return `${percent >= 0 ? '+' : ''}${percent.toFixed(1)}%`
+}

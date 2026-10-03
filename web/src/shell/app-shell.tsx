@@ -2,7 +2,7 @@ import { Outlet } from 'react-router'
 import { documentTitle, usePageMeta, type MetaContext } from '@/app/page-meta'
 import { useConnectionNews } from '@/chrome/connection-news'
 import { useConnectionStatus, useServerName, useSunset } from '@/chrome/hooks'
-import { ChromeTempoStrip } from '@/chrome/live'
+import { ChromeHoldNews, ChromeTempoStrip } from '@/chrome/live'
 import { Announcer } from '@/design/announcer'
 import { cx } from '@/design/cx'
 import { useIsPhone } from '@/lib/use-media-query'
@@ -29,6 +29,7 @@ export function AppShell() {
 
   return (
     <Announcer news={news}>
+      <ChromeHoldNews />
       <div
         className={cx(
           'h-dvh pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]',

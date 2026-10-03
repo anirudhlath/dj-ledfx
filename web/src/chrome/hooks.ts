@@ -1,8 +1,11 @@
 // The chrome's reads from the live store, one slice each (F0 review: "so a beat doesn't re-render
 // all of the chrome"). Each is null until its channel has spoken, and the part that draws it draws
 // nothing until then (F0 review: no "All good" before the server's first data).
+import { useEffect, useRef } from 'react'
 import type { AttentionItem } from '@/api/contract'
 import { useLive, useLiveShallow, type Connection } from '@/api/live-store'
+import { useAnnounce } from '@/design/announce'
+import { TEMPO_SOURCES } from './sources'
 import { HERO_CHROME, type AttentionCounts, type TempoState } from './state'
 
 /**
@@ -23,6 +26,24 @@ export function useTempo(): TempoState | null {
           bars: beat.bar !== null,
         },
   )
+}
+
+/**
+ * F3 decision 6: says when Internal starts holding the tempo, and when it lets go under Auto. It reads the
+ * inputs push, which carries the hold and the source together. AppShell says it once, for every page.
+ */
+export function useHoldNews(): void {
+  const announce = useAnnounce()
+  const tempo = useLiveShallow(({ inputs }) =>
+    inputs === null ? null : { held: inputs.tempo.held, source: inputs.tempo.source, lock: inputs.tempo.lock },
+  )
+  const was = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (tempo === null) return
+    if (was.current === false && tempo.held) announce('Tempo held on Internal')
+    if (was.current === true && !tempo.held && tempo.lock === 'auto') announce(`Tempo back to ${TEMPO_SOURCES[tempo.source].label}`)
+    was.current = tempo.held
+  }, [tempo, announce])
 }
 
 export function useConnection(): Connection {

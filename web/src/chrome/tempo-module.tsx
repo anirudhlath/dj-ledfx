@@ -2,9 +2,9 @@ import { useRef, type CSSProperties, type ReactElement, type ReactNode } from 'r
 import type { TempoSource } from '@/api/contract'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
-import type { IconName } from '@/design/icons'
 import { formatBpm } from '@/lib/format'
 import { PIP_STYLE, usePips } from './pip-writer'
+import { TEMPO_SOURCES } from './sources'
 import type { TempoState } from './state'
 
 /** A beat drawn as given, never from the beat clock: the /system specimen's. */
@@ -26,23 +26,23 @@ export interface TempoModuleProps extends TempoState {
   onTap?: () => void
 }
 
-const SOURCE: Record<TempoSource, { label: string; icon: IconName }> = {
-  prodjlink: { label: 'Pro DJ Link', icon: 'deck' },
-  music: { label: 'Music', icon: 'music' },
-  internal: { label: 'Internal', icon: 'tempo' },
-}
-
 /** §9.3's Idle: nothing to report, nothing wrong. */
-const NO_DJ = { label: 'No DJ', icon: 'deck' } as const satisfies (typeof SOURCE)[TempoSource]
+const NO_DJ = { label: 'No DJ', icon: 'deck' } as const satisfies (typeof TEMPO_SOURCES)[TempoSource]
 
 /**
  * §6.2 TempoModule. The pips and "bar N" follow the beat clock, written by the pip writer from an animation
  * frame (F3 decision 3), so a beat redraws no React. With no DJ (`bpm` null) it's §9.3's Idle: a quiet
  * "No DJ" where the source is, and no BPM or pips.
  */
-export function TempoModule({ variant, source, bpm, stale, bars, fixed, onSourceClick, renderSource, onTap }: TempoModuleProps) {
+export function TempoModule({ variant, source, bpm, stale, lock, held, bars, fixed, onSourceClick, renderSource, onTap }: TempoModuleProps) {
   const idle = bpm === null
-  const { label, icon } = idle ? NO_DJ : SOURCE[source]
+  const named = idle ? NO_DJ : TEMPO_SOURCES[source]
+  // F3 decision 6: the hold is said in words. Only Internal holds; the beat's source catches up with the
+  // inputs push within a beat message.
+  const label = held && source === 'internal' && !idle ? `${named.label} · held` : named.label
+  const { icon } = named
+  // F3 decision 5: under these locks the engine refuses a tap.
+  const tapLocked = lock === 'prodjlink' || lock === 'music'
   const staleNote = stale && <span className="sr-only">, stale</span>
   const pips = <Pips variant={variant} stale={stale} bars={bars} fixed={fixed} />
   const tone = idle ? 'text-text-3' : stale ? 'text-signal' : 'text-text-2'
@@ -76,7 +76,8 @@ export function TempoModule({ variant, source, bpm, stale, bars, fixed, onSource
           <button
             type="button"
             onClick={onTap}
-            className="h-10 rounded-[9px] border border-line-strong bg-control-hover px-4 text-size-control font-bold tracking-[0.06em] uppercase max-md:touch-target"
+            disabled={tapLocked}
+            className="h-10 rounded-[9px] border border-line-strong bg-control-hover px-4 text-size-control font-bold tracking-[0.06em] uppercase disabled:pointer-events-none disabled:opacity-45 max-md:touch-target"
           >
             Tap
           </button>
@@ -123,7 +124,8 @@ export function TempoModule({ variant, source, bpm, stale, bars, fixed, onSource
       <button
         type="button"
         onClick={onTap}
-        className="h-7 rounded-chip border border-line-strong bg-control-hover px-3 text-meta font-bold tracking-[0.06em] text-text uppercase"
+        disabled={tapLocked}
+        className="h-7 rounded-chip border border-line-strong bg-control-hover px-3 text-meta font-bold tracking-[0.06em] text-text uppercase disabled:pointer-events-none disabled:opacity-45"
       >
         Tap
       </button>

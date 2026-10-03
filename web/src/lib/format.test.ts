@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { HERO_NOW } from '@/test/live'
-import { formatBpm, formatDayDateTime, formatDayTime, formatLatency, formatTime } from './format'
+import { formatBpm, formatDayDateTime, formatDayTime, formatLatency, formatPitch, formatTime, formatTrackBpm } from './format'
 
 describe('format', () => {
   const hero = HERO_NOW
+
+  it("writes a deck's BPM to two decimals and its pitch with a sign (§10)", () => {
+    expect(formatTrackBpm(124)).toBe('124.00')
+    expect(formatPitch(1.2)).toBe('+1.2%')
+    expect(formatPitch(0)).toBe('+0.0%')
+    expect(formatPitch(-0.5)).toBe('-0.5%')
+  })
 
   it('writes the clocks the chrome shows', () => {
     expect(formatDayDateTime(hero)).toBe('Wed 23 Sep · 19:14')

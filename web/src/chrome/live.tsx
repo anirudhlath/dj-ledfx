@@ -1,20 +1,43 @@
-// The chrome's parts on the live store. Each reads its own slice (hooks.ts), so a beat redraws the
-// tempo module and nothing else, and each draws nothing until its data has arrived.
+// The chrome's parts on the live store. Each reads its own slice (hooks.ts), so a message redraws only the
+// part whose slice it changes (a beat, none: the pip writer draws the pips), and each draws nothing until
+// its data has arrived. TAP sends a tap and the source button opens the tempo source popover.
+import { useCallback, type ReactElement } from 'react'
+import { failureText, tapTempo } from '@/api/actions'
+import { useAnnounce } from '@/design/announce'
 import { AttentionButton } from './attention-button'
 import { ConnectionIndicator } from './connection-indicator'
-import { useAttentionTotal, useConnection, useConnectionUnlessLive, usePreviewOnly, useTempo } from './hooks'
+import { useAttentionTotal, useConnection, useConnectionUnlessLive, useHoldNews, usePreviewOnly, useTempo } from './hooks'
 import { PreviewOnlySwitch } from './preview-only-switch'
 import { TempoModule } from './tempo-module'
+import { TempoSourcePopover } from './tempo-source'
 
 type Variant = 'bar' | 'header'
+
+/** TAP (F3 decision 5): a tap, and what failed if it did (Review Focus 1). */
+function useTapTempo(): () => void {
+  const announce = useAnnounce()
+  return useCallback(() => {
+    tapTempo().catch((error: unknown) => announce(failureText('tap the tempo', error)))
+  }, [announce])
+}
+
+/** The source button opens the tempo source popover (desktop). One function, so the module's props stay equal. */
+const sourcePopover = (source: ReactElement) => <TempoSourcePopover trigger={source} />
+
+/** The hold's news (F3 decision 6), said once for the whole app. */
+export function ChromeHoldNews() {
+  useHoldNews()
+  return null
+}
 
 /** The top bar's tempo module, and the divider after it. */
 export function ChromeTempo() {
   const tempo = useTempo()
+  const onTap = useTapTempo()
   if (tempo === null) return null
   return (
     <>
-      <TempoModule variant="bar" {...tempo} />
+      <TempoModule variant="bar" {...tempo} onTap={onTap} renderSource={sourcePopover} />
       <span aria-hidden="true" className="h-6 w-px bg-line tablet:hidden" />
     </>
   )
@@ -23,10 +46,11 @@ export function ChromeTempo() {
 /** The phone's tempo strip under the header, on Live. */
 export function ChromeTempoStrip() {
   const tempo = useTempo()
+  const onTap = useTapTempo()
   if (tempo === null) return null
   return (
     <div className="mx-4 mt-1.5">
-      <TempoModule variant="strip" {...tempo} />
+      <TempoModule variant="strip" {...tempo} onTap={onTap} />
     </div>
   )
 }
