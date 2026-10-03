@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import struct
 from collections.abc import Callable, Collection
 from typing import Any
@@ -189,6 +190,28 @@ async def test_a_light_fades_over_the_engine_s_gap_when_the_engine_is_slower() -
     await device.adapter.send_frame(np.full((1, 3), 200, dtype=np.uint8))
     *_, duration = struct.unpack("<B4HI", transport.last(SET_COLOR).payload)
     assert duration == fade == 31
+
+
+ECHO_REQUEST = 58
+
+
+async def test_a_light_is_probed_only_while_its_tracker_saw_a_send() -> None:
+    """Its echo round trips count only while it streams, so an idle light isn't asked."""
+    transport = FakeLifxTransport(product=1)
+    record = LifxDeviceRecord(mac=MAC, ip="127.0.0.1", port=56700, vendor=1, product=1)
+    device = await _backend(transport)._setup(record, AppConfig())
+    assert device is not None and device.on_accepted is not None
+    device.on_accepted()
+    probing = asyncio.create_task(transport._probe_loop(0.01))
+    try:
+        await asyncio.sleep(0.05)
+        assert ECHO_REQUEST not in transport.types()
+
+        device.tracker.note_send()  # it streams: a frame went out
+        await asyncio.sleep(0.05)
+        assert ECHO_REQUEST in transport.types()
+    finally:
+        probing.cancel()
 
 
 async def test_a_known_online_light_is_left_out_before_it_is_asked() -> None:

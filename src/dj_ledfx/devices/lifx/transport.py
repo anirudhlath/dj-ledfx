@@ -50,6 +50,8 @@ class LifxTransport:
         self._devices: dict[tuple[str, int], LifxDeviceRecord] = {}
         # RTT callbacks: ip -> callback(rtt_ms)
         self._rtt_callbacks: dict[str, Callable[[float], None]] = {}
+        # Whether each light streams, by ip: a light that doesn't isn't probed
+        self._streaming: dict[str, Callable[[], bool]] = {}
         # Pending echo probes: sequence_counter -> (device_ip, send_time)
         self._pending_probes: dict[int, tuple[str, float]] = {}
         # Requests waiting for a reply: (ip, wire sequence) -> (accepted types, future)
@@ -98,6 +100,7 @@ class LifxTransport:
         self._is_open = False
         self._devices.clear()
         self._rtt_callbacks.clear()
+        self._streaming.clear()
         self._pending_probes.clear()
         for _types, future in self._waiters.values():
             future.cancel()
@@ -126,11 +129,20 @@ class LifxTransport:
         self,
         record: LifxDeviceRecord,
         rtt_callback: Callable[[float], None] | None = None,
+        *,
+        streaming: Callable[[], bool] | None = None,
     ) -> None:
+        """Probe the light, handing its echo round trips to rtt_callback, but only while
+        streaming() says it streams (with none, always): an idle light's Wi-Fi dozes, and
+        its round trips, running long, wouldn't count."""
         key = (record.ip, record.port)
         self._devices[key] = record
         if rtt_callback:
             self._rtt_callbacks[record.ip] = rtt_callback
+        if streaming is None:
+            self._streaming.pop(record.ip, None)
+        else:
+            self._streaming[record.ip] = streaming
 
     def add_listener(self, listener: PacketListener) -> None:
         self._listeners.append(listener)
@@ -220,6 +232,9 @@ class LifxTransport:
                 del self._pending_probes[k]
 
             for (ip, port), record in self._devices.items():
+                streaming = self._streaming.get(ip)
+                if streaming is not None and not streaming():
+                    continue  # idle: its round trip wouldn't count
                 seq = self.next_sequence()
                 self._pending_probes[seq] = (record.ip, now)
                 pkt = LifxPacket(

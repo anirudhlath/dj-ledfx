@@ -359,3 +359,34 @@ def test_every_reply_stamps_when_the_light_was_heard() -> None:
     now[0] = 104.0
     transport._on_packet_received(b"not a LIFX packet", ("127.0.0.1", 56700))
     assert transport.last_heard("127.0.0.1") == 102.0
+
+
+ECHO_REQUEST = 58
+
+
+@pytest.mark.asyncio
+async def test_the_probe_loop_asks_a_light_only_while_it_streams() -> None:
+    """An idle light's round trip wouldn't count (its Wi-Fi dozes), so it isn't asked."""
+    transport, sent = _transport()
+    streams = [False]
+    record = LifxDeviceRecord(mac=b"\xaa" * 6, ip="127.0.0.1", port=56700, vendor=1, product=1)
+    transport.register_device(record, rtt_callback=lambda rtt: None, streaming=lambda: streams[0])
+    transport.start_probing(interval_s=0.01)
+    await asyncio.sleep(0.05)
+    assert [packet.msg_type for packet, _ in sent.packets] == []
+
+    streams[0] = True
+    await asyncio.sleep(0.05)
+    assert {packet.msg_type for packet, _ in sent.packets} == {ECHO_REQUEST}
+    await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_a_light_registered_without_a_streaming_check_is_always_probed() -> None:
+    transport, sent = _transport()
+    record = LifxDeviceRecord(mac=b"\xaa" * 6, ip="127.0.0.1", port=56700, vendor=1, product=1)
+    transport.register_device(record)
+    transport.start_probing(interval_s=0.01)
+    await asyncio.sleep(0.03)
+    assert {packet.msg_type for packet, _ in sent.packets} == {ECHO_REQUEST}
+    await transport.close()

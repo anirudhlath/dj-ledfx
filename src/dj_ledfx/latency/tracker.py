@@ -51,6 +51,13 @@ class LatencyTracker:
         reset. Until one has, the latency is the seed: the config's, or the type's heuristic."""
         return self._measured
 
+    @property
+    def streaming(self) -> bool:
+        """Whether a frame went out within STREAMING_WINDOW_S: a round trip measured now
+        counts, so only then is the light worth a probe."""
+        last = self._last_send
+        return last is not None and self._clock() - last <= STREAMING_WINDOW_S
+
     def note_send(self) -> None:
         """A frame went out now, on this tracker's clock."""
         self._last_send = self._clock()
@@ -58,7 +65,7 @@ class LatencyTracker:
     def update_rtt(self, rtt_ms: float) -> None:
         """A probe's round trip. Half of it is the one-way latency, but only while the light
         streams: an idle light's Wi-Fi dozes, and its round trips run long."""
-        if self._last_send is None or self._clock() - self._last_send > STREAMING_WINDOW_S:
+        if not self.streaming:
             return
         self._strategy.update(rtt_ms / 2.0)
         # A static latency ignores the sample: it stays the configured one.

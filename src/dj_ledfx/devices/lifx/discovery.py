@@ -171,9 +171,15 @@ class LifxBackend(DeviceBackend):
             return None
         tracker = tracker_for(config.devices.lifx, display_ms=adapter.display_ms)
         await adapter.connect()
-        # Probed, and its echoes timed for this tracker, once the orchestrator takes it in
+        # Probed while it streams, its echoes timed for this tracker, once the orchestrator
+        # takes it in
         transport = self._transport
-        register = partial(transport.register_device, record, rtt_callback=tracker.update_rtt)
+        register = partial(
+            transport.register_device,
+            record,
+            rtt_callback=tracker.update_rtt,
+            streaming=lambda: tracker.streaming,
+        )
         return DiscoveredDevice(
             adapter=adapter, tracker=tracker, max_fps=adapter.stream_fps, on_accepted=register
         )

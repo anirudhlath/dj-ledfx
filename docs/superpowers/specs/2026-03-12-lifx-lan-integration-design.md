@@ -111,7 +111,7 @@ Owns the single asyncio UDP socket for all LIFX communication.
 **RTT probe design:**
 - Probe task starts only after all adapters have registered their callbacks (at the end of `LifxBackend.discover()`, not during discovery broadcast). This prevents EchoResponses arriving before any callback is registered.
 - Runs as async task at configurable interval (default 2s)
-- Iterates registered devices, sends EchoRequest with unique sequence per device
+- Iterates registered devices, sends EchoRequest with unique sequence per device. Since the light-output fixes it skips a light that doesn't stream (its tracker's `streaming`: no frame within `STREAMING_WINDOW_S`), whose round trip the tracker would ignore
 - On EchoResponse: computes `rtt_ms = (now - send_time) * 1000`, calls registered callback
 - RTT callbacks must be synchronous and non-blocking (<1ms), consistent with EventBus callback policy. The `tracker.update()` call is pure arithmetic — sub-microsecond.
 - Callbacks registered by adapters on connect, forward to their LatencyTracker

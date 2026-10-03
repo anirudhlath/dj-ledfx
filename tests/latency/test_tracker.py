@@ -62,3 +62,17 @@ def test_a_static_latency_is_never_measured() -> None:
     tracker.note_send()
     tracker.update_rtt(60.0)
     assert (tracker.effective_latency_ms, tracker.measured) == (10.0, False)  # the config's
+
+
+def test_a_light_streams_for_the_window_after_a_send() -> None:
+    now = [100.0]
+    tracker = LatencyTracker(StaticLatency(10.0), clock=lambda: now[0])
+    assert not tracker.streaming  # nothing sent yet
+    tracker.note_send()
+    now[0] += STREAMING_WINDOW_S
+    assert tracker.streaming
+    now[0] += 0.1
+    assert not tracker.streaming
+    tracker.note_send()
+    tracker.reset()
+    assert not tracker.streaming
