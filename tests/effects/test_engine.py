@@ -71,6 +71,37 @@ def test_ring_buffer_empty_returns_none() -> None:
     assert buf.find_nearest(100.0) is None
 
 
+def _around(buf: RingBuffer, target_time: float) -> tuple[float, float, float] | None:
+    """The times of the frames either side of target_time, and how far it lies between."""
+    found = buf.find_around(target_time)
+    return None if found is None else (found[0].target_time, found[1].target_time, found[2])
+
+
+def _write_at(buf: RingBuffer, *times: float) -> None:
+    for t in times:
+        colors = np.zeros((1, 3), dtype=np.float32)
+        buf.write(RenderedFrame(colors=colors, target_time=t, beat_phase=0.0, bar_phase=0.0))
+
+
+# A send loop blends the two frames either side of its light's moment (scheduling/route.py).
+# They're found by their times: a horizon that shrinks renders a frame for a moment before
+# frames already written.
+def test_the_ring_finds_the_frames_either_side_of_a_moment_by_their_times() -> None:
+    buf = RingBuffer(capacity=10)
+    _write_at(buf, 10.0, 11.0, 10.5)
+    assert _around(buf, 10.75) == (10.5, 11.0, 0.5)
+    assert _around(buf, 10.1) == (10.0, 10.5, pytest.approx(0.2))
+
+
+def test_a_moment_outside_the_ring_s_frames_gets_the_nearest_frame_alone() -> None:
+    buf = RingBuffer(capacity=10)
+    assert buf.find_around(10.0) is None
+    _write_at(buf, 10.0, 11.0)
+    assert _around(buf, 9.0) == (10.0, 10.0, 0.0)  # a look's first frames
+    assert _around(buf, 12.0) == (11.0, 11.0, 0.0)  # a light slower than the horizon
+    assert _around(buf, 11.0) == (11.0, 11.0, 0.0)  # a moment on a frame
+
+
 def _runtime(zone_id: str, clock: TempoClock) -> ZoneRuntime:
     look = builtin_look("classic-breathe")
     light = ZoneLight(f"{zone_id}-light", 4, DeviceCapabilities(protocol="LIFX"))

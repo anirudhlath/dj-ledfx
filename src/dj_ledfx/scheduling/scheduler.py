@@ -33,8 +33,8 @@ if TYPE_CHECKING:
 class FrameSlot:
     """Depth-1 slot for passing target_time from distributor to per-device send loop.
 
-    Stores a target_time (float), not a frame. The send loop resolves it to
-    a frame via ring_buffer.find_nearest() only when ready to send.
+    Stores a target_time (float), not a frame. The send loop reads its route's
+    colours at that moment (DeviceRoute.colors_at()) only when ready to send.
     """
 
     def __init__(self) -> None:

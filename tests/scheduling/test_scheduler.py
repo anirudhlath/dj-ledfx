@@ -575,14 +575,15 @@ async def test_distributor_handles_concurrent_add_device() -> None:
 
 
 def _two_frame_ring() -> RingBuffer:
-    """Frame 0 for now and frame 1 for a second later; LEDs 0-4 and 5-9 differ in each."""
+    """Frame 0 for 0.4 s from now and frame 1 for 0.5 s; LEDs 0-4 and 5-9 differ in each. A
+    light whose moments come before both frames gets frame 0 alone, one after both frame 1."""
     buf = RingBuffer(capacity=10)
     now = time.monotonic()
-    for index, (first, second) in enumerate([(0.25, 0.5), (0.75, 1.0)]):
+    for at, (first, second) in [(0.4, (0.25, 0.5)), (0.5, (0.75, 1.0))]:
         colors = np.empty((10, 3), dtype=np.float32)
         colors[:5], colors[5:] = first, second
         buf.write(
-            RenderedFrame(colors=colors, target_time=now + index, beat_phase=0.0, bar_phase=0.0)
+            RenderedFrame(colors=colors, target_time=now + at, beat_phase=0.0, bar_phase=0.0)
         )
     return buf
 
@@ -597,7 +598,7 @@ async def test_each_device_gets_its_slice_of_the_frame_for_its_own_latency() -> 
 
     await _run_for(scheduler, 0.2)
 
-    # near reads frame 0 (now + 10 ms), far reads frame 1 (now + 600 ms)
+    # near's moments (now + 10 ms) come before both frames, far's (now + 600 ms) after both
     near_sent = {frame.tobytes() for frame in near.adapter.send_frame_calls}
     far_sent = {frame.tobytes() for frame in far.adapter.send_frame_calls}
     assert near_sent == {bytes([64] * 15)}  # 0.25 in 8 bits
@@ -611,9 +612,9 @@ class _CountingRing(RingBuffer):
         super().__init__(capacity)
         self.asked = 0
 
-    def find_nearest(self, target_time: float) -> RenderedFrame | None:
+    def find_around(self, target_time: float) -> tuple[RenderedFrame, RenderedFrame, float] | None:
         self.asked += 1
-        return super().find_nearest(target_time)
+        return super().find_around(target_time)
 
 
 # M1 review, constraint 3: a route that doesn't stream costs the send loop nothing. The web
