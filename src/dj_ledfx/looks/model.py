@@ -7,7 +7,7 @@ the contract can describe is refused with the milestone that brings it.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar, get_args
 
@@ -18,6 +18,8 @@ from dj_ledfx.effects.params import EffectParam, check_setting
 from dj_ledfx.effects.registry import get_effect_class
 from dj_ledfx.effects.strip_adapter import PROJECTION_PARAMS, StripAdapter
 from dj_ledfx.looks.selectors import Selector, parse_selector
+from dj_ledfx.readers import Reader
+from dj_ledfx.types import is_finite_number
 
 LayerType = Literal["field", "particles", "firmware"]
 Blend = Literal["add", "screen", "normal", "multiply", "max"]
@@ -40,6 +42,9 @@ MAX_DISTANCE_M = 1000.0
 
 class LookError(ValueError):
     """A look that can't be read or can't run in this version, with the reason."""
+
+
+_READ = Reader(LookError)  # the readers the home map uses too (readers.py)
 
 
 class LookNotFoundError(KeyError):
@@ -169,26 +174,26 @@ def _choice(value: Any, allowed: tuple[str, ...], what: str) -> Any:
 # contract refuses them with 422 (web/contract.py). What can't be mapped is refused:
 # something that isn't a number at all, an unknown kind, a height range from high to low.
 _Neutral = TypeVar("_Neutral", float, None)
-
-
-def _number(value: Any, what: str) -> int | float:
-    """The value, if it's a number (JSON's integers may be too big for a float)."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise LookError(f"{what} must be a number")
-    number: int | float = value
-    return number
+_Part = TypeVar("_Part")
 
 
 def _endless(number: int | float) -> bool:
-    return isinstance(number, float) and not math.isfinite(number)
+    """NaN or an infinity. An integer too big for a float isn't: it's past a bound."""
+    return not (is_finite_number(number) or isinstance(number, int))
 
 
 def _bounded(
     value: Any, what: str, low: float, high: float, neutral: _Neutral
 ) -> float | _Neutral:
     """A number within low..high, clamped to them; `neutral` for NaN or an infinity."""
-    number = _number(value, what)
+    number = _READ.number(value, what)
     return neutral if _endless(number) else float(min(max(number, low), high))
+
+
+def _optional(value: Any, what: str, low: float, high: float) -> float | None:
+    """A number a look may leave out (None), within low..high; None for NaN or an
+    infinity."""
+    return None if value is None else _bounded(value, what, low, high, None)
 
 
 def _metres(value: Any, what: str, neutral: _Neutral) -> float | _Neutral:
@@ -198,67 +203,51 @@ def _metres(value: Any, what: str, neutral: _Neutral) -> float | _Neutral:
 def _degrees(value: Any, what: str) -> float:
     """An angle as the same turn from -180 (not included) to 180; 0 for NaN or an
     infinity."""
-    number = _number(value, what)
+    number = _READ.number(value, what)
     return 0.0 if _endless(number) else 180.0 - (180 - number) % 360
 
 
-def _ident(value: Any, what: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise LookError(f"{what} needs an id")
-    return value.strip()
+def _part(
+    read: Callable[[str, Mapping[str, Any]], _Part], layer: str, data: Any, what: str
+) -> _Part | None:
+    """A layer's mask, mirror or transform (`what`), read by `read`; None when it has
+    none."""
+    return None if data is None else read(layer, _READ.mapping(data, f"Layer '{layer}': {what}"))
 
 
-def _numbers(value: Any, count: int, what: str) -> tuple[Any, ...]:
-    if not isinstance(value, list | tuple) or len(value) != count:
-        raise LookError(f"{what} must be {count} numbers")
-    return tuple(value)
-
-
-def _mask(layer: str, data: Any) -> Mask | None:
-    if data is None:
-        return None
-    if not isinstance(data, Mapping):
-        raise LookError(f"Layer '{layer}': a mask must be an object")
+def _mask(layer: str, data: Mapping[str, Any]) -> Mask:
     kind = _choice(data.get("kind"), get_args(MaskKind), "mask")
     what = f"Layer '{layer}': the {kind} mask"
     if kind == "height":  # NaN or an infinity leaves its side of the band open
         low, high = (
-            _number(part, f"{what}'s range")
-            for part in _numbers(data.get("range"), 2, f"{what}'s range")
+            _READ.number(part, f"{what}'s range")
+            for part in _READ.items(data.get("range"), 2, f"{what}'s range")
         )
         low, high = (-math.inf if _endless(low) else low, math.inf if _endless(high) else high)
         if low >= high:
             raise LookError(f"{what}'s range must run from low to high")
         return HeightMask(_metres(low, what, -MAX_DISTANCE_M), _metres(high, what, MAX_DISTANCE_M))
     if kind == "room":
-        return RoomMask(_ident(data.get("room"), what))
+        return RoomMask(_READ.text(data.get("room"), f"{what}'s room"))
     if kind == "sub-zone":
-        return SubZoneMask(_ident(data.get("subZone"), what))
+        return SubZoneMask(_READ.text(data.get("subZone"), f"{what}'s sub-zone"))
     radius = _bounded(data.get("radius"), f"{what}'s radius", 0.0, MAX_DISTANCE_M, MAX_DISTANCE_M)
-    return AnchorMask(_ident(data.get("anchor"), what), radius)
+    return AnchorMask(_READ.text(data.get("anchor"), f"{what}'s anchor"), radius)
 
 
-def _mirror(layer: str, data: Any) -> Mirror | None:
-    if data is None:
-        return None
-    if not isinstance(data, Mapping):
-        raise LookError(f"Layer '{layer}': a mirror must be an object")
+def _mirror(layer: str, data: Mapping[str, Any]) -> Mirror:
     at = data.get("at")
     return Mirror(
         axis=_choice(data.get("axis", "x"), get_args(MirrorAxis), "mirror axis"),
-        at=None if at is None else _metres(at, f"Layer '{layer}': the mirror's place", None),
+        at=_optional(at, f"Layer '{layer}': the mirror's place", -MAX_DISTANCE_M, MAX_DISTANCE_M),
     )
 
 
-def _transform(layer: str, data: Any) -> Transform | None:
-    if data is None:
-        return None
-    if not isinstance(data, Mapping):
-        raise LookError(f"Layer '{layer}': a transform must be an object")
+def _transform(layer: str, data: Mapping[str, Any]) -> Transform:
     what = f"Layer '{layer}': the transform"
     x, y, z = (
         _metres(part, f"{what}'s offset", 0.0)
-        for part in _numbers(data.get("offset", (0.0, 0.0, 0.0)), 3, f"{what}'s offset")
+        for part in _READ.items(data.get("offset", (0.0, 0.0, 0.0)), 3, f"{what}'s offset")
     )
     return Transform(
         offset=(x, y, z),
@@ -268,15 +257,11 @@ def _transform(layer: str, data: Any) -> Transform | None:
 
 
 def _modifiers(data: Mapping[str, Any]) -> LookModifiers:
-    trails, cap = data.get("trailsS"), data.get("brightnessCap")
-    if trails is not None:  # no time is no trails
-        trails = _bounded(trails, "Trails", 0.0, MAX_TRAILS_S, None) or None
-    if cap is not None:
-        cap = _bounded(cap, "The brightness cap", 0.0, 1.0, None)
+    trails = _optional(data.get("trailsS"), "Trails", 0.0, MAX_TRAILS_S)
     return LookModifiers(
-        trails_s=trails,
+        trails_s=trails or None,  # no time is no trails
         downbeat_flash=bool(data.get("downbeatFlash", False)),
-        brightness_cap=cap,
+        brightness_cap=_optional(data.get("brightnessCap"), "The brightness cap", 0.0, 1.0),
         evening=bool(data.get("evening", False)),
     )
 
@@ -292,15 +277,12 @@ def _inputs(values: Any, what: str) -> tuple[Any, ...]:
     return tuple(_choice(v, get_args(InputKind), "input") for v in values)
 
 
-def _layer_from_dict(data: Mapping[str, Any], index: int) -> Layer:
-    if not isinstance(data, Mapping):
-        raise LookError(f"Layer {index + 1} must be an object")
+def _layer_from_dict(layer: Any, index: int) -> Layer:
+    data = _READ.mapping(layer, f"Layer {index + 1}")
     layer_type = _choice(data.get("type"), get_args(LayerType), "layer type")
     if layer_type == "particles":
         raise LookError("Particle layers arrive in M5")
-    raw_settings = data.get("settings") or {}
-    if not isinstance(raw_settings, Mapping):
-        raise LookError("Layer settings must be an object")
+    raw_settings = _READ.mapping(data.get("settings") or {}, "Layer settings")
     settings: dict[str, Any] = {}
     for key, setting in raw_settings.items():
         if not isinstance(setting, Mapping) or "value" not in setting:
@@ -322,9 +304,9 @@ def _layer_from_dict(data: Mapping[str, Any], index: int) -> Layer:
         opacity=opacity,
         settings=settings,
         lights=lights,
-        mask=_mask(name, data.get("mask")),
-        mirror=_mirror(name, data.get("mirror")),
-        transform=_transform(name, data.get("transform")),
+        mask=_part(_mask, name, data.get("mask"), "a mask"),
+        mirror=_part(_mirror, name, data.get("mirror"), "a mirror"),
+        transform=_part(_transform, name, data.get("transform"), "a transform"),
     )
 
 
@@ -343,21 +325,16 @@ def _lights(layer: str, value: Any) -> tuple[Selector, ...] | None:
 
 def look_from_dict(data: Mapping[str, Any]) -> Look:
     """Read a contract-shaped look. `builtIn` and `starred` in the input are ignored."""
-    if not isinstance(data, Mapping):
-        raise LookError("A look must be an object")
-    name = data.get("name")
-    if not isinstance(name, str) or not name.strip():
-        raise LookError("A look needs a name")
+    data = _READ.mapping(data, "A look")
+    name = _READ.text(data.get("name"), "A look's name")
     layers = data.get("layers") or []
     if not isinstance(layers, list):
         raise LookError("'layers' must be a list")
-    modifiers = data.get("modifiers") or {}
-    transition = data.get("transition") or {}
-    if not isinstance(modifiers, Mapping) or not isinstance(transition, Mapping):
-        raise LookError("'modifiers' and 'transition' must be objects")
+    modifiers = _READ.mapping(data.get("modifiers") or {}, "A look's modifiers")
+    transition = _READ.mapping(data.get("transition") or {}, "A look's transition")
     return Look(
         id=str(data.get("id") or ""),
-        name=name.strip(),
+        name=name,
         category=_choice(data.get("category"), get_args(Category), "category"),
         description=str(data.get("description") or ""),
         thumbnail=str(data.get("thumbnail") or ""),
