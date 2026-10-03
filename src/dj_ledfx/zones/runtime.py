@@ -57,7 +57,8 @@ SLOW_AFTER_S = 30.0
 CRASH_LOG_INTERVAL_S = 60.0
 ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5.2)
 # How far ahead a zone renders at most. A light slower than this gets the newest frame and
-# runs late by the difference; a look starts and reacts within a frame or two.
+# runs late by the difference. A look starts within a frame or two, and a change to a
+# running look shows within the horizon (≤120 ms).
 HORIZON_CAP_S = 0.12
 
 # Process-wide, so no two runtimes ever share a generation: a light applied for one
