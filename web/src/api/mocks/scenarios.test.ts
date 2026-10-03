@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HERO_CHROME } from '@/chrome/state'
+import { HERO_BEAT, HERO_CHROME } from '@/chrome/state'
 import { attentionAbout, HERO_NOW } from '@/test/live'
 import type { AttentionItem } from '../contract'
 import { HOME_ZONE, lookName, roomName } from './fixtures'
@@ -97,8 +97,8 @@ describe('the hero', () => {
     expect(hero.beat).toMatchObject({
       source: HERO_CHROME.tempo.source,
       bpm: HERO_CHROME.tempo.bpm,
-      bar: HERO_CHROME.tempo.bar,
-      beatInBar: HERO_CHROME.tempo.beat,
+      bar: HERO_BEAT.bar,
+      beatInBar: HERO_BEAT.beat,
       stale: false,
     })
     expect(hhmm(hero.inputs.sun.sunset)).toBe(HERO_CHROME.sunset)

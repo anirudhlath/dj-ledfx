@@ -1,16 +1,27 @@
-import type { ReactElement, ReactNode } from 'react'
+import { useRef, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import type { TempoSource } from '@/api/contract'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import type { IconName } from '@/design/icons'
 import { formatBpm } from '@/lib/format'
+import { PIP_STYLE, usePips } from './pip-writer'
 import type { TempoState } from './state'
+
+/** A beat drawn as given, never from the beat clock: the /system specimen's. */
+export interface FixedBeat {
+  /** 1–4. */
+  beat: number
+  /** null: no "bar N". */
+  bar: number | null
+}
 
 export interface TempoModuleProps extends TempoState {
   /** "bar": the desktop top bar. "strip": the phone strip under the header on Live. */
   variant: 'bar' | 'strip'
+  /** The specimen's fixed beat. The app passes none: the pip writer follows the beat clock. */
+  fixed?: FixedBeat
   onSourceClick?: () => void
-  /** Desktop: wraps the source button, e.g. in F3's tempo source popover as its trigger. */
+  /** Desktop: wraps the source button, e.g. in the tempo source popover as its trigger. */
   renderSource?: (source: ReactElement) => ReactNode
   onTap?: () => void
 }
@@ -25,15 +36,15 @@ const SOURCE: Record<TempoSource, { label: string; icon: IconName }> = {
 const NO_DJ = { label: 'No DJ', icon: 'deck' } as const satisfies (typeof SOURCE)[TempoSource]
 
 /**
- * §6.2 TempoModule. F1 draws the beat in the bar that each beat message carries; F3 drives the pips
- * from the beat clock (§5.4). With no DJ (`bpm` null) it's §9.3's Idle: a quiet "No DJ" where the
- * source is, and no BPM or pips.
+ * §6.2 TempoModule. The pips and "bar N" follow the beat clock, written by the pip writer from an animation
+ * frame (F3 decision 3), so a beat redraws no React. With no DJ (`bpm` null) it's §9.3's Idle: a quiet
+ * "No DJ" where the source is, and no BPM or pips.
  */
-export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceClick, renderSource, onTap }: TempoModuleProps) {
+export function TempoModule({ variant, source, bpm, stale, bars, fixed, onSourceClick, renderSource, onTap }: TempoModuleProps) {
   const idle = bpm === null
   const { label, icon } = idle ? NO_DJ : SOURCE[source]
   const staleNote = stale && <span className="sr-only">, stale</span>
-  const pips = <Pips beat={stale ? null : beat} variant={variant} />
+  const pips = <Pips variant={variant} stale={stale} bars={bars} fixed={fixed} />
   const tone = idle ? 'text-text-3' : stale ? 'text-signal' : 'text-text-2'
 
   if (variant === 'strip') {
@@ -109,7 +120,6 @@ export function TempoModule({ variant, source, bpm, beat, bar, stale, onSourceCl
         </span>
       )}
       {!idle && pips}
-      {bar !== null && <span className="num text-[11.5px] whitespace-nowrap text-text-3 tablet:hidden">bar {bar}</span>}
       <button
         type="button"
         onClick={onTap}
@@ -126,18 +136,43 @@ const PIPS: Record<TempoModuleProps['variant'], { row?: string; pip: string; dow
   strip: { row: 'flex-1', pip: 'h-3 rounded-[3px]', downbeat: 'w-4', beat: 'w-3' },
 }
 
-/** Four beat pips; the downbeat is wider. `beat` null means stopped. */
-function Pips({ beat, variant }: { beat: number | null; variant: TempoModuleProps['variant'] }) {
+/**
+ * Four beat pips, the downbeat wider, and on desktop "bar N" after them. The pip writer lights them and
+ * names the row and the bar from the beat clock; a fixed beat is drawn as given. Stale, they stop and the
+ * row leaves the accessibility tree.
+ */
+function Pips({ variant, stale, bars, fixed }: {
+  variant: TempoModuleProps['variant']
+  stale: boolean
+  bars: boolean
+  fixed?: FixedBeat
+}) {
   const size = PIPS[variant]
-  const a11y = beat === null ? { 'aria-hidden': true } : { role: 'img', 'aria-label': `Beat ${beat} of 4` }
+  const row = useRef<HTMLSpanElement>(null)
+  // The bar is drawn here, not beside the pips in TempoModule, so its ref is set before the writer's
+  // first write (a layout effect sees its own component's refs, not a later sibling's).
+  const bar = useRef<HTMLSpanElement>(null)
+  usePips(fixed === undefined ? row : null, bar, stale)
+  const a11y = stale
+    ? { 'aria-hidden': true }
+    : { role: 'img', ...(fixed === undefined ? {} : { 'aria-label': `Beat ${fixed.beat} of 4` }) }
   return (
-    <span {...a11y} className={cx('flex items-center gap-1.25', size.row)}>
-      {[1, 2, 3, 4].map((n) => (
-        <span
-          key={n}
-          className={cx(size.pip, n === 1 ? size.downbeat : size.beat, n === beat ? 'bg-text shadow-[0_0_10px] shadow-text/55' : 'bg-control-hover')}
-        />
-      ))}
-    </span>
+    <>
+      <span ref={row} {...a11y} className={cx('flex items-center gap-1.25', size.row)}>
+        {[1, 2, 3, 4].map((n) => (
+          <span
+            key={n}
+            className={cx(size.pip, n === 1 ? size.downbeat : size.beat)}
+            style={fixed !== undefined && !stale && n === fixed.beat ? ({ ...PIP_STYLE, '--pip': 1 } as CSSProperties) : PIP_STYLE}
+          />
+        ))}
+      </span>
+      {variant === 'bar' && (fixed === undefined ? bars : fixed.bar !== null) && (
+        // The pip writer writes "bar N" here; a fixed beat's bar is drawn as given.
+        <span ref={bar} className="num text-[11.5px] whitespace-nowrap text-text-3 tablet:hidden">
+          {fixed?.bar != null && `bar ${fixed.bar}`}
+        </span>
+      )}
+    </>
   )
 }

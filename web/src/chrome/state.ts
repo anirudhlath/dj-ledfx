@@ -1,6 +1,6 @@
 // The chrome's data. The live store (src/api/live-store.ts) produces it; hooks.ts reads it one slice
 // at a time, and the components in this folder draw it.
-import type { TempoSource } from '@/api/contract'
+import type { TempoLock, TempoSource } from '@/api/contract'
 import type { Connection } from '@/api/live-store'
 
 export interface TempoState {
@@ -10,12 +10,14 @@ export interface TempoState {
    * and draws no BPM or pips; TAP stays.
    */
   bpm: number | null
-  /** Beat in the bar, 1–4. null: the beat doesn't move (stopped, stale, or 0 BPM), so no pip lights. */
-  beat: number | null
-  /** null: the source counts no bars (engine M1's beat), and the module leaves "bar N" out. */
-  bar: number | null
   /** §6.2: the source stopped updating; its label turns signal and the pips stop. */
   stale: boolean
+  /** §11.5's lock; null until the server's inputs arrive (engine M1 sends none). */
+  lock: TempoLock | null
+  /** Internal holds the tempo under Auto until a DJ starts again (F3 decision 6). */
+  held: boolean
+  /** The beat counts bars (frame protocol v2's beat), so the module shows "bar N". Engine M1's doesn't. */
+  bars: boolean
 }
 
 export interface AttentionCounts {
@@ -44,10 +46,13 @@ export interface ChromeState {
  * Preview only is the server's now (its transport); only the switch's action waits for F3.
  */
 export const HERO_CHROME: ChromeState = {
-  tempo: { source: 'music', bpm: 121.8, beat: 2, bar: 42, stale: false },
+  tempo: { source: 'music', bpm: 121.8, stale: false, lock: 'auto', held: false, bars: true },
   previewOnly: false,
   attention: { total: 1, lights: 1, inputs: 0 },
   connection: { status: 'live', fps: 60 },
   server: 'homeserver',
   sunset: '19:26',
 }
+
+/** Main.png's beat, beat 2 of bar 42, for the specimen's fixed tempo modules (/system). */
+export const HERO_BEAT = { beat: 2, bar: 42 } as const

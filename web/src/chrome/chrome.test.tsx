@@ -1,20 +1,21 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Connection } from '@/api/live-store'
 import { Announcer } from '@/design/announcer'
 import { Popover } from '@/design/overlays'
+import { seedLive } from '@/test/live'
 import { AttentionButton } from './attention-button'
 import { ConnectionIndicator } from './connection-indicator'
 import { useConnectionNews } from './connection-news'
-import { HERO_CHROME, type TempoState } from './state'
+import { HERO_BEAT, HERO_CHROME, type TempoState } from './state'
 import { PreviewOnlySwitch } from './preview-only-switch'
 import { TempoModule } from './tempo-module'
 
 describe('TempoModule', () => {
   it('shows source, BPM, the beat and the bar (desktop)', async () => {
     const onTap = vi.fn()
-    render(<TempoModule variant="bar" {...HERO_CHROME.tempo} onTap={onTap} />)
+    render(<TempoModule variant="bar" {...HERO_CHROME.tempo} fixed={HERO_BEAT} onTap={onTap} />)
     const tempo = screen.getByRole('group', { name: 'Tempo' })
     expect(within(tempo).getByRole('button', { name: 'Music' })).toHaveAttribute('aria-haspopup', 'dialog')
     expect(tempo).toHaveTextContent('121.8BPM')
@@ -22,6 +23,18 @@ describe('TempoModule', () => {
     expect(tempo).toHaveTextContent('bar 42')
     await userEvent.click(within(tempo).getByRole('button', { name: 'Tap' }))
     expect(onTap).toHaveBeenCalledOnce()
+  })
+
+  // F3 decision 3: the pips follow the beat clock from an animation frame, and React draws nothing per beat.
+  it('follows the beat clock: the pips light, and the row and the bar are named, with no redraw', () => {
+    vi.useFakeTimers()
+    seedLive()
+    render(<TempoModule variant="bar" {...HERO_CHROME.tempo} />)
+    const tempo = screen.getByRole('group', { name: 'Tempo' })
+    expect(within(tempo).getByRole('img', { name: 'Beat 2 of 4' })).toBeInTheDocument()
+    expect(tempo).toHaveTextContent('bar 42')
+    act(() => vi.advanceTimersByTime(500))
+    expect(within(tempo).getByRole('img', { name: 'Beat 3 of 4' })).toBeInTheDocument()
   })
 
   it('drops the source button and the bar on the phone strip', () => {
@@ -53,7 +66,7 @@ describe('TempoModule', () => {
   })
 
   it('stale: the source turns signal, is named stale, and the pips stop', () => {
-    const stale: TempoState = { source: 'internal', bpm: 118, beat: 2, bar: 7, stale: true }
+    const stale: TempoState = { ...HERO_CHROME.tempo, source: 'internal', bpm: 118, stale: true }
     render(<TempoModule variant="bar" {...stale} />)
     const source = screen.getByRole('button', { name: 'Internal, stale' })
     expect(source).toHaveClass('text-signal')
@@ -63,7 +76,7 @@ describe('TempoModule', () => {
 
   // D2: §9.3's Idle. Engine M1 with no DJ has no tempo to show.
   it.each(['bar', 'strip'] as const)('idle (%s): "No DJ" in a quiet chip, with no BPM or pips, and TAP', (variant) => {
-    render(<TempoModule variant={variant} source="prodjlink" bpm={null} beat={null} bar={null} stale={false} />)
+    render(<TempoModule variant={variant} source="prodjlink" bpm={null} stale={false} lock={null} held={false} bars={false} />)
     const tempo = screen.getByRole('group', { name: 'Tempo' })
     expect(within(tempo).getByText('No DJ')).toBeInTheDocument()
     expect(tempo).not.toHaveTextContent(/Pro DJ Link|BPM|0\.0/)
@@ -72,7 +85,7 @@ describe('TempoModule', () => {
   })
 
   it('idle: the source button stays, quiet, for the source popover (desktop)', () => {
-    render(<TempoModule variant="bar" source="prodjlink" bpm={null} beat={null} bar={null} stale={false} />)
+    render(<TempoModule variant="bar" source="prodjlink" bpm={null} stale={false} lock={null} held={false} bars={false} />)
     const source = screen.getByRole('button', { name: 'No DJ' })
     expect(source).toHaveAttribute('aria-haspopup', 'dialog')
     expect(source).toHaveClass('text-text-3', 'border-line', 'bg-transparent')
@@ -80,7 +93,7 @@ describe('TempoModule', () => {
 
   // Engine M1's beat counts no bars (decision 9).
   it('leaves the bar out when the source counts none', () => {
-    render(<TempoModule variant="bar" {...HERO_CHROME.tempo} bar={null} />)
+    render(<TempoModule variant="bar" {...HERO_CHROME.tempo} bars={false} />)
     // Not even the label: "bar " with no number is what a null left behind.
     expect(screen.getByRole('group', { name: 'Tempo' })).not.toHaveTextContent(/bar/)
   })

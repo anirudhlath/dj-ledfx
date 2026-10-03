@@ -7,18 +7,20 @@ import { HERO_CHROME, type AttentionCounts, type TempoState } from './state'
 
 /**
  * The tempo module's values. BPM to one decimal (§10), or null for §9.3's "No DJ": engine M1 with no
- * DJ sends Pro DJ Link at 0 BPM. The beat in the bar only while it moves.
+ * DJ sends Pro DJ Link at 0 BPM. The beat and the bar are the pip writer's (F3 decision 3), so a beat
+ * redraws nothing; the lock and the hold are the inputs' (F3 decision 6).
  */
 export function useTempo(): TempoState | null {
-  return useLiveShallow(({ beat }) =>
+  return useLiveShallow(({ beat, inputs }) =>
     beat === null
       ? null
       : {
           source: beat.source,
           bpm: beat.source === 'prodjlink' && beat.bpm <= 0 ? null : Math.round(beat.bpm * 10) / 10,
-          beat: beat.playing ? beat.beatInBar : null,
-          bar: beat.bar,
           stale: beat.stale,
+          lock: inputs?.tempo.lock ?? null,
+          held: inputs?.tempo.held ?? false,
+          bars: beat.bar !== null,
         },
   )
 }
