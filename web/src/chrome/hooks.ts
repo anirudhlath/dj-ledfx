@@ -1,7 +1,8 @@
 // The chrome's reads from the live store, one slice each (F0 review: "so a beat doesn't re-render
 // all of the chrome"). Each is null until its channel has spoken, and the part that draws it draws
 // nothing until then (F0 review: no "All good" before the server's first data).
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import { failureText, tapTempo } from '@/api/actions'
 import type { AttentionItem } from '@/api/contract'
 import { useLive, useLiveShallow, type Connection } from '@/api/live-store'
 import { useAnnounce } from '@/design/announce'
@@ -44,6 +45,14 @@ export function useHoldNews(): void {
     if (was.current === true && !tempo.held && tempo.lock === 'auto') announce(`Tempo back to ${TEMPO_SOURCES[tempo.source].label}`)
     was.current = tempo.held
   }, [tempo, announce])
+}
+
+/** TAP (F3 decision 5): a tap, and what failed if it did (Review Focus 1). The tempo module and the phone's Tempo share it. */
+export function useTapTempo(): () => void {
+  const announce = useAnnounce()
+  return useCallback(() => {
+    tapTempo().catch((error: unknown) => announce(failureText('tap the tempo', error)))
+  }, [announce])
 }
 
 export function useConnection(): Connection {

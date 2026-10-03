@@ -1,10 +1,9 @@
 import { useRef, type CSSProperties, type ReactElement, type ReactNode } from 'react'
-import type { TempoSource } from '@/api/contract'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import { formatBpm } from '@/lib/format'
 import { PIP_STYLE, usePips } from './pip-writer'
-import { TEMPO_SOURCES } from './sources'
+import { NO_DJ, TEMPO_SOURCES } from './sources'
 import type { TempoState } from './state'
 
 /** A beat drawn as given, never from the beat clock: the /system specimen's. */
@@ -25,9 +24,6 @@ export interface TempoModuleProps extends TempoState {
   renderSource?: (source: ReactElement) => ReactNode
   onTap?: () => void
 }
-
-/** §9.3's Idle: nothing to report, nothing wrong. */
-const NO_DJ = { label: 'No DJ', icon: 'deck' } as const satisfies (typeof TEMPO_SOURCES)[TempoSource]
 
 /**
  * §6.2 TempoModule. The pips and "bar N" follow the beat clock, written by the pip writer from an animation

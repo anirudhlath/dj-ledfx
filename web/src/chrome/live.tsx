@@ -1,27 +1,17 @@
 // The chrome's parts on the live store. Each reads its own slice (hooks.ts), so a message redraws only the
 // part whose slice it changes (a beat, none: the pip writer draws the pips), and each draws nothing until
 // its data has arrived. TAP sends a tap and the source button opens the tempo source popover.
-import { useCallback, useState, type ReactElement } from 'react'
-import { failureText, tapTempo } from '@/api/actions'
-import { useAnnounce } from '@/design/announce'
+import { useState, type ReactElement } from 'react'
 import { AttentionButton } from './attention-button'
 import { AttentionPopover, AttentionSheet } from './attention-list'
 import { ConnectionIndicator } from './connection-indicator'
-import { useAttentionTotal, useConnection, useConnectionUnlessLive, useHoldNews, usePreviewOnly, useTempo } from './hooks'
+import { useAttentionTotal, useConnection, useConnectionUnlessLive, useHoldNews, usePreviewOnly, useTapTempo, useTempo } from './hooks'
 import { usePreviewControl } from './preview-control'
 import { PreviewOnlySwitch } from './preview-only-switch'
 import { TempoModule } from './tempo-module'
 import { TempoSourcePopover } from './tempo-source'
 
 type Variant = 'bar' | 'header'
-
-/** TAP (F3 decision 5): a tap, and what failed if it did (Review Focus 1). */
-function useTapTempo(): () => void {
-  const announce = useAnnounce()
-  return useCallback(() => {
-    tapTempo().catch((error: unknown) => announce(failureText('tap the tempo', error)))
-  }, [announce])
-}
 
 /** The source button opens the tempo source popover (desktop). One function, so the module's props stay equal. */
 const sourcePopover = (source: ReactElement) => <TempoSourcePopover trigger={source} />

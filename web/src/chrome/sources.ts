@@ -11,6 +11,9 @@ export const TEMPO_SOURCES: Record<TempoSource, { label: string; icon: IconName 
   internal: { label: 'Internal', icon: 'tempo' },
 }
 
+/** §9.3's Idle: nothing to report, nothing wrong. Where a source is named, it reads "No DJ". */
+export const NO_DJ = { label: 'No DJ', icon: 'deck' } as const satisfies (typeof TEMPO_SOURCES)[TempoSource]
+
 /** Music Assistant with no track to follow, by its state (§9.3). */
 const MUSIC: Record<InputState, string> = {
   connected: 'Nothing playing',

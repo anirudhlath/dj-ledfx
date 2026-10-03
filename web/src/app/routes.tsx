@@ -2,6 +2,7 @@ import { Navigate, type RouteObject } from 'react-router'
 import { formatDayDateTime, formatDayTime, formatTimeWithSeconds } from '@/lib/format'
 import { ZoneTitle } from '@/live/zone-detail'
 import { AppError, RootError } from '@/pages/app-error'
+import { InputsPage } from '@/pages/inputs'
 import { LivePage } from '@/pages/live'
 import { NotFound } from '@/pages/not-found'
 import { Placeholder } from '@/pages/placeholder'
@@ -63,7 +64,7 @@ export const routes: RouteObject[] = [
           { path: 'map/:thingId', handle: MAP, element: <Placeholder name="Home map" milestone="F7" /> },
           { path: 'devices', handle: DEVICES, element: <Placeholder name="Devices" milestone="F6" /> },
           { path: 'devices/:deviceId', handle: DEVICES, element: <Placeholder name="Devices" milestone="F6" /> },
-          { path: 'inputs', handle: INPUTS, element: <Placeholder name="Inputs" milestone="F6" /> },
+          { path: 'inputs', handle: INPUTS, element: <InputsPage /> },
           { path: 'settings', handle: SETTINGS, element: <Placeholder name="Settings" milestone="F6" /> },
           // The primitives specimen loads on demand, keeping Base UI out of the first load.
           {
