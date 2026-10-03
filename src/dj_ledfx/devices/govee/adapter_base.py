@@ -3,6 +3,7 @@ each segment on its own by razer; `GoveeColourAdapter` sends one colour by color
 
 from __future__ import annotations
 
+import asyncio
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -30,6 +31,10 @@ STATUS_TIMEOUT_S = 1.0
 # A reply lost on the LAN isn't a lamp gone (a streaming lamp answered 9 queries of 10), so
 # a status read asks again once before it counts as silence, as LIFX reads do.
 STATUS_TRIES = 2
+# A lamp loses a command that comes hard on the last: a restore sent back to back, just out
+# of razer, lost the off that ends it and left the lamp lit, every time; 0.2 s apart, never.
+COMMAND_GAP_S = 0.2
+OFF_TRIES = 3  # offs a restore sends while the lamp still reads on: one can be lost on the LAN
 UPRIGHT_HEIGHT_M = 1.4  # an upright lamp's segments, bottom to top
 STRIP_LENGTH_M = 1.0
 
@@ -165,14 +170,30 @@ class GoveeAdapterBase(DeviceAdapter):
 
     async def restore_state(self, state: bytes, *, power: bool = True) -> None:
         """Put the lamp back as captured, out of razer first so it shows the colour it gets
-        back. A lamp switched off elsewhere (power=False) is left alone: a LAN colour
-        command may switch it on."""
+        back, each command COMMAND_GAP_S after the last. A lamp switched off elsewhere
+        (power=False) is left alone: a LAN colour command may switch it on."""
         if not power:
             return
         saved = GoveeDeviceState.from_bytes(state)
         await self._send(build_razer_switch(on=False))
-        await self._send(build_solid_color_message(saved.r, saved.g, saved.b))
-        await self._send(build_brightness_message(saved.brightness))
+        await self._after_a_gap(build_solid_color_message(saved.r, saved.g, saved.b))
+        await self._after_a_gap(build_brightness_message(saved.brightness))
         # Turn off last so colour and brightness are set while the lamp is still on
         if not saved.on_off:
-            await self._send(build_turn_message(on=False))
+            await self._switch_off()
+
+    async def _after_a_gap(self, message: dict[str, Any]) -> None:
+        """Send a command COMMAND_GAP_S after the last, so the lamp takes it."""
+        await asyncio.sleep(COMMAND_GAP_S)
+        await self._send(message)
+
+    async def _switch_off(self) -> None:
+        """Switch the lamp off, and again while it still reads on: an off lost on the LAN
+        leaves it lit. A lamp that can't be read gets the one off."""
+        for _try in range(OFF_TRIES):
+            await self._after_a_gap(build_turn_message(on=False))
+            await asyncio.sleep(COMMAND_GAP_S)  # it reads on until it takes the off
+            state = await self._status()
+            if state is None or not state.on_off:
+                return
+        logger.warning("Govee {} still reads on after {} offs", self._record.ip, OFF_TRIES)

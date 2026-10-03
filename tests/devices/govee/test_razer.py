@@ -1,21 +1,30 @@
 from __future__ import annotations
 
 import base64
+import time
 from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from govee_fakes import lamp_record, lamp_transport, sent
+from govee_fakes import STATUS, lamp_record, lamp_transport, sent
 
-from dj_ledfx.devices.govee.adapter_base import UPRIGHT_HEIGHT_M
-from dj_ledfx.devices.govee.protocol import build_brightness_message, build_razer_switch
+from dj_ledfx.devices.govee import adapter_base
+from dj_ledfx.devices.govee.adapter_base import OFF_TRIES, UPRIGHT_HEIGHT_M
+from dj_ledfx.devices.govee.protocol import (
+    build_brightness_message,
+    build_razer_switch,
+    build_turn_message,
+)
 from dj_ledfx.devices.govee.razer import RAZER_IDLE_S, GoveeRazerAdapter
 from dj_ledfx.devices.govee.state import GoveeDeviceState
 from dj_ledfx.scheduling.scheduler import KEEPALIVE_S
 from dj_ledfx.spatial.geometry import StripGeometry
 
 RAZER_ON, RAZER_OFF = build_razer_switch(on=True), build_razer_switch(on=False)
+OFF = build_turn_message(on=False)
+CAPTURED_OFF = GoveeDeviceState(on_off=0, brightness=50, r=10, g=20, b=30).to_bytes()
+LIT = {**STATUS, "onOff": 1}
 
 
 def _razer_rgb(message: dict[str, Any]) -> bytes:
@@ -94,12 +103,46 @@ async def test_a_look_started_right_after_another_re_arms(transport: MagicMock) 
 
 
 async def test_a_restore_takes_the_lamp_out_of_razer_first(transport: MagicMock) -> None:
+    transport.query_status.return_value = STATUS  # it takes the off
     adapter = GoveeRazerAdapter(transport, lamp_record(), 3)
     state = GoveeDeviceState(on_off=0, brightness=50, r=10, g=20, b=30)
     await adapter.restore_state(state.to_bytes())
     first, *rest = sent(transport)
     assert first == RAZER_OFF
     assert [m["msg"]["cmd"] for m in rest] == ["colorwc", "brightness", "turn"]
+
+
+async def test_a_restore_gives_the_lamp_time_to_take_each_command(transport: MagicMock) -> None:
+    """Sent back to back, a lamp just out of razer lost the off that ends a restore and
+    stayed lit: each command goes a gap after the last."""
+    transport.query_status.return_value = STATUS  # it takes the off
+    sent_at: list[float] = []
+    transport.send_command.side_effect = lambda *_: sent_at.append(time.monotonic())
+    adapter = GoveeRazerAdapter(transport, lamp_record(), 3)
+    await adapter.restore_state(CAPTURED_OFF)
+    assert len(sent_at) == 4  # razer off, colour, brightness, off
+    assert min(np.diff(sent_at)) > 0.9 * adapter_base.COMMAND_GAP_S
+
+
+async def test_an_off_the_lamp_loses_is_sent_again(transport: MagicMock) -> None:
+    transport.query_status.side_effect = [LIT, STATUS]  # it reads on after the first off
+    adapter = GoveeRazerAdapter(transport, lamp_record(), 3)
+    await adapter.restore_state(CAPTURED_OFF)
+    assert sent(transport).count(OFF) == 2
+
+
+async def test_a_lamp_that_stays_lit_is_left_after_a_few_offs(transport: MagicMock) -> None:
+    adapter = GoveeRazerAdapter(transport, lamp_record(), 3)  # it reads on, whatever it's sent
+    await adapter.restore_state(CAPTURED_OFF)
+    assert sent(transport).count(OFF) == OFF_TRIES
+
+
+async def test_a_lamp_that_cant_be_read_gets_one_off() -> None:
+    transport = lamp_transport(can_receive=False)  # another program holds the reply port
+    adapter = GoveeRazerAdapter(transport, lamp_record(), 3)
+    await adapter.restore_state(CAPTURED_OFF)
+    assert sent(transport).count(OFF) == 1
+    transport.query_status.assert_not_awaited()
 
 
 async def test_a_lamp_switched_off_elsewhere_is_left_alone(transport: MagicMock) -> None:
