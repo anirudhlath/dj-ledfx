@@ -36,7 +36,7 @@ from dj_ledfx.home.shapes import (
 from dj_ledfx.home.store import ScenePlacement
 from dj_ledfx.spatial.geometry import DeviceGeometry, MatrixGeometry, PointGeometry, StripGeometry
 
-CANDLE = Placement(CylinderShape((1.0, 1.0, 0.8), 0.12, 0.02), "bottom-to-top")
+CANDLE = Placement(CylinderShape((1.0, 1.0, 0.8), 0.12, 0.02), "bottom-to-top", source="seed")
 
 
 def _light(light_id: str, name: str | None = None, *devices: str, leds: int = 1) -> LightEntry:
@@ -64,7 +64,7 @@ def test_unplaced_lights_take_their_seed_or_are_spread_round_the_largest_room() 
     guesses = guess_placements(home, lights, {"done"}, [_seed("Candle", "west")])
 
     assert set(guesses) == {"candle-1", "x", "y"}
-    assert guesses["candle-1"] == CANDLE
+    assert guesses["candle-1"] == CANDLE and guesses["x"].source == "guess"
     room = largest_room(home)
     cx, cy = room.label_at
     for light_id in ("x", "y"):
@@ -97,10 +97,13 @@ def test_scene_placements_move_onto_the_map_round_their_rooms_centre() -> None:
 
     # The scene's centre is (2, 1.5, 0), its y is up and its z is south: the lamp sits
     # 1 m west, 1 m south and 0.5 m up from the east room's label point (6, 2).
-    assert moved["lamp"] == Placement(PointShape((5.0, 3.0, GUESS_HEIGHT_M + 0.5)), "")
+    # Each is the owner's: they placed it on the old scene page.
+    lamp = Placement(PointShape((5.0, 3.0, GUESS_HEIGHT_M + 0.5)), "", source="owner")
+    assert moved["lamp"] == lamp
     assert moved["strip"] == Placement(
         LineShape(((7.0, 1.0, GUESS_HEIGHT_M - 0.5), (7.5, 1.0, GUESS_HEIGHT_M - 0.5))),
         "along-path",
+        source="owner",
     )  # the first scene that placed a device wins
 
 
@@ -128,6 +131,8 @@ def test_first_placements_put_the_scene_over_the_seed_and_spread_the_rest() -> N
     first = first_placements(home, lights, [_seed("Candle", "west")], scene)
 
     assert set(first) == {"candle-1", "lamp", "new"}  # a device no longer known is skipped
+    assert first["candle-1"].source == "owner"  # the old scene, the owner's, over the seed
+    assert (first["lamp"].source, first["new"].source) == ("guess", "guess")
     west_label = (2.0, 2.0)  # tiny_home's west room
     assert first["candle-1"].shape == PointShape((*west_label, GUESS_HEIGHT_M))  # the seed's room
     assert isinstance(first["lamp"].shape, PointShape) and not first["new"].confirmed

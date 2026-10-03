@@ -506,7 +506,7 @@ async def _export_home(db: StateDB) -> dict[str, Any]:
 
 
 def _placement_doc(placement: Placement) -> dict[str, Any]:
-    doc = placement_to_dict(placement)
+    doc = placement_to_dict(placement) | {"source": placement.source}
     if doc["confirmed_at"] is None:
         del doc["confirmed_at"]  # TOML has no null
     return doc

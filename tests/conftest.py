@@ -415,6 +415,17 @@ def _effect_registry() -> Iterator[None]:
     Effect._registry.update(_EFFECTS)
 
 
+async def as_schema(db: StateDB, version: int) -> None:
+    """Make an open state.db look as schema `version` left it, for an upgrade test: its
+    version, and no placements.source when it's older than 9 (the one column a migration
+    adds that can't be added twice)."""
+    if version < 9:
+        await db.write("ALTER TABLE placements DROP COLUMN source")
+    await db.write(
+        "UPDATE config SET value=? WHERE section='_meta' AND key='schema_version'", (str(version),)
+    )
+
+
 @pytest_asyncio.fixture
 async def db(tmp_path: Path) -> AsyncIterator[StateDB]:
     """An open state.db in the test's own directory."""

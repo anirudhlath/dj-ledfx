@@ -349,8 +349,9 @@ class HomeMap:
     async def set_placement(
         self, target_id: str, shape: LightShape, led_order: str | None = None
     ) -> Placement:
-        """Place or move a light or a PC part. Moving keeps whether it was confirmed, and
-        keeps the LED order when the shape's kind stays the same and none is given."""
+        """Place or move a light or a PC part: the owner's placement, which a refit never
+        moves. Moving keeps whether it was confirmed, and keeps the LED order when the
+        shape's kind stays the same and none is given."""
         self._check_target(target_id)
         async with self._lock:
             old = self._placements.get(target_id)
@@ -361,6 +362,7 @@ class HomeMap:
                 led_order=check_led_order(shape.kind, led_order),
                 confirmed=old.confirmed if old is not None else False,
                 confirmed_at=old.confirmed_at if old is not None else None,
+                source="owner",
             )
             await self._store.save_placement(target_id, placement)
             self._placements[target_id] = placement
@@ -399,33 +401,31 @@ class HomeMap:
                 self._seeds(),
                 geometry_of=self._geometry,
             )
-            for target_id, placement in guesses.items():
-                await self._store.save_placement(target_id, placement)
-                self._placements[target_id] = placement
+            await self._put(guesses)
         if guesses:
             await self._changed()
         return guesses
 
-    async def refit(self) -> dict[str, Placement]:
-        """Fit each online light's unconfirmed placement to its form where it hides it
-        (the light-output plan's ruling 19): many LEDs on a point, an upright lamp lying
-        down. Confirmed placements, offline lights, forms nobody knows and the PC are left
-        alone. Returns the placements it changed."""
-        fitted: dict[str, Placement] = {}
+    async def refit(self, device_id: str) -> Placement | None:
+        """Fit the placement of the light that just came online to its form, where it hides
+        it (the light-output plan's ruling 19): many LEDs on a point, an upright lamp lying
+        down. Its coming online is when its form is known. Only a seed's or a guess's
+        unconfirmed placement is fitted: the owner's, a confirmed one, the PC's and a form
+        nobody knows are left alone. Returns the new placement, or None."""
         async with self._lock:
-            for light in self.lights().entries:
-                old = self._placements.get(light.id)
-                geometry = self._geometry(light)
-                if old is None or old.confirmed or in_form(old.shape, light.leds, geometry):
-                    continue
-                placement = placed_in_form(shape_centre(old.shape), light.leds, geometry)
-                await self._store.save_placement(light.id, placement)
-                self._placements[light.id] = placement
-                fitted[light.id] = placement
-        if fitted:
-            logger.info("Fitted {} placement(s) to their lights' forms", len(fitted))
-            await self._changed()
-        return fitted
+            index = self.lights()
+            light = index.get(index.light_of(device_id))
+            old = self._placements.get(light.id) if light is not None else None
+            if light is None or old is None or old.confirmed or old.source == "owner":
+                return None
+            geometry = self._geometry(light)
+            if in_form(old.shape, light.leds, geometry):
+                return None
+            placement = placed_in_form(shape_centre(old.shape), light.leds, geometry)
+            await self._put({light.id: placement})
+        logger.info("Fitted light {}'s placement to its form", light.id)
+        await self._changed()
+        return placement
 
     # --- internals -------------------------------------------------------------------
 
@@ -483,6 +483,12 @@ class HomeMap:
             kept = (key, build())
             self._placed[target_id] = kept
         return kept[1]
+
+    async def _put(self, placements: Mapping[str, Placement]) -> None:
+        """Save placements, in one transaction, and keep them. Under the lock."""
+        if placements:
+            await self._store.save_placements(placements)
+            self._placements.update(placements)
 
     async def _edit(self, change: Callable[[Home], Home]) -> Home:
         """One edit of the map: under the lock, change it, check it and save it; then tell

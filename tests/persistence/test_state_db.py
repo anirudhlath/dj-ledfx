@@ -23,9 +23,9 @@ async def test_creates_db_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_schema_version_is_8(db):
+async def test_schema_version_is_9(db):
     version = await db.get_schema_version()
-    assert version == 8
+    assert version == 9
 
 
 @pytest.mark.asyncio
@@ -78,7 +78,7 @@ async def test_idempotent_open(tmp_path):
     db2 = StateDB(db_path)
     await db2.open()
     version = await db2.get_schema_version()
-    assert version == 8
+    assert version == 9
     await db2.close()
 
 

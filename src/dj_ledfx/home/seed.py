@@ -68,7 +68,7 @@ def _seed_light(light: Mapping[str, Any]) -> SeedLight:
         room=str(light["room"]),
         sub_zone=light.get("subZone"),
         leds=int(light["leds"]),
-        placement=Placement(shape, check_led_order(kind, light.get("ledOrder"))),
+        placement=Placement(shape, check_led_order(kind, light.get("ledOrder")), source="seed"),
     )
 
 

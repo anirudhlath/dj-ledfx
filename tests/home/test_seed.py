@@ -53,7 +53,7 @@ def test_seed_lights_carry_the_handoff_placements() -> None:
             if key in light:
                 assert shape[key] == light[key], (seed.id, key)
         assert seed.placement.led_order == (light.get("ledOrder") or LED_ORDERS[light["shape"]][0])
-        assert not seed.placement.confirmed
+        assert not seed.placement.confirmed and seed.placement.source == "seed"
 
 
 def test_names_are_matched_without_case_or_punctuation() -> None:

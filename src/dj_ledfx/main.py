@@ -341,7 +341,8 @@ async def _run(args: argparse.Namespace) -> None:
         else:
             _spawn(background, zone_manager.on_device_online(event.stable_id))
         light_monitor.refresh()
-        _spawn(background, home_map.refit())  # a light back online shows its form (ruling 19)
+        # The light back online shows its form (ruling 19).
+        _spawn(background, home_map.refit(event.stable_id))
 
     event_bus.subscribe(DeviceOfflineEvent, _on_device_offline)
     event_bus.subscribe(DeviceOnlineEvent, _on_device_back)

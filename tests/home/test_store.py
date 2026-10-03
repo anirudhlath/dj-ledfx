@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 
+import pytest
+from conftest import as_schema
 from loguru import logger
 
 from dj_ledfx.home.seed import seed_home
@@ -29,6 +33,7 @@ async def test_migration_005_adds_the_map_and_the_placements(db: StateDB) -> Non
         "confirmed",
         "confirmed_at",
         "updated_at",
+        "source",  # 009
     ]
 
 
@@ -79,6 +84,66 @@ async def test_placements_are_saved_changed_and_removed(db: StateDB) -> None:
 
     await store.delete_placement("lamp-1")
     assert list(await store.load_placements()) == ["rope-1"]
+
+
+async def test_placements_keep_where_they_came_from(db: StateDB) -> None:
+    store = HomeStore(db)
+    bulb = Placement(PointShape((0.0, 0.0, 1.0)), "")
+    placed = {"lamp-1": replace(LAMP, source="owner"), "rope-1": replace(ROPE, source="seed")}
+
+    await store.save_placements({**placed, "bulb": bulb})
+
+    assert await store.load_placements() == {**placed, "bulb": bulb}
+    assert bulb.source == "guess"  # what a placement is unless it says
+
+
+@pytest.mark.parametrize(
+    ("seeded", "sources"),
+    [
+        (True, {"lamp": "seed", "tile": "owner", "moved": "guess"}),
+        (False, {"lamp": "guess", "tile": "guess", "moved": "guess"}),
+    ],
+)
+async def test_schema_9_gives_each_placement_made_before_it_a_source(
+    tmp_path: Path, seeded: bool, sources: dict[str, str]
+) -> None:
+    """A row from before placements.source is a guess, except the first start's: the
+    seeding's rows, all written within a second, are seed, or owner where an old scene
+    placed the light."""
+    path = tmp_path / "state.db"
+    db = StateDB(path)
+    await db.open()
+    await as_schema(db, 8)
+    point = json.dumps({"kind": "point", "position": [1.0, 2.0, 1.0]})
+    for target, at in (
+        ("lamp", "2026-09-30T12:00:00.000100+00:00"),
+        ("tile", "2026-09-30T12:00:00.000200+00:00"),
+        ("moved", "2026-09-30T18:30:00.500000+00:00"),
+    ):
+        await db.write(
+            "INSERT INTO placements (target_id, shape, updated_at) VALUES (?, ?, ?)",
+            (target, point, at),
+        )
+    if seeded:
+        await db.write(*StateDB.mark_statement("home_placements_seeded"))
+    await db.write("INSERT INTO scenes (id, name) VALUES ('old', 'Old')")
+    await db.write("INSERT INTO devices (id, name, backend) VALUES ('tile', 'Tile', 'lifx')")
+    await db.write(
+        "INSERT INTO scene_placements (scene_id, device_id, geometry_type) "
+        "VALUES ('old', 'tile', 'matrix')"
+    )
+    await db.close()
+
+    db = StateDB(path)
+    await db.open()
+    try:
+        version = await db.get_schema_version()
+        placements = await HomeStore(db).load_placements()
+    finally:
+        await db.close()
+
+    assert version == 9
+    assert {target: placement.source for target, placement in placements.items()} == sources
 
 
 async def test_an_unreadable_placement_is_left_out(db: StateDB) -> None:

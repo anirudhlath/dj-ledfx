@@ -71,8 +71,9 @@ async def test_a_light_is_placed_moved_confirmed_and_removed(db: StateDB) -> Non
 
     moved = await home_map.set_placement("lamp", LineShape(((0, 0, 1), (1, 0, 1))))
     assert (moved.led_order, moved.confirmed) == ("along-path", False)  # moving doesn't confirm
+    assert moved.source == "owner"
     confirmed = await home_map.confirm("lamp")
-    assert (confirmed.confirmed, confirmed.confirmed_at) == (True, NOW)
+    assert (confirmed.confirmed, confirmed.confirmed_at, confirmed.source) == (True, NOW, "owner")
     again = await home_map.set_placement("lamp", LineShape(((0, 0, 1), (2, 0, 1))))
     assert again.confirmed and again.led_order == "along-path"
     await home_map.remove_placement("lamp")
@@ -191,6 +192,8 @@ async def test_a_guess_places_only_unplaced_lights(db: StateDB) -> None:
     await home_map.remove_placement("lamp")
     guesses = await home_map.guess()
     assert list(guesses) == ["lamp"] and not guesses["lamp"].confirmed
+    assert guesses["lamp"].source == "guess"
+    assert await HomeStore(db).load_placements() == guesses
 
 
 async def test_online_lights_on_points_are_fitted_to_their_forms(db: StateDB) -> None:
@@ -205,17 +208,38 @@ async def test_online_lights_on_points_are_fitted_to_their_forms(db: StateDB) ->
 
     home_map.on_change(changed)
 
-    fitted = await home_map.refit()
+    fitted = {light: await home_map.refit(light) for light in ("lamp", "matrix")}
 
-    lamp_shape = fitted["lamp"].shape
-    assert isinstance(lamp_shape, LineShape) and not fitted["lamp"].confirmed
-    (x0, y0, z0), (x1, y1, z1) = lamp_shape.path
+    lamp = fitted["lamp"]
+    assert lamp is not None and isinstance(lamp.shape, LineShape) and not lamp.confirmed
+    (x0, y0, z0), (x1, y1, z1) = lamp.shape.path
     assert (x0, y0) == (x1, y1) == DESK_CORNER[:2] and z0 < z1
-    assert isinstance(fitted["matrix"].shape, GridShape)
+    matrix = fitted["matrix"]
+    assert matrix is not None and isinstance(matrix.shape, GridShape)
     assert dict(home_map.placements) == fitted
     assert await HomeStore(db).load_placements() == fitted
-    assert changes == ["map"]  # told once
-    assert await home_map.refit() == {}  # they fit now
+    assert changes == ["map", "map"]  # told once for each
+    assert await home_map.refit("lamp") is None  # it fits now
+
+
+async def test_only_the_light_that_came_online_is_fitted(db: StateDB) -> None:
+    lights = [FakeLight(light, led_count=15, geometry=UPRIGHT_LAMP) for light in ("lamp", "twin")]
+    placements = {"lamp": DESK_LAMP, "twin": DESK_LAMP}
+    home_map = await _map(db, lights, placements=placements, seeded=True)
+
+    fitted = await home_map.refit("lamp")
+
+    assert fitted is not None and isinstance(fitted.shape, LineShape)
+    assert home_map.placement("twin") == DESK_LAMP  # its own coming online fits it
+
+
+async def test_an_owner_s_placement_survives_its_light_coming_online(db: StateDB) -> None:
+    lamp = FakeLight("lamp", led_count=15, geometry=UPRIGHT_LAMP)
+    home_map = await _map(db, [lamp], seeded=True)
+    laid_down = await home_map.set_placement("lamp", LineShape(((1.0, 1.0, 1.0), (2.4, 1.0, 1.0))))
+
+    assert await home_map.refit("lamp") is None  # unconfirmed, and out of form, but the owner's
+    assert home_map.placement("lamp") == laid_down
 
 
 async def test_confirmed_offline_fitting_one_led_and_pc_placements_are_left_alone(
@@ -240,7 +264,8 @@ async def test_confirmed_offline_fitting_one_led_and_pc_placements_are_left_alon
     }
     home_map = await _map(db, devices, placements=placements, seeded=True)
 
-    assert await home_map.refit() == {}
+    for target in [*placements, f"{SERVER}:0", "unplaced"]:
+        assert await home_map.refit(target) is None
     assert dict(home_map.placements) == placements
 
 

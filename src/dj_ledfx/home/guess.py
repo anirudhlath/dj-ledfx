@@ -239,7 +239,10 @@ def moved_scene_placements(
             except ValueError as exc:  # a ShapeError too
                 _skipped(member, str(exc))
                 continue
-            moved[member.device_id] = Placement(shape, check_led_order(shape.kind, None))
+            # The owner placed it on the old scene page.
+            moved[member.device_id] = Placement(
+                shape, check_led_order(shape.kind, None), source="owner"
+            )
     return moved
 
 
