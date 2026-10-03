@@ -134,7 +134,7 @@ src/dj_ledfx/ layout:
 - `devices/discovery.py` — DiscoveryOrchestrator: multi-wave scanning, fast reconnect, ghost promote/demote (one `_promote()`); a Govee lamp's output: `set_output()` keeps it in the row and plays it at once, `output_of()` says how the lamp plays, `apply_outputs()` plays what restored rows hold; scans and output changes take turns (`_scan_lock`: a Govee scan has one reply handler)
 - `devices/ghost.py` — GhostAdapter: placeholder for offline devices (is_connected=False, send_frame no-op)
 - `status.py` — SystemStatus health tracking
-- `main.py` — Application coordinator (startup/shutdown orchestration; serves the web app with granian's embedded server, on the app's own event loop, and stops it through `_WebServer.stop()`: close the websockets, then granian's `Server.stop()`)
+- `main.py` — Application coordinator (startup/shutdown orchestration; serves the web app with granian's embedded server, on the app's own event loop, and stops it through `_WebServer.stop()`: close the websockets, then granian's `Server.stop()`; `_spawn()` runs the event handlers' work as background tasks and logs one that fails)
 
 frontend/ (Vite + React 19 + TypeScript + shadcn/ui + Tailwind CSS v4):
 - `src/lib/ws-client.ts` — Multiplexed WS client with reconnection

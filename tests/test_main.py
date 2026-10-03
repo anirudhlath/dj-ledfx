@@ -18,12 +18,15 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
+from loguru import logger
 from tempo_fakes import beat_packet
 
 from dj_ledfx.home.seed import seed_home
+from dj_ledfx.main import _spawn
 from dj_ledfx.persistence.state_db import StateDB
 
 pytest.importorskip("fastapi")  # the web extra
@@ -313,3 +316,27 @@ async def test_a_tempo_set_at_start_is_kept_across_a_restart(tmp_path: Path) -> 
         assert "Traceback" not in output, output
 
     assert (tempo["source"], tempo["bpm"], tempo["internal"]["how"]) == ("internal", 97.0, "set")
+
+
+async def test_a_background_task_that_fails_is_logged_and_one_cancelled_is_not() -> None:
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="ERROR")
+    background: set[asyncio.Task[object]] = set()
+
+    async def refit() -> None:
+        raise RuntimeError("the map is gone")
+
+    try:
+        _spawn(background, refit())
+        _spawn(background, asyncio.sleep(60))
+        tasks = set(background)
+        for task in tasks:
+            if task.get_name() == "sleep":
+                task.cancel()  # as shutdown cancels what's left
+        await asyncio.wait(tasks)
+    finally:
+        logger.remove(sink)
+
+    assert not background  # each lets go of its task once it's done
+    assert [record["exception"].type for record in records] == [RuntimeError]
+    assert "refit" in records[0]["message"]
