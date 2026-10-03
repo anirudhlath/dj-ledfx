@@ -5,16 +5,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
+from collections.abc import Mapping
 from dataclasses import replace
+from typing import Any
 
 import pytest
-from conftest import FakeLight
+from conftest import FakeLight, events
+from loguru import logger
 from zone_home import GLOW, TILE, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.looks.model import Transition
 from dj_ledfx.looks.store import look_body
-from dj_ledfx.zones.model import TransitionInfo
+from dj_ledfx.main import _switch_at_midpoints
+from dj_ledfx.zones.model import LightsChanged, TransitionInfo, TransitionSwitched
 from dj_ledfx.zones.runtime import ZoneRuntime
 
 FADE = Transition(kind="fade", duration_s=2.0)
@@ -80,7 +85,7 @@ async def test_a_firmware_light_keeps_its_effect_until_the_midpoint(
     assert home.manager.effect_name("tile") == "Glow"
 
     _past_midpoint(home.host.runtimes["z"])
-    await home.manager.switch_due()
+    await home.manager.switch("z")
 
     assert tile.names()[sent:] == ["prepare_stream"]
     assert home.routes.routes["tile"].streaming
@@ -99,7 +104,7 @@ async def test_a_light_that_refuses_the_new_effect_at_the_midpoint_streams_a_cop
     await home.manager.start("z", GLOW, FADE)
     assert home.routes.routes["tile"].streaming  # the old look, until the midpoint
     _past_midpoint(home.host.runtimes["z"])
-    await home.manager.switch_due()
+    await home.manager.switch("z")
 
     assert home.manager.light_mode("tile") == "streamed-copy"
     assert home.routes.routes["tile"].streaming
@@ -138,7 +143,7 @@ async def test_off_mid_transition_puts_the_lights_back(make_home: HomeFactory, s
 
     await (home.manager.off("z") if stop == "off" else home.manager.stop_all())
     calls = len(tile.calls)
-    await home.manager.switch_due()
+    await home.manager.switch("z")
 
     assert ("restore", b"before") in tile.calls and ("restore", b"before") in lamp.calls
     assert len(tile.calls) == calls
@@ -163,22 +168,121 @@ async def test_a_take_over_of_a_zone_in_transition_cuts_it_on_the_lights_it_keep
     assert result.running.transition.from_name == "Strobe"
 
 
+# Review Focus 2 (I2): a light the new look runs itself streams the old look past the
+# midpoint, until the zone manager has started its effect.
+async def test_a_light_the_new_look_runs_itself_streams_until_its_effect_starts(
+    make_home: HomeFactory,
+) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    home = await make_home([tile], [zone_record("z", "tile")])
+    await home.manager.start("z", home.look("classic-breathe"))
+    await home.manager.start("z", GLOW, FADE)
+    runtime = home.host.runtimes["z"]
+
+    _past_midpoint(runtime)
+    assert home.routes.routes["tile"].streaming and runtime.handing_over == {"tile"}
+    await home.manager.switch("z")
+
+    assert tile.names()[-1] == "firmware" and not home.routes.routes["tile"].streaming
+    assert runtime.handing_over == set()
+
+
+# I2, cut short: a transition that ends before its midpoint (here another zone takes one
+# of its lights) stops the frames of a light the new look runs itself until it's applied.
+async def test_a_transition_cut_short_stops_frames_to_a_light_the_new_look_runs_itself(
+    make_home: HomeFactory,
+) -> None:
+    tile, lamp = FakeLight("tile", caps=TILE), FakeLight("lamp", caps=LAMP)
+    home = await make_home(
+        [tile, lamp], [zone_record("z", "tile", "lamp"), zone_record("other", "lamp")]
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    await home.manager.start("z", GLOW, FADE)
+    switches = events(home.bus, TransitionSwitched)
+    assert home.routes.routes["tile"].streaming  # the old look, until the midpoint
+
+    await home.manager.start("other", home.look("classic-breathe"))  # z cuts to Glow
+
+    assert switches == [TransitionSwitched("z")]
+    assert not home.routes.routes["tile"].streaming  # never the new look's rows
+    await home.manager.switch("z")
+    assert tile.names()[-1] == "firmware"
+
+
+async def _spawned(background: set[asyncio.Task[object]]) -> None:
+    """Wait for the tasks main's wiring spawned (each lets go of its own once done)."""
+    assert background, "nothing was spawned"
+    await asyncio.wait(set(background))
+
+
 async def test_the_manager_applies_the_midpoint_by_itself(make_home: HomeFactory) -> None:
     tile = FakeLight("tile", caps=TILE)
     home = await make_home([tile], [zone_record("z", "tile")])
+    background: set[asyncio.Task[object]] = set()
+    _switch_at_midpoints(home.bus, home.manager, background)  # as main wires it
     await home.manager.start("z", GLOW)
     await home.manager.start("z", home.look("classic-breathe"), FADE)
-    task = asyncio.create_task(home.manager.run())
+
+    _past_midpoint(home.host.runtimes["z"])
+    await _spawned(background)
+
+    assert tile.names()[-1] == "prepare_stream"
+
+
+# I1: each midpoint's switch is a task of its own, so one that fails is logged and the next
+# midpoint still applies.
+async def test_a_switch_that_fails_is_logged_and_the_next_midpoint_still_applies(
+    make_home: HomeFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tile = FakeLight("tile", caps=TILE, connected=False)  # offline at the starts: uncaptured
+    home = await make_home([tile], [zone_record("z", "tile")])
+    background: set[asyncio.Task[object]] = set()
+    _switch_at_midpoints(home.bus, home.manager, background)
+    await home.manager.start("z", home.look("classic-breathe"))
+    await home.manager.start("z", GLOW, FADE)
+    tile.connected = True  # back, before the zone manager has heard
+    save = home.db.save_device_states
+    failures = [sqlite3.OperationalError("database is locked")]
+
+    async def save_once_failing(states: Mapping[str, bytes]) -> None:
+        if failures:
+            raise failures.pop()
+        await save(states)
+
+    monkeypatch.setattr(home.db, "save_device_states", save_once_failing)
+    errors: list[Any] = []
+    sink = logger.add(lambda message: errors.append(message.record), level="ERROR")
     try:
+        _past_midpoint(home.host.runtimes["z"])  # its switch captures the tile: it fails
+        await _spawned(background)
+        await home.manager.start("z", home.look("classic-breathe"), FADE)
         _past_midpoint(home.host.runtimes["z"])
-        for _ in range(50):
-            await asyncio.sleep(0)
-            if tile.names()[-1] == "prepare_stream":
-                break
-        assert tile.names()[-1] == "prepare_stream"
+        await _spawned(background)
     finally:
-        task.cancel()
-        await asyncio.wait([task])
+        logger.remove(sink)
+
+    assert [record["exception"].type for record in errors] == [sqlite3.OperationalError]
+    assert tile.names()[-2:] == ["firmware", "prepare_stream"]  # Glow, then the midpoint
+
+
+# E9: a midpoint with no light held applies nothing; the running channel still pushes it.
+async def test_a_transition_that_holds_no_light_switches_nothing_at_its_midpoint(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp", caps=LAMP)
+    home = await make_home([lamp], [zone_record("z", "lamp")])
+    await home.manager.start("z", home.look("classic-breathe"))
+    await home.manager.start("z", home.look("classic-strobe"), FADE)
+    switches = events(home.bus, TransitionSwitched)
+    lights = events(home.bus, LightsChanged)
+    route, pushes = home.routes.routes["lamp"], len(home.changes)
+
+    _past_midpoint(home.host.runtimes["z"])
+    await home.manager.switch("z")
+
+    assert switches == [] and lights == []
+    assert home.routes.routes["lamp"] is route  # its route isn't set again
+    assert len(home.changes) == pushes + 1
 
 
 async def test_a_resumed_zone_plays_no_transition(make_home: HomeFactory) -> None:

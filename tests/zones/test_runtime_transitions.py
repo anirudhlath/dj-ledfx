@@ -145,7 +145,8 @@ def test_a_brightness_change_mid_transition_dims_both_looks() -> None:
 # then goes over to the new look, whole.
 def test_a_firmware_light_switches_whole_at_the_midpoint() -> None:
     old = runtime_of(look_of(field_layer(1.0), glow_layer(0.9)))  # the tile runs Glow
-    new = _flat(0.0)
+    switches: list[ZoneRuntime] = []
+    new = _flat(0.0, on_switch=switches.append)
     new.begin_transition(FADE, [old])
     glow = old.claim_for("tile")
     assert new.claim_for("tile") == glow and not new.streams("tile")
@@ -160,7 +161,9 @@ def test_a_firmware_light_switches_whole_at_the_midpoint() -> None:
 
     new.tick(1000.0 + 1.0 + HORIZON)
     assert new.applied_key("tile") == (new.generation, None) and new.streams("tile")
-    assert new.take_switch() and not new.take_switch()  # the manager is told once
+    assert switches == [new] and new.handing_over == {"tile"}  # the manager applies it
+    new.tick(1000.0 + 1.1 + HORIZON)
+    assert switches == [new]  # told once
 
 
 def test_a_light_the_new_look_runs_itself_streams_the_old_one_until_the_midpoint() -> None:
@@ -174,6 +177,43 @@ def test_a_light_the_new_look_runs_itself_streams_the_old_one_until_the_midpoint
     assert _levels(new)[:4] == [1.0] * 4
     new.tick(1000.0 + 1.0 + HORIZON)
     assert new.mode_of("tile") == "own-effect" and not new.streams("tile")
+
+
+# Review Focus 2 (I2): through its route, at its latency, a light the new look runs itself
+# reads the old look until the zone manager has started its effect, though the frames'
+# times pass the midpoint before now does. It never reads the new look's rows.
+def test_a_light_the_new_look_runs_itself_reads_the_old_look_until_its_effect_starts() -> None:
+    switches: list[ZoneRuntime] = []
+    old = _flat(1.0)
+    new = runtime_of(look_of(field_layer(0.0), glow_layer(0.9)), on_switch=switches.append)
+    new.begin_transition(FADE, [old])
+    route = new.route_for("tile")  # the scheduler's until the manager applies the tile
+    assert route is not None and route.streaming
+
+    for step in range(100):  # to 1001.65: the midpoint, 1001 + HORIZON, has passed
+        now = 1000.0 + step / 60
+        new.tick(now)
+        read = route.colors_at(now + 0.02, 4)  # the tile's latency
+        assert read is not None and (read == 255).all(), f"at {now}: {read.tolist()}"
+
+    assert switches == [new] and new.handing_over == {"tile"}
+    new.handed_over({"tile"})  # the manager started Glow: frames no longer reach it
+    new.tick(1001.7)
+    assert _levels(new)[:4] == [0.9] * 4 and new.handing_over == set()  # the preview's Glow
+
+
+def test_a_midpoint_with_no_light_held_switches_nothing() -> None:
+    switches: list[ZoneRuntime] = []
+    pushes: list[ZoneRuntime] = []
+    old = _flat(1.0)
+    new = _flat(0.0, on_switch=switches.append, on_state_change=pushes.append)
+    new.begin_transition(FADE, [old])
+
+    new.tick(1000.0)
+    new.tick(1000.0 + 1.0 + HORIZON)
+
+    assert switches == [] and new.handing_over == set()
+    assert pushes == [new]  # the running channel still pushes the zone at its midpoint
 
 
 def test_a_light_nothing_drove_runs_its_firmware_effect_at_once() -> None:
@@ -202,15 +242,16 @@ def test_an_old_look_that_fails_ends_the_transition_not_the_zone() -> None:
 # Review Focus 3: a map change mid-transition cuts to the new look on the lights it keeps.
 def test_new_lights_mid_transition_end_it() -> None:
     old = runtime_of(look_of(field_layer(1.0), glow_layer(0.9)))
-    new = _flat(0.0)
+    switches: list[ZoneRuntime] = []
+    new = _flat(0.0, on_switch=switches.append)
     new.begin_transition(FADE, [old])
     new.tick(1000.0)
 
-    new.set_lights(new.lights[1:])
+    new.set_lights(new.lights[:2])  # the lamp leaves
     new.tick(1000.1)
 
-    assert new.state == "running" and _levels(new) == [0.0] * 4
-    assert new.take_switch()  # the tile it held goes over: the manager applies it
+    assert new.state == "running" and _levels(new) == [0.0] * 5
+    assert switches == [new] and new.handing_over == {"tile"}  # the manager applies it
 
 
 # Review Focus 3: a start mid-transition takes the mix on; a third ends the oldest one.

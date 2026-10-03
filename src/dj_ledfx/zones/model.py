@@ -144,6 +144,14 @@ class ZonesChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class TransitionSwitched:
+    """A running zone's transition passed its midpoint, or ended before it, and the lights
+    it held go over to the new look: main runs ZoneManager.switch() for the zone."""
+
+    zone_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class PreviewOnlyChanged:
     on: bool
 

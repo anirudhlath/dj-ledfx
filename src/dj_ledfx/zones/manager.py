@@ -45,6 +45,7 @@ from dj_ledfx.zones.model import (
     StartResult,
     StoppedLook,
     TakeOver,
+    TransitionSwitched,
     ZoneError,
     ZoneNotFoundError,
     ZoneNotRunningError,
@@ -165,6 +166,7 @@ class ZoneManager:
             watched=frames_watched,
             evening=evening,
             on_state_change=self._state_changed,
+            on_switch=self._switch_due,
         )
         self._zones: dict[str, ZoneRecord] = {}
         self._running: dict[str, _Running] = {}
@@ -178,9 +180,6 @@ class ZoneManager:
         # is gone or has no lights.
         self._previews: dict[ZoneRuntime, Callable[[], None]] = {}
         self._lock = asyncio.Lock()
-        # Zones whose transitions passed their midpoints: run() applies their lights.
-        self._switching: set[str] = set()
-        self._switched = asyncio.Event()
 
     async def load(self) -> None:
         await self._load_zones()
@@ -833,38 +832,39 @@ class ZoneManager:
 
     def _state_changed(self, runtime: ZoneRuntime) -> None:
         """A running zone crashed, turned slow or recovered by itself (spec §8), or its
-        transition passed the midpoint or ended (spec §5.3): run() applies its lights."""
+        transition started, passed the midpoint or ended (spec §5.3)."""
         running = self._running.get(runtime.zone_id)
-        if running is None or running.runtime is not runtime:  # not one still starting
+        if running is not None and running.runtime is runtime:  # not one still starting
+            self._event_bus.emit(ZonesChanged())
+
+    def _switch_due(self, runtime: ZoneRuntime) -> None:
+        """Lights went over to a running zone's new look: its transition passed the midpoint,
+        or ended before it. main runs switch() for the zone (TransitionSwitched), a task of
+        its own that logs a failure. A transition that ended no longer shows the old look on
+        them, so a light the new look runs itself takes no frames until then."""
+        running = self._running.get(runtime.zone_id)
+        if running is None or running.runtime is not runtime:
             return
-        if runtime.take_switch():
-            self._switching.add(runtime.zone_id)
-            self._switched.set()
-        self._event_bus.emit(ZonesChanged())
+        if runtime.transition_info() is None:
+            for device_id in runtime.handing_over & set(running.lights):
+                if not runtime.streams(device_id):
+                    self._routes.set_route(device_id, runtime.route_for(device_id))
+        self._event_bus.emit(TransitionSwitched(runtime.zone_id))
 
-    async def run(self) -> None:
-        """Apply the lights' new looks as transitions pass their midpoints, until
-        cancelled (main runs it beside the engine)."""
-        while True:
-            await self._switched.wait()
-            await self.switch_due()
-
-    async def switch_due(self) -> None:
-        """The lights of the zones whose transitions passed their midpoints go over to the
-        new look: each firmware effect starts, or the light streams (spec §5.3)."""
-        self._switched.clear()
+    async def switch(self, zone_id: str) -> None:
+        """The lights a running zone's transition held go over to its new look (spec
+        §5.3): each firmware effect starts, or the light streams. Until then a light the
+        new look runs itself shows the old look; it shows the new one once applied."""
         async with self._lock:
-            zones, self._switching = self._switching, set()
-            lights = [
-                light
-                for zone_id in zones
-                if (running := self._running.get(zone_id)) is not None
-                and running.runtime is not None
-                for light in running.lights
-            ]
+            running = self._running.get(zone_id)
+            runtime = running.runtime if running is not None else None
+            if running is None or runtime is None:
+                return
+            lights = [light for light in running.lights if light in runtime.handing_over]
             if not lights:
                 return
             await self._sync(lights)
+            runtime.handed_over(lights)
         self._event_bus.emit(LightsChanged())
 
     def _rebuild_broken(self, zone_id: str, running: _Running) -> bool:

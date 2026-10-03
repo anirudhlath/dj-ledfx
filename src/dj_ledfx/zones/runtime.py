@@ -95,14 +95,14 @@ class _Transition:
     """A transition while it plays (spec §5.3). `rows` says where each look it replaces
     drew the zone's lights: rows of this zone's frame and of that runtime's. `held` lights
     run a firmware effect in one of the two looks, so they stay with the look they had
-    until the midpoint and then switch whole."""
+    until the midpoint and then switch whole; `held_rows` are their rows in the frame."""
 
     kind: TransitionKind
     duration_s: float
     rows: list[tuple[ZoneRuntime, NDArray[np.intp], NDArray[np.intp]]]
     order: NDArray[np.float32] | None  # each LED's place in the switch; None: all at once
     held: dict[str, ZoneRuntime]  # light -> the runtime whose look it keeps until then
-    held_rows: NDArray[np.intp]
+    held_rows: dict[str, slice]
     started: float | None = None  # the first frame's time: the transition runs from it
     progress: float = 0.0  # of the newest frame, 0..1
     switched: bool = False  # the held lights went over to the new look
@@ -147,6 +147,9 @@ class RuntimeEnv:
     # Called when the zone crashes, turns slow, recovers by itself or its transition
     # starts, passes the midpoint or ends: the zone manager tells the running channel.
     on_state_change: Callable[[ZoneRuntime], None] | None = None
+    # Called when lights went over to the zone's new look (its transition passed the
+    # midpoint, or ended before it, holding lights): the zone manager applies them.
+    on_switch: Callable[[ZoneRuntime], None] | None = None
 
 
 class ZoneRuntime:
@@ -177,7 +180,7 @@ class ZoneRuntime:
         self._seed = seed
         self._trails = Trails()
         self._transition: _Transition | None = None
-        self._switch_due = False  # lights went over to this look: the manager applies them
+        self._handover: set[str] = set()  # see handing_over
         self._fields: list[tuple[Layer, FieldEffect]] = []  # bottom to top
         self._firmware: list[tuple[Layer, FirmwareEffect]] = []  # top layer first
         self._claims: dict[str, int] = {}  # light -> firmware layer it runs itself
@@ -304,6 +307,18 @@ class ZoneRuntime:
             return None
         return DeviceRoute(self, device_id, streaming=self.streams(device_id))
 
+    @property
+    def handing_over(self) -> frozenset[str]:
+        """The lights that went over to this look (its transition passed the midpoint, or
+        ended before it) that the zone manager hasn't applied yet. A light this look runs
+        itself shows the old look's rows until then, so whatever reads its frames never
+        sees this look's (spec §5.3)."""
+        return frozenset(self._handover)
+
+    def handed_over(self, device_ids: Iterable[str]) -> None:
+        """The zone manager applied these lights: their rows show this look from now."""
+        self._handover.difference_update(device_ids)
+
     def _holder(self, device_id: str) -> ZoneRuntime:
         """The runtime whose look the light follows now: this one, but during a transition
         a light that runs a firmware effect in either look keeps the look it had until the
@@ -422,7 +437,7 @@ class ZoneRuntime:
             return
         rows: list[tuple[ZoneRuntime, NDArray[np.intp], NDArray[np.intp]]] = []
         held: dict[str, ZoneRuntime] = {}
-        held_rows: list[NDArray[np.intp]] = []
+        held_rows: dict[str, slice] = {}
         covered: set[str] = set()
         for source in sources:
             source.settle()  # this transition takes its lights on from here
@@ -439,7 +454,7 @@ class ZoneRuntime:
                 theirs.append(np.arange(old.start, old.stop, dtype=np.intp))
                 if source.claim_for(device_id) is not None or device_id in self._claims:
                     held[device_id] = source
-                    held_rows.append(here)
+                    held_rows[device_id] = slice(piece.start, piece.stop)
             if mine:
                 rows.append((source, np.concatenate(mine), np.concatenate(theirs)))
         for source in sources:  # at most three looks at once: older transitions end now
@@ -451,7 +466,7 @@ class ZoneRuntime:
             rows=rows,
             order=switch_order(transition.kind, self.leds, self.generation),
             held=held,
-            held_rows=np.concatenate(held_rows) if held_rows else np.zeros(0, np.intp),
+            held_rows=held_rows,
             covered={source: len(mine_rows) for source, mine_rows, _ in rows},
         )
 
@@ -465,7 +480,7 @@ class ZoneRuntime:
             self.zone_id,
             self.look,
             self._lights,
-            replace(self._env, on_state_change=None),
+            replace(self._env, on_state_change=None, on_switch=None),
             brightness=self.brightness,
             seed=self._seed,
             space=self._space,
@@ -477,25 +492,37 @@ class ZoneRuntime:
 
     def settle(self) -> None:
         """Let the lights this runtime's transition holds go over to its look now: a newer
-        start takes them on from here. Its colours keep mixing until the transition ends."""
-        if self._transition is not None and not self._transition.switched:
+        start takes them on from here, and applies them. Its colours keep mixing until the
+        transition ends."""
+        if self._transition is not None:
             self._transition.switched = True
-            self._switch_due = True
+        self._handover.clear()
 
     def end_transition(self) -> None:
-        """Show this look alone from the next frame: a transition ending, or cut short."""
+        """Show this look alone from the next frame: a transition ending, or cut short.
+        Lights it still held go over now; the zone manager applies them."""
         transition, self._transition = self._transition, None
         if transition is None:
             return
         if not transition.switched:
-            self._switch_due = True
+            self._handover.update(transition.held)
+        if self._handover:  # or a switch that hasn't applied them, tried again
+            self._switch_due()
         self._state_changed()
 
-    def take_switch(self) -> bool:
-        """Whether lights went over to this look since the last call (its transition passed
-        the midpoint or ended): the zone manager applies their firmware effects then."""
-        due, self._switch_due = self._switch_due, False
-        return due
+    def _switch(self, transition: _Transition) -> None:
+        """The transition passed its midpoint: the lights it held go over to this look,
+        and the zone manager applies them. The running channel pushes the zone either way
+        (ruling 15)."""
+        transition.switched = True
+        if transition.held:
+            self._handover.update(transition.held)
+            self._switch_due()
+        self._state_changed()
+
+    def _switch_due(self) -> None:
+        if self._env.on_switch is not None:
+            self._env.on_switch(self)
 
     # --- rendering ------------------------------------------------------------------
 
@@ -505,9 +532,7 @@ class ZoneRuntime:
             return
         transition = self._transition
         if transition is not None and not transition.switched and transition.past_midpoint(now):
-            transition.switched = True  # the frame showing now is past it
-            self._switch_due = True
-            self._state_changed()
+            self._switch(transition)  # the frame showing now is past it
         self._ticks += 1
         if self._ticks % self._stride:
             return
@@ -559,9 +584,12 @@ class ZoneRuntime:
             self.end_transition()
             return frame
         share = new_share(transition.kind, transition.order, progress, len(frame))
-        if len(transition.held_rows):  # firmware lights switch whole, at the midpoint
-            new = transition.switched or transition.past_midpoint(ctx.t)
-            share[transition.held_rows] = 1.0 if new else 0.0
+        for device_id, rows in transition.held_rows.items():  # firmware lights switch whole
+            if device_id in self._claims:  # this look runs it: new once its effect started
+                new = transition.switched and device_id not in self._handover
+            else:  # it streams this look once applied, which is after the midpoint
+                new = transition.switched or transition.past_midpoint(ctx.t)
+            share[rows] = 1.0 if new else 0.0
         mixed: FloatRGB = old + (frame - old) * share
         return mixed
 
@@ -682,7 +710,9 @@ class ZoneRuntime:
             self.ring = RingBuffer(self._capacity)
         self._views = {}
         self._trails.reset()
-        self._emulated &= {light.device_id for light in self._lights}
+        ids = {light.device_id for light in self._lights}
+        self._emulated &= ids
+        self._handover &= ids
 
     def _picks(self, index: int, light: ZoneLight) -> bool:
         selectors = self._firmware[index][0].lights

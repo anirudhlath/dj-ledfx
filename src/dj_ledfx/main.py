@@ -55,6 +55,7 @@ from dj_ledfx.zones.frames import FrameFeed, Watchers
 from dj_ledfx.zones.home_view import MapZones
 from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.manager import ZoneManager
+from dj_ledfx.zones.model import TransitionSwitched
 from dj_ledfx.zones.preview import PreviewManager
 from dj_ledfx.zones.store import ZoneStore
 
@@ -203,6 +204,16 @@ def _finished(background: set[asyncio.Task[object]], task: asyncio.Task[object])
         logger.opt(exception=error).error("{} failed", task.get_name())
 
 
+def _switch_at_midpoints(
+    bus: EventBus, zones: ZoneManager, background: set[asyncio.Task[object]]
+) -> None:
+    """A transition's held lights go over to the new look at its midpoint (spec §5.3): one
+    task for each switch, so one that fails is logged and the next still runs."""
+    bus.subscribe(
+        TransitionSwitched, lambda event: _spawn(background, zones.switch(event.zone_id))
+    )
+
+
 async def _run(args: argparse.Namespace) -> None:
     metrics.init(enabled=args.metrics, port=args.metrics_port)
 
@@ -349,6 +360,7 @@ async def _run(args: argparse.Namespace) -> None:
     event_bus.subscribe(DeviceOfflineEvent, _on_device_offline)
     event_bus.subscribe(DeviceOnlineEvent, _on_device_back)
     event_bus.subscribe(DeviceDiscoveredEvent, _on_device_back)
+    _switch_at_midpoints(event_bus, zone_manager, background)
 
     if registered_devices:
         await discovery_orchestrator.connect_known_devices(registered_devices)
@@ -474,7 +486,6 @@ async def _run(args: argparse.Namespace) -> None:
     tasks.append(asyncio.create_task(light_monitor.run()))
     tasks.append(asyncio.create_task(attention_feed.run()))
     tasks.append(asyncio.create_task(previews.run()))
-    tasks.append(asyncio.create_task(zone_manager.run()))  # transitions' midpoints
 
     discovery_orchestrator.start()
 
