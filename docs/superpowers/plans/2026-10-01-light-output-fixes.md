@@ -82,10 +82,21 @@ The owner's rulings first; the rest are this plan's, where the specs are silent 
 13. **A lamp's segment count:** its own stored output, else the config's `segment_override` (for RGBIC lamps, as now), else the table. Fewer than 2 segments plays one colour.
 14. **Govee capabilities:** the model is `Govee <model number>` and multizone means more than one segment.
 15. **A Govee lamp that stops answering is a missed read:** `read_light` raises `NoAnswer`, so three missed 5 s polls (about 15 s) take it offline; it gets no frames until a scan (every 30 s) finds it again. While another program holds UDP 4002 the app can't hear replies at all, can't tell, and keeps sending.
+   *Note, 2026-10-02 (review):* a read now counts as missed only after three changes:
+   - A status read asks twice.
+   - Two reads of one lamp share its reply.
+   - A light heard from since its last read hasn't missed it.
+
+   Task 8 measured a streaming lamp answering 9 of 10 reads. With single reads, that would have made a false offline about every hour and a half.
 16. **LIFX discovery:** a known online light is skipped before `GetVersion`; a light silent to `GetVersion` gives no record; a light silent to any setup query (firmware, label, chain, zones) is skipped for that scan. A `StateUnhandled` reply still falls back as before.
 17. **Each Govee lamp's own output** (segments by razer, or one colour; a segment count): `GET` and `PUT /api/lights/{id}/output`, kept in the device row's `extra` (JSON, key `output`), carried by backups, applied at once by reconnecting the lamp (a restored backup's outputs apply at the next start). Backups leave out unset config values, since TOML has no null; one such value made every export of the deployed database fail. A lamp that doesn't answer the reconnect goes offline, and the next scan brings it back with the new output. The route is outside the web spec's contract until a design handoff adds it; the web app doesn't change.
+   *Note, 2026-10-02 (review):* changing an output never takes a lamp offline. The new adapter is built from the lamp's row and swapped in with no network.
+   - The orchestrator owns the setting (`set_output`, `output_of`).
+   - `GET` reports what the live adapter plays.
+   - A restored backup's changed outputs apply at once.
 18. **The discovery orchestrator is in `app.state`.** `POST /api/devices/scan` then runs a real scan instead of the legacy rediscover, and scans take turns: one asked for while another runs waits for it, since a Govee scan has one reply handler and two at once would cut each other short.
 19. **Placements fit forms:** when a light is online, an unconfirmed placement that hides its form (many LEDs on a point; an upright lamp lying down) is fitted again. An upright lamp stands as a vertical line from 0.1 m, 1.4 m tall (`UPRIGHT_BASE_M`, `UPRIGHT_HEIGHT_M`); a strip lies along its length; a matrix stands as a grid. One-LED lights, forms nobody knows and the PC keep their placements. A confirmed placement is never touched.
+   *Note, 2026-10-02 (review):* only the light that came online is fitted, and only if its placement came from the seed or a guess. A placement the owner set (`PUT /api/lights/{id}/placement`, or an old scene) is never refitted; migration 009 records each placement's source. A matrix stands with its first row on top on every path, and candles and tubes fit as cylinders.
 20. **Aurora's new copy** is "curtains hang from the ceiling to the floor": Task 12 edits the vendored design file under O1. The owner should make the same change in the Claude Design project, or the next handoff brings the old copy back.
 21. **Rates are named constants** in `config.py`. A database-backed run takes `devices.*` from code defaults (its stored config sections are engine, network, web, discovery and effect), so the defaults are what the deployed app uses; `config.toml`'s `[devices.*]` lines change only to stay in step.
 22. **The razer check script** sends no brightness and binds no port, except its `status` pattern, which binds UDP 4002 and so runs only while the deployed app is stopped.
@@ -5017,7 +5028,8 @@ Write `$B/body.md` with these sections, in this order.
 
 **Real lights.** Task 8's findings, in words: what each pattern showed on each lamp, by its table entry, and whether a streaming lamp answered status queries. Task 15's table before and after, by kind of light, and the matrix's display delay as set. No names, addresses or model numbers.
 
-**Known issues.** The lowest lights glow dimly in Aurora (a curtain fades in up to its band's middle). A run beside the deployed app can't hear Govee replies, so it can't capture or restore a lamp. A restored backup's lamp outputs apply at the next start. The Claude Design project still has Aurora's old copy (ruling 20). The Govee outage's cause is unproven.
+**Known issues.** The lowest lights glow dimly in Aurora (a curtain fades in up to its band's middle). A run beside the deployed app can't hear Govee replies, so it can't capture or restore a lamp. A restored backup's lamp outputs apply at the next start. The web app shows LIFX and Govee latency as estimated, because `estimated` follows `supports_latency_probing`, which is False on every real adapter. The Claude Design project still has Aurora's old copy (ruling 20). The Govee outage's cause is unproven.
+*Note, 2026-10-02 (review):* the review's fixes ended two of these. `estimated` now says whether a round trip has been measured, and a restored backup's outputs apply at once.
 
 **Test plan.** Step 3's gates with their counts, the perf run, the web gate, Task 8 and Task 15.
 
