@@ -1,6 +1,7 @@
 // §8.1 bottom left: the light-state legend, each sample drawn as §6.6 draws that state.
 import type { CSSProperties } from 'react'
-import { RENDER, SPEC } from '../design-numbers'
+import { LIVE_SPEC } from '@/design/live-numbers'
+import { RENDER } from '../design-numbers'
 import { colourOf, cssColour, cssSize } from '../palette'
 
 const { dotPx, liveSample, ownEffectSample, glowPx, glowAlpha } = RENDER.legend
@@ -13,12 +14,12 @@ const ITEMS: { name: string; style: CSSProperties; slash?: true }[] = [
     name: 'Own effect',
     style: sample({
       background: cssColour(ownEffectSample),
-      outline: `${SPEC.swatch.ownEffectPx}px dotted var(--color-text-2)`,
-      outlineOffset: SPEC.swatch.ownEffectOffsetPx,
+      outline: `${LIVE_SPEC.swatch.ownEffectPx}px dotted var(--color-text-2)`,
+      outlineOffset: LIVE_SPEC.swatch.ownEffectOffsetPx,
     }),
   },
-  { name: 'Offline', style: sample({ border: `${SPEC.swatch.offlinePx}px dashed var(--color-signal)` }) },
-  { name: 'Switched off elsewhere', style: sample({ border: `${SPEC.swatch.switchedOffPx}px solid var(--color-text-3)` }), slash: true },
+  { name: 'Offline', style: sample({ border: `${LIVE_SPEC.swatch.offlinePx}px dashed var(--color-signal)` }) },
+  { name: 'Switched off elsewhere', style: sample({ border: `${LIVE_SPEC.swatch.switchedOffPx}px solid var(--color-text-3)` }), slash: true },
 ]
 
 export function Legend() {

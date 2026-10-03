@@ -9,7 +9,7 @@ import { HERO_NOW, pushFrame, startMockDataLayer } from '@/test/live'
 import { sceneProps } from '@/test/stage'
 import { SPEC } from '../design-numbers'
 import { FrameWriter } from '../frame-writer'
-import type { RGB } from '../light-maths'
+import type { RGB } from '@/lib/light-colour'
 import { HomeScene } from './home-scene'
 import { StageScene } from './stage-scene'
 

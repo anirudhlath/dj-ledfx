@@ -22,7 +22,7 @@ export function useIsPhone(): boolean {
   return useMediaQuery(PHONE_QUERY)
 }
 
-/** The system asks for less motion (§5.4): the stage redraws at most once every SPEC.reducedMotionMs. */
+/** The system asks for less motion (§5.4): the stage redraws at most once every LIVE_SPEC.reducedMotionMs. */
 export function useReducedMotion(): boolean {
   return useMediaQuery(REDUCED_MOTION_QUERY)
 }

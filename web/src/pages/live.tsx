@@ -6,13 +6,13 @@ import { lazy, Suspense } from 'react'
 import { queries } from '@/api/queries'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
 import { StagePending } from '@/stage/stage-pending'
-import { LIVE_LAYOUT } from './live-numbers'
+import { LIVE_SPEC } from '@/design/live-numbers'
 import { Placeholder } from './placeholder'
 
 const Stage = lazy(() => import('@/stage/stage'))
 
-/** §4.4: below LIVE_LAYOUT.widePx the Running panel stops sitting beside the stage (F3 makes it collapsible). */
-const NARROW_QUERY = `(width < ${LIVE_LAYOUT.widePx / 16}rem)`
+/** §4.4: below LIVE_SPEC.widePx the Running panel stops sitting beside the stage (F3 makes it collapsible). */
+const NARROW_QUERY = `(width < ${LIVE_SPEC.widePx / 16}rem)`
 
 export function LivePage() {
   usePrefetchQuery(queries.home())
@@ -28,7 +28,7 @@ export function LivePage() {
   if (phone) {
     return (
       <div className="flex flex-col">
-        <div className="relative shrink-0" style={{ aspectRatio: `${LIVE_LAYOUT.phoneStage.width} / ${LIVE_LAYOUT.phoneStage.height}` }}>
+        <div className="relative shrink-0" style={{ aspectRatio: `${LIVE_SPEC.phoneStage.width} / ${LIVE_SPEC.phoneStage.height}` }}>
           {stage}
         </div>
         <Placeholder name="Running" milestone="F3" />

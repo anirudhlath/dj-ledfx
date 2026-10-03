@@ -3,7 +3,7 @@
 import type { Id, Light, RunningZone } from '@/api/contract'
 import type { LightFrame } from '@/api/frames'
 import { formatLatency, formatTime } from '@/lib/format'
-import { hexOf, intensityOf, type RGB } from './light-maths'
+import { hexOf, intensityOf, type RGB } from '@/lib/light-colour'
 import { isStreamed, newestFirst, restingColour, type LightState } from './show'
 
 export interface TooltipText {

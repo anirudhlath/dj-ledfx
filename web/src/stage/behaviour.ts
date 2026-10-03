@@ -1,6 +1,7 @@
 // §7.6's modes table in code: what the stage does in each mode, on each variant (§8.10's phone).
 // StageView asks once and hands the answers down; nothing else checks the mode or the variant. The
 // modes F3, F4 and F7 bring (compose, focus, map) extend it.
+import { LIVE_SPEC } from '@/design/live-numbers'
 import { SPEC } from './design-numbers'
 
 /** §7.6's modes so far: `live`, and `frozen` while the link is down (§9.4 Reconnecting). */
@@ -33,7 +34,7 @@ export interface StageBehaviour {
   greyed: boolean
   /**
    * Milliseconds between draws: SPEC.target.fps's on desktop and SPEC.phoneFps's on a phone (§7.5),
-   * SPEC.reducedMotionMs with reduced motion (§5.4); null while frames don't redraw the stage (§7.6
+   * LIVE_SPEC.reducedMotionMs with reduced motion (§5.4); null while frames don't redraw the stage (§7.6
    * frozen: "no animation").
    */
   cadenceMs: number | null
@@ -48,6 +49,6 @@ export function stageBehaviour({ mode, variant, reducedMotion, labels }: StageOp
     labels: !phone && labels,
     sunLabel: !phone,
     greyed: !live,
-    cadenceMs: !live ? null : reducedMotion ? SPEC.reducedMotionMs : 1000 / (phone ? SPEC.phoneFps : SPEC.target.fps),
+    cadenceMs: !live ? null : reducedMotion ? LIVE_SPEC.reducedMotionMs : 1000 / (phone ? SPEC.phoneFps : SPEC.target.fps),
   }
 }

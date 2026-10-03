@@ -1,10 +1,12 @@
 // Writes src/stage/design-numbers.ts, the numbers and the colours the stage draws with, and
-// src/pages/live-numbers.ts, the numbers Live lays its page out by, read from the handoff by
+// src/design/live-numbers.ts, the numbers everything outside the stage draws with, read from the handoff by
 // scripts/design-extract.ts. src/stage/design-numbers.node.test.ts fails when either is stale.
 //   npm run design:numbers
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { designNumbersSource, extractLive, extractRender, extractSpec, liveNumbersSource, readHandoff, tokenColours } from './design-extract.ts'
+import {
+  designNumbersSource, extractLive, extractLiveRender, extractRender, extractSpec, liveNumbersSource, readHandoff, tokenColours,
+} from './design-extract.ts'
 
 const WEB = resolve(import.meta.dirname, '..')
 const handoff = readHandoff(resolve(WEB, '..'))
@@ -14,7 +16,7 @@ if (handoff.read === null) {
 }
 const files = {
   'src/stage/design-numbers.ts': designNumbersSource(extractSpec(handoff.spec), extractRender(handoff.read), tokenColours(handoff.tokens)),
-  'src/pages/live-numbers.ts': liveNumbersSource(extractLive(handoff.spec)),
+  'src/design/live-numbers.ts': liveNumbersSource(extractLive(handoff.spec), extractLiveRender(handoff.read)),
 }
 for (const [file, source] of Object.entries(files)) {
   writeFileSync(resolve(WEB, file), source)

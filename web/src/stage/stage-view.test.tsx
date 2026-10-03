@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { roomName } from '@/api/mocks/fixtures'
 import type { ScenarioName } from '@/api/mocks/scenarios'
-import { LIVE_LAYOUT } from '@/pages/live-numbers'
+import { LIVE_SPEC } from '@/design/live-numbers'
 import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
 import { pushFrame } from '@/test/live'
@@ -218,15 +218,15 @@ describe('the stage on Live (§7, §8.1)', () => {
   })
 
   // §5.4: with reduced motion the stage still updates the lights' colours, but slowly.
-  it('redraws at most once every SPEC.reducedMotionMs when the system asks for less motion', async () => {
+  it('redraws at most once every LIVE_SPEC.reducedMotionMs when the system asks for less motion', async () => {
     await openLive()
     expect(canvas().dataset.cadence).toBe(String(1000 / SPEC.target.fps))
     act(() => setReducedMotion(true))
-    expect(canvas().dataset.cadence).toBe(String(SPEC.reducedMotionMs))
+    expect(canvas().dataset.cadence).toBe(String(LIVE_SPEC.reducedMotionMs))
   })
 
   it("draws the phone's stage without labels or overlays", async () => {
-    setViewportWidth(LIVE_LAYOUT.phoneStage.width)
+    setViewportWidth(LIVE_SPEC.phoneStage.width)
     const { state } = await openLive()
     expect(screen.queryByText(state.home.rooms[0].name)).not.toBeInTheDocument()
     expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()

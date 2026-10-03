@@ -3,6 +3,7 @@
 // so React draws it only when one of those changes (memo). Every size and colour is SPEC's or RENDER's.
 import { memo, useId } from 'react'
 import type { Vec2 } from '@/api/contract'
+import { LIVE_SPEC } from '@/design/live-numbers'
 import { projectPoint, type CameraPose } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import type { StageLabel } from '../labels'
@@ -66,7 +67,7 @@ function MarkShape({ mark }: { mark: Mark }) {
     case 'offline': {
       // §9.1 and the legend: a hollow ring in the signal colour, dashed as the render's offline strip.
       const { dashPx, gapPx } = RENDER.offlineStrip
-      return <circle cx={mark.at[0]} cy={mark.at[1]} r={RENDER.switchedOff.ringPx} {...line('--color-signal', 1, SPEC.swatch.offlinePx, [dashPx, gapPx])} />
+      return <circle cx={mark.at[0]} cy={mark.at[1]} r={RENDER.switchedOff.ringPx} {...line('--color-signal', 1, LIVE_SPEC.swatch.offlinePx, [dashPx, gapPx])} />
     }
     case 'offline-strip': {
       const { colour, alpha, widthPx, dashPx, gapPx } = RENDER.offlineStrip

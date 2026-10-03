@@ -2,7 +2,7 @@
 // Design"): SPEC from the web app spec's own sentences, RENDER from the reference renders' markup,
 // TOKENS from tokens.css. Each entry names where its number lives. A sentence or an element that
 // moved fails loudly here, naming the entry; `npm run design:numbers` writes
-// src/stage/design-numbers.ts and src/pages/live-numbers.ts from these.
+// src/stage/design-numbers.ts and src/design/live-numbers.ts from these.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
@@ -129,25 +129,15 @@ const SPEC_ENTRIES: Record<string, Entry> = {
     pattern: /room labels are ([\d.]+) px sans caps with the running look beneath in ([\d.]+) px serif italic/,
     take: (m) => ({ capsPx: n(m[1]), lookPx: n(m[2]) }),
   },
-  reducedMotionMs: {
-    where: '§5.4',
-    pattern: /The stage still updates light colours, at most once per (second|minute)/,
-    take: (m) => (m[1] === 'second' ? 1000 : 60_000),
+  focus: {
+    where: '§7.2 Focus framing',
+    pattern: /Focus framing \(zone detail, editor preview, composer on phone\): fit the zone's polygon, tilt ([\d.]+)°/,
+    take: (m) => ({ tiltDeg: n(m[1]) }),
   },
-  swatch: {
-    where: '§6.6',
-    pattern: /fill = the light's colour mixed from `(#[0-9a-f]{6})` toward the colour by `([\d.]+) \+ intensity` \(clamped\), with a glow `0 0 (\d+)px` of the colour scaled by intensity; intensity ≤ ([\d.]+) shows `(#[0-9a-f]{6})` \(dark\)\.[\s\S]*?Running its own effect: ([\d.]+) px dotted `text-2` outline, ([\d.]+) px offset\.[\s\S]*?Offline: hollow, ([\d.]+) px dashed signal border\.\n- Switched off elsewhere: hollow, ([\d.]+) px `text-3` border with a diagonal slash/,
-    take: (m) => ({
-      fromColour: m[1],
-      mixBase: n(m[2]),
-      glowPx: n(m[3]),
-      darkAt: n(m[4]),
-      darkColour: m[5],
-      ownEffectPx: n(m[6]),
-      ownEffectOffsetPx: n(m[7]),
-      offlinePx: n(m[8]),
-      switchedOffPx: n(m[9]),
-    }),
+  compose: {
+    where: '§7.6 compose',
+    pattern: /Rooms outside the chosen zone dimmed to ([\d.]+)%; chosen zone outlined in ([\d.]+) px `text`/,
+    take: (m) => ({ dimmed: pct(m[1]), outlinePx: n(m[2]) }),
   },
   quality: {
     where: '§14 Performance',
@@ -156,10 +146,49 @@ const SPEC_ENTRIES: Record<string, Entry> = {
   },
 }
 
-/** The numbers Live lays its page out by: the first load carries these, and not the stage's. */
+/** The numbers everything outside the stage draws with: the first load carries these, and not the stage's. */
 const LIVE_ENTRIES: Record<string, Entry> = {
   widePx: { where: '§4.4', pattern: /\| ≥ (\d+) px \| Desktop \(designed at/, take: (m) => n(m[1]) },
   phoneStage: { where: '§8.10 Live', pattern: /stage (\d+) × (\d+) \(no labels\)/, take: (m) => ({ width: n(m[1]), height: n(m[2]) }) },
+  swatch: {
+    where: '§6.6',
+    pattern:
+      /(\d+) px circle \((\d+) phone, (\d+) devices table\)\.\n- Live: fill = the light's colour mixed from `(#[0-9a-f]{6})` toward the colour by `([\d.]+) \+ intensity` \(clamped\), with a glow `0 0 (\d+)px` of the colour scaled by intensity; intensity ≤ ([\d.]+) shows `(#[0-9a-f]{6})` \(dark\)\.\n- Multizone or matrix: a ([\d.]+)× wide pill with a left-to-right gradient of its zones\.\n- Running its own effect: ([\d.]+) px dotted `text-2` outline, ([\d.]+) px offset\.\n- Streamed copy: ([\d.]+) px dashed `text-3` outline, ([\d.]+) px offset\.\n- Offline: hollow, ([\d.]+) px dashed signal border\.\n- Switched off elsewhere: hollow, ([\d.]+) px `text-3` border with a diagonal slash/,
+    take: (m) => ({
+      px: n(m[1]),
+      phonePx: n(m[2]),
+      tablePx: n(m[3]),
+      fromColour: m[4],
+      mixBase: n(m[5]),
+      glowPx: n(m[6]),
+      darkAt: n(m[7]),
+      darkColour: m[8],
+      pillRatio: n(m[9]),
+      ownEffectPx: n(m[10]),
+      ownEffectOffsetPx: n(m[11]),
+      streamedPx: n(m[12]),
+      streamedOffsetPx: n(m[13]),
+      offlinePx: n(m[14]),
+      switchedOffPx: n(m[15]),
+    }),
+  },
+  reducedMotionMs: {
+    where: '§5.4',
+    pattern: /The stage still updates light colours, at most once per (second|minute)/,
+    take: (m) => (m[1] === 'second' ? 1000 : 60_000),
+  },
+  tape: {
+    where: '§5.6',
+    pattern:
+      /the whole app window gets a (\d+) px \(phone (\d+) px\) tape frame on all four edges, the top-bar switch track turns to tape, the Running panel header gets a (\d+) px tape bar/,
+    take: (m) => ({ framePx: n(m[1]), phoneFramePx: n(m[2]), panelBarPx: n(m[3]) }),
+  },
+  frozenCardsOpacity: { where: '§9.4 Reconnecting', pattern: /cards at (\d+)% opacity and inert/, take: (m) => pct(m[1]) },
+  attentionPopoverPx: {
+    where: '§6.2 AttentionButton',
+    pattern: /`AttentionPopover` \(desktop, (\d+) px, anchored under the button\)/,
+    take: (m) => n(m[1]),
+  },
 }
 
 /** Each entry's number, from the spec's text. Each sentence must say it once. */
@@ -176,7 +205,7 @@ function extract(spec: string, entries: Record<string, Entry>): Record<string, u
 /** SPEC: the stage's numbers, from the spec's text. */
 export const extractSpec = (spec: string): Record<string, unknown> => extract(spec, SPEC_ENTRIES)
 
-/** LIVE_LAYOUT: Live's own layout numbers, from the spec's text. */
+/** LIVE_SPEC: the numbers outside the stage, from the spec's text. */
 export const extractLive = (spec: string): Record<string, unknown> => extract(spec, LIVE_ENTRIES)
 
 // ── RENDER: the reference renders' markup ───────────────────────────────────────────────────
@@ -219,6 +248,8 @@ const luminance = (hex: string) => [1, 3, 5].reduce((sum, at) => sum + parseInt(
 
 /** The renders RENDER reads. */
 const RENDERS = ['reference/Main.html', 'reference/State-Firmware.html']
+/** The renders LIVE_RENDER reads. */
+const LIVE_RENDERS = ['reference/Main.html', 'reference/State-Sheet.html']
 
 /** Fails unless each named file of docs/design/web-app is the one HANDOFF.sha256 (`pins`) pins. */
 export function checkPins(pins: string, names: readonly string[], readBytes: (name: string) => Uint8Array): void {
@@ -400,13 +431,59 @@ export function extractRender(read: ReadText): Record<string, unknown> {
   }
 }
 
-/** src/stage/design-numbers.ts's text. */
-/** src/pages/live-numbers.ts: Live's layout numbers, a module of their own so the first load doesn't carry the stage's. */
-export function liveNumbersSource(live: Record<string, unknown>): string {
-  return `// Generated by \`npm run design:numbers\` (web/scripts/design-numbers.ts) from the web app spec. Don't
-// edit it: after a new handoff, run the command again. Live's own layout numbers; the stage's are in
-// src/stage/design-numbers.ts, which only the stage's lazy chunk loads.
-export const LIVE_LAYOUT = ${JSON.stringify(live, null, 2)} as const
+/**
+ * LIVE_RENDER: what everything outside the stage takes from the renders. The pips' curve, from Main.html's
+ * `@keyframes pip`, is turned from a cycle's percentages into beats: the four pips share one animation,
+ * each a beat behind the last, so a cycle is as many beats as the delays' step goes into it. An overlay's
+ * gold is State-Sheet.html's: tokens.css has no colour for it.
+ */
+export function extractLiveRender(read: ReadText): Record<string, unknown> {
+  const tokens = read('tokens.css')
+  const main = read('reference/Main.html')
+  const sheet = read('reference/State-Sheet.html')
+  const curve = same(main, {
+    where: 'Main.html @keyframes pip',
+    pattern:
+      /@keyframes pip\{0%,100%\{background:(#[0-9a-f]{6});box-shadow:none\}([\d.]+)%,([\d.]+)%\{background:(#[0-9a-f]{6});box-shadow:0 0 (\d+)px rgba\((\d+),(\d+),(\d+),([\d.]+)\)\}([\d.]+)%\{background:(#[0-9a-f]{6});box-shadow:none\}\}/,
+  })
+  if (curve[11] !== curve[1]) throw new Error('design numbers: Main.html @keyframes pip rests on two colours')
+  const delays = matches(main, { where: 'Main.html pips', pattern: /animation: pip ([\d.]+)s linear -([\d.]+)s infinite/ })
+  const steps = delays.slice(1).map((m, i) => n(delays[i][2]) - n(m[2]))
+  if (steps.length === 0 || steps.some((step) => Math.abs(step - steps[0]) > 1e-3)) {
+    throw new Error('design numbers: the pips in Main.html are not one beat apart')
+  }
+  const beats = Math.round(n(delays[0][1]) / steps[0])
+  const glow = rgba(tokens, curve, 6)
+  const card = same(sheet, {
+    where: 'State-Sheet.html overlay card',
+    pattern:
+      /background: (#[0-9a-f]{6}); border: 1px solid (#[0-9a-f]{6})"><div style="display: flex; align-items: center; justify-content: space-between"><span style="font-size: [\d.]+px; font-weight: 600; color: (#[0-9a-f]{6})">[^<]* s left<\/span>[\s\S]*?<div style="height: \d+px; border-radius: \d+px; background: (#[0-9a-f]{6}); overflow: hidden"><div style="width: \d+%; height: 100%; background: (#[0-9a-f]{6})"><\/div>/,
+  })
+  return {
+    pip: {
+      rest: colour(tokens, curve[1]),
+      lit: colour(tokens, curve[4]),
+      riseBeats: pct(curve[2]) * beats,
+      holdBeats: pct(curve[3]) * beats,
+      endBeats: pct(curve[10]) * beats,
+      glowPx: n(curve[5]),
+      glow: glow.colour,
+      glowAlpha: glow.alpha,
+    },
+    overlay: { background: card[1], border: card[2], ink: card[3], track: card[4], fill: card[5] },
+  }
+}
+
+/** src/design/live-numbers.ts: the numbers outside the stage, a module of their own so the first load doesn't carry the stage's. */
+export function liveNumbersSource(spec: Record<string, unknown>, render: Record<string, unknown>): string {
+  return `// Generated by \`npm run design:numbers\` (web/scripts/design-numbers.ts) from the web app spec
+// (LIVE_SPEC) and the pinned reference renders (LIVE_RENDER). Don't edit it: after a new handoff, run
+// the command again. The numbers everything outside the stage draws with; the stage's are in
+// src/stage/design-numbers.ts, which only the stage's lazy chunk loads. A colour is a tokens.css
+// custom property where tokens.css has it, else the render's own hex.
+export const LIVE_SPEC = ${JSON.stringify(spec, null, 2)} as const
+
+export const LIVE_RENDER = ${JSON.stringify(render, null, 2)} as const
 `
 }
 
@@ -431,7 +508,7 @@ export interface Handoff {
   spec: string
   /** tokens.css. */
   tokens: string
-  /** Reads tokens.css or a render, each render RENDER reads the one HANDOFF.sha256 pins; null where the renders are missing (CI). */
+  /** Reads tokens.css or a render, each render RENDER or LIVE_RENDER reads the one HANDOFF.sha256 pins; null where the renders are missing (CI). */
   read: ReadText | null
 }
 
@@ -458,6 +535,6 @@ export function readHandoff(repo: string): Handoff {
   const renders = main === null ? null : resolve(main, 'docs/design/web-app/reference')
   if (renders === null || !existsSync(resolve(renders, 'Main.html'))) return { spec, tokens, read: null }
   const path = (name: string) => (name.startsWith('reference/') ? resolve(renders, name.slice('reference/'.length)) : resolve(design, name))
-  checkPins(readFileSync(path('HANDOFF.sha256'), 'utf8'), RENDERS, (name) => readFileSync(path(name)))
+  checkPins(readFileSync(path('HANDOFF.sha256'), 'utf8'), [...new Set([...RENDERS, ...LIVE_RENDERS])], (name) => readFileSync(path(name)))
   return { spec, tokens, read: (name) => readFileSync(path(name), 'utf8') }
 }

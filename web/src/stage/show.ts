@@ -2,7 +2,7 @@
 // push. A light being streamed shows its frames; one that is only on shows its own colour; offline
 // and switched-off lights show only their marks (the overlay's rings), never a glow.
 import { STREAMED, type Id, type Light, type LightUpdate, type RunningZone } from '@/api/contract'
-import { parseHex, type RGB } from './light-maths'
+import { parseHex, type RGB } from '@/lib/light-colour'
 
 /** The fields the stage reads, the push's where there is one. */
 export interface LightState {

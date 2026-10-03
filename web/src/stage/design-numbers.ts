@@ -90,17 +90,12 @@ export const SPEC = {
     "capsPx": 9.5,
     "lookPx": 15
   },
-  "reducedMotionMs": 1000,
-  "swatch": {
-    "fromColour": "#1e1c19",
-    "mixBase": 0.15,
-    "glowPx": 10,
-    "darkAt": 0.04,
-    "darkColour": "#26241f",
-    "ownEffectPx": 1.5,
-    "ownEffectOffsetPx": 2,
-    "offlinePx": 1.5,
-    "switchedOffPx": 1.5
+  "focus": {
+    "tiltDeg": 50
+  },
+  "compose": {
+    "dimmed": 0.34,
+    "outlinePx": 1.6
   },
   "quality": {
     "desktopFps": 55,

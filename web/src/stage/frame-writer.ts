@@ -6,9 +6,10 @@
 // marks are the overlay's.
 import type { Id, Light, Room } from '@/api/contract'
 import type { FrameStore } from '@/api/frames'
+import { hueOf, isDark, mix, type RGB } from '@/lib/light-colour'
 import { anchorIndex, type Body } from './bodies'
 import { SPEC } from './design-numbers'
-import { coreOf, haloRadiusPx, hueOf, isDark, mix, poolRadiusM, type RGB } from './light-maths'
+import { coreOf, haloRadiusPx, poolRadiusM } from './light-maths'
 import { STAGE_PALETTE } from './palette'
 import { toWorld } from './plan'
 import { isDrawn, isStreamed, restingColour, type LightState } from './show'

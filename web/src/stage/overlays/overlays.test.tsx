@@ -146,7 +146,7 @@ describe('the light tooltip (§8.1)', () => {
   // Mi5: the tooltip shows the light as the stage draws it, so with reduced motion or on a phone it
   // changes no more often than the canvas does (§5.4, §7.5).
   it.each([
-    ['once per SPEC.reducedMotionMs with reduced motion', { variant: 'desktop', reducedMotion: true }],
+    ['once per LIVE_SPEC.reducedMotionMs with reduced motion', { variant: 'desktop', reducedMotion: true }],
     ["at the phone's rate on a phone", { variant: 'phone', reducedMotion: false }],
   ] as const)('repaints its colour as the stage draws: %s', (_, options) => {
     vi.useFakeTimers()
