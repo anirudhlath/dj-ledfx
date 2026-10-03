@@ -72,6 +72,9 @@ _GENERATIONS = itertools.count(1)
 
 ZoneState = Literal["running", "slow", "crashed", "waiting", "transition"]
 LightMode = Literal["streaming", "own-effect", "streamed-copy"]
+# What a light was last given: the generation of the look it follows (twins share their
+# runtime's) and the firmware layer it runs (None: it streams).
+AppliedKey = tuple[int, str | None]
 
 
 def _finite(colors: FloatRGB) -> FloatRGB:
@@ -255,29 +258,45 @@ class ZoneRuntime:
         frame_s = self._stride / self._env.fps
         return min(latency + frame_s, HORIZON_CAP_S, self._env.max_lookahead_s)
 
-    @property
-    def firmware_brightness(self) -> float:
-        """The brightness a light running its own effect is started at: the zone's, under
-        the look's brightness cap (spec §5.3: the cap also caps firmware devices). Streamed
-        colours are capped in the frame and scaled by the zone's brightness at send, so both
-        kinds of light end up at most brightness × cap."""
-        cap = self.look.modifiers.brightness_cap
-        return self.brightness if cap is None else self.brightness * cap
+    # Each light's answers come from the look it follows now (_holder): mid-transition, a
+    # light that runs a firmware effect in either look keeps the look it had until the
+    # midpoint (spec §5.3), so the zone manager keeps applying that look's effect.
 
     def claim_for(self, device_id: str) -> tuple[Layer, FirmwareEffect] | None:
-        index = self._claims.get(device_id)
-        return None if index is None else self._firmware[index]
+        """The firmware layer the light runs itself, and its effect; None: it streams."""
+        holder = self._holder(device_id)
+        index = holder._claims.get(device_id)
+        return None if index is None else holder._firmware[index]
 
     def mode_of(self, device_id: str) -> LightMode:
-        if device_id in self._claims:
+        holder = self._holder(device_id)
+        if device_id in holder._claims:
             return "own-effect"
-        if device_id in self._copies:
+        if device_id in holder._copies:
             return "streamed-copy"
         return "streaming"
 
     def effect_name(self, device_id: str) -> str | None:
-        index = self._claims.get(device_id, self._copies.get(device_id))
-        return None if index is None else self._firmware[index][1].display_name
+        """The firmware effect the light runs, or streams a copy of."""
+        holder = self._holder(device_id)
+        index = holder._claims.get(device_id, holder._copies.get(device_id))
+        return None if index is None else holder._firmware[index][1].display_name
+
+    def applied_key(self, device_id: str) -> AppliedKey:
+        """What the light is given once its zone's look is applied: the generation of the
+        look it follows and the firmware layer it runs there (None: it streams). The zone
+        manager applies the light again whenever this changes."""
+        holder = self._holder(device_id)
+        claim = self.claim_for(device_id)
+        return holder.generation, None if claim is None else claim[0].id
+
+    def start_brightness(self, device_id: str) -> float:
+        """The brightness the light's firmware effect starts at."""
+        return self._holder(device_id)._firmware_brightness
+
+    def streams(self, device_id: str) -> bool:
+        """Whether the light takes this zone's frames now: it runs no firmware effect."""
+        return self.claim_for(device_id) is None
 
     def route_for(self, device_id: str) -> DeviceRoute | None:
         piece = self.leds.slice_for(device_id)
@@ -285,20 +304,24 @@ class ZoneRuntime:
             return None
         return DeviceRoute(self, device_id, streaming=self.streams(device_id))
 
-    def streams(self, device_id: str) -> bool:
-        """Whether the light takes this zone's frames now: it runs no firmware effect of
-        the look it follows (holder())."""
-        return self.holder(device_id).claim_for(device_id) is None
-
-    def holder(self, device_id: str) -> ZoneRuntime:
+    def _holder(self, device_id: str) -> ZoneRuntime:
         """The runtime whose look the light follows now: this one, but during a transition
         a light that runs a firmware effect in either look keeps the look it had until the
-        midpoint (spec §5.3). The zone manager applies the holder's firmware effect, at its
-        brightness, under its generation, so a light keeps the effect it already runs."""
+        midpoint (spec §5.3), with that look's effect, brightness and generation, so it
+        isn't sent its effect again."""
         transition = self._transition
         if transition is None or transition.switched:
             return self
         return transition.held.get(device_id, self)
+
+    @property
+    def _firmware_brightness(self) -> float:
+        """The brightness a light running its own effect is started at: the zone's, under
+        the look's brightness cap (spec §5.3: the cap also caps firmware devices). Streamed
+        colours are capped in the frame and scaled by the zone's brightness at send, so both
+        kinds of light end up at most brightness × cap."""
+        cap = self.look.modifiers.brightness_cap
+        return self.brightness if cap is None else self.brightness * cap
 
     @property
     def transition_sources(self) -> tuple[ZoneRuntime, ...]:
@@ -379,11 +402,12 @@ class ZoneRuntime:
 
     def mark_emulated(self, device_id: str) -> None:
         """The light refused its firmware effect: stream that layer's copy to it instead."""
-        index = self._claims.pop(device_id, None)
+        holder = self._holder(device_id)
+        index = holder._claims.pop(device_id, None)
         if index is not None:
-            self._emulated.add(device_id)
-            self._copies[device_id] = index
-            self._retarget()
+            holder._emulated.add(device_id)
+            holder._copies[device_id] = index
+            holder._retarget()
 
     # --- transitions ----------------------------------------------------------------
 

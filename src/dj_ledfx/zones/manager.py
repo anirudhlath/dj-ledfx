@@ -51,7 +51,7 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
     ZonesChanged,
 )
-from dj_ledfx.zones.runtime import LightMode, RuntimeEnv, ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import AppliedKey, LightMode, RuntimeEnv, ZoneLight, ZoneRuntime
 from dj_ledfx.zones.store import new_group_id
 
 if TYPE_CHECKING:
@@ -67,9 +67,6 @@ if TYPE_CHECKING:
     from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.zones.store import ZoneStore
 
-# What a light was last given: its runtime's generation (unique across runtimes) and the
-# firmware layer it runs (None: it streams).
-AppliedKey = tuple[int, str | None]
 T = TypeVar("T")
 
 
@@ -86,15 +83,6 @@ class RouteTable(Protocol):
     """Sends each light its slice of its zone's frames: the scheduler."""
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None: ...
-
-
-def _applied_key(runtime: ZoneRuntime, device_id: str) -> AppliedKey:
-    """What a light is given once its zone's look is applied to it: the look it follows
-    now (mid-transition, a light that runs a firmware effect keeps the old look's until
-    the midpoint; ZoneRuntime.holder)."""
-    holder = runtime.holder(device_id)
-    claim = holder.claim_for(device_id)
-    return holder.generation, claim[0].id if claim is not None else None
 
 
 def _brightness_of(running: _Running) -> float:
@@ -287,12 +275,12 @@ class ZoneManager:
         """How a light shows its zone's look. None when no look drives it: no running zone
         owns it, or its zone's saved look can't be read, which leaves it as it is."""
         runtime = self._runtime_of(device_id)
-        return None if runtime is None else runtime.holder(device_id).mode_of(device_id)
+        return None if runtime is None else runtime.mode_of(device_id)
 
     def effect_name(self, device_id: str) -> str | None:
         """The firmware effect a light runs, or streams a copy of."""
         runtime = self._runtime_of(device_id)
-        return None if runtime is None else runtime.holder(device_id).effect_name(device_id)
+        return None if runtime is None else runtime.effect_name(device_id)
 
     def power_of(self, device_id: str) -> bool | None:
         return self._power.get(device_id)
@@ -473,11 +461,11 @@ class ZoneManager:
                 or self._power.get(device_id) is False
             ):
                 return
-            key = _applied_key(runtime, device_id)
+            key = runtime.applied_key(device_id)
             if self._applied.get(device_id) != key:
                 await self._sync([device_id])
                 return
-            claim = runtime.holder(device_id).claim_for(device_id)
+            claim = runtime.claim_for(device_id)
             if claim is None:
                 return
             effect = claim[1]
@@ -1175,24 +1163,24 @@ class ZoneManager:
         every routed slice either way."""
         route = runtime.route_for(device_id)
         applied = self._applied.get(device_id)
-        ready = applied is not None and applied[0] == runtime.holder(device_id).generation
+        ready = applied is not None and applied[0] == runtime.applied_key(device_id)[0]
         if route is not None and route.streaming and (self._preview_only or not ready):
             route = replace(route, streaming=False)
         self._routes.set_route(device_id, route)
 
     async def _apply(self, device_id: str, adapter: DeviceAdapter, runtime: ZoneRuntime) -> None:
         """Start the light's firmware layer, or get it ready to stream, once per change."""
-        key = _applied_key(runtime, device_id)
+        key = runtime.applied_key(device_id)
         if self._applied.get(device_id) == key:
             return
-        holder = runtime.holder(device_id)  # the look the light follows now
-        claim = holder.claim_for(device_id)
+        claim = runtime.claim_for(device_id)
         if claim is not None:
             layer, effect = claim
             self._routes.set_route(device_id, runtime.route_for(device_id))  # stop frames first
+            brightness = runtime.start_brightness(device_id)
             try:
                 async with adapter.send_lock:
-                    await effect.start(adapter, effect.start_params(holder.firmware_brightness))
+                    await effect.start(adapter, effect.start_params(brightness))
             except FirmwareRejected as exc:  # it can't run it: stream a copy (spec §8)
                 logger.warning(
                     "{} refused {} ({}); streaming a copy instead",
@@ -1200,9 +1188,9 @@ class ZoneManager:
                     effect.display_name,
                     exc,
                 )
-                holder.mark_emulated(device_id)
+                runtime.mark_emulated(device_id)
                 claim = None
-                key = (holder.generation, None)
+                key = runtime.applied_key(device_id)
             except Exception as exc:  # no answer: left unapplied, the next poll tries again
                 logger.warning(
                     "{} didn't start {} ({}); trying again at the next poll",

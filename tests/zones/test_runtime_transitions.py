@@ -147,17 +147,19 @@ def test_a_firmware_light_switches_whole_at_the_midpoint() -> None:
     old = runtime_of(look_of(field_layer(1.0), glow_layer(0.9)))  # the tile runs Glow
     new = _flat(0.0)
     new.begin_transition(FADE, [old])
-    assert new.holder("tile") is old and not new.streams("tile")
-    assert new.holder("lamp") is new and new.streams("lamp")
+    glow = old.claim_for("tile")
+    assert new.claim_for("tile") == glow and not new.streams("tile")
+    assert new.applied_key("tile") == old.applied_key("tile")  # Glow, not sent again
+    assert new.applied_key("lamp") == (new.generation, None) and new.streams("lamp")
 
     new.tick(1000.0)  # the transition runs from this frame's time, 1000 + HORIZON
     new.tick(1001.0)  # this frame's time is the midpoint; now isn't there yet
-    assert new.holder("tile") is old
+    assert new.claim_for("tile") == glow
     assert _levels(new)[:4] == [0.0] * 4  # the tile's rows: new, whole
     assert _levels(new)[4:] == [0.5] * 4  # the rest: half-way, about
 
     new.tick(1000.0 + 1.0 + HORIZON)
-    assert new.holder("tile") is new and new.streams("tile")
+    assert new.applied_key("tile") == (new.generation, None) and new.streams("tile")
     assert new.take_switch() and not new.take_switch()  # the manager is told once
 
 
@@ -168,17 +170,17 @@ def test_a_light_the_new_look_runs_itself_streams_the_old_one_until_the_midpoint
 
     new.tick(1000.0)
 
-    assert new.holder("tile") is old and new.streams("tile")
+    assert new.applied_key("tile") == old.applied_key("tile") and new.streams("tile")
     assert _levels(new)[:4] == [1.0] * 4
     new.tick(1000.0 + 1.0 + HORIZON)
-    assert new.holder("tile") is new and not new.streams("tile")
+    assert new.mode_of("tile") == "own-effect" and not new.streams("tile")
 
 
 def test_a_light_nothing_drove_runs_its_firmware_effect_at_once() -> None:
     new = runtime_of(look_of(field_layer(0.0), glow_layer(0.9)))
     new.begin_transition(FADE, [])
 
-    assert new.holder("tile") is new and not new.streams("tile")
+    assert new.mode_of("tile") == "own-effect" and not new.streams("tile")
 
 
 def test_an_old_look_that_fails_ends_the_transition_not_the_zone() -> None:

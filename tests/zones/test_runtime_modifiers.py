@@ -155,7 +155,7 @@ def test_the_cap_caps_streamed_lights_and_the_preview_of_firmware_ones() -> None
 
     assert runtime.mode_of("tile") == "own-effect"  # drawn for the preview, capped too
     np.testing.assert_allclose(latest(runtime), 0.6, rtol=1e-6)
-    assert runtime.firmware_brightness == pytest.approx(0.3)  # brightness × cap
+    assert runtime.start_brightness("tile") == pytest.approx(0.3)  # brightness × cap
 
 
 def test_a_new_cap_starts_the_firmware_effects_again() -> None:
@@ -166,7 +166,7 @@ def test_a_new_cap_starts_the_firmware_effects_again() -> None:
     runtime.update_look(replace(look, modifiers=LookModifiers(brightness_cap=0.8)))
 
     assert runtime.generation != before
-    assert runtime.firmware_brightness == pytest.approx(0.8)
+    assert runtime.start_brightness("tile") == pytest.approx(0.8)
     streamed = runtime_of(look_of(field_layer(), modifiers=LookModifiers(brightness_cap=0.6)))
     kept = streamed.generation
     streamed.update_look(replace(streamed.look, modifiers=LookModifiers(brightness_cap=0.8)))
