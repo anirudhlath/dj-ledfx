@@ -29,25 +29,6 @@ def to_device_colors(colors: FloatRGB, led_count: int, scale: float = 1.0) -> ND
     return out
 
 
-def slice_colors(
-    colors: FloatRGB, start: int, stop: int, led_count: int, scale: float = 1.0
-) -> NDArray[np.uint8] | None:
-    """LEDs start..stop of a zone frame in 8 bits, for a device of led_count LEDs, scaled by
-    the zone's brightness. None when the frame is shorter: it was rendered for an LED set
-    since rebuilt."""
-    if colors.shape[0] < stop:
-        return None
-    return to_device_colors(colors[start:stop], led_count, scale)
-
-
-def lerp_colors(first: FloatRGB, second: FloatRGB, weight: float) -> FloatRGB:
-    """The colours weight of the way from first to second (0 to 1), in a new array."""
-    out = second - first
-    out *= np.float32(weight)
-    out += first
-    return out
-
-
 class FrameSource(Protocol):
     """What a route reads: a zone's runtime (zones/runtime.py)."""
 
@@ -72,20 +53,11 @@ class DeviceRoute:
 
     def colors_at(self, target_time: float, led_count: int) -> NDArray[np.uint8] | None:
         """This device's slice of its zone's frames at target_time, blended from the two
-        either side of it, or None. A light's moment shifts by less than a frame when its
-        latency is measured again or its send loop wakes late: sent the nearest frame, it
-        would show one frame twice and skip the next; blended, its colours move as little."""
+        either side of it, in 8 bits, or None."""
         piece = self.source.leds.slice_for(self.device_id)
         if piece is None or piece.count == 0:
             return None
-        found = self.source.ring.find_around(target_time)
-        if found is None:
+        colors = self.source.ring.colors_at(target_time, piece.start, piece.stop)
+        if colors is None:
             return None
-        first, second, weight = found
-        start, stop = piece.start, piece.stop
-        if min(first.colors.shape[0], second.colors.shape[0]) < stop:
-            return None  # rendered for an LED set since rebuilt
-        colors = first.colors[start:stop]
-        if weight > 0.0:
-            colors = lerp_colors(colors, second.colors[start:stop], weight)
         return to_device_colors(colors, led_count, self.source.brightness)

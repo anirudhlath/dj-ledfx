@@ -575,8 +575,7 @@ async def test_distributor_handles_concurrent_add_device() -> None:
 
 
 def _two_frame_ring() -> RingBuffer:
-    """Frame 0 for 0.4 s from now and frame 1 for 0.5 s; LEDs 0-4 and 5-9 differ in each. A
-    light whose moments come before both frames gets frame 0 alone, one after both frame 1."""
+    """Frame 0 for 0.4 s from now and frame 1 for 0.5 s; LEDs 0-4 and 5-9 differ in each."""
     buf = RingBuffer(capacity=10)
     now = time.monotonic()
     for at, (first, second) in [(0.4, (0.25, 0.5)), (0.5, (0.75, 1.0))]:
