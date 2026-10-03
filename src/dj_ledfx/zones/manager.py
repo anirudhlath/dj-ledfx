@@ -845,7 +845,7 @@ class ZoneManager:
         running = self._running.get(runtime.zone_id)
         if running is None or running.runtime is not runtime:
             return
-        if runtime.transition_info() is None:
+        if not runtime.transitioning:
             for device_id in runtime.handing_over & set(running.lights):
                 if not runtime.streams(device_id):
                     self._routes.set_route(device_id, runtime.route_for(device_id))

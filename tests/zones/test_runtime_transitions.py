@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import numpy as np
@@ -77,6 +78,25 @@ def test_a_fade_mixes_the_old_look_into_the_new_one() -> None:
     new.tick(1002.0)
     assert _levels(new) == [0.0] * 8
     assert new.state == "running" and new.transition_info() is None
+
+
+# M3: a zone shows a transition only while its state is `transition`: one that crashed or
+# waits mid-transition shows none, and a running or slow one has none left.
+@pytest.mark.parametrize("state", ["running", "slow", "crashed", "waiting"])
+def test_a_zone_shows_its_transition_only_in_transition(state: str) -> None:
+    needs = ("music",) if state == "waiting" else ()
+    new = runtime_of(look_of(field_layer(0.0), needs=needs))
+    new.begin_transition(FADE, [_flat(1.0)])
+    new.tick(1000.0)
+    if state == "crashed":
+        FlatField.mode = "raise"
+        new.tick(1000.5)
+    if state in ("running", "slow"):
+        new.tick(1002.0)  # the transition is over
+    if state == "slow":
+        new.slow_since = datetime(2026, 10, 3, tzinfo=UTC)
+
+    assert new.state == state and new.transition_info() is None
 
 
 def test_a_wipe_switches_the_west_first() -> None:

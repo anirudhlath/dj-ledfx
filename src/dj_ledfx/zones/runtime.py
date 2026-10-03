@@ -349,9 +349,16 @@ class ZoneRuntime:
         transition = self._transition
         return () if transition is None else tuple(transition.covered)
 
+    @property
+    def transitioning(self) -> bool:
+        """Whether a transition is under way, whatever the state shows (a zone that crashed
+        or waits mid-transition still holds it)."""
+        return self._transition is not None
+
     def transition_info(self) -> TransitionInfo | None:
+        """The transition the zone shows: only while its state is `transition`."""
         transition = self._transition
-        if transition is None:
+        if transition is None or self.state != "transition":
             return None
         covered = transition.covered
         replaced = max(covered, key=covered.__getitem__).look.name if covered else ""
