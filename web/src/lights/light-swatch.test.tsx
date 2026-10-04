@@ -59,6 +59,23 @@ describe('LightSwatch', () => {
     expect(bed).toHaveStyle({ background: swatchFill([0, 0, 255]) })
   })
 
+  // §6.6's hollow states: a lit swatch whose light goes offline, or is switched off elsewhere, keeps no colour.
+  it('drops its colour and glow when its light goes offline or is switched off elsewhere', () => {
+    vi.useFakeTimers()
+    const { rerender } = render(swatchOf('bedl', 'streaming'))
+    const bed = screen.getByRole('img', { name: light('bedl').name })
+    pushFrame('bedl', 1, [255, 120, 0])
+    act(() => vi.advanceTimersToNextFrame())
+    expect(bed).toHaveStyle({ background: swatchFill([255, 120, 0]) })
+
+    rerender(swatchOf('bedl', 'offline', false))
+    expect(bed.style).toMatchObject({ background: '', boxShadow: '', borderStyle: 'dashed' })
+    rerender(swatchOf('bedl', 'streaming'))
+    expect(bed).toHaveStyle({ background: swatchFill([255, 120, 0]), boxShadow: swatchGlow([255, 120, 0], swatch.glowPx) })
+    rerender(swatchOf('bedl', 'switched-off', false))
+    expect(bed.style).toMatchObject({ background: '', boxShadow: '', borderStyle: 'solid' })
+  })
+
   it('draws a multizone or matrix light as a pill, its LEDs left to right, and a light at rest in its own colour', () => {
     vi.useFakeTimers()
     const rope = light('rope')

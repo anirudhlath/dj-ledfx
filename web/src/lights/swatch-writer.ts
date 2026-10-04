@@ -102,7 +102,10 @@ function due(): void {
   frame ??= requestAnimationFrame(draw)
 }
 
-/** Paints a swatch now and whenever its light's frame changes, until the returned function stops it. */
+/**
+ * Paints a swatch now and whenever its light's frame changes, until the returned function stops it and takes
+ * the paint off: React never set it, so a swatch gone hollow would otherwise keep its light's last colour.
+ */
 export function registerSwatch(swatch: Swatch): () => void {
   const painted: Painted = { seq: undefined, at: 0 }
   swatches.set(swatch, painted)
@@ -110,6 +113,8 @@ export function registerSwatch(swatch: Swatch): () => void {
   sleeping ??= frames.onNextFrame(woken)
   return () => {
     swatches.delete(swatch)
+    swatch.element.style.background = ''
+    swatch.element.style.boxShadow = ''
     if (swatches.size > 0) return
     sleeping?.()
     sleeping = null
