@@ -3,7 +3,8 @@
 import type { Id, Light, RunningZone } from '@/api/contract'
 import type { LightFrame } from '@/api/frames'
 import { formatLatency, formatTime } from '@/lib/format'
-import { hexOf, intensityOf, type RGB } from './light-maths'
+import { effectWord } from '@/lights/firmware'
+import { hexOf, intensityOf, type RGB } from '@/lib/light-colour'
 import { isStreamed, newestFirst, restingColour, type LightState } from './show'
 
 export interface TooltipText {
@@ -54,4 +55,16 @@ export function colourLine(state: LightState, rgb: RGB | null): string | null {
   if (state.status === 'switched-off') return 'Switched off elsewhere'
   if (rgb !== null) return `${hexOf(rgb)} · ${Math.round(intensityOf(rgb) * 100)}%`
   return state.power === false ? 'Off' : null
+}
+
+/**
+ * §9.1's Copy column, in the tooltip (F3 decision 19): "Own effect · LIFX Flame", and "Streamed copy · Govee
+ * has no Flame", where the effect drops its protocol's word. The engine names in `ownEffect` the effect a
+ * light runs, or streams a copy of. Null for any other light.
+ */
+export function firmwareLine(light: Light, state: LightState): string | null {
+  const effect = state.ownEffect
+  if (state.status === 'own-effect') return effect === null ? 'Own effect' : `Own effect · ${effect}`
+  if (state.status !== 'streamed-copy') return null
+  return effect === null ? 'Streamed copy' : `Streamed copy · ${light.protocol} has no ${effectWord(effect)}`
 }

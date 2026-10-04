@@ -102,7 +102,7 @@ const JITTER_SNAP_S = 0.05
 /** How much of a small error each message corrects. */
 const SOFT_GAIN = 0.1
 
-interface BeatSample {
+export interface BeatSample {
   beatPhase: number
   barPhase: number
   /** 1–4. */
@@ -127,6 +127,7 @@ export class BeatClock {
   private bpm = 0
   private running = false
   private counted = false
+  private held = false
 
   /** A beat with a number that isn't finite is ignored, so a malformed message can't stop the clock. */
   receive(beat: Beat, offset: number | null): void {
@@ -163,13 +164,18 @@ export class BeatClock {
     return sample
   }
 
+  /** ?still (the mock builds' screenshots; app/boot.tsx): the beat stays where its messages put it. */
+  hold(): void {
+    this.held = true
+  }
+
   /** Forget the beat: after a reconnect, the next message anchors afresh. */
   reset(): void {
     this.anchor(0, 0, 0, false, false)
   }
 
   private positionAt(now: number): number {
-    return this.running ? this.position + ((now - this.at) * this.bpm) / 60 : this.position
+    return this.running && !this.held ? this.position + ((now - this.at) * this.bpm) / 60 : this.position
   }
 
   private anchor(position: number, at: number, bpm: number, running: boolean, counted: boolean): void {

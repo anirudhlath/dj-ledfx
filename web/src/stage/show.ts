@@ -2,7 +2,7 @@
 // push. A light being streamed shows its frames; one that is only on shows its own colour; offline
 // and switched-off lights show only their marks (the overlay's rings), never a glow.
 import { STREAMED, type Id, type Light, type LightUpdate, type RunningZone } from '@/api/contract'
-import { parseHex, type RGB } from './light-maths'
+import { parseHex, type RGB } from '@/lib/light-colour'
 
 /** The fields the stage reads, the push's where there is one. */
 export interface LightState {
@@ -11,11 +11,19 @@ export interface LightState {
   since: string
   power: boolean | null
   colour: RGB | null
+  /** The built-in effect it runs, or streams a copy of; null for none (§9.1). */
+  ownEffect: string | null
 }
 
 export function lightState(light: Light, update: LightUpdate | undefined): LightState {
   const from = update ?? light
-  return { status: from.status, since: from.statusSince, power: from.power ?? null, colour: parseHex(from.colour) }
+  return {
+    status: from.status,
+    since: from.statusSince,
+    power: from.power ?? null,
+    colour: parseHex(from.colour),
+    ownEffect: from.ownEffect ?? null,
+  }
 }
 
 /** Each light's state, from its REST record and the latest push's update for it, if any. */

@@ -6,16 +6,19 @@ export interface SwitchProps {
   label: string
   /** §5.6: the track turns to tape when on. Only Preview only uses it. */
   tape?: boolean
+  /** The control waits: a change is on its way. */
+  disabled?: boolean
   className?: string
 }
 
 /** §6.1 Switch: a native button with role="switch". */
-export function Switch({ checked, onCheckedChange, label, tape = false, className }: SwitchProps) {
+export function Switch({ checked, onCheckedChange, label, tape = false, disabled, className }: SwitchProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      disabled={disabled}
       onClick={() => onCheckedChange?.(!checked)}
       className={cx('inline-flex items-center gap-2.5', className)}
     >

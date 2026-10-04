@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Light, Zone } from './contract'
 import { applyMessage, createLiveStore } from './live-store'
-import { createQueryClient, queries, refetchOnNews, resync } from './queries'
+import { createQueryClient, integrationsOn, queries, refetchOnNews, resync } from './queries'
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -68,5 +68,12 @@ describe('REST data that changes elsewhere', () => {
     applyMessage(store, { channel: 'lights', lights: lights('a') }, 0)
     expect(invalidate).toHaveBeenLastCalledWith({ queryKey: ['lights'] })
     stop()
+  })
+})
+
+describe('integrationsOn', () => {
+  it("names the integrations the engine's config has on; a missing flag is on, as the engine's default", () => {
+    expect(integrationsOn({ engine: { preview_only: false } })).toEqual(['OpenRGB', 'LIFX', 'Govee'])
+    expect(integrationsOn({ devices: { openrgb: { enabled: false }, lifx: { enabled: true } } })).toEqual(['LIFX', 'Govee'])
   })
 })

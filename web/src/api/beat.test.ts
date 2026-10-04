@@ -114,6 +114,15 @@ describe('ClockOffset', () => {
 })
 
 describe('BeatClock', () => {
+  it('holds the beat where its message put it, for ?still screenshots', () => {
+    const clock = new BeatClock()
+    clock.hold()
+    clock.receive(beat(42, 1.25, 10), null)
+    const held = clock.sample(15)
+    expect(held).toMatchObject({ beatInBar: 2, bar: 42, running: true })
+    expect(held.beatPhase).toBeCloseTo(0.25)
+  })
+
   it('runs on at the tempo between messages', () => {
     const clock = new BeatClock()
     clock.receive(beat(42, 1.5, 100), null)

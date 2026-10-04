@@ -9,5 +9,7 @@ export function seedRest(name: ScenarioName = 'hero', now: Date = HERO_NOW): Sce
   queryClient.setQueryData(queries.home().queryKey, state.home)
   queryClient.setQueryData(queries.lights().queryKey, state.lights)
   queryClient.setQueryData(queries.zones().queryKey, state.zones)
+  queryClient.setQueryData(queries.recentLooks().queryKey, state.recent)
+  queryClient.setQueryData(queries.looks().queryKey, state.looks)
   return state
 }

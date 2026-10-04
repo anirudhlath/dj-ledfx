@@ -1,7 +1,8 @@
 import { onTestFinished } from 'vitest'
 import type { AttentionItem, Id } from '@/api/contract'
 import { decodeFrame, encodeFrame, type FrameStore } from '@/api/frames'
-import { frames, startDataLayer } from '@/api/live'
+import { clientNow, normaliseBeat } from '@/api/beat'
+import { beatClock, frames, startDataLayer } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { inMemorySockets } from '@/api/mocks/in-memory-socket'
 import { beatMessage, MockServer, snapshotMessages, type MockServerOptions } from '@/api/mocks/mock-server'
@@ -12,12 +13,15 @@ export const HERO_NOW = new Date(2026, 8, 23, 19, 14)
 /** When the hero's lights took the status they have outside its looks: 70 minutes before HERO_NOW, as its scenario has it. */
 export const HERO_SINCE = new Date(HERO_NOW.getTime() - 70 * 60_000).toISOString()
 
-/** Fills the app's live store as a scenario's server does on connect: snapshots, a beat, and 60 fps. */
+/** Fills the app's live store and beat clock as a scenario's server does on connect: snapshots, a beat, and 60 fps. */
 export function seedLive(name: ScenarioName = 'hero', now: Date = HERO_NOW): void {
   const state = buildScenario(name, now)
   const at = now.getTime() / 1000
   for (const message of snapshotMessages(state, 2)) applyMessage(liveStore, message, at)
-  applyMessage(liveStore, beatMessage(state, 0, at, 2), at)
+  // The beat goes to the store and to the beat clock, as the live client does: the pips follow the clock.
+  const beat = normaliseBeat(beatMessage(state, 0, at, 2), clientNow())
+  liveStore.setState({ beat })
+  beatClock.receive(beat, null)
   liveStore.setState({ connection: { status: 'live', fps: 60 } })
 }
 

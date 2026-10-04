@@ -31,10 +31,9 @@ describe('the chrome on the live store', () => {
     act(() => applyMessage(liveStore, beatMessage(hero, 0.1, 0, 2), 0))
     expect(renders).toEqual({})
 
-    // The next beat moves the pips: the tempo module alone redraws, not the bar around it.
+    // The next beat moves the pips, which the pip writer draws from the beat clock (F3 decision 3): no redraw at all.
     act(() => applyMessage(liveStore, beatMessage(hero, 0.5, 0, 2), 0))
-    expect(renders).toEqual({ tempo: 1 })
-    expect(screen.getByRole('img', { name: 'Beat 3 of 4' })).toBeInTheDocument()
+    expect(renders).toEqual({})
 
     // Nothing needs attention any more: the attention button alone redraws, to All good.
     resetRenders()

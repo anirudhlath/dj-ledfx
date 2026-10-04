@@ -4,7 +4,7 @@
 // the frame store, where only the canvas reads them.
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import type { Home, Id, Light, RunningZone, SunInput } from '@/api/contract'
+import type { Home, Id, Light, RunningZone, SunInput, Zone } from '@/api/contract'
 import { useLive, useLiveBy } from '@/api/live-store'
 import { queries } from '@/api/queries'
 import { useConnectionStatus } from '@/chrome/hooks'
@@ -19,6 +19,8 @@ export interface StageData {
   running: readonly RunningZone[]
   /** For the tooltip's "look · zone"; empty until the zones load. */
   zoneNames: ReadonlyMap<Id, string>
+  /** For the outline's polygons; empty until the zones load. */
+  zones: readonly Zone[]
   /** Null until the server says (engine M2 has no inputs yet). */
   sun: SunInput | null
   /** The link dropped: §7.6 frozen. */
@@ -26,6 +28,7 @@ export interface StageData {
 }
 
 const NOTHING_RUNS: readonly RunningZone[] = []
+const NO_ZONES: readonly Zone[] = []
 
 /** The stage's data; null until the home and the lights have loaded. */
 export function useStageData(): StageData | null {
@@ -40,5 +43,5 @@ export function useStageData(): StageData | null {
   const states = useMemo(() => lightStates(lights ?? [], updates), [lights, updates])
   const zoneNames = useMemo(() => new Map((zones ?? []).map((zone) => [zone.id, zone.name])), [zones])
   if (home === undefined || lights === undefined) return null
-  return { home, lights, states, running, zoneNames, sun, frozen }
+  return { home, lights, states, running, zoneNames, zones: zones ?? NO_ZONES, sun, frozen }
 }

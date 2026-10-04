@@ -3,7 +3,8 @@
 // takes them as 0–1 sRGB numbers, from TOKENS (tokens.css's colours, generated into
 // design-numbers.ts); CSS and SVG take var(--…).
 import { RENDER, TOKENS } from './design-numbers'
-import { parseHex, type Colour } from './light-maths'
+import { parseHex } from '@/lib/light-colour'
+import type { Colour } from './light-maths'
 
 /** A colour for WebGL. Throws on a name tokens.css doesn't have: a typo, or a handoff that renamed it. */
 export function colourOf(name: string): Colour {

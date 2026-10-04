@@ -3,12 +3,14 @@
 // so React draws it only when one of those changes (memo). Every size and colour is SPEC's or RENDER's.
 import { memo, useId } from 'react'
 import type { Vec2 } from '@/api/contract'
+import { LIVE_SPEC } from '@/design/live-numbers'
 import { projectPoint, type CameraPose } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
 import type { StageLabel } from '../labels'
 import type { Mark } from '../marks'
 import { cssColour, cssSize } from '../palette'
 import type { SunScene } from '../sun'
+import { ZoneOutline, type ZoneOutlineShape } from './zone-outline'
 
 export interface StageSvgProps {
   pose: CameraPose
@@ -17,12 +19,15 @@ export interface StageSvgProps {
   labels: readonly StageLabel[] | null
   /** The sun, with its label where the stage has labels (behaviour.ts). */
   sun: SunScene | null
+  /** The zone a card is hovered over, or /live/zones/:zoneId names; null for none. */
+  outline?: ZoneOutlineShape | null
 }
 
-export const StageSvg = memo(function StageSvg({ pose, marks, labels, sun }: StageSvgProps) {
+export const StageSvg = memo(function StageSvg({ pose, marks, labels, sun, outline = null }: StageSvgProps) {
   return (
     <svg aria-hidden="true" className="pointer-events-none absolute inset-0" width={pose.width} height={pose.height}>
       {sun !== null && <SunMark pose={pose} sun={sun} />}
+      {outline !== null && <ZoneOutline outline={outline} />}
       {marks.map((mark) => (
         <MarkShape key={mark.key} mark={mark} />
       ))}
@@ -66,7 +71,7 @@ function MarkShape({ mark }: { mark: Mark }) {
     case 'offline': {
       // §9.1 and the legend: a hollow ring in the signal colour, dashed as the render's offline strip.
       const { dashPx, gapPx } = RENDER.offlineStrip
-      return <circle cx={mark.at[0]} cy={mark.at[1]} r={RENDER.switchedOff.ringPx} {...line('--color-signal', 1, SPEC.swatch.offlinePx, [dashPx, gapPx])} />
+      return <circle cx={mark.at[0]} cy={mark.at[1]} r={RENDER.switchedOff.ringPx} {...line('--color-signal', 1, LIVE_SPEC.swatch.offlinePx, [dashPx, gapPx])} />
     }
     case 'offline-strip': {
       const { colour, alpha, widthPx, dashPx, gapPx } = RENDER.offlineStrip

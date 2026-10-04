@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { AttentionButton } from '@/chrome/attention-button'
 import { ConnectionIndicator } from '@/chrome/connection-indicator'
-import { HERO_CHROME } from '@/chrome/state'
+import { HERO_BEAT, HERO_CHROME } from '@/chrome/state'
 import { PreviewOnlySwitch } from '@/chrome/preview-only-switch'
 import { TempoModule } from '@/chrome/tempo-module'
 import { Button, IconButton } from '@/design/button'
@@ -98,19 +98,19 @@ export function SystemPage() {
         />
       </Row>
       <Row label="Always within reach">
-        <TempoModule variant="bar" {...tempo} />
-        <TempoModule variant="bar" source="internal" bpm={118} beat={2} bar={7} stale />
+        <TempoModule variant="bar" {...tempo} fixed={HERO_BEAT} />
+        <TempoModule variant="bar" {...tempo} source="internal" bpm={118} stale fixed={{ beat: 2, bar: 7 }} />
         {/* The longest source label and a three-digit bar. */}
-        <TempoModule variant="bar" {...tempo} source="prodjlink" bar={128} />
+        <TempoModule variant="bar" {...tempo} source="prodjlink" fixed={{ ...HERO_BEAT, bar: 128 }} />
         <div className="w-89.5">
-          <TempoModule variant="strip" {...tempo} />
+          <TempoModule variant="strip" {...tempo} fixed={HERO_BEAT} />
         </div>
         {/* The strip at its narrowest, on a 320 px phone, with the longer source labels. */}
         <div className="w-72">
-          <TempoModule variant="strip" {...tempo} source="internal" />
+          <TempoModule variant="strip" {...tempo} source="internal" fixed={HERO_BEAT} />
         </div>
         <div className="w-72">
-          <TempoModule variant="strip" {...tempo} source="prodjlink" />
+          <TempoModule variant="strip" {...tempo} source="prodjlink" fixed={HERO_BEAT} />
         </div>
         <PreviewOnlySwitch variant="bar" on={false} />
         <PreviewOnlySwitch variant="bar" on />

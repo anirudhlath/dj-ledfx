@@ -6,7 +6,7 @@ import { buildScenario } from '@/api/mocks/scenarios'
 import { formatTime } from '@/lib/format'
 import { HERO_NOW } from '@/test/live'
 import { lightState, newestFirst } from './show'
-import { colourLine, currentColour, deviceLine, tooltipText } from './tooltip'
+import { colourLine, currentColour, deviceLine, firmwareLine, tooltipText } from './tooltip'
 
 const hero = buildScenario('hero', HERO_NOW)
 const named = (id: string) => hero.lights.find((light) => light.id === id)!
@@ -64,5 +64,18 @@ describe('the light tooltip (§7.6)', () => {
     expect(colourLine({ ...state, status: 'switched-off' }, null)).toBe('Switched off elsewhere')
     expect(colourLine({ ...state, status: 'idle', power: false }, null)).toBe('Off')
     expect(colourLine({ ...state, status: 'idle', power: null }, null)).toBeNull()
+  })
+
+  // §9.1's Copy column; F3 decision 19.
+  it('says when a light runs its own effect, or streams a copy of one, and nothing otherwise', () => {
+    const firmware = buildScenario('firmware', HERO_NOW)
+    const own = firmware.lights.find((light) => light.status === 'own-effect' && light.ownEffect === 'LIFX Flame')!
+    const copy = firmware.lights.find((light) => light.status === 'streamed-copy')!
+    expect(firmwareLine(own, lightState(own, undefined))).toBe('Own effect · LIFX Flame')
+    expect(firmwareLine(copy, lightState(copy, undefined))).toBe(`Streamed copy · ${copy.protocol} has no Flame`)
+    expect(firmwareLine(own, { ...lightState(own, undefined), ownEffect: null })).toBe('Own effect')
+    expect(firmwareLine(copy, { ...lightState(copy, undefined), ownEffect: null })).toBe('Streamed copy')
+    const streaming = hero.lights.find((light) => light.status === 'streaming')!
+    expect(firmwareLine(streaming, lightState(streaming, undefined))).toBeNull()
   })
 })

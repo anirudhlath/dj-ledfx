@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { openStage } from './helpers'
+import { open, openStage, stageCanvas } from './helpers'
 
 // The stage in the browser, on the mock (the hero unless the path asks for another scenario): §8.1's
 // room click and §7.6's frozen mode. The phone's stage has no labels or overlays (§8.10), and
@@ -20,10 +20,13 @@ test.describe('the stage', () => {
     await page.waitForURL((url) => `${url.pathname}${url.search}` === href)
   })
 
-  // Review focus 3, in the browser: the reconnecting scenario drops the link a second after it connects.
+  // Review focus 3, in the browser: the reconnecting scenario drops the link a second after it connects. The
+  // rooms' links come with the stage, before its canvas, whose shaders can take most of that second to compile.
   test('freezes when the link drops: greyed, and no room opens the composer', async ({ page }) => {
-    const stage = await openStage(page, '/next/live?scenario=reconnecting')
+    await open(page, '/next/live?scenario=reconnecting')
+    const stage = page.getByRole('region', { name: 'Home, live' })
     await expect(stage.getByRole('navigation', { name: 'Rooms' })).toHaveCount(1)
+    await expect(stageCanvas(page)).toBeVisible()
     await expect(page.getByRole('status')).toHaveText('Reconnecting')
     await expect(stage.locator(':scope > div').first()).toHaveCSS('filter', /grayscale/)
     await expect(stage.getByRole('navigation', { name: 'Rooms' })).toHaveCount(0)

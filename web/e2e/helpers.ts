@@ -3,12 +3,13 @@ import { expect, type Locator, type Page } from '@playwright/test'
 
 /**
  * Opens a page and waits for the chrome's first data from the mock (the hero, unless the path asks
- * for another scenario): the attention button, whatever it says.
+ * for another scenario): the attention button, whatever it says, or `ready` where there's none to wait
+ * for (the phone's header hides it while nothing needs attention).
  */
-export async function open(page: Page, path: string): Promise<void> {
+export async function open(page: Page, path: string, ready?: Locator): Promise<void> {
   await page.goto(path)
   // The mock build renders once MSW's worker is up (app/boot.tsx), so the chrome comes first, then its fonts.
-  await expect(page.getByRole('banner').getByRole('button', { name: /needs attention$|^All good$/ })).toBeVisible()
+  await expect(ready ?? page.getByRole('banner').getByRole('button', { name: /needs? attention$|^All good$/ })).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
 }
 

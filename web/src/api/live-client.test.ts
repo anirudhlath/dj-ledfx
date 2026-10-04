@@ -115,6 +115,22 @@ describe('LiveClient', () => {
     }
   })
 
+  // §9.4 Reconnecting: "This is the last frame, from 19:14:32."
+  it('remembers when it last heard the server, on the wall clock, when the link drops', () => {
+    client.start()
+    welcome()
+    const heard = Date.now()
+    vi.advanceTimersByTime(1500)
+    latest().drop()
+    expect(connection()).toEqual({ status: 'reconnecting', attempt: 1 })
+    expect(store.getState().lastHeard).toBe(heard)
+    // A retry that fails changes nothing: the last frame is still the one from before the drop.
+    vi.advanceTimersByTime(backoffMs(1))
+    latest().drop()
+    expect(connection()).toEqual({ status: 'reconnecting', attempt: 2 })
+    expect(store.getState().lastHeard).toBe(heard)
+  })
+
   // Review focus 1: a server that hangs rather than closing.
   it('drops a link that has gone silent for 3 s', () => {
     client.start()
@@ -323,6 +339,32 @@ describe('LiveClient', () => {
     vi.advanceTimersByTime(1000)
     welcome()
     expect(latest().sent.map((command) => command.action)).toEqual(['subscribe_beat', 'subscribe_frames', 'subscribe_signals'])
+  })
+
+  it("sends a tap with the client's time, and settles it by the server's ack", async () => {
+    client.start()
+    welcome()
+    const tapped = client.tap(1_790_000_000.25)!
+    const id = latest().idOf('tap')
+    expect(latest().sent.at(-1)).toEqual({ action: 'tap', client_time: 1_790_000_000.25, id })
+    latest().say({ channel: 'ack', id, action: 'tap' })
+    await expect(tapped).resolves.toBeUndefined()
+  })
+
+  it('refuses a tap the server refuses, and one the link dropped before it answered', async () => {
+    client.start()
+    welcome()
+    const refused = client.tap(1)!
+    latest().say({ channel: 'error', id: latest().idOf('tap'), detail: 'The tempo is locked to Pro DJ Link: choose Auto or Internal to set it here' })
+    await expect(refused).rejects.toThrow(/locked to Pro DJ Link/)
+    const lost = client.tap(2)!
+    latest().drop()
+    await expect(lost).rejects.toMatchObject({ status: 0 })
+  })
+
+  it('leaves a tap to REST while the link is down', () => {
+    client.start()
+    expect(client.tap(1)).toBeNull()
   })
 
   it('stops for good: it closes the socket and never retries', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { TOKENS } from './design-numbers'
-import { parseHex } from './light-maths'
+import { parseHex } from '@/lib/light-colour'
 import { colourOf, cssColour, STAGE_PALETTE } from './palette'
 
 describe("the stage's palette", () => {

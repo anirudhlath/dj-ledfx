@@ -4,21 +4,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { roomName } from '@/api/mocks/fixtures'
 import type { ScenarioName } from '@/api/mocks/scenarios'
-import { LIVE_LAYOUT } from '@/pages/live-numbers'
+import { LIVE_SPEC } from '@/design/live-numbers'
 import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
 import { pushFrame } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
-import { drawn, heroPose, loadedStage, MAIN_STAGE, seedStage } from '@/test/stage'
+import { drawn, heroPose, loadedStage, MAIN_STAGE, seedStage, stageWriter } from '@/test/stage'
 import { setReducedMotion, setViewportWidth } from '@/test/viewport'
 import { lightBodies } from './bodies'
-import { FIT_VIEW, projectPoint } from './camera'
+import { FIT_VIEW, fitPose, projectPoint } from './camera'
 import { SPEC } from './design-numbers'
 import { anchorOf } from './marks'
 import { STAGE_LABEL } from './stage-pending'
 import { sunPosition, sunScene } from './sun'
+import Stage from './stage'
 import { readStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
+import { zonePolygons } from './zone-shape'
 
 // jsdom has no WebGL: the canvas is src/test/stage.ts's stand-in, which keeps the props it was given
 // last in `drawn`. The rest of the stage (the SVG layer, the overlays, the pointer) is the real one.
@@ -49,12 +51,14 @@ beforeEach(() => {
 describe('the stage on Live (§7, §8.1)', () => {
   it('labels each room with its look, and draws the sun and its readout', async () => {
     const { state } = await openLive()
-    for (const room of state.home.rooms) expect(screen.getByText(room.name)).toBeInTheDocument()
-    expect(screen.getByText(roomName('corridor'))).toBeInTheDocument()
-    for (const zone of state.running) expect(screen.getAllByText(zone.lookName).length).toBeGreaterThan(0)
+    // The stage's own labels: the Running panel beside it names the zones too.
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    for (const room of state.home.rooms) expect(stage.getByText(room.name)).toBeInTheDocument()
+    expect(stage.getByText(roomName('corridor'))).toBeInTheDocument()
+    for (const zone of state.running) expect(stage.getAllByText(zone.lookName).length).toBeGreaterThan(0)
     const sun = state.inputs.sun
-    expect(screen.getByText(sunScene(state.home, sun)!.label!)).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: STAGE_LABEL })).getByText(sunPosition(sun)!)).toBeInTheDocument()
+    expect(stage.getByText(sunScene(state.home, sun)!.label!)).toBeInTheDocument()
+    expect(stage.getByText(sunPosition(sun)!)).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')).toHaveLength(4)
   })
 
@@ -218,15 +222,15 @@ describe('the stage on Live (§7, §8.1)', () => {
   })
 
   // §5.4: with reduced motion the stage still updates the lights' colours, but slowly.
-  it('redraws at most once every SPEC.reducedMotionMs when the system asks for less motion', async () => {
+  it('redraws at most once every LIVE_SPEC.reducedMotionMs when the system asks for less motion', async () => {
     await openLive()
     expect(canvas().dataset.cadence).toBe(String(1000 / SPEC.target.fps))
     act(() => setReducedMotion(true))
-    expect(canvas().dataset.cadence).toBe(String(SPEC.reducedMotionMs))
+    expect(canvas().dataset.cadence).toBe(String(LIVE_SPEC.reducedMotionMs))
   })
 
   it("draws the phone's stage without labels or overlays", async () => {
-    setViewportWidth(LIVE_LAYOUT.phoneStage.width)
+    setViewportWidth(LIVE_SPEC.phoneStage.width)
     const { state } = await openLive()
     expect(screen.queryByText(state.home.rooms[0].name)).not.toBeInTheDocument()
     expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
@@ -250,7 +254,68 @@ describe('the stage on Live (§7, §8.1)', () => {
     act(() => liveStore.setState({ inputs: null }))
     expect(sunDrawn()).not.toBeInTheDocument()
     act(() => liveStore.setState({ inputs: { ...inputs, sun: { ...sun, elevation: -3 } } }))
-    expect(screen.queryByText(/^SUN /)).not.toBeInTheDocument()
-    expect(screen.queryByText(/^Sun /)).not.toBeInTheDocument()
+    // On the stage: on a Sunday the top bar's date line starts "Sun " too.
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    expect(stage.queryByText(/^SUN /)).not.toBeInTheDocument()
+    expect(stage.queryByText(/^Sun /)).not.toBeInTheDocument()
+  })
+
+  // §8.1 "Hover a card → its zone outlines on the stage"; F3 decision 23.
+  it('outlines the zone of the card under the pointer, and the zone /live/zones/:zoneId names', async () => {
+    const { router } = await openLive()
+    const panel = screen.getByRole('complementary', { name: 'Running' })
+    const outline = () => document.querySelector('[data-outline]')
+    expect(outline()).toBeNull()
+    fireEvent.pointerOver(within(panel).getByRole('article', { name: 'Living room — Fireflies' }))
+    expect(outline()).toHaveAttribute('data-outline', 'living')
+    expect(outline()!.querySelectorAll('polygon')).toHaveLength(1)
+    fireEvent.pointerLeave(panel)
+    expect(outline()).toBeNull()
+    await act(() => router.navigate('/live/zones/office'))
+    expect(outline()).toHaveAttribute('data-outline', 'office')
+  })
+
+  // State-Problems; F3 decision 18: desktop `live` only.
+  it('tags a crashed and a slow zone on the stage, until the link drops', async () => {
+    await openLive('problems')
+    const stage = screen.getByRole('region', { name: STAGE_LABEL })
+    expect(within(stage).getByText('Lava stopped · 19:12')).toBeInTheDocument()
+    expect(within(stage).getByText('38 fps · target 60')).toBeInTheDocument()
+    act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
+    expect(within(stage).queryByText('Lava stopped · 19:12')).toBeNull()
+  })
+
+  // State-Transition; F3 decision 16.
+  it('tags a transition with its kind and its percentage', async () => {
+    await openLive('transition')
+    const stage = screen.getByRole('region', { name: STAGE_LABEL })
+    expect(within(stage).getByText(/^Fireflies → Embers · dissolving/)).toHaveTextContent('Fireflies → Embers · dissolving 62%')
+  })
+})
+
+describe('the stage in focus (§7.6)', () => {
+  it("frames the zone at the focus tilt, hides the other zones' lights, and keeps the frame through a drop", async () => {
+    const state = seedStage('hero')
+    renderApp('/next/focus', { routes: [{ path: '/focus', element: <Stage variant="phone" focus="living" /> }] })
+    await loadedStage()
+    act(() => resizeObserved(390, 280))
+    const zone = state.zones.find((each) => each.id === 'living')!
+    const framed = fitPose(zonePolygons(state.home, zone, state.lights).flat(), { width: 390, height: 280 }, FIT_VIEW, SPEC.focus.tiltDeg)
+    expect(drawn.props!.pose).toEqual(framed)
+    // The canvas draws the zone's lights as it would draw them in the whole home (an offline light is a
+    // mark, not a light), and none of the lights round it.
+    const lightIds = (entries: readonly { body: { lightId: string } }[]) => entries.map((entry) => entry.body.lightId)
+    const inZone = state.lights.filter((light) => zone.lights.includes(light.id))
+    const zoneDrawn = lightIds(stageWriter(inZone, { rooms: state.home.rooms }).entries)
+    expect(lightIds(drawn.props!.entries)).toEqual(zoneDrawn)
+    expect(lightIds(stageWriter(state.lights, { rooms: state.home.rooms }).entries).length).toBeGreaterThan(zoneDrawn.length)
+    // The picture alone: no room links, no overlays, and a vignette over it.
+    expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
+    expect(picture().querySelector('[data-vignette]')).not.toBeNull()
+
+    act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
+    expect(drawn.props!.pose).toEqual(framed)
+    expect(picture().style.filter).toBe(`grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`)
   })
 })

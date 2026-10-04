@@ -1,4 +1,4 @@
-// The stage (§7) in its `live` and `frozen` modes: the canvas, the SVG layer over it and the HTML
+// The stage (§7) in its `live`, `focus` and `frozen` modes: the canvas, the SVG layer over it and the HTML
 // overlays, all placed from one camera pose (camera.ts). What each mode does is decided once
 // (behaviour.ts), and the stage is two parts: the picture (the canvas and the SVG layer, greyed while
 // frozen) and the interactive layer (the pointer's tooltip and room click, the overlays, the rooms'
@@ -23,6 +23,7 @@ import { NoWebGL } from './overlays/no-webgl'
 import { RoomLinks } from './overlays/room-links'
 import { StageSvg } from './overlays/stage-svg'
 import { StageTools } from './overlays/stage-tools'
+import { ZoneTags } from './overlays/zone-tags'
 import { SunReadout } from './overlays/sun-readout'
 import { ViewControls } from './overlays/view-controls'
 import { pickLight, pickRoom, screenPoints } from './picking'
@@ -30,13 +31,21 @@ import { roomMask } from './room-mask'
 import { StageCanvas } from './stage-canvas'
 import { STAGE_LABEL } from './stage-pending'
 import { sunScene } from './sun'
+import { zoneTags } from './tags'
 import { tooltipText } from './tooltip'
 import type { StageData } from './use-stage-data'
 import { useStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
+import { zonePolygons } from './zone-shape'
 
 /** §7.6 frozen: the last frame, greyed as SPEC.frozen says. */
 const GREYED = `grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`
+
+/**
+ * §7.6 focus's "soft vignette" (F3 decision 37): clear over the middle, darkening toward `bg` at the
+ * edges, where §7.2 shows the neighbours dimmed.
+ */
+const FOCUS_VIGNETTE = 'radial-gradient(closest-side, transparent 60%, color-mix(in srgb, var(--color-bg) 70%, transparent) 100%)'
 
 export type { StageVariant } from './behaviour'
 
@@ -48,14 +57,21 @@ export interface StageViewProps {
   route: string
   /** Where a click on a room goes: its zone's composer (§8.1). */
   roomTo: (room: Room) => string
+  /** The zone to outline: the card under the pointer, or the one /live/zones/:zoneId names (F3 decision 23). */
+  outlined?: Id | null
+  /** §7.6 focus: framed on this zone, the other zones' lights hidden, a soft vignette (Zone detail). */
+  focus?: Id | null
 }
 
-export function StageView({ data, variant, route, roomTo }: StageViewProps) {
-  const { home, lights, states, running, zoneNames, sun, frozen } = data
+export function StageView({ data, variant, route, roomTo, outlined = null, focus = null }: StageViewProps) {
+  const { home, lights, states, running, zoneNames, zones, sun, frozen } = data
   const [ref, size] = useElementSize<HTMLElement>()
   const [stored, store] = useStageView(route)
   const reducedMotion = useReducedMotion()
-  const behaviour = stageBehaviour({ mode: frozen ? 'frozen' : 'live', variant, reducedMotion, labels: stored.labels })
+  // The zone in focus, once the zones load. A drop keeps its frame and its lights (§7.6 frozen).
+  const focusZone = focus === null ? undefined : zones.find((zone) => zone.id === focus)
+  const mode = frozen ? 'frozen' : focusZone !== undefined ? 'focus' : 'live'
+  const behaviour = stageBehaviour({ mode, variant, reducedMotion, labels: stored.labels })
   // The phone's stage has no view controls, so it shows the fitted view (§8.10).
   const view = behaviour.overlays ? stored.view : FIT_VIEW
   const [webgl] = useState(hasWebGL2)
@@ -68,12 +84,25 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
   }
   const navigate = useNavigate()
 
-  const pose = useMemo(() => fitPose(home.outline, size, view), [home.outline, size, view])
-  const bodies = useMemo(() => stageBodies(lights), [lights])
+  // §7.2: "fit the zone's polygon, tilt …°"; §7.6: "other zones' lights hidden".
+  const framing = useMemo(() => {
+    const polygons = focusZone === undefined ? [] : zonePolygons(home, focusZone, lights)
+    return polygons.length === 0 ? null : polygons.flat()
+  }, [focusZone, home, lights])
+  const shown = useMemo(() => {
+    if (focusZone === undefined) return lights
+    const ids = new Set(focusZone.lights)
+    return lights.filter((light) => ids.has(light.id))
+  }, [focusZone, lights])
+  const pose = useMemo(
+    () => (framing === null ? fitPose(home.outline, size, view) : fitPose(framing, size, view, SPEC.focus.tiltDeg)),
+    [framing, home.outline, size, view],
+  )
+  const bodies = useMemo(() => stageBodies(shown), [shown])
   // The engine pushes `lights` every few seconds while a look plays. The writer's arrays (and the
   // meshes over them) are made from which bodies are drawn alone, and take each push's colours in
   // place; the marks, from each light's status alone (I1).
-  const entries = useMemo(() => writerEntries(bodies, lights, states, home.rooms), [bodies, lights, states, home.rooms])
+  const entries = useMemo(() => writerEntries(bodies, shown, states, home.rooms), [bodies, shown, states, home.rooms])
   const layout = useStable(entries, sameLayout)
   const writer = useMemo(() => new FrameWriter(layout), [layout])
   const mask = useMemo(() => roomMask(home.rooms), [home.rooms])
@@ -82,6 +111,16 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
   const labels = useMemo(() => (behaviour.labels ? stageLabels(home, running, lights) : null), [behaviour.labels, home, running, lights])
   const sunDrawn = useMemo(() => sunScene(home, sun, behaviour.sunLabel), [home, sun, behaviour.sunLabel])
   const points = useMemo(() => (pose === null ? [] : screenPoints(pose, bodies)), [pose, bodies])
+  // §8.1 "Hover a card → its zone outlines on the stage", drawn as §7.6 compose draws its zone.
+  const outlineZone = outlined === null ? undefined : zones.find((zone) => zone.id === outlined)
+  const outline = useMemo(() => {
+    if (pose === null || outlineZone === undefined) return null
+    const polygons = zonePolygons(home, outlineZone, lights).map((polygon) => polygon.map(([x, y]) => projectPoint(pose, [x, y, 0])))
+    return polygons.length === 0 ? null : { zoneId: outlineZone.id, polygons }
+  }, [pose, outlineZone, home, lights])
+  // State-Problems' and State-Transition's tags: desktop `live` only (F3 decision 18).
+  const tagged = behaviour.overlays && behaviour.interactive
+  const tags = useMemo(() => (tagged ? zoneTags(running, bodies) : []), [tagged, running, bodies])
 
   /** The pointer on the stage, in CSS px, with the room under it. */
   const under = (event: MouseEvent<HTMLElement>) => {
@@ -131,7 +170,10 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
                 pose={pose}
                 cadenceMs={behaviour.cadenceMs}
               />
-              <StageSvg pose={pose} marks={marks} labels={labels} sun={sunDrawn} />
+              <StageSvg pose={pose} marks={marks} labels={labels} sun={sunDrawn} outline={outline} />
+              {framing !== null && (
+                <div aria-hidden="true" data-vignette className="pointer-events-none absolute inset-0" style={{ background: FOCUS_VIGNETTE }} />
+              )}
             </>
           )}
         </div>
@@ -154,6 +196,7 @@ export function StageView({ data, variant, route, roomTo }: StageViewProps) {
               <ViewControls view={view} onView={(next) => store({ ...stored, view: next })} />
             </>
           )}
+          {webgl && pose !== null && tags.length > 0 && <ZoneTags tags={tags} pose={pose} />}
           {webgl && pose !== null && light !== undefined && body !== undefined && state !== undefined && (
             <LightTooltip
               light={light}

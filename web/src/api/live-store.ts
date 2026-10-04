@@ -18,6 +18,11 @@ export type Connection =
 
 export interface LiveState {
   connection: Connection
+  /**
+   * §9.4 Reconnecting's "the last frame, from 19:14:32": when the last message came before the link
+   * dropped, epoch ms. Null until a drop; a failed retry leaves it.
+   */
+  lastHeard: number | null
   /** The latest beat message. Motion samples the BeatClock instead (§5.4). */
   beat: Beat | null
   decks: Deck[] | null
@@ -32,6 +37,7 @@ export interface LiveState {
 
 export const EMPTY_LIVE: LiveState = {
   connection: { status: 'connecting' },
+  lastHeard: null,
   beat: null,
   decks: null,
   running: null,

@@ -4,7 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router'
-import { startDataLayer } from '@/api/live'
+import { beatClock, startDataLayer } from '@/api/live'
 import { queryClient } from '@/api/queries'
 import { MocksFailed } from '@/pages/mocks-failed'
 import { routerBasename } from './router'
@@ -45,6 +45,8 @@ async function startMocksIfAsked(): Promise<void> {
     if (choice !== null) {
       const { startMocks } = await import('@/api/mocks/browser')
       await startMocks(choice)
+      // ?still holds the mock's beat; the pips follow the beat clock (F3 decision 3), so it holds too.
+      if (choice.still) beatClock.hold()
     }
   }
 }

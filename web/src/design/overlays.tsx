@@ -3,6 +3,7 @@ import { Popover as BasePopover } from '@base-ui/react/popover'
 import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip'
 import type { ReactElement, ReactNode } from 'react'
 import { IconButton } from './button'
+import { Icon } from './icon'
 
 interface OverlayProps {
   /** The element that opens it; Base UI wires its events and ARIA. */
@@ -44,19 +45,40 @@ export function Tooltip({ content, children, side = 'top' }: TooltipProps) {
   )
 }
 
-const SURFACE = 'rounded-card border border-line-strong bg-raised shadow-pop outline-none'
-const HEAD = 'text-section font-semibold text-text'
+/** What every popup's surface is. */
+export const SURFACE = 'rounded-card border border-line-strong bg-raised shadow-pop outline-none'
+/** A popup's title. */
+export const HEAD = 'text-section font-semibold text-text'
 
-/** §6.1 Popover: anchored to its trigger. */
-export function Popover({ trigger, title, children, open, onOpenChange, align = 'center' }: OverlayProps & { align?: 'start' | 'center' | 'end' }) {
+/**
+ * §6.1 Popover: anchored to its trigger. `width` in px, never wider than the viewport allows; `aside` sits
+ * at the title row's end (the attention popover's count, §6.2, State-Problems). Its head, 6 px under the
+ * trigger and 20 px in from the window's edge are State-Problems.html's, the one popover a render draws.
+ */
+export function Popover({
+  trigger,
+  title,
+  children,
+  open,
+  onOpenChange,
+  align = 'center',
+  width,
+  aside,
+}: OverlayProps & { align?: 'start' | 'center' | 'end'; width?: number; aside?: ReactNode }) {
   return (
     <BasePopover.Root open={open} onOpenChange={onOpenChange}>
       <BasePopover.Trigger render={trigger} />
       <BasePopover.Portal>
-        <BasePopover.Positioner sideOffset={8} align={align} className="z-50">
-          <BasePopover.Popup className={`overflow-hidden ${SURFACE}`}>
-            <BasePopover.Title className={`px-3.5 py-3 ${HEAD}`}>{title}</BasePopover.Title>
-            {children}
+        <BasePopover.Positioner sideOffset={6} align={align} collisionPadding={20} className="z-50">
+          <BasePopover.Popup
+            className={`flex max-h-(--available-height) max-w-[calc(100vw-2rem)] flex-col overflow-hidden ${SURFACE}`}
+            style={width === undefined ? undefined : { width }}
+          >
+            <div className="flex shrink-0 items-center justify-between gap-2 px-3.5 py-3">
+              <BasePopover.Title className="text-[14px] font-semibold text-text">{title}</BasePopover.Title>
+              {aside}
+            </div>
+            <div className="min-h-0 overflow-y-auto">{children}</div>
           </BasePopover.Popup>
         </BasePopover.Positioner>
       </BasePopover.Portal>
@@ -90,15 +112,27 @@ export function Dialog({ title, children, ...modal }: OverlayProps) {
   )
 }
 
-/** §6.1 Sheet: the phone's bottom sheet, with a grabber. */
-export function Sheet({ title, children, ...modal }: OverlayProps) {
+/**
+ * §6.1 Sheet: the phone's bottom sheet, with a grabber, its title (Phone-State-Problems: `aside` beside
+ * it, the count) and a Close at the row's end, bare as Phone-State-Problems and Phone-PutLookOn draw it:
+ * a 44 px x in text-2, like the phone header's Back.
+ */
+export function Sheet({ title, aside, children, ...modal }: OverlayProps & { aside?: ReactNode }) {
   return (
     <Modal
       {...modal}
       className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] flex-col gap-1 overflow-y-auto rounded-t-sheet border-t border-line bg-panel px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-sheet outline-none"
     >
       <span aria-hidden="true" className="mx-auto mb-1.5 h-1.25 w-10 shrink-0 rounded-[3px] bg-line-strong" />
-      <BaseDialog.Title className={HEAD}>{title}</BaseDialog.Title>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-baseline gap-1">
+          <BaseDialog.Title className="text-title font-semibold text-text">{title}</BaseDialog.Title>
+          {aside}
+        </div>
+        <BaseDialog.Close aria-label="Close" className="inline-flex size-11 shrink-0 items-center justify-center text-text-2">
+          <Icon name="x" size={20} />
+        </BaseDialog.Close>
+      </div>
       {children}
     </Modal>
   )

@@ -1,9 +1,14 @@
+import type { ComponentType } from 'react'
 import { useMatches } from 'react-router'
 
 export interface MetaContext {
   now: Date
   /** Today's sunset, 24 h: the fixture until F6 (decision 10). */
   sunset: string
+  /** The server's preview only (§5.6); false until it has said. */
+  previewOnly: boolean
+  /** While the link is down: when the last message came, epoch ms (§9.4); null otherwise. */
+  lastFrame: number | null
 }
 
 /** What the chrome shows for a route (spec §4.1, §4.2). Set as the route's `handle`. */
@@ -18,6 +23,10 @@ export interface PageMeta {
   phoneContext?: (at: MetaContext) => string
   /** Phone only: the tempo strip under the header (Live). */
   tempoStrip?: boolean
+  /** Draws the phone header's title when it comes from data, over phoneTitle (Zone detail: the zone's name). */
+  PhoneTitle?: ComponentType
+  /** Phone only: a Back link before the title, to this path (Zone detail: Live). */
+  phoneBack?: string
 }
 
 const FALLBACK: PageMeta = { title: 'dj-ledfx' }

@@ -118,7 +118,7 @@ for (const path of ROUTES) {
 
 // Decision 12: /system is there to run axe over every primitive. Base UI mounts an overlay's popup
 // only while it's open, so each one is opened before axe looks.
-const OVERLAYS: { name: string; open: (page: Page) => Promise<void>; popup: (page: Page) => Locator }[] = [
+const OVERLAYS: { name: string; path?: string; desktop?: boolean; open: (page: Page) => Promise<void>; popup: (page: Page) => Locator }[] = [
   {
     name: 'Tooltip',
     open: (page) => page.getByRole('button', { name: 'Fit', exact: true }).hover(),
@@ -144,11 +144,39 @@ const OVERLAYS: { name: string; open: (page: Page) => Promise<void>; popup: (pag
     open: (page) => page.getByRole('combobox', { name: 'Transition', exact: true }).click(),
     popup: (page) => page.getByRole('listbox'),
   },
+  {
+    name: 'needs-attention list',
+    path: '/next/live?scenario=problems',
+    open: (page) => page.getByRole('banner').getByRole('button', { name: /needs? attention$/ }).click(),
+    popup: (page) => page.getByRole('dialog', { name: 'Needs attention', exact: true }),
+  },
+  {
+    name: 'zone menu',
+    path: '/next/live',
+    desktop: true,
+    open: (page) => page.getByRole('button', { name: 'More for Living room', exact: true }).click(),
+    popup: (page) => page.getByRole('menu', { name: 'More for Living room', exact: true }),
+  },
+  {
+    name: 'Stop all confirmation',
+    path: '/next/live',
+    desktop: true,
+    open: (page) => page.getByRole('button', { name: 'Stop all', exact: true }).click(),
+    popup: (page) => page.getByRole('alertdialog', { name: 'Stop all?', exact: true }),
+  },
+  {
+    name: 'tempo source popover',
+    path: '/next/live',
+    desktop: true,
+    open: (page) => page.getByRole('banner').getByRole('button', { name: 'Music', exact: true }).click(),
+    popup: (page) => page.getByRole('dialog', { name: 'Tempo source', exact: true }),
+  },
 ]
 
 for (const overlay of OVERLAYS) {
-  test(`axe passes with the ${overlay.name} open`, async ({ page }) => {
-    await open(page, '/next/system')
+  test(`axe passes with the ${overlay.name} open`, async ({ page, isMobile }) => {
+    test.skip(isMobile && overlay.desktop === true, 'a desktop control')
+    await open(page, overlay.path ?? '/next/system')
     await overlay.open(page)
     await expect(overlay.popup(page)).toBeVisible()
     expect(await axeViolations(page)).toEqual([])
@@ -211,6 +239,19 @@ test.describe('desktop', () => {
     await page.keyboard.press('Enter')
     await expect(page).toHaveURL(/\/next\/settings$/)
     await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
+  })
+
+  // §5.5: past the stage and every card's controls, the keyboard reaches Put a look on, and every stop has a name.
+  test('the keyboard reaches Put a look on, naming every stop', async ({ page }) => {
+    await open(page, '/next/live')
+    await tempo(page)
+    const put = page.getByRole('link', { name: 'Put a look on', exact: true })
+    for (let i = 0; i < 80; i += 1) {
+      await page.keyboard.press('Tab')
+      await expect(page.locator(':focus')).toHaveAccessibleName(/\S/)
+      if (await put.evaluate((element) => element === document.activeElement)) break
+    }
+    await expect(put).toBeFocused()
   })
 
   // Review focus: crossing 768 px (a window resize, a tablet rotating) swaps the chrome in place.

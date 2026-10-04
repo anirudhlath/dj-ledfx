@@ -1,6 +1,8 @@
 import { Navigate, type RouteObject } from 'react-router'
-import { formatDayDateTime, formatDayTime } from '@/lib/format'
+import { formatDayDateTime, formatDayTime, formatTimeWithSeconds } from '@/lib/format'
+import { ZoneTitle } from '@/live/zone-detail'
 import { AppError, RootError } from '@/pages/app-error'
+import { InputsPage } from '@/pages/inputs'
 import { LivePage } from '@/pages/live'
 import { NotFound } from '@/pages/not-found'
 import { Placeholder } from '@/pages/placeholder'
@@ -13,9 +15,15 @@ const LIVE: PageMeta = {
   title: 'Live',
   context: ({ now }) => formatDayDateTime(now),
   phoneTitle: 'Home',
-  phoneContext: ({ now, sunset }) => `${formatDayTime(now)} · sun sets ${sunset}`,
+  // Phone-State-Reconnecting: "last frame 19:14:32"; Phone-State-Preview-Only: "Wed 19:14 · on screen only".
+  phoneContext: ({ now, sunset, previewOnly, lastFrame }) =>
+    lastFrame !== null
+      ? `last frame ${formatTimeWithSeconds(new Date(lastFrame))}`
+      : `${formatDayTime(now)} · ${previewOnly ? 'on screen only' : `sun sets ${sunset}`}`,
   tempoStrip: true,
 }
+/** Zone detail (Phone-Zone): the zone's name with Back to Live, and no context line or tempo strip. On desktop it's Live (F3 decision 23). */
+const ZONE: PageMeta = { title: LIVE.title, context: LIVE.context, PhoneTitle: ZoneTitle, phoneBack: '/live' }
 const LOOKS: PageMeta = { title: 'Looks' }
 const MAP: PageMeta = {
   title: 'Map',
@@ -43,16 +51,17 @@ export const routes: RouteObject[] = [
         errorElement: <AppError />,
         children: [
           { index: true, element: <Navigate to="/live" replace /> },
-          { path: 'live', handle: LIVE, element: <LivePage /> },
+          // F3 decision 23: /live/zones/:zoneId is Live, so the stage stays mounted between them. LivePage
+          // reads the id: on desktop it outlines the zone's card, and on the phone it draws Zone detail.
+          { path: 'live', handle: LIVE, element: <LivePage />, children: [{ path: 'zones/:zoneId', handle: ZONE, element: null }] },
           { path: 'live/put', handle: LIVE, element: <Placeholder name="Put a look on" milestone="F4" /> },
-          { path: 'live/zones/:zoneId', handle: LIVE, element: <Placeholder name="Zone" milestone="F3" /> },
           { path: 'looks', handle: LOOKS, element: <Placeholder name="Looks" milestone="F5" /> },
           { path: 'looks/:lookId', handle: LOOKS, element: <Placeholder name="Look editor" milestone="F8" /> },
           { path: 'map', handle: MAP, element: <Placeholder name="Home map" milestone="F7" /> },
           { path: 'map/:thingId', handle: MAP, element: <Placeholder name="Home map" milestone="F7" /> },
           { path: 'devices', handle: DEVICES, element: <Placeholder name="Devices" milestone="F6" /> },
           { path: 'devices/:deviceId', handle: DEVICES, element: <Placeholder name="Devices" milestone="F6" /> },
-          { path: 'inputs', handle: INPUTS, element: <Placeholder name="Inputs" milestone="F6" /> },
+          { path: 'inputs', handle: INPUTS, element: <InputsPage /> },
           { path: 'settings', handle: SETTINGS, element: <Placeholder name="Settings" milestone="F6" /> },
           // The primitives specimen loads on demand, keeping Base UI out of the first load.
           {

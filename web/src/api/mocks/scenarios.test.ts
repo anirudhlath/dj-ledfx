@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { HERO_CHROME } from '@/chrome/state'
+import { HERO_BEAT, HERO_CHROME } from '@/chrome/state'
 import { attentionAbout, HERO_NOW } from '@/test/live'
 import type { AttentionItem } from '../contract'
 import { HOME_ZONE, lookName, roomName } from './fixtures'
-import { SCENARIOS, buildScenario, hhmm, isScenario, orderAttention } from './scenarios'
+import { SCENARIOS, buildScenario, hhmm, isScenario, orderAttention, type ScenarioName, type ScenarioState } from './scenarios'
 
 const light = (name: (typeof SCENARIOS)[number], id: string) =>
   buildScenario(name, HERO_NOW).lights.find((candidate) => candidate.id === id)
@@ -97,8 +97,8 @@ describe('the hero', () => {
     expect(hero.beat).toMatchObject({
       source: HERO_CHROME.tempo.source,
       bpm: HERO_CHROME.tempo.bpm,
-      bar: HERO_CHROME.tempo.bar,
-      beatInBar: HERO_CHROME.tempo.beat,
+      bar: HERO_BEAT.bar,
+      beatInBar: HERO_BEAT.beat,
       stale: false,
     })
     expect(hhmm(hero.inputs.sun.sunset)).toBe(HERO_CHROME.sunset)
@@ -150,7 +150,11 @@ describe('the other scenarios', () => {
     expect(state.running[0]).toMatchObject({ zoneId: HOME_ZONE, lookId: 'firmware', brightness: 0.9 })
     expect(state.running[0].lights).toHaveLength(state.lights.length)
     for (const each of state.lights) {
-      if (each.builtInEffects.length === 0) expect(each.status).toBe('streamed-copy')
+      if (each.builtInEffects.length === 0) {
+        // A streamed copy names the effect it copies: one another light runs itself.
+        expect(each.status).toBe('streamed-copy')
+        expect(state.lights.flatMap((other) => other.builtInEffects)).toContain(each.ownEffect)
+      }
       else expect(each).toMatchObject({ status: 'own-effect', ownEffect: each.builtInEffects[0] })
     }
     expect(state.lights.filter((each) => each.ownEffect === 'LIFX waveform')).toHaveLength(11)
@@ -173,6 +177,8 @@ describe('the other scenarios', () => {
     expect(state.running).toEqual([])
     expect(state.lights.filter((each) => each.power === true)).toHaveLength(9)
     expect(state.lights.filter((each) => each.power !== true)).toHaveLength(10)
+    // §9.4 "Stage shows each light as it is": a light that's on has its own colour (State-Nothing-Running's warm white).
+    expect(state.lights.filter((each) => each.power === true).every((each) => each.colour !== null)).toBe(true)
     expect(light('nothing-running', 'rope')?.status).toBe('offline')
     expect(state.attention).toEqual([])
   })
@@ -217,5 +223,57 @@ describe('the other scenarios', () => {
     const state = buildScenario('preview-only', HERO_NOW)
     expect(state.previewOnly).toBe(true)
     expect(state.running).toEqual(buildScenario('hero', HERO_NOW).running)
+  })
+
+  it('waiting has the living room wait dark for the music, which plays nothing', () => {
+    const state = buildScenario('waiting', HERO_NOW)
+    expect(state.running.find((zone) => zone.zoneId === 'living')).toMatchObject({
+      lookId: 'spectrum',
+      state: 'waiting',
+      waitingFor: ['music'],
+    })
+    expect(state.looks.find((look) => look.id === 'spectrum')?.needs).toContain('music')
+    expect(state.inputs.music).toMatchObject({ state: 'idle', track: null })
+    expect(state.inputs.tempo).toMatchObject({ source: 'internal', bpm: 118 })
+  })
+
+  it('first-run has no lights, so nothing runs and nothing needs attention', () => {
+    const state = buildScenario('first-run', HERO_NOW)
+    expect(state.lights).toEqual([])
+    expect(state.zones.every((zone) => zone.lights.length === 0)).toBe(true)
+    expect([state.running, state.attention, state.recent]).toEqual([[], [], []])
+  })
+
+  it("puts Evening on the hero's Home sunset, as Main.png's card shows", () => {
+    expect(buildScenario('hero', HERO_NOW).looks.find((look) => look.id === 'homesunset')?.modifiers?.evening).toBe(true)
+  })
+})
+
+// §13.1 F3's done-when: "All Live states from 9 reproduce from mock scenarios". Each row is a §9 state
+// and the scenario that shows it; Task 21 screenshots each scenario at both sizes.
+const LIVE_STATES: [string, ScenarioName, (state: ScenarioState) => boolean][] = [
+  ['§9.2 running', 'hero', (s) => s.running.some((zone) => zone.state === 'running')],
+  ['§9.2 transition', 'transition', (s) => s.running.some((zone) => zone.state === 'transition' && zone.transition != null)],
+  ['§9.2 slow', 'problems', (s) => s.running.some((zone) => zone.state === 'slow' && zone.fps != null)],
+  ['§9.2 crashed', 'problems', (s) => s.running.some((zone) => zone.state === 'crashed' && zone.error != null)],
+  ['§9.2 waiting for an input', 'waiting', (s) => s.running.some((zone) => zone.state === 'waiting' && (zone.waitingFor ?? []).length > 0)],
+  ['§9.2 overlay', 'doorbell', (s) => s.overlays.length > 0],
+  ['§9.1 offline', 'hero', (s) => s.lights.some((light) => light.status === 'offline')],
+  ['§9.1 switched off elsewhere', 'hero', (s) => s.lights.some((light) => light.status === 'switched-off')],
+  ['§9.1 running its own effect', 'firmware', (s) => s.lights.some((light) => light.status === 'own-effect')],
+  ['§9.1 streamed copy', 'firmware', (s) => s.lights.some((light) => light.status === 'streamed-copy')],
+  ['§9.3 stale and disconnected', 'inputs-down', (s) => s.inputs.music.state === 'stale' && s.inputs.homeAssistant.state === 'disconnected'],
+  ['§9.3 idle', 'dj-playing', (s) => s.inputs.music.state === 'idle'],
+  ['§9.4 preview only', 'preview-only', (s) => s.previewOnly],
+  ['§9.4 reconnecting', 'reconnecting', (s) => s.dropAfterMs !== null],
+  ['§9.4 nothing running', 'nothing-running', (s) => s.running.length === 0 && s.recent.length > 0],
+  ['§9.4 no lights placed', 'no-lights', (s) => s.lights.length > 0 && s.lights.every((light) => light.shape == null)],
+  ['§9.4 first run', 'first-run', (s) => s.lights.length === 0],
+  ['§9.5 needs attention', 'problems', (s) => s.attention.length > 1],
+]
+
+describe('the Live states of §9', () => {
+  it.each(LIVE_STATES)('%s reproduces from the %s scenario', (_, name, shows) => {
+    expect(shows(buildScenario(name, HERO_NOW))).toBe(true)
   })
 })

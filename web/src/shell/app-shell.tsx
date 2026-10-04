@@ -1,11 +1,12 @@
 import { Outlet } from 'react-router'
 import { documentTitle, usePageMeta, type MetaContext } from '@/app/page-meta'
 import { useConnectionNews } from '@/chrome/connection-news'
-import { useConnectionStatus, useServerName, useSunset } from '@/chrome/hooks'
-import { ChromeTempoStrip } from '@/chrome/live'
+import { useConnectionStatus, usePreviewOnly, useReconnecting, useServerName, useSunset } from '@/chrome/hooks'
+import { ChromeHoldNews, ChromeTempoStrip } from '@/chrome/live'
 import { Announcer } from '@/design/announcer'
 import { cx } from '@/design/cx'
 import { useIsPhone } from '@/lib/use-media-query'
+import { TapeFrame } from '@/live/preview-only'
 import { useNow } from '@/lib/use-now'
 import { PhoneHeader } from './phone-header'
 import { Rail } from './rail'
@@ -24,11 +25,13 @@ import { TopBar } from './top-bar'
 export function AppShell() {
   const isPhone = useIsPhone()
   const meta = usePageMeta()
+  const { PhoneTitle } = meta
   const news = useConnectionNews(useConnectionStatus())
   const server = useServerName()
 
   return (
     <Announcer news={news}>
+      <ChromeHoldNews />
       <div
         className={cx(
           'h-dvh pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]',
@@ -37,7 +40,11 @@ export function AppShell() {
       >
         <title>{documentTitle(meta.title)}</title>
         {isPhone ? (
-          <PhoneHeader title={meta.phoneTitle ?? meta.title} context={meta.phoneContext && <PageContext get={meta.phoneContext} />}>
+          <PhoneHeader
+            title={PhoneTitle ? <PhoneTitle /> : (meta.phoneTitle ?? meta.title)}
+            back={meta.phoneBack}
+            context={meta.phoneContext && <PageContext get={meta.phoneContext} />}
+          >
             {meta.tempoStrip && <ChromeTempoStrip />}
           </PhoneHeader>
         ) : (
@@ -53,11 +60,13 @@ export function AppShell() {
         </main>
         {isPhone && <TabBar />}
       </div>
+      <TapeFrame />
     </Announcer>
   )
 }
 
 /** A page's context line. It alone reads the clock, so the minute ticking over redraws just the line. */
 function PageContext({ get }: { get: (at: MetaContext) => string }) {
-  return get({ now: useNow(), sunset: useSunset() })
+  const lastFrame = useReconnecting()?.lastHeard ?? null
+  return get({ now: useNow(), sunset: useSunset(), previewOnly: usePreviewOnly() === true, lastFrame })
 }
