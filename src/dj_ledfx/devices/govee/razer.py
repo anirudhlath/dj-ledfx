@@ -11,7 +11,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from dj_ledfx.devices.govee.adapter_base import GoveeAdapterBase
-from dj_ledfx.devices.govee.protocol import build_razer_frame, build_razer_switch
+from dj_ledfx.devices.govee.protocol import (
+    build_razer_frame,
+    build_razer_switch,
+    build_solid_color_message,
+)
 from dj_ledfx.devices.govee.types import GoveeDeviceRecord, GoveeForm
 
 if TYPE_CHECKING:
@@ -64,9 +68,18 @@ class GoveeRazerAdapter(GoveeAdapterBase):
         await super().set_power(on)
 
     async def prepare_stream(self) -> None:
-        """Full brightness; the next frame switches razer on."""
-        self._last_frame_at = None
-        await super().prepare_stream()
+        """Out of razer, out of white, then full brightness; the next frame switches razer on.
+        Razer drives only the colour LEDs, so a lamp left on white kept its white LEDs lit
+        behind every frame: colour temperature 0 switches them off, in black, which can't
+        flash before the first frame. Razer goes off first, so a lamp a run left in razer
+        takes the white off too, and is armed again only once the prepare is done: the old
+        look's frames may still go out during it."""
+        try:
+            await self._command(build_razer_switch(on=False))
+            await self._command(build_solid_color_message(0, 0, 0, kelvin=0))
+            await super().prepare_stream()
+        finally:
+            self._last_frame_at = None
 
     async def restore_state(self, state: bytes, *, power: bool = True) -> None:
         """As the base class does; the next frame switches razer on again."""

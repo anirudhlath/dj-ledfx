@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock
 
+import numpy as np
 import pytest
-from govee_fakes import STATUS, lamp_record, lamp_transport, sent
+from govee_fakes import STATUS, lamp_record, lamp_transport, send_times, sent
 
 from dj_ledfx.devices.capabilities import LightReading, NoAnswer, try_read
+from dj_ledfx.devices.govee import adapter_base
 from dj_ledfx.devices.govee.colour import GoveeColourAdapter
+from dj_ledfx.devices.govee.protocol import build_razer_switch
 from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
 from dj_ledfx.devices.govee.state import GoveeDeviceState
 from dj_ledfx.devices.govee.transport import GoveeTransport
@@ -102,8 +107,41 @@ async def test_set_power_and_prepare_stream(record: GoveeDeviceRecord) -> None:
     await adapter.prepare_stream()
     assert sent(transport) == [
         {"msg": {"cmd": "turn", "data": {"value": 1}}},
+        build_razer_switch(on=False),
+        {
+            "msg": {
+                "cmd": "colorwc",
+                "data": {"color": {"r": 0, "g": 0, "b": 0}, "colorTemInKelvin": 0},
+            }
+        },
         {"msg": {"cmd": "brightness", "data": {"value": 100}}},
     ]
+
+
+@pytest.mark.parametrize("adapter_class", [GoveeColourAdapter, GoveeRazerAdapter])
+async def test_a_turn_on_and_the_prepare_after_it_go_out_a_gap_apart(
+    record: GoveeDeviceRecord, adapter_class: type[GoveeColourAdapter | GoveeRazerAdapter]
+) -> None:
+    """A look switches a lamp on and prepares it at once: each command still waits for the
+    last, whichever call sent it."""
+    transport = lamp_transport()
+    sent_at = send_times(transport)
+    adapter = adapter_class(transport, record, 15)
+    await adapter.set_power(True)
+    await adapter.prepare_stream()
+    assert min(np.diff(sent_at)) > 0.9 * adapter_base.COMMAND_GAP_S
+
+
+async def test_a_command_long_after_the_last_goes_out_at_once(record: GoveeDeviceRecord) -> None:
+    """A command waits only for what's left of the gap since the last."""
+    transport = lamp_transport()
+    sent_at = send_times(transport)
+    adapter = GoveeRazerAdapter(transport, record, 15)
+    await adapter.set_power(True)
+    await asyncio.sleep(2 * adapter_base.COMMAND_GAP_S)
+    asked = time.monotonic()
+    await adapter.prepare_stream()
+    assert sent_at[1] - asked < adapter_base.COMMAND_GAP_S / 2
 
 
 def test_transport_knows_whether_it_can_receive() -> None:

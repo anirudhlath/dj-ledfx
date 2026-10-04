@@ -1,3 +1,5 @@
+from govee_fakes import WARM_WHITE
+
 from dj_ledfx.devices.govee.state import GoveeDeviceState
 
 
@@ -35,14 +37,6 @@ def test_from_bytes_with_partial_data():
     assert state.on_off == 1
     assert state.brightness == 100
     assert state.r == 255
-
-
-WARM_WHITE = {
-    "onOff": 1,
-    "brightness": 80,
-    "color": {"r": 0, "g": 0, "b": 0},
-    "colorTemInKelvin": 2700,
-}
 
 
 def test_a_lamp_on_white_is_captured_with_its_colour_temperature():

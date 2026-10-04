@@ -4,6 +4,7 @@ the SKU table's kinds of lamp, and a transport that hears the lamp."""
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,14 @@ LAMP = "govee:test-lamp"  # the test lamp's stable id
 UPRIGHT = GoveeDeviceCapability(is_rgbic=True, segment_count=15, razer=True, form="upright")
 NO_RAZER = GoveeDeviceCapability(is_rgbic=True, segment_count=15)
 STATUS: dict[str, Any] = {"onOff": 0, "brightness": 50, "color": {"r": 10, "g": 20, "b": 30}}
+# A lamp on warm white: its white LEDs, at a colour temperature, beside a colour that means
+# nothing (black from one lamp, white from another).
+WARM_WHITE: dict[str, Any] = {
+    "onOff": 1,
+    "brightness": 80,
+    "color": {"r": 0, "g": 0, "b": 0},
+    "colorTemInKelvin": 2700,
+}
 
 
 def lamp_record(sku: str = TEST_MODEL) -> GoveeDeviceRecord:
@@ -65,6 +74,13 @@ def lamp_transport(
 
     transport.discover = discover
     return transport
+
+
+def send_times(transport: MagicMock) -> list[float]:
+    """When each message goes through the transport from now on (`time.monotonic()`)."""
+    times: list[float] = []
+    transport.send_command.side_effect = lambda *_: times.append(time.monotonic())
+    return times
 
 
 def sent(transport: MagicMock) -> list[dict[str, Any]]:

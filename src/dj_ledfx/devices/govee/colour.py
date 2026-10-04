@@ -24,5 +24,5 @@ class GoveeColourAdapter(GoveeAdapterBase):
 
     async def prepare_stream(self) -> None:
         """Out of razer, in case a look left the lamp there, then full brightness."""
-        await self._send(build_razer_switch(on=False))
+        await self._command(build_razer_switch(on=False))
         await super().prepare_stream()
