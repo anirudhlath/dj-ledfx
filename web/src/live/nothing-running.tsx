@@ -58,7 +58,8 @@ export function NothingRunning({ on, total, variant = 'desktop' }: NothingRunnin
                 />
                 <span className="flex min-w-0 grow flex-col gap-0.5">
                   <span className={phone ? 'font-serif text-[19px] leading-[1.1]' : 'font-serif text-display-xs'}>{look.lookName}</span>
-                  <span className={cx('truncate text-text-3', phone ? 'text-[11.5px]' : 'text-meta')}>
+                  {/* F3 decision 35: Goodnight's end shows, so a line too long for the row goes on to a second. */}
+                  <span className={cx('text-balance text-text-3', phone ? 'text-[11.5px]' : 'text-meta')}>
                     {look.zoneName} · {formatSpan(new Date(look.startedAt), new Date(look.stoppedAt), now)}
                   </span>
                 </span>

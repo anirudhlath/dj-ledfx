@@ -33,14 +33,22 @@ function renderPanel(name: ScenarioName | null, selected?: Id) {
 }
 
 const HEIGHT = { card: 300, compact: 200, row: 50 }
+const HINT_TEXT = 'or click a room in the home'
 
-/** jsdom lays nothing out: each zone is as tall as its shape says, and the scrolling box is `box.height`. */
-function layOut(box: { height: number }) {
+/**
+ * jsdom lays nothing out: each zone is as tall as its shape says. The room the scrolling box shares with the
+ * footer (which holds Put a look on) is `room.height`, and the box has all of it but `hint` while the footer's
+ * hint shows.
+ */
+function layOut(room: { height: number }, hint = 0) {
   vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
     const items = [...this.querySelectorAll<HTMLElement>('[data-shape]')]
     return items.reduce((sum, item) => sum + HEIGHT[item.dataset.shape as keyof typeof HEIGHT], 0)
   })
-  vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(() => box.height)
+  vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
+    const shown = document.body.textContent?.includes(HINT_TEXT) === true
+    return this.querySelector('a[href="/live/put"]') !== null || !shown ? room.height : room.height - hint
+  })
 }
 
 /** Each zone's shape, by its name. */
@@ -65,7 +73,7 @@ describe('RunningPanel', () => {
       'Whole home — Home sunset',
     ])
     expect(within(panel).getByRole('link', { name: 'Put a look on' })).toHaveAttribute('href', '/live/put')
-    expect(within(panel).getByText('or click a room in the home')).toBeInTheDocument()
+    expect(within(panel).getByText(HINT_TEXT)).toBeInTheDocument()
   })
 
   // State-Problems; F3 decision 2.
@@ -82,10 +90,32 @@ describe('RunningPanel', () => {
       'Bedroom — Sunset': 'row',
     })
     expect(within(panel).getByRole('link', { name: 'Bedroom — Sunset' })).toHaveAttribute('href', '/live/zones/bedroom')
-    expect(within(panel).queryByText('or click a room in the home')).toBeNull()
+    expect(within(panel).queryByText(HINT_TEXT)).toBeNull()
     box.height = 2_000
     settle(1)
     expect(new Set(Object.values(shapes(panel)))).toEqual(new Set(['card']))
+  })
+
+  // Main.png at 1440 × 900: its three cards fit once the footer's hint goes (F3 decision 34). The box the hint
+  // gives back is no reason to start again from the hint, which would squeeze the cards and bring it back.
+  it('drops the hint before it squeezes a card, and keeps still once the cards fit', () => {
+    layOut({ height: 3 * HEIGHT.card + 10 }, 30)
+    const panel = renderPanel('hero')
+    expect(within(panel).getByText(HINT_TEXT)).toBeInTheDocument()
+    settle(3)
+    expect(new Set(Object.values(shapes(panel)))).toEqual(new Set(['card']))
+    expect(within(panel).queryByText(HINT_TEXT)).toBeNull()
+    settle(2)
+    expect(new Set(Object.values(shapes(panel)))).toEqual(new Set(['card']))
+  })
+
+  // State-Firmware: the breakdown takes the hint's place, so there's no hint to drop first.
+  it('goes straight to compact cards when there is no hint to drop', () => {
+    layOut({ height: 100 })
+    const panel = renderPanel('firmware')
+    expect(within(panel).queryByText(HINT_TEXT)).toBeNull()
+    settle(1)
+    expect(new Set(Object.values(shapes(panel)))).toEqual(new Set(['compact']))
   })
 
   // Live-Doorbell: the overlay over everything comes first.
@@ -109,8 +139,11 @@ describe('RunningPanel', () => {
       'FirefliesLiving room · yesterday 21:10 – 23:31',
       'Home sunsetWhole home · yesterday 18:02 – 23:31',
     ])
+    // Decision 35: Goodnight's end shows, so a line too long for its row goes on to a second, balanced, rather than lose its end.
+    expect(within(list).getByText('Whole home · yesterday 23:31 – today 07:00')).not.toHaveClass('truncate')
+    expect(within(list).getByText('Whole home · yesterday 23:31 – today 07:00')).toHaveClass('text-balance')
     expect(within(panel).queryByRole('button', { name: 'Stop all' })).toBeNull()
-    expect(within(panel).queryByText('or click a room in the home')).toBeNull()
+    expect(within(panel).queryByText(HINT_TEXT)).toBeNull()
     await userEvent.click(within(list).getByRole('button', { name: 'Start Goodnight on Whole home again' }))
     expect(start).toHaveBeenCalledWith('home', { lookId: 'goodnight' })
   })

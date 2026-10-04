@@ -271,16 +271,21 @@ export function transitionView(transition: ZoneTransition | null | undefined): T
   return { from: transition.from, label: said, progress: clamp01(transition.progress), durationS }
 }
 
+/** A running zone's lights that REST knows, each with its state, in the zone's order. */
+export function zoneLights(running: RunningZone, world: ZoneWorld): SwatchLight[] {
+  return running.lights.flatMap((id) => {
+    const light = world.lights.get(id)
+    const state = world.states.get(id)
+    return light === undefined || state === undefined ? [] : [{ light, state }]
+  })
+}
+
 /** What a card says about a running zone; `compact` is F3 decision 2's compact card. */
 export function zoneView(running: RunningZone, world: ZoneWorld, now: Date, compact = false): ZoneView {
   const zone = world.zones.get(running.zoneId)
   const look = world.looks.get(running.lookId)
   const name = zone?.name ?? running.zoneId
-  const lights = running.lights.flatMap((id) => {
-    const light = world.lights.get(id)
-    const state = world.states.get(id)
-    return light === undefined || state === undefined ? [] : [{ light, state }]
-  })
+  const lights = zoneLights(running, world)
   return {
     zoneId: running.zoneId,
     name,

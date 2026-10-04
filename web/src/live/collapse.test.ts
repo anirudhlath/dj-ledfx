@@ -16,20 +16,25 @@ describe('the collapse', () => {
     expect(ids(rowOrder(problems))).toEqual(['bedroom', 'office', 'living', 'kitchen'])
     expect(ids(rowOrder(problems, 'bedroom'))).toEqual(['office', 'living', 'kitchen', 'bedroom'])
     expect(shapes(0)).toEqual({ office: 'card', kitchen: 'card', living: 'card', bedroom: 'card' })
-    expect(shapes(1)).toEqual({ office: 'compact', kitchen: 'compact', living: 'compact', bedroom: 'compact' })
-    expect(shapes(3)).toEqual({ office: 'row', kitchen: 'compact', living: 'compact', bedroom: 'row' })
-    expect(shapes(4)).toEqual({ office: 'row', kitchen: 'compact', living: 'row', bedroom: 'row' })
-    expect(shapes(9, 'bedroom')).toEqual({ office: 'row', kitchen: 'row', living: 'row', bedroom: 'compact' })
+    // Step 1 drops only the footer's hint (F3 decision 34).
+    expect(shapes(1)).toEqual(shapes(0))
+    expect(shapes(2)).toEqual({ office: 'compact', kitchen: 'compact', living: 'compact', bedroom: 'compact' })
+    expect(shapes(4)).toEqual({ office: 'row', kitchen: 'compact', living: 'compact', bedroom: 'row' })
+    expect(shapes(5)).toEqual({ office: 'row', kitchen: 'compact', living: 'row', bedroom: 'row' })
+    expect(shapes(10, 'bedroom')).toEqual({ office: 'row', kitchen: 'row', living: 'row', bedroom: 'compact' })
     expect(collapseKey(problems)).not.toBe(collapseKey(problems, 'bedroom'))
     expect(shapesAt([], 3).size).toBe(0)
   })
 
-  it('takes one step at a time while the zones overflow, and starts again from cards when the box changes', () => {
-    expect(nextStep(0, { boxChanged: false, overflows: true, last: 4 })).toBe(1)
-    expect(nextStep(3, { boxChanged: false, overflows: true, last: 4 })).toBe(4)
-    expect(nextStep(4, { boxChanged: false, overflows: true, last: 4 })).toBe(4)
-    expect(nextStep(2, { boxChanged: false, overflows: false, last: 4 })).toBe(2)
-    expect(nextStep(3, { boxChanged: true, overflows: true, last: 4 })).toBe(0)
-    expect(nextStep(0, { boxChanged: true, overflows: true, last: 4 })).toBe(1)
+  it('takes one step at a time while the zones overflow, the hint first, and starts again from cards when the room changes', () => {
+    const overflowing = { roomChanged: false, overflows: true, last: 5, hint: true }
+    expect(nextStep(0, overflowing)).toBe(1)
+    // No hint to drop (a frozen panel, a firmware breakdown): the cards go compact at once.
+    expect(nextStep(0, { ...overflowing, hint: false })).toBe(2)
+    expect(nextStep(4, overflowing)).toBe(5)
+    expect(nextStep(5, overflowing)).toBe(5)
+    expect(nextStep(2, { ...overflowing, overflows: false })).toBe(2)
+    expect(nextStep(3, { ...overflowing, roomChanged: true })).toBe(0)
+    expect(nextStep(0, { ...overflowing, roomChanged: true })).toBe(1)
   })
 })
