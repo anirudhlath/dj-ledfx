@@ -13,8 +13,8 @@ Beat-synced LED effect engine driven by Pro DJ Link network data with per-device
 - Use context7 to check latest docs and for external dependencies.
 - Add claude md skill as a task to improve and revise claude context, memories etc.
 - Finally create a PR with the changes.
-- Don't put code-architect reviews or /simplify in plans as tasks. Run them once, on the plan's PR after it opens: a @feature-dev:code-architect review and /simplify. Fix every issue they raise and push the fixes to the PR.
-- Only a plan's PR gets those reviews. A fix or small change made without a plan skips them: its PR follows a passing gate.
+- Run a @feature-dev:code-architect review or /simplify only when the owner asks for one. Never run one on your own, and never put one in a plan as a task. Fix every issue a requested review raises and push the fixes to the PR.
+- A plan's run ends with /executing-plans' own final review of the whole branch. A fix or small change made without a plan needs only a passing gate before its PR.
 
 ## Redesign in Progress
 
