@@ -98,7 +98,7 @@ async def export_toml(db: StateDB) -> str:
             if device.get("last_latency_ms") is not None:
                 entry["last_latency_ms"] = device["last_latency_ms"]
             if device.get("extra"):
-                entry["extra"] = device["extra"]  # JSON text: a Govee lamp's own output
+                entry["extra"] = device["extra"]  # JSON: a Govee output, an OpenRGB identity
             devices_doc[name] = entry
         doc["devices"] = devices_doc
 

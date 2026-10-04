@@ -95,7 +95,7 @@ class GoveeBackend(DeviceBackend):
             task = asyncio.create_task(_setup_device(record))
             setup_tasks.append(task)
 
-        await transport.discover(
+        heard = await transport.discover(
             timeout_s=govee.discovery_timeout_s,
             on_record=_on_record,
         )
@@ -104,7 +104,7 @@ class GoveeBackend(DeviceBackend):
         if setup_tasks:
             await asyncio.gather(*setup_tasks, return_exceptions=True)
 
-        if not results:
+        if not heard:  # not when every lamp that answered is online already
             logger.info("No Govee devices found — ensure LAN control is enabled in Govee app")
 
         return results

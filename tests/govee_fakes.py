@@ -69,8 +69,10 @@ def lamp_transport(
     transport.last_heard = MagicMock(return_value=None)  # never heard but by its reads
     transport.send_command = AsyncMock()
 
-    async def discover(timeout_s: float = 10.0, on_record: Any = None) -> None:
-        on_record(lamp_record(sku))
+    async def discover(timeout_s: float = 10.0, on_record: Any = None) -> list[Any]:
+        record = lamp_record(sku)
+        on_record(record)
+        return [record]  # the records the scan heard
 
     transport.discover = discover
     return transport

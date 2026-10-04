@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from openrgb_fakes import adapter_of
 
 from dj_ledfx.devices.capabilities import FirmwareRejected, LightReading, NoAnswer
 from dj_ledfx.devices.openrgb import HAS_BRIGHTNESS, HAS_PER_LED_COLOR, OpenRGBAdapter
@@ -38,11 +39,7 @@ def _device() -> MagicMock:
 
 
 async def _connected(device: MagicMock) -> OpenRGBAdapter:
-    with patch("dj_ledfx.devices.openrgb.OpenRGBClient") as client_cls:
-        client_cls.return_value = MagicMock(devices=[device])
-        adapter = OpenRGBAdapter(device_index=0)
-        await adapter.connect()
-    return adapter
+    return await adapter_of(device)
 
 
 async def test_connect_leaves_the_mode_alone() -> None:
