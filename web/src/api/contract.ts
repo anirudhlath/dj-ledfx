@@ -20,12 +20,6 @@ export type CreateGroup = Schemas['CreateGroup']
 export type UpdateGroup = Schemas['UpdateGroup']
 export type RunningZone = Schemas['RunningZone']
 export type Overlay = Schemas['Overlay']
-/**
- * A zone's transition with its duration, which engine M4 serves (F3 decision 16). Until then the duration
- * is missing and the card says only the kind. contract.test.ts fails once the backend serves it: then this
- * becomes `NonNullable<RunningZone['transition']>`.
- */
-export type ZoneTransition = NonNullable<RunningZone['transition']> & { durationS?: number }
 export type Running = Schemas['Running']
 export type StartRequest = Schemas['StartRequest']
 export type StartResponse = Schemas['StartResponse']

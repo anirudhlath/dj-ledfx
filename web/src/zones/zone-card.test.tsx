@@ -76,7 +76,7 @@ describe('ZoneCard', () => {
     expect(within(card).getByText('100%')).toBeInTheDocument()
     cleanup()
     const held = renderCard('transition', 'living', {
-      change: (state) => (runningIn(state, 'living').transition = { from: 'Fireflies', kind: 'fade', progress: 0.25 }),
+      change: (state) => (runningIn(state, 'living').transition = { from: 'Fireflies', kind: 'fade', progress: 0.25, durationS: 0 }),
     })
     act(() => vi.advanceTimersByTime(600))
     expect(within(held).getByText('25%')).toBeInTheDocument()

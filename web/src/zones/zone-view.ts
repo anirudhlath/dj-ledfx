@@ -12,9 +12,9 @@ import type {
   Look,
   Overlay,
   RunningZone,
+  RunningZoneTransition,
   TempoSource,
   Zone,
-  ZoneTransition,
 } from '@/api/contract'
 import type { IconName } from '@/design/icons'
 import { formatDuration, formatList, formatTime } from '@/lib/format'
@@ -123,7 +123,7 @@ const BEAT: Record<TempoSource, string> = {
 }
 
 /** A transition's kind: the card's bar says its label, the stage's tag what it's doing (State-Transition). */
-export const TRANSITION: Record<ZoneTransition['kind'], { label: string; doing: string }> = {
+export const TRANSITION: Record<RunningZoneTransition['kind'], { label: string; doing: string }> = {
   cut: { label: 'Cut', doing: 'cutting' },
   fade: { label: 'Fade', doing: 'fading' },
   wipe: { label: 'Wipe', doing: 'wiping' },
@@ -262,7 +262,7 @@ function firmwareNote(lights: readonly SwatchLight[]): ZoneNote | null {
 }
 
 /** A served transition as the card and the stage's tag say it; null without one. */
-export function transitionView(transition: ZoneTransition | null | undefined): TransitionView | null {
+export function transitionView(transition: RunningZoneTransition | null | undefined): TransitionView | null {
   if (transition == null) return null
   const { label } = TRANSITION[transition.kind]
   // A duration that isn't above zero (or isn't a number) says nothing.

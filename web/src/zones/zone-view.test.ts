@@ -106,7 +106,7 @@ describe('zoneView', () => {
   it("shows a transition's kind, its duration when the server sends one, and its progress", () => {
     expect(viewOf('transition', 'living').transition).toEqual({ from: 'Fireflies', label: 'Dissolve · 3 s', progress: 0.62, durationS: 3 })
     const unsaid = viewOf('transition', 'living', {
-      change: (state) => (runningIn(state, 'living').transition = { from: 'Fireflies', kind: 'fade', progress: 0.25 }),
+      change: (state) => (runningIn(state, 'living').transition = { from: 'Fireflies', kind: 'fade', progress: 0.25, durationS: 0 }),
     })
     expect(unsaid.transition).toEqual({ from: 'Fireflies', label: 'Fade', progress: 0.25, durationS: null })
   })
