@@ -27,7 +27,7 @@ describe('the collapse', () => {
   })
 
   it('takes one step at a time while the zones overflow, the hint first, and starts again from cards when the room changes', () => {
-    const overflowing = { roomChanged: false, overflows: true, last: 5, hint: true }
+    const overflowing = { roomChanged: false, shrank: false, overflows: true, last: 5, hint: true }
     expect(nextStep(0, overflowing)).toBe(1)
     // No hint to drop (a frozen panel, a firmware breakdown): the cards go compact at once.
     expect(nextStep(0, { ...overflowing, hint: false })).toBe(2)
@@ -36,5 +36,14 @@ describe('the collapse', () => {
     expect(nextStep(2, { ...overflowing, overflows: false })).toBe(2)
     expect(nextStep(3, { ...overflowing, roomChanged: true })).toBe(0)
     expect(nextStep(0, { ...overflowing, roomChanged: true })).toBe(1)
+  })
+
+  // §8.1 collapses only "if more zones run than fit": a list that grows shorter at the same step (an overlay or
+  // a transition's bar that ends) may fit as cards again.
+  it('starts again from cards when the list grows shorter at the same step', () => {
+    const fits = { roomChanged: false, shrank: true, overflows: false, last: 5, hint: true }
+    expect(nextStep(4, fits)).toBe(0)
+    expect(nextStep(0, fits)).toBe(0)
+    expect(nextStep(0, { ...fits, overflows: true })).toBe(1)
   })
 })

@@ -4,10 +4,11 @@
 // a row (k - 2 rows), in rowOrder: healthy zones oldest first, then troubled ones (crashed, slow, waiting),
 // then the selected one. The last of rowOrder always stays a card. The panel measures its scrolling box
 // whenever the box, the list in it or the room the box shares with the footer resizes, and takes one step
-// while the list overflows. A room that changes size, or zones that change, start again from cards; the box
-// alone doesn't, since the hint's going gives it the hint's room (Main.png's cards fit only then). Pure
-// parts first, then the hook.
-import { useEffect, useState } from 'react'
+// while the list overflows. A room that changes size, zones that change, and a list that grows shorter while
+// the step stays (an overlay or a transition's bar that ends, a note that goes) start again from cards: what
+// went may have made the room they need. The box alone doesn't, since the hint's going gives it the hint's
+// room (Main.png's cards fit only then), nor does a step's own shrinking. Pure parts first, then the hook.
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Id, RunningZone } from '@/api/contract'
 
 export type ZoneShape = 'card' | 'compact' | 'row'
@@ -39,6 +40,8 @@ export function collapseKey(newestFirst: readonly RunningZone[], selected?: Id):
 export interface Measure {
   /** The room the scrolling box shares with the footer changed height since the last measure. */
   roomChanged: boolean
+  /** The list grew shorter since the last measure, at the same step: something in it went. */
+  shrank: boolean
   /** The list is taller than the box. */
   overflows: boolean
   /** The last step: the number of zones, plus the hint's step. */
@@ -47,8 +50,8 @@ export interface Measure {
   hint: boolean
 }
 
-export function nextStep(step: number, { roomChanged, overflows, last, hint }: Measure): number {
-  if (roomChanged && step > 0) return 0
+export function nextStep(step: number, { roomChanged, shrank, overflows, last, hint }: Measure): number {
+  if ((roomChanged || shrank) && step > 0) return 0
   if (!overflows || step >= last) return step
   return step === 0 && !hint ? Math.min(HINT_STEP + 1, last) : step + 1
 }
@@ -73,15 +76,27 @@ export function useCollapse(key: string, zones: number, hint: boolean): Collapse
   const [box, setBox] = useState<HTMLElement | null>(null)
   const [list, setList] = useState<HTMLElement | null>(null)
   const last = zones + HINT_STEP
+  const step = state.key === key ? state.step : 0
+  // The step the list is drawn at, for the measures, which come after the layout.
+  const drawn = useRef(step)
+  useLayoutEffect(() => {
+    drawn.current = step
+  }, [step])
   useEffect(() => {
     if (room === null || box === null || list === null) return
     let roomHeight = room.clientHeight
-    // Fires when the room or the box resizes, and when a step changes the list's or the box's height: one
-    // step a time.
+    let listHeight = list.scrollHeight
+    let listStep = drawn.current
+    // Fires when the room or the box resizes, and when a step or what's in the list changes the list's or the
+    // box's height: one step a time.
     const observer = new ResizeObserver(() => {
       const height = room.clientHeight
-      const measure = { roomChanged: height !== roomHeight, overflows: box.scrollHeight > box.clientHeight, last, hint }
+      const content = list.scrollHeight
+      const shrank = drawn.current === listStep && content < listHeight
+      const measure = { roomChanged: height !== roomHeight, shrank, overflows: box.scrollHeight > box.clientHeight, last, hint }
       roomHeight = height
+      listHeight = content
+      listStep = drawn.current
       setState((current) => {
         const step = nextStep(current.step, measure)
         return step === current.step ? current : { ...current, step }
@@ -92,5 +107,5 @@ export function useCollapse(key: string, zones: number, hint: boolean): Collapse
     observer.observe(list)
     return () => observer.disconnect()
   }, [room, box, list, last, hint])
-  return { room: setRoom, box: setBox, list: setList, listElement: list, step: state.key === key ? state.step : 0 }
+  return { room: setRoom, box: setBox, list: setList, listElement: list, step }
 }

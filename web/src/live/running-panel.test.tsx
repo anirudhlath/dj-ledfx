@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Id } from '@/api/contract'
+import { liveStore } from '@/api/live-store'
 import type { ScenarioName } from '@/api/mocks/scenarios'
 import { queryClient } from '@/api/queries'
 import { api, ApiError } from '@/api/rest'
@@ -33,17 +34,24 @@ function renderPanel(name: ScenarioName | null, selected?: Id) {
 }
 
 const HEIGHT = { card: 300, compact: 200, row: 50 }
+/** An overlay's card, and a transition's bar in a zone's card. */
+const OVERLAY = 150
+const BAR = 40
 const HINT_TEXT = 'or click a room in the home'
 
 /**
- * jsdom lays nothing out: each zone is as tall as its shape says. The room the scrolling box shares with the
- * footer (which holds Put a look on) is `room.height`, and the box has all of it but `hint` while the footer's
- * hint shows.
+ * jsdom lays nothing out: each zone is as tall as its shape says, with its transition's bar, and each overlay
+ * OVERLAY. The room the scrolling box shares with the footer (which holds Put a look on) is `room.height`, and
+ * the box has all of it but `hint` while the footer's hint shows.
  */
 function layOut(room: { height: number }, hint = 0) {
   vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
     const items = [...this.querySelectorAll<HTMLElement>('[data-shape]')]
-    return items.reduce((sum, item) => sum + HEIGHT[item.dataset.shape as keyof typeof HEIGHT], 0)
+    const overlays = this.querySelectorAll('article[aria-label$=" over everything"]').length
+    return items.reduce(
+      (sum, item) => sum + HEIGHT[item.dataset.shape as keyof typeof HEIGHT] + (item.querySelector('[role="progressbar"]') === null ? 0 : BAR),
+      overlays * OVERLAY,
+    )
   })
   vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
     const shown = document.body.textContent?.includes(HINT_TEXT) === true
@@ -123,6 +131,32 @@ describe('RunningPanel', () => {
     const panel = renderPanel('doorbell')
     expect(within(panel).getByText('3 zones + 1 overlay')).toBeInTheDocument()
     expect(within(panel).getAllByRole('article')[0]).toHaveAccessibleName('Doorbell ripple over everything')
+  })
+
+  // §8.1 collapses only "if more zones run than fit": what an overlay took, its end gives back.
+  it('brings the cards back when an overlay ends', () => {
+    layOut({ height: 3 * HEIGHT.card + 10 })
+    const panel = renderPanel('doorbell')
+    settle(3)
+    expect(new Set(Object.values(shapes(panel)))).toEqual(new Set(['compact']))
+    act(() => liveStore.setState(({ running }) => ({ running: { ...running!, overlays: [] } })))
+    settle(2)
+    expect(new Set(Object.values(shapes(panel)))).toEqual(new Set(['card']))
+  })
+
+  // State-Transition: and what a transition's bar took, its end gives back.
+  it('brings the cards back when a transition ends', () => {
+    layOut({ height: 3 * HEIGHT.card + 10 })
+    const panel = renderPanel('transition')
+    settle(3)
+    expect(new Set(Object.values(shapes(panel)))).not.toEqual(new Set(['card']))
+    act(() =>
+      liveStore.setState(({ running }) => ({
+        running: { ...running!, zones: running!.zones.map((zone) => ({ ...zone, state: 'running' as const, transition: null })) },
+      })),
+    )
+    settle(2)
+    expect(new Set(Object.values(shapes(panel)))).toEqual(new Set(['card']))
   })
 
   // State-Nothing-Running; §9.4; F3 decision 35.
