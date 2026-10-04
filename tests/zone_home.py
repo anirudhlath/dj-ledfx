@@ -71,12 +71,14 @@ class FakeHost:
 
 
 class FakeRoutes:
-    """Stands in for the scheduler: it keeps each light's route, and sends a frame down
-    every streaming route whenever the app asks a light something (send_frames), as the
-    real scheduler does while the zone manager awaits."""
+    """Stands in for the scheduler: it keeps each light's route, and every route set in
+    order (`history`), and sends a frame down every streaming route whenever the app asks a
+    light something (send_frames), as the real scheduler does while the zone manager
+    awaits."""
 
     def __init__(self, lights: Mapping[str, FakeLight]) -> None:
         self.routes: dict[str, DeviceRoute] = {}
+        self.history: list[tuple[str, DeviceRoute | None]] = []
         self._lights = lights
 
     def send_frames(self) -> None:
@@ -87,6 +89,7 @@ class FakeRoutes:
             light.receive_frame(np.zeros((light.led_count, 3), dtype=np.uint8))
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None:
+        self.history.append((device_id, route))
         if route is None:
             self.routes.pop(device_id, None)
         else:

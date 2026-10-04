@@ -1069,15 +1069,21 @@ class ZoneManager:
     async def _sync(self, device_ids: Iterable[str], power_on: Iterable[str] = ()) -> None:
         """Bring each light in line with the zone that owns it, or release it.
 
-        The lights about to get a look are read and, the first time, captured, all at once;
-        the new captures are saved in one transaction before any light is changed (spec
-        §4.3). Then every light is applied or released at once, and the released lights'
-        captures are forgotten together.
+        A light already readied for the look that owns it now (it streams in this look as
+        in the one before) is routed to that look at once, before any light is read, so a
+        start or a take-over never pauses its frames. The lights about to get a look are
+        read and, the first time, captured, all at once; the new captures are saved in one
+        transaction before any light is changed (spec §4.3). Then every light is applied or
+        released at once, and the released lights' captures are forgotten together.
         """
         wanted = set(power_on)
         if self._preview_only:
             self._deferred_power_on |= wanted  # applied when preview-only is turned off
         ids = list(dict.fromkeys(device_ids))
+        for device_id in ids:
+            runtime = self._runtime_of(device_id)
+            if runtime is not None and self._ready(device_id, runtime):
+                self._publish(device_id, runtime)
         captured = await self._each(ids, lambda d: self._look_at(d, d in wanted))
         new = {d: state for d, state in zip(ids, captured, strict=True) if state is not None}
         if new:
@@ -1162,10 +1168,14 @@ class ZoneManager:
         light for this runtime, and never while preview-only is on; the web preview gets
         every routed slice either way."""
         route = runtime.route_for(device_id)
-        ready = self._applied.get(device_id) == runtime.applied_key(device_id)
+        ready = self._ready(device_id, runtime)
         if route is not None and route.streaming and (self._preview_only or not ready):
             route = replace(route, streaming=False)
         self._routes.set_route(device_id, route)
+
+    def _ready(self, device_id: str, runtime: ZoneRuntime) -> bool:
+        """Whether the light was last given what this runtime gives it (applied_key)."""
+        return self._applied.get(device_id) == runtime.applied_key(device_id)
 
     async def _apply(self, device_id: str, adapter: DeviceAdapter, runtime: ZoneRuntime) -> None:
         """Start the light's firmware layer, or get it ready to stream, once per change."""

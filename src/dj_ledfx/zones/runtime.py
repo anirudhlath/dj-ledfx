@@ -9,7 +9,7 @@ from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple
 
 import numpy as np
 from loguru import logger
@@ -66,16 +66,18 @@ ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5
 # running look shows within the horizon (≤120 ms).
 HORIZON_CAP_S = 0.12
 
-# Process-wide, so a light applied for one runtime always sees another look as new; only a
-# twin shares its runtime's generation, on purpose (twin()).
+# Process-wide, so a light running one runtime's firmware effect always sees another look's
+# as new; only a twin shares its runtime's generation, on purpose (twin()).
 _GENERATIONS = itertools.count(1)
 
 ZoneState = Literal["running", "slow", "crashed", "waiting", "transition"]
 LightMode = Literal["streaming", "own-effect", "streamed-copy"]
-# What a light was last given: the generation of the look it follows (twins share their
-# runtime's), and the firmware layer it runs with the brightness that started it (both None:
-# it streams).
-AppliedKey = tuple[int, str | None, float | None]
+# What a light was last given: STREAMS while it takes a zone's frames, whichever look draws
+# them, so a light readied to stream stays ready through starts, take-overs and
+# transitions; else the generation of the look whose firmware layer it runs (twins share
+# their runtime's), that layer, and the brightness that started it.
+STREAMS: Final = "streams"
+AppliedKey = Literal["streams"] | tuple[int, str, float]
 
 
 def _finite(colors: FloatRGB) -> FloatRGB:
@@ -327,15 +329,16 @@ class ZoneRuntime:
         return None if index is None else holder._firmware[index][1].display_name
 
     def applied_key(self, device_id: str) -> AppliedKey:
-        """What the light is given once its zone's look is applied: the generation of the
-        look it follows, and the firmware layer it runs there with the brightness it starts
-        at (None, None: it streams). The zone manager applies the light again whenever this
-        changes, so a new brightness or cap starts the firmware effects again, and only
-        those."""
-        holder = self._holder(device_id)
+        """What the light is given once its zone's look is applied: STREAMS when it takes
+        the zone's frames, whatever look they're from, so a light that streams in one look
+        and the next is never readied again; else the generation of the look it follows,
+        and the firmware layer it runs there with the brightness it starts at. The zone
+        manager applies the light again whenever this changes, so a new brightness or cap
+        starts the firmware effects again, and only those."""
         claim = self.claim_for(device_id)
         if claim is None:
-            return holder.generation, None, None
+            return STREAMS
+        holder = self._holder(device_id)
         return holder.generation, claim[0].id, holder._firmware_brightness
 
     def start_brightness(self, device_id: str) -> float:
