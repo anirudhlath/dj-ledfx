@@ -10,7 +10,14 @@ from api_home import Api, api_home
 from conftest import FakeLight
 from map_home import IN_THE_DESK_CORNER, tiny_home
 
-from dj_ledfx.looks.model import Look
+from dj_ledfx.looks.model import (
+    HeightMask,
+    Look,
+    LookModifiers,
+    Mirror,
+    Transform,
+    Transition,
+)
 from dj_ledfx.zones.model import ZoneRecord
 
 DESK = ZoneRecord(id="desk", name="Desk", lights=("a",))
@@ -43,6 +50,38 @@ async def test_restore_brings_back_zones_looks_stars_and_what_ran(tmp_path: Path
         assert running == [("desk", mine.id, 0.5)]
         assert "desk" in new.home.host.runtimes
         assert [p["name"] for p in await new.home.db.load_presets()] == ["Slow"]
+
+
+# Spec §2: each milestone extends backup and restore to the data it adds. M4's lives in the
+# looks: their layer modifiers, look modifiers and transitions.
+async def test_a_backup_carries_a_looks_modifiers_and_transition(tmp_path: Path) -> None:
+    (tmp_path / "old").mkdir()
+    (tmp_path / "new").mkdir()
+    async with api_home(tmp_path / "old", [FakeLight("a")], [DESK]) as old:
+        breathe = _mine(old)
+        layer = replace(
+            breathe.layers[0],
+            mask=HeightMask(0.5, 1.5),
+            mirror=Mirror("y", 2.0),
+            transform=Transform(offset=(1.0, 0.0, 0.0), rotate_deg=45.0, scale=2.0),
+        )
+        mine = await old.home.looks.create(
+            replace(
+                breathe,
+                layers=(layer,),
+                modifiers=LookModifiers(0.5, True, 0.6, True),
+                transition=Transition(kind="dissolve", duration_s=3.0),
+            )
+        )
+        backup = (await old.client.get("/api/state/export")).text
+
+    async with api_home(tmp_path / "new", [FakeLight("a")], []) as new:
+        resp = await new.client.post("/api/state/import", content=backup)
+
+        assert resp.status_code == 200
+        restored = new.home.looks.get(mine.id)
+        assert restored.layers == mine.layers
+        assert (restored.modifiers, restored.transition) == (mine.modifiers, mine.transition)
 
 
 # B6: a restored look is applied as a start is: its lights end up on and running.

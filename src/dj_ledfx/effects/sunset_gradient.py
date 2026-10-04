@@ -14,9 +14,8 @@ from numpy.typing import NDArray
 
 from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import height01
+from dj_ledfx.effects.field_tools import height01, reach
 from dj_ledfx.effects.params import EffectParam, level_param
-from dj_ledfx.spatial.mapping import RadialMapping
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -80,9 +79,7 @@ class SunsetGradient(ParamField):
         values = self._values
         along = height01(leds) ** np.float32(2.0 ** (2.0 * float(values["warmth"]) - 1.0))
         sun = leds.anchors.get(values["anchor"]) if values["anchor"] else None
-        if sun is not None:
-            centre = (float(sun[0]), float(sun[1]), float(sun[2]))
-            reach = RadialMapping(center=centre).map_positions(leds.pos.astype(np.float64))
-            if reach.any():  # every LED at the sun: nothing to cool
-                along = ((1.0 - ANCHOR_SHARE) * along + ANCHOR_SHARE * reach).astype(np.float32)
+        shares = None if sun is None else reach(leds, sun)
+        if shares is not None and shares.any():  # every LED at the sun: nothing to cool
+            along = ((1.0 - ANCHOR_SHARE) * along + ANCHOR_SHARE * shares).astype(np.float32)
         return along

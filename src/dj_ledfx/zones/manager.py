@@ -38,19 +38,28 @@ from dj_ledfx.zones.model import (
     DERIVED_KINDS,
     Assignment,
     CrashInfo,
+    LightsChanged,
     PreviewOnlyChanged,
     RecentLookInfo,
     RunningZoneInfo,
     StartResult,
     StoppedLook,
     TakeOver,
+    TransitionSwitched,
     ZoneError,
     ZoneNotFoundError,
     ZoneNotRunningError,
     ZoneRecord,
     ZonesChanged,
 )
-from dj_ledfx.zones.runtime import LightMode, ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import (
+    STREAMS,
+    AppliedKey,
+    LightMode,
+    RuntimeEnv,
+    ZoneLight,
+    ZoneRuntime,
+)
 from dj_ledfx.zones.store import new_group_id
 
 if TYPE_CHECKING:
@@ -59,16 +68,13 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.field import FieldEffect
     from dj_ledfx.effects.ledset import Space
     from dj_ledfx.events import EventBus
-    from dj_ledfx.looks.model import Look
+    from dj_ledfx.looks.model import Look, Transition
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.scheduling.route import DeviceRoute
     from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.zones.store import ZoneStore
 
-# What a light was last given: its runtime's generation (unique across runtimes) and the
-# firmware layer it runs (None: it streams).
-AppliedKey = tuple[int, str | None]
 T = TypeVar("T")
 
 
@@ -86,11 +92,9 @@ class RouteTable(Protocol):
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None: ...
 
-
-def _applied_key(runtime: ZoneRuntime, device_id: str) -> AppliedKey:
-    """What a light is given once its zone's look is applied to it."""
-    claim = runtime.claim_for(device_id)
-    return runtime.generation, claim[0].id if claim is not None else None
+    async def send_now(self, device_id: str) -> None:
+        """Send a streaming light its frame for now at once, ahead of its send loop."""
+        ...
 
 
 def _brightness_of(running: _Running) -> float:
@@ -148,6 +152,7 @@ class ZoneManager:
         now: Callable[[], datetime] = utcnow,
         home: HomeView = NO_HOME,
         frames_watched: Callable[[], bool] = lambda: True,
+        evening: Callable[[], float] = lambda: 0.0,
     ) -> None:
         self._store = store
         self._looks = looks
@@ -156,15 +161,24 @@ class ZoneManager:
         self._host = host
         self._routes = routes
         self._event_bus = event_bus
-        self._clock = clock
-        self._fps = fps
-        self._max_lookahead_s = max_lookahead_s
         self._preview_only = preview_only
         self._now = now
         self._home = home
-        # Whether anyone watches the live stream: zones draw lights that run their own
-        # effect only then (M1 review, constraint 3). main passes Watchers.watching_live.
-        self._frames_watched = frames_watched
+        # What every zone's runtime reads. `frames_watched`: whether anyone watches the live
+        # stream, so zones draw lights that run their own effect only then (M1 review,
+        # constraint 3; main passes Watchers.watching_live). `evening`: how far into the
+        # evening it is, for looks that follow it.
+        self._env = RuntimeEnv(
+            clock=clock,
+            latency_s=self._latency_s,
+            fps=fps,
+            max_lookahead_s=max_lookahead_s,
+            now=now,
+            watched=frames_watched,
+            evening=evening,
+            on_state_change=self._state_changed,
+            on_switch=self._switch_due,
+        )
         self._zones: dict[str, ZoneRecord] = {}
         self._running: dict[str, _Running] = {}
         self._captured: dict[str, bytes] = {}  # b"": control taken, nothing captured
@@ -288,11 +302,14 @@ class ZoneManager:
 
     # --- commands ---------------------------------------------------------------------
 
-    async def start(self, zone_id: str, look: Look) -> StartResult:
-        """Put a look on a zone. It takes its lights over from running zones (spec §4.3)."""
+    async def start(
+        self, zone_id: str, look: Look, transition: Transition | None = None
+    ) -> StartResult:
+        """Put a look on a zone. It takes its lights over from running zones (spec §4.3),
+        with the transition asked for, or else the look's own (spec §5.3)."""
         validate_look(look)
         async with self._lock:
-            result = await self._start(zone_id, look)
+            result = await self._start(zone_id, look, transition)
         self._event_bus.emit(ZonesChanged())
         return result
 
@@ -454,7 +471,7 @@ class ZoneManager:
                 or self._power.get(device_id) is False
             ):
                 return
-            key = _applied_key(runtime, device_id)
+            key = runtime.applied_key(device_id)
             if self._applied.get(device_id) != key:
                 await self._sync([device_id])
                 return
@@ -524,9 +541,8 @@ class ZoneManager:
             raise ZoneError(f"{zone.name} has no lights")
         running = self._running.get(zone_id)
         brightness = _brightness_of(running) if running is not None else 1.0
-        runtime = self._new_runtime(
-            zone_id, look, lights, brightness, latency_s=lambda _: None, watched=lambda: True
-        )
+        env = replace(self._env, latency_s=lambda _: None, watched=lambda: True)
+        runtime = self._new_runtime(zone_id, look, lights, brightness, env)
         self._previews[runtime] = on_end
         self._host.add_runtime(runtime)
         return runtime
@@ -765,12 +781,17 @@ class ZoneManager:
             raise ZoneNotRunningError(f"{zone.name} isn't running")
         return running
 
-    async def _start(self, zone_id: str, look: Look) -> StartResult:
+    async def _start(
+        self, zone_id: str, look: Look, transition: Transition | None = None
+    ) -> StartResult:
         validate_look(look)
         zone = self.get_zone(zone_id)
         lights = [light for light in zone.lights if self._adapter(light) is not None]
         if not lights:
             raise ZoneError(f"{zone.name} has no lights")
+        transition = look.transition if transition is None else transition
+        # What the lights show, read before any changes hands: only for a transition that plays.
+        sources = self._sources(zone_id, lights) if transition.plays else []
         take_overs = await self._take_over(zone_id, lights)
         previous: _Running | None = None
         stopped: list[StoppedLook] = []
@@ -778,6 +799,7 @@ class ZoneManager:
             previous, stopped = self._end_run(zone_id, remember=True)
         brightness = _brightness_of(previous) if previous is not None else 1.0
         runtime = self._new_runtime(zone_id, look, lights, brightness)
+        runtime.begin_transition(transition, sources)
         running = _Running(
             since=self._now(), lights=lights, runtime=runtime, members=tuple(lights)
         )
@@ -789,38 +811,72 @@ class ZoneManager:
         await self._sync([*lights, *released], power_on=lights)
         return StartResult(self._info(zone_id, running), tuple(take_overs))
 
+    def _sources(self, zone_id: str, lights: Sequence[str]) -> list[ZoneRuntime]:
+        """What a start's lights show now, for its transition (spec §5.3): the zone's own
+        runtime, and a twin of each zone it takes lights from (its runtime is about to lose
+        them). A crashed zone's lights fade in from black."""
+        owners = dict.fromkeys(
+            runtime
+            for light in lights
+            if (runtime := self._runtime_of(light)) is not None and runtime.crash is None
+        )
+        return [owner if owner.zone_id == zone_id else owner.twin() for owner in owners]
+
     def _new_runtime(
         self,
         zone_id: str,
         look: Look,
         lights: Iterable[str],
         brightness: float,
-        *,
-        latency_s: Callable[[str], float | None] | None = None,
-        watched: Callable[[], bool] | None = None,
+        env: RuntimeEnv | None = None,
     ) -> ZoneRuntime:
-        """A zone's runtime. A preview's passes its own latency (none) and watched (always:
-        it exists only to be watched)."""
+        """A zone's runtime. A preview passes its own env: no latency (nothing is sent)
+        and always watched (it exists only to be watched)."""
         return ZoneRuntime(
             zone_id,
             look,
             self._zone_lights(lights),
-            clock=self._clock,
-            latency_s=latency_s or self._latency_s,
-            fps=self._fps,
-            max_lookahead_s=self._max_lookahead_s,
+            env or self._env,
             brightness=brightness,
             space=self._home.space(),
-            now=self._now,
-            on_state_change=self._state_changed,
-            watched=watched or self._frames_watched,
         )
 
     def _state_changed(self, runtime: ZoneRuntime) -> None:
-        """A running zone crashed, turned slow or recovered by itself (spec §8)."""
+        """A running zone crashed, turned slow or recovered by itself (spec §8), or its
+        transition started, passed the midpoint or ended (spec §5.3)."""
         running = self._running.get(runtime.zone_id)
         if running is not None and running.runtime is runtime:  # not one still starting
             self._event_bus.emit(ZonesChanged())
+
+    def _switch_due(self, runtime: ZoneRuntime) -> None:
+        """Lights went over to a running zone's new look: its transition passed the midpoint,
+        or ended before it. main runs switch() for the zone (TransitionSwitched), a task of
+        its own that logs a failure. A transition that ended no longer shows the old look on
+        them, so a light the new look runs itself takes no frames until then."""
+        running = self._running.get(runtime.zone_id)
+        if running is None or running.runtime is not runtime:
+            return
+        if not runtime.transitioning:
+            for device_id in runtime.handing_over & set(running.lights):
+                if not runtime.streams(device_id):
+                    self._routes.set_route(device_id, runtime.route_for(device_id))
+        self._event_bus.emit(TransitionSwitched(runtime.zone_id))
+
+    async def switch(self, zone_id: str) -> None:
+        """The lights a running zone's transition held go over to its new look (spec
+        §5.3): each firmware effect starts, or the light streams. Until then a light the
+        new look runs itself shows the old look; it shows the new one once applied."""
+        async with self._lock:
+            running = self._running.get(zone_id)
+            runtime = running.runtime if running is not None else None
+            if running is None or runtime is None:
+                return
+            lights = [light for light in running.lights if light in runtime.handing_over]
+            if not lights:
+                return
+            await self._sync(lights)
+            runtime.handed_over(lights)
+        self._event_bus.emit(LightsChanged())
 
     def _rebuild_broken(self, zone_id: str, running: _Running) -> bool:
         """A zone whose saved look can't be read tries the look saved under its id."""
@@ -971,6 +1027,7 @@ class ZoneManager:
             waiting_for=runtime.waiting_for,
             slow_since=runtime.slow_since,
             covers=self._home.covers(running.lights),
+            transition=runtime.transition_info(),
         )
 
     # --- lights -----------------------------------------------------------------------
@@ -1023,15 +1080,21 @@ class ZoneManager:
     async def _sync(self, device_ids: Iterable[str], power_on: Iterable[str] = ()) -> None:
         """Bring each light in line with the zone that owns it, or release it.
 
-        The lights about to get a look are read and, the first time, captured, all at once;
-        the new captures are saved in one transaction before any light is changed (spec
-        §4.3). Then every light is applied or released at once, and the released lights'
-        captures are forgotten together.
+        A light already readied for the look that owns it now (it streams in this look as
+        in the one before) is routed to that look at once, before any light is read, so a
+        start or a take-over never pauses its frames. The lights about to get a look are
+        read and, the first time, captured, all at once; the new captures are saved in one
+        transaction before any light is changed (spec §4.3). Then every light is applied or
+        released at once, and the released lights' captures are forgotten together.
         """
         wanted = set(power_on)
         if self._preview_only:
             self._deferred_power_on |= wanted  # applied when preview-only is turned off
         ids = list(dict.fromkeys(device_ids))
+        for device_id in ids:
+            runtime = self._runtime_of(device_id)
+            if runtime is not None and self._ready(device_id, runtime):
+                self._publish(device_id, runtime)
         captured = await self._each(ids, lambda d: self._look_at(d, d in wanted))
         new = {d: state for d, state in zip(ids, captured, strict=True) if state is not None}
         if new:
@@ -1113,27 +1176,33 @@ class ZoneManager:
 
     def _publish(self, device_id: str, runtime: ZoneRuntime) -> None:
         """Route a light to its zone's frames. They're sent only once _apply has readied the
-        light for this runtime, and never while preview-only is on; the web preview gets
-        every routed slice either way."""
+        light for this runtime (a light leaving its own effect, from just before _apply
+        stops the effect), and never while preview-only is on; the web preview gets every
+        routed slice either way."""
         route = runtime.route_for(device_id)
-        applied = self._applied.get(device_id)
-        ready = applied is not None and applied[0] == runtime.generation
+        ready = self._ready(device_id, runtime)
         if route is not None and route.streaming and (self._preview_only or not ready):
             route = replace(route, streaming=False)
         self._routes.set_route(device_id, route)
 
+    def _ready(self, device_id: str, runtime: ZoneRuntime) -> bool:
+        """Whether the light was last given what this runtime gives it (applied_key)."""
+        return self._applied.get(device_id) == runtime.applied_key(device_id)
+
     async def _apply(self, device_id: str, adapter: DeviceAdapter, runtime: ZoneRuntime) -> None:
         """Start the light's firmware layer, or get it ready to stream, once per change."""
-        key = _applied_key(runtime, device_id)
-        if self._applied.get(device_id) == key:
+        key = runtime.applied_key(device_id)
+        before = self._applied.get(device_id)
+        if before == key:
             return
         claim = runtime.claim_for(device_id)
         if claim is not None:
             layer, effect = claim
             self._routes.set_route(device_id, runtime.route_for(device_id))  # stop frames first
+            brightness = runtime.start_brightness(device_id)
             try:
                 async with adapter.send_lock:
-                    await effect.start(adapter, effect.start_params(runtime.brightness))
+                    await effect.start(adapter, effect.start_params(brightness))
             except FirmwareRejected as exc:  # it can't run it: stream a copy (spec §8)
                 logger.warning(
                     "{} refused {} ({}); streaming a copy instead",
@@ -1143,7 +1212,7 @@ class ZoneManager:
                 )
                 runtime.mark_emulated(device_id)
                 claim = None
-                key = (runtime.generation, None)
+                key = runtime.applied_key(device_id)
             except Exception as exc:  # no answer: left unapplied, the next poll tries again
                 logger.warning(
                     "{} didn't start {} ({}); trying again at the next poll",
@@ -1152,12 +1221,31 @@ class ZoneManager:
                     exc,
                 )
                 return
-        if claim is None:
-            try:
-                await adapter.prepare_stream()
-            except Exception as exc:
-                logger.warning("Couldn't prepare {}: {}", adapter.device_info.name, exc)
+        if claim is None and before not in (None, STREAMS):  # it ran its own effect
+            await self._leave_effect(device_id, adapter, runtime)
+        elif claim is None:
+            await self._prepare(adapter)
         self._applied[device_id] = key
+
+    async def _leave_effect(
+        self, device_id: str, adapter: DeviceAdapter, runtime: ZoneRuntime
+    ) -> None:
+        """Take a light from its own effect to streaming so that it shows the look's rows
+        from the moment the effect stops. It's routed to them first and sent its frame at
+        once, just before the stop (a light that keeps colours sent while its effect runs
+        shows them as it stops) and again just after (one that doesn't gets them then,
+        not at its next due send). A light from anything else (idle, offline) is readied
+        before any frame reaches it: an effect of its own may be running."""
+        self._routes.set_route(device_id, runtime.route_for(device_id))
+        await self._routes.send_now(device_id)
+        await self._prepare(adapter)
+        await self._routes.send_now(device_id)
+
+    async def _prepare(self, adapter: DeviceAdapter) -> None:
+        try:
+            await adapter.prepare_stream()
+        except Exception as exc:
+            logger.warning("Couldn't prepare {}: {}", adapter.device_info.name, exc)
 
     async def _read(self, adapter: DeviceAdapter) -> LightReading:
         reading = await try_read(adapter)

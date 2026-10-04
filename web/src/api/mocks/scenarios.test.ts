@@ -120,7 +120,7 @@ describe('the other scenarios', () => {
     expect(living).toMatchObject({
       lookId: 'embers',
       state: 'transition',
-      transition: { from: lookName('fireflies'), kind: 'dissolve', progress: 0.62 },
+      transition: { from: lookName('fireflies'), kind: 'dissolve', progress: 0.62, durationS: 3 },
     })
   })
 

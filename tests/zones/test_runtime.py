@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import itertools
-from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, ClassVar
@@ -10,9 +9,20 @@ import numpy as np
 import pytest
 from conftest import builtin_look, nearest_frame, span
 from loguru import logger
+from runtime_fakes import (
+    BULB,
+    LAMP,
+    TILE,
+    FlatField,
+    field_layer,
+    glow_layer,
+    latest,
+    look_of,
+    runtime_of,
+    sent,
+)
 from tempo_fakes import START, FakeTime, tempo_clock
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext, render_context
 from dj_ledfx.effects.field import FieldEffect
@@ -20,106 +30,18 @@ from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet, PlacedLeds, Space
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.builtin import classic_look_id
-from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.looks.model import Layer
 from dj_ledfx.looks.selectors import parse_selector
 from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import FloatRGB, RenderedFrame
-from dj_ledfx.zones.runtime import HORIZON_CAP_S, ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import HORIZON_CAP_S, ZoneLight
 
-TILE = DeviceCapabilities(protocol="LIFX", matrix=True)
-BULB = DeviceCapabilities(protocol="LIFX")
-LAMP = DeviceCapabilities(protocol="Govee")
-LIGHTS = (ZoneLight("tile", 4, TILE), ZoneLight("bulb", 1, BULB), ZoneLight("lamp", 3, LAMP))
-
-
-class FlatField(FieldEffect, register=False):
-    """Flat grey at `level`; raises or returns NaN when the test asks it to."""
-
-    mode: ClassVar[str] = "ok"
-
-    @classmethod
-    def parameters(cls) -> dict[str, EffectParam]:
-        return {"level": EffectParam(type="float", default=0.5, min=0.0, max=1.0)}
-
-    def __init__(self, level: float = 0.5) -> None:
-        self.level = level
-
-    def get_params(self) -> dict[str, Any]:
-        return {"level": self.level}
-
-    def _apply_params(self, **kwargs: Any) -> None:
-        self.level = float(kwargs.get("level", self.level))
-
-    def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
-        if FlatField.mode == "raise":
-            raise RuntimeError("boom")
-        value = np.nan if FlatField.mode == "nan" else self.level
-        return np.full((leds.count, 3), value, dtype=np.float32)
-
-
-@pytest.fixture(autouse=True)
-def _flat_field() -> Iterator[None]:
-    Effect._registry["flat_field"] = FlatField  # conftest drops it after each test
-    FlatField.mode = "ok"
-    yield
-    FlatField.mode = "ok"
-
-
-def _field(level: float = 0.5, opacity: float = 1.0) -> Layer:
-    return Layer(
-        id="field",
-        name="Flat",
-        type="field",
-        kind="flat_field",
-        opacity=opacity,
-        settings={"level": level},
-    )
-
-
-def _glow(level: float = 0.5) -> Layer:
-    return Layer(
-        id="glow", name="Glow", type="firmware", kind="glow_firmware", settings={"level": level}
-    )
-
-
-def _look(*layers: Layer, needs: tuple[Any, ...] = ()) -> Look:
-    return Look(id="test", name="Test", category="ambient", layers=layers, needs=needs)
-
-
-def _runtime(
-    look: Look,
-    lights: Sequence[ZoneLight] = LIGHTS,
-    latencies: dict[str, float | None] | None = None,
-    clock: TempoClock | None = None,
-    **kwargs: Any,
-) -> ZoneRuntime:
-    known = latencies or {}
-    return ZoneRuntime(
-        "zone",
-        look,
-        lights,
-        clock=clock or TempoClock(),
-        latency_s=lambda device_id: known.get(device_id, 0.02),
-        **kwargs,
-    )
-
-
-def _latest(runtime: ZoneRuntime) -> np.ndarray:
-    return nearest_frame(runtime.ring, 1e9).colors
-
-
-def _sent(runtime: ZoneRuntime, light: str, at: float, leds: int) -> np.ndarray:
-    """What a light's route sends at `at`, to a device of `leds` LEDs."""
-    route = runtime.route_for(light)
-    assert route is not None
-    sent = route.colors_at(at, leds)
-    assert sent is not None
-    return sent
+pytestmark = pytest.mark.usefixtures("_fields")
 
 
 def test_firmware_runs_where_supported_and_the_field_plays_elsewhere() -> None:
-    runtime = _runtime(_look(_field(), _glow()))
+    runtime = runtime_of(look_of(field_layer(), glow_layer()))
     claim = runtime.claim_for("tile")
     assert claim is not None and claim[1].display_name == "Glow"
     assert runtime.mode_of("tile") == "own-effect"
@@ -130,24 +52,24 @@ def test_firmware_runs_where_supported_and_the_field_plays_elsewhere() -> None:
 
 
 def test_a_firmware_only_look_streams_its_copy_to_lights_that_cannot_run_it() -> None:
-    runtime = _runtime(_look(_glow(level=0.4)), brightness=0.5)
+    runtime = runtime_of(look_of(glow_layer(level=0.4)), brightness=0.5)
     assert runtime.mode_of("lamp") == "streamed-copy"
     assert runtime.effect_name("lamp") == "Glow"
     runtime.tick(100.0)
-    assert np.allclose(_latest(runtime), 0.4)  # the copy everywhere; brightness waits for the send
-    assert np.all(_sent(runtime, "lamp", 100.0, 3) == 51)  # 0.4 at half brightness, in 8 bits
+    assert np.allclose(latest(runtime), 0.4)  # the copy everywhere; brightness waits for the send
+    assert np.all(sent(runtime, "lamp", 100.0, 3) == 51)  # 0.4 at half brightness, in 8 bits
 
 
 def test_the_top_firmware_layer_claims_first() -> None:
     flame = Layer(id="flame", name="Flame", type="firmware", kind="lifx_flame")
-    runtime = _runtime(_look(_glow(), flame))
+    runtime = runtime_of(look_of(glow_layer(), flame))
     claim = runtime.claim_for("tile")
     assert claim is not None and claim[1].display_name == "LIFX Flame"
     assert runtime.effect_name("lamp") == "LIFX Flame"  # the copy comes from the top layer
 
 
 def test_a_rejected_firmware_effect_falls_back_to_its_streamed_copy() -> None:
-    runtime = _runtime(_look(_field(), _glow()))
+    runtime = runtime_of(look_of(field_layer(), glow_layer()))
     runtime.mark_emulated("tile")
     assert runtime.claim_for("tile") is None
     assert runtime.mode_of("tile") == "streamed-copy"
@@ -160,7 +82,7 @@ def test_a_streamed_copy_is_drawn_as_on_the_whole_zone() -> None:
     flame = Layer(id="flame", name="Flame", type="firmware", kind="lifx_flame")
     lights = (ZoneLight("bulb", 1, BULB), ZoneLight("tile", 4, TILE), ZoneLight("lamp", 3, LAMP))
     clock = TempoClock()
-    runtime = _runtime(_look(_field(), flame), lights, clock=clock)
+    runtime = runtime_of(look_of(field_layer(), flame), lights, clock=clock)
     runtime.mark_emulated("tile")
     runtime.tick(100.0)
     frame = nearest_frame(runtime.ring, 1e9)
@@ -174,17 +96,17 @@ def test_a_streamed_copy_is_drawn_as_on_the_whole_zone() -> None:
 def test_classic_looks_move_without_a_dj() -> None:
     time = FakeTime()
     look = builtin_look(classic_look_id("beat_pulse"))
-    runtime = _runtime(look, clock=tempo_clock(time))
+    runtime = runtime_of(look, clock=tempo_clock(time))
     seen = set()
     for step in range(30):  # one beat at 120 BPM
         runtime.tick(START + step / 60)
-        seen.add(_latest(runtime).tobytes())
+        seen.add(latest(runtime).tobytes())
     assert len(seen) > 10
 
 
 # E11: the ring keeps every frame, so each tick renders a new array.
 def test_each_tick_renders_a_new_frame(monkeypatch: pytest.MonkeyPatch) -> None:
-    runtime = _runtime(_look(_field()))
+    runtime = runtime_of(look_of(field_layer()))
     written: list[RenderedFrame] = []
     monkeypatch.setattr(runtime.ring, "write", written.append)
     runtime.tick(100.0)
@@ -194,7 +116,7 @@ def test_each_tick_renders_a_new_frame(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_frames_are_rendered_for_now_plus_the_horizon() -> None:
-    runtime = _runtime(_look(_field()), latencies={"lamp": 0.1})
+    runtime = runtime_of(look_of(field_layer()), latencies={"lamp": 0.1})
     runtime.tick(100.0)
     frame = nearest_frame(runtime.ring, 100.0)
     assert frame.target_time == pytest.approx(100.0 + 0.1 + 1 / 60)
@@ -202,9 +124,9 @@ def test_frames_are_rendered_for_now_plus_the_horizon() -> None:
 
 
 def test_the_horizon_is_capped() -> None:
-    runtime = _runtime(_look(_field()), latencies={"lamp": 5.0}, max_lookahead_s=1.0)
+    runtime = runtime_of(look_of(field_layer()), latencies={"lamp": 5.0}, max_lookahead_s=1.0)
     assert runtime.horizon_s == HORIZON_CAP_S
-    shorter = _runtime(_look(_field()), latencies={"lamp": 5.0}, max_lookahead_s=0.05)
+    shorter = runtime_of(look_of(field_layer()), latencies={"lamp": 5.0}, max_lookahead_s=0.05)
     assert shorter.horizon_s == 0.05
 
 
@@ -212,7 +134,7 @@ def test_the_horizon_is_capped() -> None:
 # (None) gets none yet; neither sets how far ahead the zone renders.
 def test_the_horizon_counts_only_connected_lights_that_stream() -> None:
     latencies: dict[str, float | None] = {"tile": 0.5, "bulb": None, "lamp": 0.1}
-    runtime = _runtime(_look(_field(), _glow()), latencies=latencies)
+    runtime = runtime_of(look_of(field_layer(), glow_layer()), latencies=latencies)
     assert runtime.mode_of("tile") == "own-effect"
     assert runtime.horizon_s == pytest.approx(0.1 + 1 / 60)
 
@@ -221,27 +143,27 @@ def test_the_horizon_counts_only_connected_lights_that_stream() -> None:
 # ticks old: the horizon adds a rendered frame, and its slowest light still has a frame after
 # its moment to blend toward.
 def test_a_zone_over_its_budget_renders_a_rendered_frame_further_ahead() -> None:
-    runtime = _runtime(_look(_field()), timer=itertools.count(0.0, 0.011).__next__)
+    runtime = runtime_of(look_of(field_layer()), timer=itertools.count(0.0, 0.011).__next__)
     runtime.tick(100.0)  # 11 ms a frame, over the 5 ms budget: every third tick
     assert runtime.horizon_s == pytest.approx(0.02 + 3 / 60)
 
 
 def test_opacity_scales_the_frame_and_brightness_the_send() -> None:
-    runtime = _runtime(_look(_field(level=0.8, opacity=0.5)), brightness=0.5)
+    runtime = runtime_of(look_of(field_layer(level=0.8, opacity=0.5)), brightness=0.5)
     runtime.tick(100.0)
-    assert np.allclose(_latest(runtime), 0.4)
-    assert np.all(_sent(runtime, "bulb", 100.0, 1) == 51)
+    assert np.allclose(latest(runtime), 0.4)
+    assert np.all(sent(runtime, "bulb", 100.0, 1) == 51)
 
 
 def test_a_light_slower_than_the_cap_gets_the_newest_frame() -> None:
-    runtime = _runtime(_look(_field(level=0.8)), latencies={"lamp": 0.5})
+    runtime = runtime_of(look_of(field_layer(level=0.8)), latencies={"lamp": 0.5})
     assert runtime.horizon_s == HORIZON_CAP_S
     runtime.tick(100.0)
-    assert np.all(_sent(runtime, "lamp", 100.0 + 0.5, 3) == 204)  # 0.8 in 8 bits: late, not dark
+    assert np.all(sent(runtime, "lamp", 100.0 + 0.5, 3) == 204)  # 0.8 in 8 bits: late, not dark
 
 
 def test_a_crash_holds_the_last_good_frame_and_is_logged_once() -> None:
-    runtime = _runtime(_look(_field()))
+    runtime = runtime_of(look_of(field_layer()))
     runtime.tick(100.0)
     errors: list[str] = []
     sink = logger.add(lambda message: errors.append(str(message)), level="ERROR")
@@ -268,7 +190,7 @@ def test_a_crash_holds_the_last_good_frame_and_is_logged_once() -> None:
 
 
 def test_nan_is_a_crash() -> None:
-    runtime = _runtime(_look(_field()))
+    runtime = runtime_of(look_of(field_layer()))
     FlatField.mode = "nan"
     runtime.tick(100.0)
     assert runtime.crash is not None and "NaN" in runtime.crash.message
@@ -276,7 +198,9 @@ def test_nan_is_a_crash() -> None:
 
 
 def test_a_look_that_cannot_be_built_is_crashed_from_the_start() -> None:
-    runtime = _runtime(_look(Layer(id="x", name="Retired", type="field", kind="retired_effect")))
+    runtime = runtime_of(
+        look_of(Layer(id="x", name="Retired", type="field", kind="retired_effect"))
+    )
     assert runtime.state == "crashed"
     assert runtime.crash is not None and runtime.crash.layer == "Retired"
     runtime.tick(100.0)
@@ -285,7 +209,7 @@ def test_a_look_that_cannot_be_built_is_crashed_from_the_start() -> None:
 
 def test_a_slow_zone_drops_its_frame_rate_and_shows_slow_after_30_s() -> None:
     timer = itertools.count(0.0, 0.006).__next__  # every render "takes" 6 ms
-    runtime = _runtime(_look(_field()), timer=timer)
+    runtime = runtime_of(look_of(field_layer()), timer=timer)
     now = 100.0
     for _ in range(29 * 60):
         runtime.tick(now)
@@ -303,8 +227,10 @@ def test_a_slow_zone_drops_its_frame_rate_and_shows_slow_after_30_s() -> None:
 def test_a_zone_reports_slow_and_crashed_as_they_happen() -> None:
     changes: list[str] = []
     timer = itertools.count(0.0, 0.006).__next__  # every render "takes" 6 ms
-    runtime = _runtime(
-        _look(_field()), timer=timer, on_state_change=lambda zone: changes.append(zone.state)
+    runtime = runtime_of(
+        look_of(field_layer()),
+        timer=timer,
+        on_state_change=lambda zone: changes.append(zone.state),
     )
     now = 100.0
     for _ in range(31 * 60):
@@ -319,16 +245,16 @@ def test_a_zone_reports_slow_and_crashed_as_they_happen() -> None:
 
 
 def test_a_waiting_look_renders_dark_and_claims_nothing() -> None:
-    runtime = _runtime(_look(_field(), _glow(), needs=("music",)))
+    runtime = runtime_of(look_of(field_layer(), glow_layer(), needs=("music",)))
     assert runtime.state == "waiting"
     assert runtime.waiting_for == ("music",)
     assert runtime.claim_for("tile") is None
     runtime.tick(100.0)
-    assert not _latest(runtime).any()
+    assert not latest(runtime).any()
 
 
 def test_new_lights_rebuild_the_led_set_and_start_a_fresh_ring() -> None:
-    runtime = _runtime(_look(_field()))
+    runtime = runtime_of(look_of(field_layer()))
     runtime.tick(100.0)
     old_ring = runtime.ring
     runtime.set_lights([ZoneLight("tile", 64, TILE), ZoneLight("lamp", 3, LAMP)])
@@ -342,7 +268,7 @@ def test_new_lights_rebuild_the_led_set_and_start_a_fresh_ring() -> None:
 # M2 review A1: a route reads its zone's ring and its slice at each send, so a zone that
 # rebuilds its LED set needs no new routes.
 def test_a_route_follows_its_zone_when_the_zone_rebuilds_its_leds() -> None:
-    runtime = _runtime(_look(_field()))
+    runtime = runtime_of(look_of(field_layer()))
     lamp = runtime.route_for("lamp")
     assert lamp is not None and span(lamp) == (5, 8)
 
@@ -356,29 +282,31 @@ def test_a_route_follows_its_zone_when_the_zone_rebuilds_its_leds() -> None:
 
 
 def test_update_look_keeps_the_effect_when_the_layers_match() -> None:
-    runtime = _runtime(_look(_field(0.5), _glow(level=0.5)))
+    runtime = runtime_of(look_of(field_layer(0.5), glow_layer(level=0.5)))
     effect = runtime.field_effect
     generation = runtime.generation
-    runtime.update_look(_look(_field(0.7), _glow(level=0.5)))
+    runtime.update_look(look_of(field_layer(0.7), glow_layer(level=0.5)))
     assert runtime.field_effect is effect
     assert effect is not None and effect.get_params() == {"level": 0.7}
     assert runtime.generation == generation  # the firmware layer didn't change
-    runtime.update_look(_look(_field(0.7), _glow(level=0.9)))
+    runtime.update_look(look_of(field_layer(0.7), glow_layer(level=0.9)))
     assert runtime.generation > generation  # firmware lights get the new settings
     generation = runtime.generation
-    runtime.update_look(_look(_glow(level=0.9)))
+    runtime.update_look(look_of(glow_layer(level=0.9)))
     assert runtime.field_effect is None and runtime.generation > generation
 
 
 def test_brightness_resends_firmware_only_when_lights_run_it() -> None:
-    streamed = _runtime(_look(_field()))
-    generation = streamed.generation
+    streamed = runtime_of(look_of(field_layer()))
+    keys = [streamed.applied_key(d) for d in ("tile", "lamp")]
     streamed.set_brightness(0.3)
-    assert streamed.brightness == 0.3 and streamed.generation == generation
-    firmware = _runtime(_look(_field(), _glow()))
-    generation = firmware.generation
+    assert streamed.brightness == 0.3
+    assert [streamed.applied_key(d) for d in ("tile", "lamp")] == keys
+    firmware = runtime_of(look_of(field_layer(), glow_layer()))
+    tile, lamp = firmware.applied_key("tile"), firmware.applied_key("lamp")
     firmware.set_brightness(0.3)
-    assert firmware.generation > generation
+    assert firmware.applied_key("tile") != tile  # its effect starts again, at 0.3
+    assert firmware.applied_key("lamp") == lamp  # it streams on as it was
 
 
 class ProbeField(FieldEffect, register=False):
@@ -407,9 +335,9 @@ def test_a_runtime_draws_its_lights_where_the_map_puts_them() -> None:
     space = Space(anchors=MappingProxyType({"sofa": sofa}), rooms=("west", "east"), ceiling=3.0)
     lamp = PlacedLeds.from_positions(np.array([[1.0, 1.0, 0.2], [1.0, 1.0, 0.5], [1.0, 1.0, 0.8]]))
     lights = (ZoneLight("lamp", 3, LAMP, placed=lamp, room=0), ZoneLight("bulb", 1, BULB, room=1))
-    look = _look(Layer(id="probe", name="Probe", type="field", kind="probe_field"))
+    look = look_of(Layer(id="probe", name="Probe", type="field", kind="probe_field"))
 
-    runtime = _runtime(look, lights, space=space)
+    runtime = runtime_of(look, lights, space=space)
     runtime.tick(100.0)
 
     seen = ProbeField.seen
@@ -458,25 +386,25 @@ def test_field_layers_blend_bottom_to_top() -> None:
         opacity=0.5,
         settings={"level": 0.3},
     )
-    runtime = _runtime(_look(_field(level=0.2), glaze))
+    runtime = runtime_of(look_of(field_layer(level=0.2), glaze))
     runtime.tick(100.0)
-    assert np.allclose(_latest(runtime), 0.35)
+    assert np.allclose(latest(runtime), 0.35)
 
 
 def test_a_firmware_layer_claims_only_the_lights_it_picks() -> None:
-    by_type = _runtime(_look(_field(), _flame("type:candle")), CANDLES)
+    by_type = runtime_of(look_of(field_layer(), _flame("type:candle")), CANDLES)
     assert by_type.mode_of("c1") == "own-effect"
     assert by_type.mode_of("tile") == by_type.mode_of("lamp") == "streaming"
 
-    by_id = _runtime(_look(_field(), _flame(["tile"])), CANDLES)
+    by_id = runtime_of(look_of(field_layer(), _flame(["tile"])), CANDLES)
     assert by_id.mode_of("tile") == "own-effect" and by_id.mode_of("c1") == "streaming"
 
 
 def test_without_a_field_a_light_no_layer_picks_stays_dark() -> None:
-    glow = replace(_glow(level=0.4), lights=(parse_selector("type:candle"),))
-    runtime = _runtime(_look(glow), CANDLES)
+    glow = replace(glow_layer(level=0.4), lights=(parse_selector("type:candle"),))
+    runtime = runtime_of(look_of(glow), CANDLES)
     runtime.tick(100.0)
-    frame = _latest(runtime)
+    frame = latest(runtime)
     assert np.allclose(frame[:4], 0.4)  # the candle's own effect, drawn for the preview
     assert not frame[4:].any()
     assert runtime.effect_name("lamp") is None
@@ -486,41 +414,43 @@ def test_without_a_field_a_light_no_layer_picks_stays_dark() -> None:
 # so it happens only while someone watches. A streamed copy reaches the light: always.
 def test_lights_running_their_own_effect_are_drawn_only_while_watched() -> None:
     watching = [False]
-    runtime = _runtime(_look(_field(0.5), _glow(level=0.9)), watched=lambda: watching[0])
+    runtime = runtime_of(
+        look_of(field_layer(0.5), glow_layer(level=0.9)), watched=lambda: watching[0]
+    )
     assert runtime.mode_of("tile") == "own-effect"
 
     runtime.tick(100.0)
-    assert np.allclose(_latest(runtime)[:4], 0.5)  # not emulated: the field lies under it
+    assert np.allclose(latest(runtime)[:4], 0.5)  # not emulated: the field lies under it
 
     watching[0] = True
     runtime.tick(100.1)
-    assert np.allclose(_latest(runtime)[:4], 0.9)
+    assert np.allclose(latest(runtime)[:4], 0.9)
 
     runtime.mark_emulated("tile")
     watching[0] = False
     runtime.tick(100.2)
-    assert np.allclose(_latest(runtime)[:4], 0.9)  # now a streamed copy, watched or not
+    assert np.allclose(latest(runtime)[:4], 0.9)  # now a streamed copy, watched or not
 
 
 def test_update_look_tunes_every_field_layer_in_place() -> None:
     top = Layer(
         id="top", name="Top", type="field", kind="flat_field", blend="max", settings={"level": 0.1}
     )
-    runtime = _runtime(_look(_field(0.2), top))
+    runtime = runtime_of(look_of(field_layer(0.2), top))
     bottom = runtime.field_effect
 
-    runtime.update_look(_look(_field(0.2), replace(top, settings={"level": 0.6})))
+    runtime.update_look(look_of(field_layer(0.2), replace(top, settings={"level": 0.6})))
     runtime.tick(100.0)
 
     assert runtime.field_effect is bottom
-    assert np.allclose(_latest(runtime), 0.6)
+    assert np.allclose(latest(runtime), 0.6)
 
 
 def test_changing_the_lights_a_layer_picks_plans_the_claims_again() -> None:
-    runtime = _runtime(_look(_field(), _flame()))
+    runtime = runtime_of(look_of(field_layer(), _flame()))
     assert runtime.mode_of("tile") == "own-effect"
     generation = runtime.generation
 
-    runtime.update_look(_look(_field(), _flame("type:candle")))  # LIGHTS has no candle
+    runtime.update_look(look_of(field_layer(), _flame("type:candle")))  # LIGHTS has no candle
 
     assert runtime.mode_of("tile") == "streaming" and runtime.generation > generation

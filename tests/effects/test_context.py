@@ -5,6 +5,7 @@ from tempo_fakes import START, FakeTime, play, tempo_clock
 
 from dj_ledfx.effects.context import (
     DJ_BEAT,
+    EVENING,
     NO_SIGNALS,
     RenderContext,
     SignalView,
@@ -54,6 +55,17 @@ def test_a_dj_s_beat_is_signalled_to_the_looks() -> None:
 
     assert ctx.signals.get(DJ_BEAT) == 1.0
     assert to_beat_context(ctx).dj
+
+
+def test_the_evening_is_signalled_to_the_looks() -> None:
+    time = FakeTime()
+    clock = tempo_clock(time)
+    play(clock, time, 2)
+
+    ctx = render_context(clock, time.now, 1 / 60, evening=0.4)
+
+    assert (ctx.signals.get(EVENING), ctx.signals.get(DJ_BEAT)) == (0.4, 1.0)
+    assert render_context(clock, time.now, 1 / 60).signals.get(EVENING) == 0.0
 
 
 def test_a_pro_dj_link_lock_with_no_dj_signals_no_dj() -> None:

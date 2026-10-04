@@ -871,6 +871,54 @@ async def test_a_route_set_during_a_send_sends_again() -> None:
     assert adapter.log == ["frame", "frame"]
 
 
+# The zone manager sends a light leaving its own effect its frame at once, just before the
+# effect stops and just after: the frame for now plus its latency, whatever its send loop's
+# timing (here no loop runs at all).
+async def test_send_now_sends_a_light_its_frame_for_its_own_latency_at_once() -> None:
+    near = _make_device("near", latency_ms=10.0, led_count=5)
+    far = _make_device("far", latency_ms=600.0, led_count=5)
+    buf = _two_frame_ring()
+    scheduler = LookaheadScheduler(devices=[near, far], fps=60)
+    scheduler.set_route("near", _route(buf, start=0, stop=5))
+    scheduler.set_route("far", _route(buf, start=5, stop=10))
+
+    await scheduler.send_now("near")
+    await scheduler.send_now("far")
+
+    assert [frame.tobytes() for frame in near.adapter.send_frame_calls] == [bytes([64] * 15)]
+    assert [frame.tobytes() for frame in far.adapter.send_frame_calls] == [bytes([255] * 15)]
+
+
+async def test_send_now_sends_nothing_to_a_light_that_takes_no_frames() -> None:
+    held, unrouted, starved = (_make_device(name) for name in ("held", "unrouted", "starved"))
+    offline = _make_device("offline", connected=False)
+    buf = RingBuffer(capacity=60)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = LookaheadScheduler(devices=[held, unrouted, starved, offline], fps=60)
+    scheduler.set_route("held", _route(buf, streaming=False))  # it runs its own effect
+    scheduler.set_route("starved", _route(RingBuffer(capacity=60)))  # no frame yet
+    scheduler.set_route("offline", _route(buf))
+
+    for device_id in ("held", "unrouted", "starved", "offline", "unknown"):
+        await scheduler.send_now(device_id)
+
+    assert all(not d.adapter.send_frame_calls for d in (held, unrouted, starved, offline))
+
+
+async def test_send_now_lands_no_frame_after_a_restore() -> None:
+    device = _make_device()
+    buf = RingBuffer(capacity=60)
+    _fill_buffer(buf, time.monotonic(), 60)
+    scheduler = _scheduler(buf, [device], fps=60)
+    async with device.adapter.send_lock:  # a restore is under way
+        sending = asyncio.create_task(scheduler.send_now("TestDevice"))
+        await asyncio.sleep(0.01)  # it waits for the lock
+        scheduler.set_route("TestDevice", None)  # as the zone manager does before it restores
+    await sending
+
+    assert device.adapter.send_frame_calls == []
+
+
 async def test_a_light_back_from_a_drop_out_gets_its_frame_at_once() -> None:
     device, _buf, scheduler = _still()
     adapter = device.adapter

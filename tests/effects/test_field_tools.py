@@ -64,3 +64,12 @@ def test_smoothstep() -> None:
     assert np.allclose(
         smoothstep(0.0, 1.0, np.array([-1.0, 0.0, 0.5, 1.0, 2.0])), [0, 0, 0.5, 1, 1]
     )
+
+
+def test_smoothstep_of_one_number_is_a_float_on_the_same_edge() -> None:
+    values = [-1.0, 0.0, 0.25, 0.5, 1.0, 2.0]
+
+    each = [smoothstep(0.0, 1.0, value) for value in values]
+
+    assert all(type(value) is float for value in each)
+    assert np.allclose(each, smoothstep(0.0, 1.0, np.array(values)))

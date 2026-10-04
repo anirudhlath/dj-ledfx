@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, cast, get_args
 
-from dj_ledfx.types import is_finite_number
+from dj_ledfx.readers import Reader
 
 Vec2 = tuple[float, float]
 Vec3 = tuple[float, float, float]
@@ -125,58 +125,21 @@ class Home:
 # --- reading -------------------------------------------------------------------------
 
 
-def finite(value: Any, what: str) -> float:
-    if not is_finite_number(value):
-        raise HomeError(f"{what} must be a finite number")
-    return float(value)
-
-
-def _positive(value: Any, what: str) -> float:
-    number = finite(value, what)
-    if number <= 0.0:
-        raise HomeError(f"{what} must be greater than 0")
-    return number
-
-
-def non_negative(value: Any, what: str) -> float:
-    number = finite(value, what)
-    if number < 0.0:
-        raise HomeError(f"{what} must be 0 or more")
-    return number
-
-
-def _text(value: Any, what: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise HomeError(f"{what} must be a non-empty string")
-    return value.strip()
-
-
-def _numbers(value: Any, size: int, what: str) -> tuple[float, ...]:
-    if isinstance(value, str) or not isinstance(value, Sequence) or len(value) != size:
-        raise HomeError(f"{what} must be {size} numbers")
-    return tuple(finite(item, what) for item in value)
-
-
-def vec2(value: Any, what: str) -> Vec2:
-    x, y = _numbers(value, 2, what)
-    return (x, y)
-
-
-def vec3(value: Any, what: str) -> Vec3:
-    x, y, z = _numbers(value, 3, what)
-    return (x, y, z)
+_READ = Reader(HomeError)  # the readers the looks use too (readers.py)
+finite = _READ.finite
+_positive = _READ.positive
+non_negative = _READ.non_negative
+_text = _READ.text
+_numbers = _READ.numbers
+vec2 = _READ.vec2
+vec3 = _READ.vec3
+_object = _READ.mapping
 
 
 def polygon_of(value: Any, what: str) -> tuple[Vec2, ...]:
     if isinstance(value, str) or not isinstance(value, Sequence) or len(value) < 3:
         raise HomeError(f"{what} needs at least 3 points")
     return tuple(vec2(point, what) for point in value)
-
-
-def _object(value: Any, what: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise HomeError(f"{what} must be an object")
-    return value
 
 
 def _list(data: Mapping[str, Any], key: str, *, required: bool = False) -> list[Any]:

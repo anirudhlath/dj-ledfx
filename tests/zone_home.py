@@ -12,7 +12,6 @@ import numpy as np
 from conftest import FakeLight
 from map_home import open_map
 
-from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.devices.manager import DeviceManager
 from dj_ledfx.effects.ledset import NO_SPACE, PlacedLeds, Space
 from dj_ledfx.events import EventBus
@@ -34,7 +33,6 @@ from dj_ledfx.zones.model import HOME_ZONE_ID, HOME_ZONE_NAME, ZoneRecord, Zones
 from dj_ledfx.zones.runtime import ZoneRuntime
 from dj_ledfx.zones.store import ZoneStore
 
-TILE = DeviceCapabilities(protocol="LIFX", matrix=True)
 GLOW_LAYER = Layer(id="glow", name="Glow", type="firmware", kind="glow_firmware")
 GLOW = Look(id="glow", name="Glow look", category="firmware", layers=(GLOW_LAYER,))
 BREATHE_AND_GLOW = Look(
@@ -72,13 +70,22 @@ class FakeHost:
         return {rt.zone_id: rt for rt in self.hosted if rt not in previews}
 
 
+# The moment the fake scheduler reads a route at: past every frame, so the newest (tests
+# tick their runtimes at made-up times).
+NEWEST = 1e9
+
+
 class FakeRoutes:
-    """Stands in for the scheduler: it keeps each light's route, and sends a frame down
-    every streaming route whenever the app asks a light something (send_frames), as the
-    real scheduler does while the zone manager awaits."""
+    """Stands in for the scheduler: it keeps each light's route, and every route set in
+    order (`history`). Whenever the app asks a light something it sends a frame down every
+    streaming route (send_frames), as the real scheduler does while the zone manager
+    awaits: the route's newest colours, or black before its zone's first frame, so a test
+    sees any frame that reaches a light. send_now() sends one light its newest colours at
+    once, as the scheduler's does, and nothing before its zone's first frame."""
 
     def __init__(self, lights: Mapping[str, FakeLight]) -> None:
         self.routes: dict[str, DeviceRoute] = {}
+        self.history: list[tuple[str, DeviceRoute | None]] = []
         self._lights = lights
 
     def send_frames(self) -> None:
@@ -86,9 +93,20 @@ class FakeRoutes:
             light = self._lights.get(device_id)
             if light is None or not light.connected or not route.streaming:
                 continue
-            light.receive_frame(np.zeros((light.led_count, 3), dtype=np.uint8))
+            colors = route.colors_at(NEWEST, light.led_count)
+            black = np.zeros((light.led_count, 3), dtype=np.uint8)
+            light.receive_frame(black if colors is None else colors)
+
+    async def send_now(self, device_id: str) -> None:
+        route, light = self.routes.get(device_id), self._lights.get(device_id)
+        if route is None or light is None or not light.connected or not route.streaming:
+            return
+        colors = route.colors_at(NEWEST, light.led_count)
+        if colors is not None:
+            light.receive_frame(colors)
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None:
+        self.history.append((device_id, route))
         if route is None:
             self.routes.pop(device_id, None)
         else:
@@ -194,6 +212,7 @@ async def build_home(
     view: HomeView | None = None,
     frames_watched: Callable[[], bool] | None = None,
     plan: HomeModel | None = None,
+    evening: Callable[[], float] | None = None,
 ) -> Home:
     db = StateDB(tmp_path / "state.db")
     await db.open()
@@ -212,6 +231,7 @@ async def build_home(
         view=view,
         frames_watched=frames_watched,
         with_map=plan is not None,
+        evening=evening,
     )
 
 
@@ -225,6 +245,7 @@ async def assemble(
     view: HomeView | None = None,
     frames_watched: Callable[[], bool] | None = None,
     with_map: bool = False,
+    evening: Callable[[], float] | None = None,
 ) -> Home:
     """The app's objects around an open state.db and a set of lights."""
     bus = EventBus()
@@ -269,6 +290,7 @@ async def assemble(
         now=lambda: clock[0],
         home=view or NO_HOME,
         frames_watched=frames_watched or (lambda: True),
+        evening=evening or (lambda: 0.0),
     )
     host.zones = manager
     if home_map is not None:

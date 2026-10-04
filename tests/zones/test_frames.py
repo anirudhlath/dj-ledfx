@@ -4,7 +4,8 @@ from functools import partial
 
 import numpy as np
 from conftest import FakeLight, nearest_frame
-from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
+from runtime_fakes import TILE
+from zone_home import BREATHE_AND_GLOW, GLOW, HomeFactory, zone_record
 
 from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.types import RenderedFrame

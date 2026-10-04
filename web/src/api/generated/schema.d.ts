@@ -987,7 +987,8 @@ export interface paths {
         put?: never;
         /**
          * Start Zone
-         * @description Put a look on a zone: a saved look by id, or an unsaved draft.
+         * @description Put a look on a zone: a saved look by id, or an unsaved draft, with the transition
+         *     given, or else the look's own.
          */
         post: operations["start_zone_api_zones__zone_id__start_post"];
         delete?: never;
@@ -1049,6 +1050,21 @@ export interface components {
                 number,
                 number
             ];
+        };
+        /**
+         * AnchorMask
+         * @description The layer shows within `radius` metres of an anchor.
+         */
+        AnchorMask: {
+            /** Anchor */
+            anchor: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "anchor";
+            /** Radius */
+            radius: number;
         };
         /** AnchorUpdate */
         AnchorUpdate: {
@@ -1338,6 +1354,22 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HeightMask
+         * @description The layer shows between two heights, metres above the floor, low then high.
+         */
+        HeightMask: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "height";
+            /** Range */
+            range: [
+                number,
+                number
+            ];
+        };
         /** Home */
         Home: {
             /** Anchors */
@@ -1455,13 +1487,8 @@ export interface components {
             /** Kind */
             kind: string;
             /** Mask */
-            mask?: {
-                [key: string]: unknown;
-            } | null;
-            /** Mirror */
-            mirror?: {
-                [key: string]: unknown;
-            } | null;
+            mask?: (components["schemas"]["HeightMask"] | components["schemas"]["RoomMask"] | components["schemas"]["SubZoneMask"] | components["schemas"]["AnchorMask"]) | null;
+            mirror?: components["schemas"]["Mirror"] | null;
             /** Name */
             name: string;
             /**
@@ -1475,10 +1502,7 @@ export interface components {
             settings?: {
                 [key: string]: components["schemas"]["SettingValue"];
             };
-            /** Transform */
-            transform?: {
-                [key: string]: unknown;
-            } | null;
+            transform?: components["schemas"]["Transform"] | null;
             /**
              * Type
              * @enum {string}
@@ -1663,7 +1687,12 @@ export interface components {
             /** Uses */
             uses?: ("tempo" | "music" | "home-assistant" | "sun")[];
         };
-        /** LookModifiers */
+        /**
+         * LookModifiers
+         * @description The look's modifiers (engine spec §5.3): trails (per-LED decay over `trailsS`
+         *     seconds), a flash on every downbeat, a brightness cap (0..1, firmware lights too) and
+         *     evening (warmer and dimmer from an hour before sunset).
+         */
         LookModifiers: {
             /** Brightnesscap */
             brightnessCap?: number | null;
@@ -1691,6 +1720,21 @@ export interface components {
              * @enum {string}
              */
             type: "linear" | "radial";
+        };
+        /**
+         * Mirror
+         * @description The field reflected across a plane square to `axis`, `at` metres along it (null:
+         *     the zone's centre); the low side shows on both.
+         */
+        Mirror: {
+            /** At */
+            at?: number | null;
+            /**
+             * Axis
+             * @default x
+             * @enum {string}
+             */
+            axis: "x" | "y" | "z";
         };
         /**
          * NudgeRequest
@@ -1872,6 +1916,19 @@ export interface components {
                 number
             ][];
         };
+        /**
+         * RoomMask
+         * @description The layer shows in one room, by id.
+         */
+        RoomMask: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "room";
+            /** Room */
+            room: string;
+        };
         /** Running */
         Running: {
             /** Overlays */
@@ -1928,8 +1985,17 @@ export interface components {
             /** Target */
             target: number;
         };
-        /** RunningZoneTransition */
+        /**
+         * RunningZoneTransition
+         * @description A zone's transition while it plays: the look it replaces (the one that drove most of
+         *     its lights, counted as lights; "" when they were idle), the kind, how far it has got
+         *     (0..1) when this was sent, and how long it takes in all, so a client moves the bar on by
+         *     itself. The running channel pushes it as the transition starts, at its midpoint and as
+         *     it ends.
+         */
         RunningZoneTransition: {
+            /** Durations */
+            durationS: number;
             /** From */
             from: string;
             /**
@@ -2063,6 +2129,19 @@ export interface components {
             /** Room */
             room: string;
         };
+        /**
+         * SubZoneMask
+         * @description The layer shows in one sub-zone, by id.
+         */
+        SubZoneMask: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "sub-zone";
+            /** Subzone */
+            subZone: string;
+        };
         /** SubZoneUpdate */
         SubZoneUpdate: {
             /** Name */
@@ -2127,7 +2206,42 @@ export interface components {
              */
             lock: "auto" | "prodjlink" | "music" | "internal";
         };
-        /** Transition */
+        /**
+         * Transform
+         * @description The field shifted by `offset` metres, turned `rotateDeg` clockwise seen from above
+         *     (any angle, kept as the same turn from -180 to 180) and grown `scale` times, both
+         *     about the zone's centre.
+         */
+        Transform: {
+            /**
+             * Offset
+             * @default [
+             *       0,
+             *       0,
+             *       0
+             *     ]
+             */
+            offset: [
+                number,
+                number,
+                number
+            ];
+            /**
+             * Rotatedeg
+             * @default 0
+             */
+            rotateDeg: number;
+            /**
+             * Scale
+             * @default 1
+             */
+            scale: number;
+        };
+        /**
+         * Transition
+         * @description How a look comes in (engine spec §5.3): a cut, or a fade, wipe, spread or dissolve
+         *     over `durationS` seconds, at most 10.
+         */
         Transition: {
             /**
              * Durations

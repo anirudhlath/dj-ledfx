@@ -4,7 +4,8 @@ import asyncio
 import json
 
 from conftest import FakeLight, span
-from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
+from runtime_fakes import LAMP, TILE
+from zone_home import BREATHE_AND_GLOW, GLOW, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.latency.strategies import StaticLatency
@@ -12,7 +13,6 @@ from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.store import look_body
 from dj_ledfx.zones.model import PreviewOnlyChanged, ZoneRecord
 
-LAMP = DeviceCapabilities(protocol="Govee")
 CANDLE = DeviceCapabilities(protocol="LIFX", matrix=True, chain=True)
 STRIP = DeviceCapabilities(protocol="LIFX", multizone=True, extended_multizone=True)
 

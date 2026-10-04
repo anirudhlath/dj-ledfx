@@ -11,6 +11,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -96,6 +97,13 @@ def tiny_home(**changes: Any) -> Home:
     return replace(home, **changes)
 
 
+@cache
+def tiny_space() -> Space:
+    """The tiny home as a zone's space (one, kept): the west and east rooms, the desk in the
+    west's north-west and the sofa at (6, 2)."""
+    return space_of(tiny_home())
+
+
 def devices_of(lights: Sequence[DeviceAdapter]) -> DeviceManager:
     """A device manager holding these lights, each at 20 ms."""
     devices = DeviceManager()
@@ -135,23 +143,40 @@ def leds_at(
     ceiling: float | None = 3.0,
     anchors: Mapping[str, Sequence[float]] | None = None,
     anchor_points: Mapping[str, Sequence[Sequence[float]]] | None = None,
+    space: Space | None = None,
 ) -> LedSet:
     """One light's LEDs at these map positions, in a zone with this ceiling and anchors;
-    anchor_points gives an anchor more than one point (the speaker pair has two)."""
-    space = Space(
-        anchors=MappingProxyType(
-            {name: np.asarray(p, dtype=np.float32) for name, p in (anchors or {}).items()}
-        ),
-        anchor_points=MappingProxyType(
-            {
-                name: np.asarray(p, dtype=np.float32).reshape(-1, 3)
-                for name, p in (anchor_points or {}).items()
-            }
-        ),
-        ceiling=ceiling,
-    )
+    anchor_points gives an anchor more than one point (the speaker pair has two). A space
+    given whole (space_of(tiny_home()), with its rooms' outlines) replaces those three."""
     placed = PlacedLeds.from_positions(np.asarray(points, dtype=np.float64).reshape(-1, 3))
+    if space is None:
+        space = Space(
+            anchors=MappingProxyType(
+                {name: np.asarray(p, dtype=np.float32) for name, p in (anchors or {}).items()}
+            ),
+            anchor_points=MappingProxyType(
+                {
+                    name: np.asarray(p, dtype=np.float32).reshape(-1, 3)
+                    for name, p in (anchor_points or {}).items()
+                }
+            ),
+            ceiling=ceiling,
+        )
     return build_ledset([LedSource("light", len(points), placed=placed)], space)
+
+
+ROW = [[x, 0.0, 1.0] for x in np.linspace(0.0, 4.0, 9)]  # 0.5 m apart, west to east
+
+
+def grown(leds: LedSet) -> LedSet:
+    """The set as a layer's transform with scale 2 shows it: each LED looks at the field
+    half as far from the zone's centre."""
+    return leds.moved(leds.centre + (leds.pos - leds.centre) / np.float32(2.0))
+
+
+def shifted(leds: LedSet) -> LedSet:
+    """The set as a transform's 1 m offset east shows it: each LED looks 1 m west."""
+    return leds.moved(leds.pos - np.array([1.0, 0.0, 0.0], dtype=np.float32))
 
 
 def seeded_zone_lights() -> list[ZoneLight]:

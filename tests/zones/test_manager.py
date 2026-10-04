@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
@@ -8,12 +9,13 @@ from typing import Any
 
 import pytest
 from conftest import FakeLight, span
-from zone_home import BREATHE_AND_GLOW, GLOW, TILE, HomeFactory, zone_record
+from runtime_fakes import FADE, TILE
+from zone_home import BREATHE_AND_GLOW, GLOW, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
-from dj_ledfx.looks.model import Look, LookError
+from dj_ledfx.looks.model import Look, LookError, LookModifiers, Transition
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.model import (
     TakeOver,
@@ -378,6 +380,101 @@ async def test_starting_a_running_zone_again_replaces_its_look(make_home: HomeFa
     assert lamp.names().count("capture") == 1 and "restore" not in lamp.names()
     assert list(home.host.runtimes) == ["z"]
     assert home.routes.routes["lamp"].source is home.host.runtimes["z"]
+
+
+# The start blink, seen on the real lights: a light that streams in the look a start
+# replaces and in the new one streams on, in its own zone or taken by another, with a
+# transition or without. It isn't readied again (a Govee lamp's prepare re-arms razer: a
+# blink), and its frames never pause: it takes the new look's before the start reads it.
+@pytest.mark.parametrize("transition", [Transition(), FADE], ids=["cut", "fade"])
+@pytest.mark.parametrize("zone", ["z", "other"], ids=["own-zone", "take-over"])
+async def test_a_light_streaming_in_both_looks_streams_on_through_a_start(
+    make_home: HomeFactory, zone: str, transition: Transition
+) -> None:
+    lamp, bulb = FakeLight("lamp", caps=LAMP), FakeLight("bulb")
+    home = await make_home(
+        [lamp, bulb], [zone_record("z", "lamp", "bulb"), zone_record("other", "lamp")]
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    calls, routes = len(lamp.calls), len(home.routes.history)
+    read = lamp.hold("read_light")  # a start reads each light it applies its look to
+    starting = asyncio.create_task(
+        home.manager.start(zone, home.look("classic-strobe"), transition)
+    )
+    await read.entered.wait()
+    reading = home.routes.routes["lamp"]
+    read.release.set()
+    await starting
+
+    assert reading.source is home.host.runtimes[zone] and reading.streaming
+    assert "prepare_stream" not in lamp.names()[calls:]
+    given = [route for light, route in home.routes.history[routes:] if light == "lamp"]
+    assert given and all(route is not None and route.streaming for route in given)
+
+
+# ...and a light is readied, once, whenever it comes to streaming from anything else: from
+# idle, from being switched off elsewhere, or from being released and taken again.
+async def test_a_light_is_readied_to_stream_only_when_it_comes_from_elsewhere(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp", caps=LAMP)
+    home = await make_home([lamp], [zone_record("z", "lamp")])
+
+    await home.manager.start("z", home.look("classic-breathe"))  # from idle
+    lamp.power = False
+    await home.manager.on_power_reading("lamp", False)  # switched off elsewhere...
+    lamp.power = True
+    await home.manager.on_power_reading("lamp", True)  # ...and back on
+    await home.manager.off("z")  # released...
+    await home.manager.start("z", home.look("classic-strobe"))  # ...and taken again
+    await home.manager.start("z", home.look("classic-breathe"), FADE)  # streams in both
+
+    assert lamp.names().count("prepare_stream") == 3
+
+
+# Spec §5.3: the brightness cap also caps firmware devices.
+async def test_the_brightness_cap_caps_the_firmware_lights_too(make_home: HomeFactory) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    home = await make_home([tile], [zone_record("z", "tile")])
+
+    await home.manager.start("z", replace(GLOW, modifiers=LookModifiers(brightness_cap=0.6)))
+    assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": 0.6})
+
+    await home.manager.set_brightness("z", 0.5)
+    assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": pytest.approx(0.3)})
+
+
+# H3: a brightness change starts the firmware lights' effects again at the new brightness,
+# and leaves the streamed lights as they are.
+async def test_a_brightness_change_applies_only_the_firmware_lights_again(
+    make_home: HomeFactory,
+) -> None:
+    tile, lamp = FakeLight("tile", caps=TILE), FakeLight("lamp", caps=LAMP)
+    home = await make_home([tile, lamp], [zone_record("z", "tile", "lamp")])
+    await home.manager.start("z", BREATHE_AND_GLOW)
+    tile_calls, lamp_calls = len(tile.calls), len(lamp.calls)
+
+    await home.manager.set_brightness("z", 0.5)
+
+    assert tile.calls[tile_calls:] == [("firmware", {"level": 0.5, "brightness": 0.5})]
+    assert lamp.calls[lamp_calls:] == []  # it isn't prepared again
+
+
+async def test_running_zones_follow_the_managers_evening(make_home: HomeFactory) -> None:
+    asked: list[float] = []
+
+    def evening() -> float:
+        asked.append(1.0)
+        return 1.0
+
+    lamp = FakeLight("lamp", caps=LAMP)
+    home = await make_home([lamp], [zone_record("z", "lamp")], evening=evening)
+    look = replace(home.look("classic-breathe"), modifiers=LookModifiers(evening=True))
+    await home.manager.start("z", look)
+
+    home.host.runtimes["z"].tick(1000.0)
+
+    assert asked
 
 
 async def test_a_look_starts_its_firmware_even_when_layer_ids_repeat(

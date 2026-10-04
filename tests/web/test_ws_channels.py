@@ -85,6 +85,17 @@ async def test_running_zones_are_pushed_when_they_change(api: Api, socket: FakeS
     assert message["overlays"] == []
 
 
+async def test_a_transition_is_pushed_as_it_starts(api: Api, socket: FakeSocket) -> None:
+    body = {"lookId": "classic-breathe", "transition": {"kind": "fade", "durationS": 2.0}}
+    await api.client.post("/api/zones/desk/start", json=body)
+    await until(lambda: bool(socket.on("running")))
+
+    [message] = socket.on("running")
+    [zone] = message["zones"]
+    assert zone["state"] == "transition"
+    assert zone["transition"] == {"from": "", "kind": "fade", "progress": 0.0, "durationS": 2.0}
+
+
 async def test_changes_that_arrive_together_are_pushed_once(api: Api, socket: FakeSocket) -> None:
     api.home.bus.emit(ZonesChanged())
     api.home.bus.emit(ZonesChanged())

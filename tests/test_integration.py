@@ -25,7 +25,7 @@ from dj_ledfx.persistence.state_db import StateDB
 from dj_ledfx.scheduling.scheduler import LookaheadScheduler
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.zones.lights import LightMonitor
-from dj_ledfx.zones.runtime import ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import RuntimeEnv, ZoneLight, ZoneRuntime
 
 
 def _device(name: str, latency_ms: float, led_count: int) -> ManagedDevice:
@@ -49,7 +49,7 @@ def _zone(
     caps = DeviceCapabilities(protocol="LIFX")
     lights = [ZoneLight(d.adapter.device_info.name, d.adapter.led_count, caps) for d in devices]
     latency = {d.adapter.device_info.name: d.tracker.effective_latency_s for d in devices}
-    return ZoneRuntime(zone_id, look, lights, clock=clock, latency_s=latency.__getitem__)
+    return ZoneRuntime(zone_id, look, lights, RuntimeEnv(clock, latency.__getitem__))
 
 
 async def _play(zones: list[ZoneRuntime], devices: list[ManagedDevice], seconds: float) -> None:
@@ -227,8 +227,7 @@ async def test_a_silent_lamp_goes_offline_until_a_scan_finds_it_and_razer_re_arm
         "lamp",
         builtin_look("classic-rainbow-wave"),
         [ZoneLight(LAMP, lamp.adapter.led_count, lamp.adapter.capabilities)],
-        clock=_clock(),
-        latency_s=lambda _light: lamp.tracker.effective_latency_s,
+        RuntimeEnv(_clock(), lambda _light: lamp.tracker.effective_latency_s),
     )
     engine = EffectEngine(fps=60)
     engine.add_runtime(zone)

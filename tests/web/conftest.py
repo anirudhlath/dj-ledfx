@@ -19,6 +19,12 @@ from starlette.testclient import WebSocketTestSession  # noqa: E402
 from dj_ledfx.web.app import create_app  # noqa: E402
 
 
+def raw_json(body: str | bytes) -> dict[str, Any]:
+    """A request's JSON body sent as written, NaN and all, which httpx's json= won't send:
+    pass json.dumps() of a body that holds one."""
+    return {"content": body, "headers": {"content-type": "application/json"}}
+
+
 def mock_deps(**overrides: Any) -> dict[str, Any]:
     """create_app's required arguments, mocked, with no static directory configured; an
     override replaces one or adds another of create_app's arguments."""

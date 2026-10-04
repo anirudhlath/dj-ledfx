@@ -31,6 +31,7 @@ from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent, EventBus
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.store import HomeStore
+from dj_ledfx.home.sun import Evening
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.store import LookStore
@@ -54,6 +55,7 @@ from dj_ledfx.zones.frames import FrameFeed, Watchers
 from dj_ledfx.zones.home_view import MapZones
 from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.manager import ZoneManager
+from dj_ledfx.zones.model import TransitionSwitched
 from dj_ledfx.zones.preview import PreviewManager
 from dj_ledfx.zones.store import ZoneStore
 
@@ -202,6 +204,16 @@ def _finished(background: set[asyncio.Task[object]], task: asyncio.Task[object])
         logger.opt(exception=error).error("{} failed", task.get_name())
 
 
+def _switch_at_midpoints(
+    bus: EventBus, zones: ZoneManager, background: set[asyncio.Task[object]]
+) -> None:
+    """A transition's held lights go over to the new look at its midpoint (spec §5.3): one
+    task for each switch, so one that fails is logged and the next still runs."""
+    bus.subscribe(
+        TransitionSwitched, lambda event: _spawn(background, zones.switch(event.zone_id))
+    )
+
+
 async def _run(args: argparse.Namespace) -> None:
     metrics.init(enabled=args.metrics, port=args.metrics_port)
 
@@ -303,6 +315,7 @@ async def _run(args: argparse.Namespace) -> None:
         preview_only=config.engine.preview_only is True,
         home=MapZones(home_map),
         frames_watched=partial(watchers.watching, "live"),
+        evening=Evening(lambda: home_map.home.location),  # looks with evening (spec §5.3)
     )
     await zone_manager.load()
     # Before any light connects, so no light is restored and then taken over again.
@@ -347,6 +360,7 @@ async def _run(args: argparse.Namespace) -> None:
     event_bus.subscribe(DeviceOfflineEvent, _on_device_offline)
     event_bus.subscribe(DeviceOnlineEvent, _on_device_back)
     event_bus.subscribe(DeviceDiscoveredEvent, _on_device_back)
+    _switch_at_midpoints(event_bus, zone_manager, background)
 
     if registered_devices:
         await discovery_orchestrator.connect_known_devices(registered_devices)

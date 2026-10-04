@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from conftest import render_ctx
-from map_home import leds_at
+from map_home import ROW, grown, leds_at, shifted
 
 from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.sunset_gradient import SUNSET_PALETTE, SunsetGradient
@@ -90,3 +90,14 @@ def test_a_field_effect_fills_in_its_defaults_and_refuses_unknown_settings() -> 
     }
     with pytest.raises(TypeError, match="no setting glow"):
         SunsetGradient(glow=1.0)
+
+
+# H2 = M7: a transform moves Sunset's sun with the field: each moved LED shows what the
+# unmoved set shows where it now looks, its distance from the sun included.
+def test_a_transform_moves_the_suns_reach_with_the_field() -> None:
+    leds = leds_at(ROW, anchors={"sun": (0.0, 0.0, 1.0)})
+    sunset = SunsetGradient(anchor="sun")
+    plain = sunset.render(render_ctx(t=0.0), leds)
+
+    assert np.allclose(sunset.render(render_ctx(t=0.0), grown(leds))[::2], plain[2:7])
+    assert np.allclose(sunset.render(render_ctx(t=0.0), shifted(leds))[2:], plain[:7])

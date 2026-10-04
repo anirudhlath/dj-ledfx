@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from dj_ledfx.looks.model import TransitionKind
     from dj_ledfx.zones.runtime import ZoneState
 
 ZoneKind = Literal["home", "room", "sub-zone", "group"]
@@ -50,6 +51,18 @@ class CrashInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class TransitionInfo:
+    """A zone's transition while it plays (spec §5.3): the look it replaces (the one that
+    drove most of its lights; "" when they were idle), its kind, how far it has got (0..1)
+    and how long it takes in all."""
+
+    from_name: str
+    kind: TransitionKind
+    progress: float
+    duration_s: float
+
+
+@dataclass(frozen=True, slots=True)
 class TakeOver:
     """A running zone that lost lights to a newer start (spec §4.3)."""
 
@@ -77,6 +90,7 @@ class RunningZoneInfo:
     waiting_for: tuple[str, ...] = ()
     covers: tuple[str, ...] = ()  # the rooms its lights are in, by name, in map order
     slow_since: datetime | None = None  # for the attention feed; not in the contract
+    transition: TransitionInfo | None = None  # while its state is "transition"
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +141,14 @@ class ZoneNotRunningError(ZoneError):
 @dataclass(frozen=True, slots=True)
 class ZonesChanged:
     """Running zones changed: started, stopped, taken over, brightness or state."""
+
+
+@dataclass(frozen=True, slots=True)
+class TransitionSwitched:
+    """A running zone's transition passed its midpoint, or ended before it, and the lights
+    it held go over to the new look: main runs ZoneManager.switch() for the zone."""
+
+    zone_id: str
 
 
 @dataclass(frozen=True, slots=True)

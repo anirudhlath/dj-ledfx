@@ -139,6 +139,33 @@
         "title": "AnchorIn",
         "type": "object"
       },
+      "AnchorMask": {
+        "description": "The layer shows within `radius` metres of an anchor.",
+        "properties": {
+          "anchor": {
+            "title": "Anchor",
+            "type": "string"
+          },
+          "kind": {
+            "const": "anchor",
+            "title": "Kind",
+            "type": "string"
+          },
+          "radius": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Radius",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "anchor",
+          "radius"
+        ],
+        "title": "AnchorMask",
+        "type": "object"
+      },
       "AnchorUpdate": {
         "properties": {
           "confirmed": {
@@ -874,6 +901,40 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HeightMask": {
+        "description": "The layer shows between two heights, metres above the floor, low then high.",
+        "properties": {
+          "kind": {
+            "const": "height",
+            "title": "Kind",
+            "type": "string"
+          },
+          "range": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
+                "type": "number"
+              },
+              {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
+                "type": "number"
+              }
+            ],
+            "title": "Range",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "range"
+        ],
+        "title": "HeightMask",
+        "type": "object"
+      },
       "Home": {
         "properties": {
           "anchors": {
@@ -1205,8 +1266,29 @@
           "mask": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "discriminator": {
+                  "mapping": {
+                    "anchor": "#/components/schemas/AnchorMask",
+                    "height": "#/components/schemas/HeightMask",
+                    "room": "#/components/schemas/RoomMask",
+                    "sub-zone": "#/components/schemas/SubZoneMask"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/HeightMask"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RoomMask"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SubZoneMask"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AnchorMask"
+                  }
+                ]
               },
               {
                 "type": "null"
@@ -1217,14 +1299,12 @@
           "mirror": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/Mirror"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Mirror"
+            ]
           },
           "name": {
             "title": "Name",
@@ -1232,6 +1312,8 @@
           },
           "opacity": {
             "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
             "title": "Opacity",
             "type": "number"
           },
@@ -1252,14 +1334,12 @@
           "transform": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/Transform"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Transform"
+            ]
           },
           "type": {
             "enum": [
@@ -1823,10 +1903,13 @@
         "type": "object"
       },
       "LookModifiers": {
+        "description": "The look's modifiers (engine spec §5.3): trails (per-LED decay over `trailsS`\nseconds), a flash on every downbeat, a brightness cap (0..1, firmware lights too) and\nevening (warmer and dimmer from an hour before sunset).",
         "properties": {
           "brightnessCap": {
             "anyOf": [
               {
+                "maximum": 1.0,
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -1848,6 +1931,8 @@
           "trailsS": {
             "anyOf": [
               {
+                "exclusiveMinimum": 0.0,
+                "maximum": 10.0,
                 "type": "number"
               },
               {
@@ -1881,6 +1966,36 @@
           "params"
         ],
         "title": "MappingResponse",
+        "type": "object"
+      },
+      "Mirror": {
+        "description": "The field reflected across a plane square to `axis`, `at` metres along it (null:\nthe zone's centre); the low side shows on both.",
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "axis": {
+            "default": "x",
+            "enum": [
+              "x",
+              "y",
+              "z"
+            ],
+            "title": "Axis",
+            "type": "string"
+          }
+        },
+        "title": "Mirror",
         "type": "object"
       },
       "NudgeRequest": {
@@ -2398,6 +2513,26 @@
         "title": "Room",
         "type": "object"
       },
+      "RoomMask": {
+        "description": "The layer shows in one room, by id.",
+        "properties": {
+          "kind": {
+            "const": "room",
+            "title": "Kind",
+            "type": "string"
+          },
+          "room": {
+            "title": "Room",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "room"
+        ],
+        "title": "RoomMask",
+        "type": "object"
+      },
       "Running": {
         "properties": {
           "overlays": {
@@ -2575,7 +2710,12 @@
         "type": "object"
       },
       "RunningZoneTransition": {
+        "description": "A zone's transition while it plays: the look it replaces (the one that drove most of\nits lights, counted as lights; \"\" when they were idle), the kind, how far it has got\n(0..1) when this was sent, and how long it takes in all, so a client moves the bar on by\nitself. The running channel pushes it as the transition starts, at its midpoint and as\nit ends.",
         "properties": {
+          "durationS": {
+            "title": "Durations",
+            "type": "number"
+          },
           "from": {
             "title": "From",
             "type": "string"
@@ -2599,7 +2739,8 @@
         "required": [
           "from",
           "kind",
-          "progress"
+          "progress",
+          "durationS"
         ],
         "title": "RunningZoneTransition",
         "type": "object"
@@ -3043,6 +3184,26 @@
         "title": "SubZoneIn",
         "type": "object"
       },
+      "SubZoneMask": {
+        "description": "The layer shows in one sub-zone, by id.",
+        "properties": {
+          "kind": {
+            "const": "sub-zone",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subZone": {
+            "title": "Subzone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "subZone"
+        ],
+        "title": "SubZoneMask",
+        "type": "object"
+      },
       "SubZoneUpdate": {
         "properties": {
           "name": {
@@ -3229,10 +3390,60 @@
         "title": "TempoRequest",
         "type": "object"
       },
+      "Transform": {
+        "description": "The field shifted by `offset` metres, turned `rotateDeg` clockwise seen from above\n(any angle, kept as the same turn from -180 to 180) and grown `scale` times, both\nabout the zone's centre.",
+        "properties": {
+          "offset": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
+                "type": "number"
+              },
+              {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
+                "type": "number"
+              },
+              {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
+                "type": "number"
+              }
+            ],
+            "title": "Offset",
+            "type": "array"
+          },
+          "rotateDeg": {
+            "default": 0.0,
+            "title": "Rotatedeg",
+            "type": "number"
+          },
+          "scale": {
+            "default": 1.0,
+            "maximum": 10.0,
+            "minimum": 0.1,
+            "title": "Scale",
+            "type": "number"
+          }
+        },
+        "title": "Transform",
+        "type": "object"
+      },
       "Transition": {
+        "description": "How a look comes in (engine spec §5.3): a cut, or a fade, wipe, spread or dissolve\nover `durationS` seconds, at most 10.",
         "properties": {
           "durationS": {
             "default": 0.0,
+            "maximum": 10.0,
+            "minimum": 0.0,
             "title": "Durations",
             "type": "number"
           },
@@ -5873,7 +6084,7 @@
     },
     "/api/zones/{zone_id}/start": {
       "post": {
-        "description": "Put a look on a zone: a saved look by id, or an unsaved draft.",
+        "description": "Put a look on a zone: a saved look by id, or an unsaved draft, with the transition\ngiven, or else the look's own.",
         "operationId": "start_zone_api_zones__zone_id__start_post",
         "parameters": [
           {

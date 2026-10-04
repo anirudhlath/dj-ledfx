@@ -10,6 +10,7 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
+from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
@@ -25,7 +26,20 @@ from dj_ledfx.home import shapes
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import WallKind
 from dj_ledfx.looks import model as looks
-from dj_ledfx.looks.model import Blend, Category, InputKind, LayerType, Scope, TransitionKind
+from dj_ledfx.looks.model import (
+    MAX_DISTANCE_M,
+    MAX_SCALE,
+    MAX_TRAILS_S,
+    MAX_TRANSITION_S,
+    MIN_SCALE,
+    Blend,
+    Category,
+    InputKind,
+    LayerType,
+    MirrorAxis,
+    Scope,
+    TransitionKind,
+)
 from dj_ledfx.prodjlink.listener import Listening
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.tempo.model import (
@@ -89,6 +103,61 @@ class SettingSchema(ContractModel):
     options: list[str] | None = None
 
 
+Finite = Annotated[float, Field(allow_inf_nan=False)]
+# A place or a distance in a look, in metres, at most MAX_DISTANCE_M either way.
+Metres = Annotated[float, Field(ge=-MAX_DISTANCE_M, le=MAX_DISTANCE_M, allow_inf_nan=False)]
+
+
+class HeightMask(ContractModel):
+    """The layer shows between two heights, metres above the floor, low then high."""
+
+    kind: Literal["height"]
+    range: tuple[Metres, Metres]
+
+
+class RoomMask(ContractModel):
+    """The layer shows in one room, by id."""
+
+    kind: Literal["room"]
+    room: str
+
+
+class SubZoneMask(ContractModel):
+    """The layer shows in one sub-zone, by id."""
+
+    kind: Literal["sub-zone"]
+    sub_zone: str
+
+
+class AnchorMask(ContractModel):
+    """The layer shows within `radius` metres of an anchor."""
+
+    kind: Literal["anchor"]
+    anchor: str
+    radius: float = Field(gt=0.0, le=MAX_DISTANCE_M, allow_inf_nan=False)
+
+
+Mask = Annotated[HeightMask | RoomMask | SubZoneMask | AnchorMask, Field(discriminator="kind")]
+
+
+class Mirror(ContractModel):
+    """The field reflected across a plane square to `axis`, `at` metres along it (null:
+    the zone's centre); the low side shows on both."""
+
+    axis: MirrorAxis = "x"
+    at: Metres | None = None
+
+
+class Transform(ContractModel):
+    """The field shifted by `offset` metres, turned `rotateDeg` clockwise seen from above
+    (any angle, kept as the same turn from -180 to 180) and grown `scale` times, both
+    about the zone's centre."""
+
+    offset: tuple[Metres, Metres, Metres] = (0.0, 0.0, 0.0)
+    rotate_deg: Finite = 0.0
+    scale: float = Field(default=1.0, ge=MIN_SCALE, le=MAX_SCALE, allow_inf_nan=False)
+
+
 class Layer(ContractModel):
     id: str
     name: str
@@ -96,24 +165,31 @@ class Layer(ContractModel):
     kind: str
     visible: bool = True
     blend: Blend = "normal"
-    opacity: float = 1.0
+    opacity: float = Field(default=1.0, ge=0.0, le=1.0, allow_inf_nan=False)
     settings: dict[str, SettingValue] = Field(default_factory=dict)
     setting_schema: list[SettingSchema] = Field(default_factory=list, alias="schema")
-    mask: dict[str, Any] | None = None
-    mirror: dict[str, Any] | None = None
-    transform: dict[str, Any] | None = None
+    mask: Mask | None = None
+    mirror: Mirror | None = None
+    transform: Transform | None = None
 
 
 class LookModifiers(ContractModel):
-    trails_s: float | None = None
+    """The look's modifiers (engine spec §5.3): trails (per-LED decay over `trailsS`
+    seconds), a flash on every downbeat, a brightness cap (0..1, firmware lights too) and
+    evening (warmer and dimmer from an hour before sunset)."""
+
+    trails_s: float | None = Field(default=None, gt=0.0, le=MAX_TRAILS_S, allow_inf_nan=False)
     downbeat_flash: bool = False
-    brightness_cap: float | None = None
+    brightness_cap: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
     evening: bool = False
 
 
 class Transition(ContractModel):
+    """How a look comes in (engine spec §5.3): a cut, or a fade, wipe, spread or dissolve
+    over `durationS` seconds, at most 10."""
+
     kind: TransitionKind = "cut"
-    duration_s: float = 0.0
+    duration_s: float = Field(default=0.0, ge=0.0, le=MAX_TRANSITION_S, allow_inf_nan=False)
 
 
 class Look(ContractModel):
@@ -142,8 +218,19 @@ def look_out(look: looks.Look, starred: bool) -> Look:
 
 
 def look_in(body: Look) -> looks.Look:
-    """The look a request describes. Raises LookError when M1 can't read it."""
+    """The look a request describes. Raises LookError when M1 can't read it. One whose
+    layers share an id is refused (422): the editor tells layers apart by id. A saved
+    look can still have them (the runtime keeps each layer's view by its place)."""
+    ids = [layer.id for layer in body.layers]
+    shared = next((layer_id for layer_id in ids if ids.count(layer_id) > 1), None)
+    if shared is not None:
+        raise HTTPException(422, f"Two layers share the id '{shared}'; each needs its own")
     return looks.look_from_dict(body.model_dump(by_alias=True))
+
+
+def transition_in(body: Transition | None) -> looks.Transition | None:
+    """A start's transition as the engine plays it; None: the look's own."""
+    return None if body is None else looks.Transition(kind=body.kind, duration_s=body.duration_s)
 
 
 # --- zones -------------------------------------------------------------------------
@@ -157,9 +244,16 @@ class Zone(ContractModel):
 
 
 class RunningZoneTransition(ContractModel):
+    """A zone's transition while it plays: the look it replaces (the one that drove most of
+    its lights, counted as lights; "" when they were idle), the kind, how far it has got
+    (0..1) when this was sent, and how long it takes in all, so a client moves the bar on by
+    itself. The running channel pushes it as the transition starts, at its midpoint and as
+    it ends."""
+
     from_: str = Field(alias="from")
     kind: TransitionKind
     progress: float
+    duration_s: float
 
 
 class RunningZoneFps(ContractModel):
@@ -182,8 +276,8 @@ class RunningZone(ContractModel):
     lights: list[str]  # the lights it owns after take-overs
     # the rooms it still covers, by name, in map order
     covers: list[str] = Field(default_factory=list)
-    state: Literal[ZoneState, "transition"]  # transitions arrive in M4
-    transition: RunningZoneTransition | None = None  # transitions arrive in M4
+    state: ZoneState
+    transition: RunningZoneTransition | None = None  # while its state is "transition"
     fps: RunningZoneFps | None = None
     error: RunningZoneError | None = None
     waiting_for: list[InputKind] | None = None
@@ -225,7 +319,7 @@ class RecentLook(ContractModel):
 class StartRequest(ContractModel):
     look_id: str | None = None
     look: Look | None = None  # an unsaved draft
-    transition: Transition | None = None  # accepted; M1 plays every transition as a cut
+    transition: Transition | None = None  # None: the look's own
 
 
 class StartResponse(RunningZone):
@@ -259,6 +353,14 @@ def _running_fields(info: RunningZoneInfo, index: LightIndex) -> dict[str, Any]:
     error = None
     if info.error is not None:
         error = {"layer": info.error.layer, "message": info.error.message, "at": info.error.at}
+    transition = None
+    if info.transition is not None:
+        transition = {
+            "from": info.transition.from_name,
+            "kind": info.transition.kind,
+            "progress": round(info.transition.progress, 3),
+            "duration_s": info.transition.duration_s,
+        }
     return {
         "zone_id": info.zone_id,
         "look_id": info.look_id,
@@ -268,6 +370,7 @@ def _running_fields(info: RunningZoneInfo, index: LightIndex) -> dict[str, Any]:
         "lights": list(index.collapse(info.lights)),
         "covers": list(info.covers),
         "state": info.state,
+        "transition": transition,
         "fps": fps,
         "error": error,
         "waiting_for": list(info.waiting_for) or None,

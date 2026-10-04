@@ -7,10 +7,13 @@ import numpy as np
 import pytest
 from conftest import KEYBOARD_AND_MOUSE, SERVER, FakeLight, pc_lights
 from map_home import (
+    DESK,
     DESK_CORNER,
+    EAST,
     ROUND_MATRIX,
     SMALL_MATRIX,
     UPRIGHT_LAMP,
+    WEST,
     devices_of,
     open_map,
     tiny_home,
@@ -129,6 +132,20 @@ async def test_the_space_has_the_anchors_rooms_ceiling_and_centre(db: StateDB) -
     assert space.anchor_points["speakers"].shape == (2, 3)
     assert space.anchor_points["sofa"].shape == (1, 3)
     assert (space.rooms, space.ceiling, space.centre) == (("west", "east"), 3.0, (4.0, 2.0, 1.0))
+
+
+async def test_the_space_has_the_rooms_and_sub_zones_outlines(db: StateDB) -> None:
+    home_map = await _map(db, [])
+    space = home_map.space()
+    assert dict(space.room_outlines) == {"west": WEST, "east": EAST}
+    assert dict(space.sub_zone_outlines) == {"desk": DESK}
+
+    nook = ((0.0, 0.0), (1.5, 0.0), (1.5, 1.0))
+    await home_map.update_sub_zone("desk", polygon=nook)
+
+    moved = home_map.space()
+    assert moved.sub_zone_outlines["desk"] == nook
+    assert moved != space  # a running zone redraws its masks (zone manager's _follow)
 
 
 async def test_anchors_are_added_changed_and_deleted(db: StateDB) -> None:

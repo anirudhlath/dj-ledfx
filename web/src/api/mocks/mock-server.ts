@@ -7,8 +7,8 @@ import {
   STREAMED,
   type AnchorIn, type ApiPath, type CreateGroup, type FrameStream, type HomeSettings, type Id, type Inputs, type Light,
   type LightShape, type LightUpdate, type Look, type PendingPath, type Placement, type PlacementIn, type PreviewRequest,
-  type PreviewUpdate, type RecentLook, type RunningZone, type StartRequest, type SubZoneIn, type TakeOver, type UpdateGroup,
-  type Zone,
+  type PreviewUpdate, type RecentLook, type RunningZone, type StartRequest, type SubZoneIn, type TakeOver, type Transition,
+  type UpdateGroup, type Zone,
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import { PATH_PARAM } from '../rest'
@@ -102,6 +102,30 @@ const created = (body: unknown): MockReply => ({ status: 201, body })
 const noContent: MockReply = { status: 204 }
 const notFound = (detail = 'Not Found'): MockReply => ({ status: 404, body: { detail } })
 const badRequest = (detail: string): MockReply => ({ status: 400, body: { detail } })
+/** One of FastAPI's 422 problems: where in the request, and what's wrong there. */
+interface Problem {
+  type: string
+  loc: (string | number)[]
+  msg: string
+  input: unknown
+}
+const MAX_TRANSITION_S = 10 // engine M4's longest transition
+
+/** Whether a start's transition plays anything, as engine M4's `Transition.plays`: a cut, or one of no time, doesn't. */
+const plays = (transition: Transition): boolean => transition.kind !== 'cut' && transition.durationS > 0
+
+/** What engine M4 refuses in a transition (`loc` is where it sits in the request): a duration that isn't a number, or is outside 0–10 s. */
+function transitionProblems(transition: Transition | null | undefined, loc: string[]): Problem[] {
+  const input: unknown = transition?.durationS
+  const at = [...loc, 'durationS']
+  if (input === undefined) return [] // the default: no time
+  if (typeof input !== 'number' || !Number.isFinite(input)) return [{ type: 'float_type', loc: at, msg: 'Input should be a valid number', input }]
+  if (input < 0) return [{ type: 'greater_than_equal', loc: at, msg: 'Input should be greater than or equal to 0', input }]
+  if (input > MAX_TRANSITION_S) {
+    return [{ type: 'less_than_equal', loc: at, msg: `Input should be less than or equal to ${MAX_TRANSITION_S}`, input }]
+  }
+  return []
+}
 const BUILT_IN = 'Built-in looks are never changed; save an edit as a new look instead.'
 
 function lightUpdate(light: Light): LightUpdate {
@@ -250,6 +274,8 @@ export class MockServer {
   private readonly seqs: Record<FrameStream, Map<Id, number>> = { live: new Map(), preview: new Map() }
   /** When each light's placement was confirmed; the seed's confirmed lights have no time. */
   private readonly confirmedAt = new Map<Id, string>()
+  /** The zones a start's transition plays on, as engine M4 plays them: when each passes its midpoint (null once pushed) and ends, clock ms. */
+  private readonly transitions = new Map<Id, { midpointAt: number | null; endsAt: number }>()
   private frameCount = 0
   private nextFrameAt: number
   private nextStatsAt: number
@@ -419,6 +445,7 @@ export class MockServer {
       this.nextLightsAt += LIGHTS_MS
       this.readLightsBack(now)
     }
+    this.playTransitions(now)
     if (now >= this.nextStatusAt) {
       this.nextStatusAt += STATUS_MS
       this.broadcast({
@@ -428,6 +455,27 @@ export class MockServer {
         avg_render_ms: 1.2,
         transport: this.state.previewOnly ? 'simulating' : 'playing',
       })
+    }
+  }
+
+  /**
+   * The running channel pushes a zone as its transition passes the midpoint, halfway, and as it
+   * ends, when the zone runs its look (engine M4's ruling 15).
+   */
+  private playTransitions(now: number): void {
+    for (const [zoneId, times] of this.transitions) {
+      const zone = this.state.running.find((candidate) => candidate.zoneId === zoneId)
+      if (zone?.transition == null) {
+        this.transitions.delete(zoneId) // it stopped
+      } else if (now >= times.endsAt) {
+        this.transitions.delete(zoneId)
+        Object.assign(zone, { state: 'running', transition: null } satisfies Partial<RunningZone>)
+        this.changed('running')
+      } else if (times.midpointAt !== null && now >= times.midpointAt) {
+        times.midpointAt = null
+        zone.transition = { ...zone.transition, progress: 0.5 }
+        this.changed('running')
+      }
     }
   }
 
@@ -762,12 +810,19 @@ export class MockServer {
     })
   }
 
-  /** §11.3: the zone takes its lights from any running zone; a zone left with none stops. */
+  /** §11.3: the zone takes its lights from any running zone; a zone left with none stops. A transition engine M4 refuses is a 422, first. */
   private startLook(zoneId: Id, body: StartRequest): MockReply {
-    return this.withZone(zoneId, (zone) => this.withLookFor(body, (look) => this.takeOver(zone, look)))
+    const problems = [
+      ...transitionProblems(body.transition, ['body', 'transition']),
+      ...transitionProblems(body.look?.transition, ['body', 'look', 'transition']),
+    ]
+    if (problems.length > 0) return { status: 422, body: { detail: problems } }
+    return this.withZone(zoneId, (zone) =>
+      this.withLookFor(body, (look) => this.takeOver(zone, look, body.transition ?? look.transition)),
+    )
   }
 
-  private takeOver(zone: Zone, look: Look): MockReply {
+  private takeOver(zone: Zone, look: Look, transition: Transition | undefined): MockReply {
     const taking = new Set(zone.lights)
     const takeOvers: TakeOver[] = []
     const stopped: RunningZone[] = []
@@ -793,6 +848,18 @@ export class MockServer {
       brightness: previous?.brightness ?? 1,
       lights: zone.lights,
     })
+    this.transitions.delete(zone.id)
+    if (transition !== undefined && plays(transition)) {
+      const { kind, durationS } = transition
+      // Engine M4 names the look that drove most of the lights; the mock, the zone's own or the first it took from.
+      const from = previous?.lookName ?? takeOvers[0]?.lookName ?? ''
+      Object.assign(running, {
+        state: 'transition',
+        transition: { from, kind, progress: 0, durationS },
+      } satisfies Partial<RunningZone>)
+      const now = this.clock()
+      this.transitions.set(zone.id, { midpointAt: now + durationS * 500, endsAt: now + durationS * 1000 })
+    }
     this.state.running.push(running)
     this.changed('running', 'lights')
     return ok({ ...running, takeOvers })

@@ -352,7 +352,7 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
       lookId: 'embers',
       lookName: lookName('embers'),
       state: 'transition',
-      transition: { from: lookName('fireflies'), kind: 'dissolve', progress: 0.62 },
+      transition: { from: lookName('fireflies'), kind: 'dissolve', progress: 0.62, durationS: 3 },
     } satisfies Partial<RunningZone>)
   },
   problems(state, now) {
