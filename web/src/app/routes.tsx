@@ -51,9 +51,6 @@ export const routes: RouteObject[] = [
         errorElement: <AppError />,
         children: [
           { index: true, element: <Navigate to="/live" replace /> },
-          // F3 decision 23: /live/zones/:zoneId is Live with that zone's card outlined, so the stage
-          // stays mounted between them. LivePage reads the id; the child draws nothing (Task 19 gives it
-          // the phone's Zone detail).
           // F3 decision 23: /live/zones/:zoneId is Live, so the stage stays mounted between them. LivePage
           // reads the id: on desktop it outlines the zone's card, and on the phone it draws Zone detail.
           { path: 'live', handle: LIVE, element: <LivePage />, children: [{ path: 'zones/:zoneId', handle: ZONE, element: null }] },
