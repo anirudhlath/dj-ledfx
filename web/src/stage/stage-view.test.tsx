@@ -254,8 +254,10 @@ describe('the stage on Live (§7, §8.1)', () => {
     act(() => liveStore.setState({ inputs: null }))
     expect(sunDrawn()).not.toBeInTheDocument()
     act(() => liveStore.setState({ inputs: { ...inputs, sun: { ...sun, elevation: -3 } } }))
-    expect(screen.queryByText(/^SUN /)).not.toBeInTheDocument()
-    expect(screen.queryByText(/^Sun /)).not.toBeInTheDocument()
+    // On the stage: on a Sunday the top bar's date line starts "Sun " too.
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    expect(stage.queryByText(/^SUN /)).not.toBeInTheDocument()
+    expect(stage.queryByText(/^Sun /)).not.toBeInTheDocument()
   })
 
   // §8.1 "Hover a card → its zone outlines on the stage"; F3 decision 23.
