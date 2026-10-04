@@ -5796,7 +5796,7 @@ HOME = next(z for z in zones if z["kind"] == "home")["id"]
 if STEP == "lights":  # wait for the lights to come online, up to a minute
     for _ in range(60):
         lights = ok("GET", "/lights")
-        online = sum(light["status"] == "online" for light in lights)
+        online = sum(light["status"] not in ("offline", "reconnecting") for light in lights)
         if online == len(lights):
             break
         time.sleep(1)
