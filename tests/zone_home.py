@@ -70,11 +70,18 @@ class FakeHost:
         return {rt.zone_id: rt for rt in self.hosted if rt not in previews}
 
 
+# The moment the fake scheduler reads a route at: past every frame, so the newest (tests
+# tick their runtimes at made-up times).
+NEWEST = 1e9
+
+
 class FakeRoutes:
     """Stands in for the scheduler: it keeps each light's route, and every route set in
-    order (`history`), and sends a frame down every streaming route whenever the app asks a
-    light something (send_frames), as the real scheduler does while the zone manager
-    awaits."""
+    order (`history`). Whenever the app asks a light something it sends a frame down every
+    streaming route (send_frames), as the real scheduler does while the zone manager
+    awaits: the route's newest colours, or black before its zone's first frame, so a test
+    sees any frame that reaches a light. send_now() sends one light its newest colours at
+    once, as the scheduler's does, and nothing before its zone's first frame."""
 
     def __init__(self, lights: Mapping[str, FakeLight]) -> None:
         self.routes: dict[str, DeviceRoute] = {}
@@ -86,7 +93,17 @@ class FakeRoutes:
             light = self._lights.get(device_id)
             if light is None or not light.connected or not route.streaming:
                 continue
-            light.receive_frame(np.zeros((light.led_count, 3), dtype=np.uint8))
+            colors = route.colors_at(NEWEST, light.led_count)
+            black = np.zeros((light.led_count, 3), dtype=np.uint8)
+            light.receive_frame(black if colors is None else colors)
+
+    async def send_now(self, device_id: str) -> None:
+        route, light = self.routes.get(device_id), self._lights.get(device_id)
+        if route is None or light is None or not light.connected or not route.streaming:
+            return
+        colors = route.colors_at(NEWEST, light.led_count)
+        if colors is not None:
+            light.receive_frame(colors)
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None:
         self.history.append((device_id, route))

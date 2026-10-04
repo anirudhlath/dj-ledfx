@@ -52,7 +52,14 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
     ZonesChanged,
 )
-from dj_ledfx.zones.runtime import AppliedKey, LightMode, RuntimeEnv, ZoneLight, ZoneRuntime
+from dj_ledfx.zones.runtime import (
+    STREAMS,
+    AppliedKey,
+    LightMode,
+    RuntimeEnv,
+    ZoneLight,
+    ZoneRuntime,
+)
 from dj_ledfx.zones.store import new_group_id
 
 if TYPE_CHECKING:
@@ -84,6 +91,10 @@ class RouteTable(Protocol):
     """Sends each light its slice of its zone's frames: the scheduler."""
 
     def set_route(self, device_id: str, route: DeviceRoute | None) -> None: ...
+
+    async def send_now(self, device_id: str) -> None:
+        """Send a streaming light its frame for now at once, ahead of its send loop."""
+        ...
 
 
 def _brightness_of(running: _Running) -> float:
@@ -1165,8 +1176,9 @@ class ZoneManager:
 
     def _publish(self, device_id: str, runtime: ZoneRuntime) -> None:
         """Route a light to its zone's frames. They're sent only once _apply has readied the
-        light for this runtime, and never while preview-only is on; the web preview gets
-        every routed slice either way."""
+        light for this runtime (a light leaving its own effect, from just before _apply
+        stops the effect), and never while preview-only is on; the web preview gets every
+        routed slice either way."""
         route = runtime.route_for(device_id)
         ready = self._ready(device_id, runtime)
         if route is not None and route.streaming and (self._preview_only or not ready):
@@ -1180,7 +1192,8 @@ class ZoneManager:
     async def _apply(self, device_id: str, adapter: DeviceAdapter, runtime: ZoneRuntime) -> None:
         """Start the light's firmware layer, or get it ready to stream, once per change."""
         key = runtime.applied_key(device_id)
-        if self._applied.get(device_id) == key:
+        before = self._applied.get(device_id)
+        if before == key:
             return
         claim = runtime.claim_for(device_id)
         if claim is not None:
@@ -1208,12 +1221,31 @@ class ZoneManager:
                     exc,
                 )
                 return
-        if claim is None:
-            try:
-                await adapter.prepare_stream()
-            except Exception as exc:
-                logger.warning("Couldn't prepare {}: {}", adapter.device_info.name, exc)
+        if claim is None and before not in (None, STREAMS):  # it ran its own effect
+            await self._leave_effect(device_id, adapter, runtime)
+        elif claim is None:
+            await self._prepare(adapter)
         self._applied[device_id] = key
+
+    async def _leave_effect(
+        self, device_id: str, adapter: DeviceAdapter, runtime: ZoneRuntime
+    ) -> None:
+        """Take a light from its own effect to streaming so that it shows the look's rows
+        from the moment the effect stops. It's routed to them first and sent its frame at
+        once, just before the stop (a light that keeps colours sent while its effect runs
+        shows them as it stops) and again just after (one that doesn't gets them then,
+        not at its next due send). A light from anything else (idle, offline) is readied
+        before any frame reaches it: an effect of its own may be running."""
+        self._routes.set_route(device_id, runtime.route_for(device_id))
+        await self._routes.send_now(device_id)
+        await self._prepare(adapter)
+        await self._routes.send_now(device_id)
+
+    async def _prepare(self, adapter: DeviceAdapter) -> None:
+        try:
+            await adapter.prepare_stream()
+        except Exception as exc:
+            logger.warning("Couldn't prepare {}: {}", adapter.device_info.name, exc)
 
     async def _read(self, adapter: DeviceAdapter) -> LightReading:
         reading = await try_read(adapter)

@@ -126,6 +126,23 @@ class LookaheadScheduler:
         if state is not None:
             state.last = None
 
+    async def send_now(self, device_id: str) -> None:
+        """Send a streaming light its frame for now plus its latency at once, whatever its
+        send loop's timing: the zone manager sends one just before a light's own effect
+        stops and one just after, so the light shows its look from that moment. Nothing
+        goes to a light that doesn't stream, isn't connected or has no frame yet."""
+        state = self._device_state.get(device_id)
+        route = self._routes.get(device_id)
+        if state is None or route is None or not route.streaming:
+            return
+        device = state.managed
+        if not device.adapter.is_connected:
+            return
+        target = time.monotonic() + device.tracker.effective_latency_s
+        colors = route.colors_at(target, device.adapter.led_count)
+        if colors is not None:
+            await self._send(state, device_id, colors, colors.tobytes())
+
     def add_device(self, managed: ManagedDevice) -> None:
         """Add a device dynamically. Spawns a send task if the scheduler is running."""
         key = self._device_key(managed)

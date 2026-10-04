@@ -10,10 +10,12 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any, ClassVar
 
+import numpy as np
 import pytest
 from conftest import FakeLight, events
 from loguru import logger
-from runtime_fakes import FADE, LAMP, TILE, FlatField
+from numpy.typing import NDArray
+from runtime_fakes import FADE, LAMP, TILE, FlatField, field_layer, look_of
 from zone_home import GLOW, HomeFactory, zone_record
 
 from dj_ledfx.effects.base import Effect
@@ -257,6 +259,57 @@ async def test_a_transition_cut_short_stops_frames_to_a_light_the_new_look_runs_
     assert not home.routes.routes["tile"].streaming  # never the new look's rows
     await home.manager.switch("z")
     assert tile.names()[-1] == "firmware"
+
+
+STORED = "its stored colour"
+
+
+class EffectLight(FakeLight):
+    """A light that shows what it's given (`shown`, in order): nothing new while its own
+    effect runs, and when prepare_stream() stops the effect, the last frame sent meanwhile
+    if it keeps those (`keeps_frames`), else its stored colour, until a frame lands. Which
+    a LIFX matrix does isn't known."""
+
+    def __init__(self, stable_id: str, *, keeps_frames: bool, **kwargs: Any) -> None:
+        super().__init__(stable_id, **kwargs)
+        self.keeps_frames = keeps_frames
+        self.kept: list[list[int]] | None = None
+        self.shown: list[object] = []
+
+    def receive_frame(self, colors: NDArray[np.uint8]) -> None:
+        super().receive_frame(colors)
+        if not self.firmware_running:
+            self.shown.append(colors.tolist())
+        elif self.keeps_frames:
+            self.kept = colors.tolist()
+
+    async def prepare_stream(self) -> None:
+        await super().prepare_stream()
+        if self.firmware_running:  # its effect stops
+            self.firmware_running = False
+            self.shown.append(STORED if self.kept is None else self.kept)
+
+
+# The midpoint blink, seen on the real lights: a light leaving its own effect for streaming
+# shows the new look's rows from the moment its effect stops. It's routed to them and sent
+# its frame at once just before the stop, which a light that keeps frames sent while its
+# effect runs shows as the effect stops, and again just after, for a light that doesn't.
+@pytest.mark.usefixtures("_fields")
+@pytest.mark.parametrize("keeps_frames", [True, False], ids=["keeps-frames", "drops-frames"])
+async def test_a_light_leaving_its_own_effect_shows_the_new_rows_as_it_stops(
+    make_home: HomeFactory, keeps_frames: bool
+) -> None:
+    tile = EffectLight("tile", caps=TILE, keeps_frames=keeps_frames)
+    home = await make_home([tile], [zone_record("z", "tile")])
+    await home.manager.start("z", GLOW)
+    await home.manager.start("z", look_of(field_layer(0.25)), FADE)
+    _past_midpoint(home.host.runtimes["z"])
+
+    await home.manager.switch("z")
+
+    rows = [[64, 64, 64]] * 4  # the new look's 0.25, in 8 bits
+    assert tile.shown == ([rows, rows] if keeps_frames else [STORED, rows])
+    assert home.routes.routes["tile"].streaming
 
 
 async def _spawned(background: set[asyncio.Task[object]]) -> None:
