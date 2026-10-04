@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import struct
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from conftest import render_ctx
 from lifx_fakes import FakeLifxTransport, lifx_bulb, lifx_candle, lifx_strip
+from openrgb_fakes import adapter_of
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities, FirmwareRejected
 from dj_ledfx.devices.lifx.packet import (
@@ -20,7 +21,7 @@ from dj_ledfx.devices.lifx.packet import (
     TileEffectType,
     Waveform,
 )
-from dj_ledfx.devices.openrgb import HAS_BRIGHTNESS, OpenRGBAdapter
+from dj_ledfx.devices.openrgb import HAS_BRIGHTNESS
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.firmware_lifx import LifxFlame, LifxMorph, LifxMove, LifxWaveform
 from dj_ledfx.effects.firmware_openrgb import OpenrgbMode
@@ -170,10 +171,7 @@ def _pc_device() -> MagicMock:
 async def test_openrgb_mode_starts_checks_and_stops(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("dj_ledfx.devices.openrgb.READ_FRESH_S", 0.0)  # every check is a poll
     device = _pc_device()
-    with patch("dj_ledfx.devices.openrgb.OpenRGBClient") as client_cls:
-        client_cls.return_value = MagicMock(devices=[device])
-        pc = OpenRGBAdapter(device_index=0)
-        await pc.connect()
+    pc = await adapter_of(device)
     effect = OpenrgbMode()
 
     await effect.start(pc, effect.start_params(0.4))

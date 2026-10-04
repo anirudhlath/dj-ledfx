@@ -5,9 +5,11 @@ import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import numpy as np
 import pytest
 from conftest import events
 from govee_fakes import LAMP, STATUS, TEST_MODEL, UPRIGHT, lamp_record, lamp_row, lamp_transport
+from openrgb_fakes import PC, Listed, orgb_row, serve
 
 from dj_ledfx.config import AppConfig, DiscoveryConfig
 from dj_ledfx.devices.discovery import DiscoveryOrchestrator
@@ -17,6 +19,7 @@ from dj_ledfx.devices.govee.output import OUTPUT_KEY, GoveeOutput, LampOutputRep
 from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
 from dj_ledfx.devices.govee.sku_registry import SKU_REGISTRY
 from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
+from dj_ledfx.devices.openrgb_backend import OpenRGBBackend
 from dj_ledfx.events import DeviceOnlineEvent, EventBus
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
@@ -711,3 +714,34 @@ async def test_scans_take_turns(config, device_manager, event_bus):
     await asyncio.gather(orchestrator.run_scan(), orchestrator.run_scan())
 
     assert most == 1
+
+
+async def test_a_device_s_row_keeps_what_it_is_so_the_next_start_finds_it_wherever_it_sits(
+    monkeypatch: pytest.MonkeyPatch, config, event_bus, db
+):
+    """Four sticks of one name, known from rows that keep only their names: the first start
+    keeps each stick's location in its row, and the next start finds each stick by it."""
+    sticks = [Listed("RAM", location=f"bus-0 slot-{n}") for n in range(4)]
+    server = serve(monkeypatch, *sticks)
+    for n in range(4):
+        await db.upsert_device(orgb_row(n, "RAM"))
+
+    first = DiscoveryOrchestrator(config, DeviceManager(), event_bus, state_db=db)
+    first._backends = [OpenRGBBackend()]
+    await first.connect_known_devices(await db.load_devices())
+    await first.shutdown()
+
+    stored = json.loads((await db.load_device(f"{PC}:2"))["extra"])
+    assert stored == {"identity": {"serial": "", "location": "bus-0 slot-2"}}
+
+    server.devices = [sticks[3], sticks[1], sticks[0], sticks[2]]  # listed in another order
+    manager = DeviceManager()
+    restart = DiscoveryOrchestrator(config, manager, event_bus, state_db=db)
+    restart._backends = [OpenRGBBackend()]
+    await restart.connect_known_devices(await db.load_devices())
+
+    for n, stick in enumerate(sticks):
+        managed = manager.get_by_stable_id(f"{PC}:{n}")
+        assert managed is not None
+        await managed.adapter.send_frame(np.full((2, 3), n + 1, dtype=np.uint8))
+        assert stick.frames == [[(n + 1, n + 1, n + 1)] * 2]

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import ClassVar
+from collections.abc import Mapping
+from typing import Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -62,6 +63,13 @@ class DeviceAdapter(ABC):
         """When the light last answered anything, on time.monotonic's clock. None: never
         heard, or the protocol can't tell (the default)."""
         return None
+
+    @property
+    def row_extra(self) -> Mapping[str, Any]:
+        """What the light keeps in its device row's extra, by key, whenever the row is
+        written: what its backend knows it by next time (an OpenRGB device's identity).
+        Default: nothing."""
+        return {}
 
     @property
     def geometry(self) -> DeviceGeometry | None:

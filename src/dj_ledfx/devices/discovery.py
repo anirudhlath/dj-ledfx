@@ -293,6 +293,8 @@ class DiscoveryOrchestrator:
                 "sku": _record.sku if _record is not None else None,
             }
         )
+        for key, value in adapter.row_extra.items():  # what its backend knows it by next time
+            await self._state_db.set_device_extra(info.effective_id, key, value)
 
     async def shutdown(self) -> None:
         """Cancel discovery loop and shut down all backends."""
