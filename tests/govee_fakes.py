@@ -4,6 +4,7 @@ the SKU table's kinds of lamp, and a transport that hears the lamp."""
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -73,6 +74,13 @@ def lamp_transport(
 
     transport.discover = discover
     return transport
+
+
+def send_times(transport: MagicMock) -> list[float]:
+    """When each message goes through the transport from now on (`time.monotonic()`)."""
+    times: list[float] = []
+    transport.send_command.side_effect = lambda *_: times.append(time.monotonic())
+    return times
 
 
 def sent(transport: MagicMock) -> list[dict[str, Any]]:

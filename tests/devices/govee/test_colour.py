@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
-from govee_fakes import STATUS, WARM_WHITE, lamp_record, lamp_transport, sent
+from govee_fakes import STATUS, WARM_WHITE, lamp_record, lamp_transport, send_times, sent
 
+from dj_ledfx.devices.govee import adapter_base
 from dj_ledfx.devices.govee.adapter_base import STATUS_TIMEOUT_S
 from dj_ledfx.devices.govee.colour import GoveeColourAdapter
 from dj_ledfx.devices.govee.protocol import (
@@ -82,6 +83,14 @@ async def test_a_prepared_lamp_leaves_razer_for_full_brightness(transport: Magic
     adapter = GoveeColourAdapter(transport, lamp_record(), 15)
     await adapter.prepare_stream()
     assert sent(transport) == [RAZER_OFF, build_brightness_message(100)]
+
+
+async def test_a_prepare_gives_the_lamp_time_to_take_each_command(transport: MagicMock) -> None:
+    sent_at = send_times(transport)
+    adapter = GoveeColourAdapter(transport, lamp_record(), 15)
+    await adapter.prepare_stream()
+    assert len(sent_at) == 2  # razer off, brightness
+    assert sent_at[1] - sent_at[0] > 0.9 * adapter_base.COMMAND_GAP_S
 
 
 async def test_a_lamp_on_white_needs_no_white_off() -> None:
