@@ -30,6 +30,14 @@ describe('the room labels (§7.6)', () => {
     expect(labels.every((label) => label.look === null)).toBe(true)
   })
 
+  // State-Transition: "LIVING ROOM" over "Fireflies → Embers" while one look turns into the other.
+  it('names both looks while one turns into the other, as State-Transition does', () => {
+    const turning = buildScenario('transition', HERO_NOW)
+    const labels = stageLabels(turning.home, turning.running, turning.lights)
+    expect(labels.find((label) => label.key === 'living')!.look).toBe(`${lookName('fireflies')} → ${lookName('embers')}`)
+    expect(labels.find((label) => label.key === 'kitchen')!.look).toBe(lookName('homesunset'))
+  })
+
   it('shows the newest look where two run on one room', () => {
     const hero = buildScenario('hero', HERO_NOW)
     const living = hero.running.find((zone) => zone.zoneId === 'living')!

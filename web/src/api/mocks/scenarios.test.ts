@@ -177,6 +177,8 @@ describe('the other scenarios', () => {
     expect(state.running).toEqual([])
     expect(state.lights.filter((each) => each.power === true)).toHaveLength(9)
     expect(state.lights.filter((each) => each.power !== true)).toHaveLength(10)
+    // §9.4 "Stage shows each light as it is": a light that's on has its own colour (State-Nothing-Running's warm white).
+    expect(state.lights.filter((each) => each.power === true).every((each) => each.colour !== null)).toBe(true)
     expect(light('nothing-running', 'rope')?.status).toBe('offline')
     expect(state.attention).toEqual([])
   })

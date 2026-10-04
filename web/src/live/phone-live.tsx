@@ -40,7 +40,8 @@ export function PhoneRunning() {
     <>
       <div className="relative z-10 flex flex-col gap-2.5 px-4 pt-3 pb-4">
         {previewOnly === true ? (
-          <PreviewOnlyBanner className="-mt-12.5" />
+          // Phone-State-Preview-Only: 38 px up into the stage's foot, and the cards 4 px under it.
+          <PreviewOnlyBanner className="-mt-12.5 -mb-1.5" />
         ) : (
           something &&
           !frozen && (

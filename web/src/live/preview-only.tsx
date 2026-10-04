@@ -30,11 +30,18 @@ export function TapeBar() {
   return <span aria-hidden="true" data-tape="bar" className="tape block rounded-[2px]" style={{ height: LIVE_SPEC.tape.panelBarPx }} />
 }
 
+/**
+ * Where the label's foot is, 18 px down and 48 high (State-Preview-Only.html, content-box): Live sets it on
+ * the stage as `--stage-top-shift`, and the stage's tools and sun readout, which that render doesn't draw,
+ * start under it.
+ */
+export const PREVIEW_LABEL_FOOT_PX = 18 + 48
+
 /** The stage's label, centred at its top, with the way back to the lights. */
 export function PreviewOnlyLabel() {
   const control = usePreviewControl()
   return (
-    <div className="absolute top-4.5 left-1/2 z-10 flex h-11 -translate-x-1/2 items-center gap-3 rounded-control border-2 border-text bg-bg pr-1.5 pl-1">
+    <div className="absolute top-4.5 left-1/2 z-10 flex h-12 -translate-x-1/2 items-center gap-3 rounded-control border-2 border-text bg-bg pr-1.5 pl-1">
       <span aria-hidden="true" className="tape block h-8 w-10 shrink-0 rounded-[5px]" />
       <div className="flex flex-col whitespace-nowrap">
         <span className="text-data font-bold tracking-[0.08em] uppercase">Preview only</span>

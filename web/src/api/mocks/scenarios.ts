@@ -425,9 +425,21 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
     ])
   },
   'nothing-running'(state, now) {
-    // "Your lights are as they were: 9 on, 10 off." M1 raises no item for a light in no running zone.
-    const on = zoneOf(state, 'living').lights.filter((id) => id !== 'rope' && id !== 'tube')
-    for (const id of on) setLight(state, id, { power: true })
+    // "Your lights are as they were: 9 on, 10 off." M1 raises no item for a light in no running zone. The stage
+    // shows each light as it is (§9.4): the nine State-Nothing-Running draws lit, each in its colour at the
+    // brightness its glow has there.
+    const asTheyWere: Record<Id, string> = {
+      lcl: '#FFCF94',
+      tube: '#FFCF94',
+      ikea2: '#B99E7A',
+      rlamp: '#A28462',
+      kfloor: '#E8C191',
+      bedl: '#745B3F',
+      deskl: '#E8E5DE',
+      deskr: '#E8E5DE',
+      pc: '#597AB9',
+    }
+    for (const [id, colour] of Object.entries(asTheyWere)) setLight(state, id, { power: true, colour })
     setLight(state, 'rope', { status: 'offline', statusSince: after(now, -132 * MINUTE), power: null })
     // "Start again": the render's three looks from last night. Goodnight replaced Home sunset on the
     // whole home at 23:31 and took the living room's lights from Fireflies. The render gives Goodnight

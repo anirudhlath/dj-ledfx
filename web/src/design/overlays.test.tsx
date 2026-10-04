@@ -17,6 +17,19 @@ describe('overlays', () => {
     expect(dialog.style.width).toBe('430px')
   })
 
+  // State-Problems.html, the one popover a render draws: its title 14/600, centred on the row with the count.
+  it("Popover's head is State-Problems': a 14 px title, centred on its row", async () => {
+    render(
+      <Popover trigger={<button type="button">Open</button>} title="Needs attention" aside={<span>4</span>}>
+        <p>Items</p>
+      </Popover>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }))
+    const title = within(await screen.findByRole('dialog', { name: 'Needs attention' })).getByText('Needs attention')
+    expect(title).toHaveClass('text-[14px]', 'font-semibold')
+    expect(title.parentElement).toHaveClass('items-center')
+  })
+
   // The tooltip is visual only: the trigger's own label names it, and the popup, loose in <body>,
   // stays out of the accessibility tree (and out of axe's region rule).
   it('Tooltip shows on keyboard focus, out of the accessibility tree', async () => {
@@ -69,5 +82,18 @@ describe('overlays', () => {
     expect(within(sheet).getByText('3')).toBeInTheDocument()
     await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog', { name: 'Put a look on' })).toBeNull()
+  })
+
+  // Phone-State-Problems and Phone-PutLookOn draw the sheet's Close bare: a 44 px x in text-2, as the phone header's Back.
+  it("Sheet's Close is a bare 44 px x, as the phone's renders draw it", async () => {
+    render(
+      <Sheet trigger={<Button>Where</Button>} title="Put a look on">
+        <p>Pick a zone</p>
+      </Sheet>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Where' }))
+    const close = within(await screen.findByRole('dialog', { name: 'Put a look on' })).getByRole('button', { name: 'Close' })
+    expect(close).toHaveClass('size-11', 'text-text-2')
+    expect(close).not.toHaveClass('bg-control')
   })
 })

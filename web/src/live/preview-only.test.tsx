@@ -26,6 +26,9 @@ describe('preview only', () => {
     expect(document.querySelector('[data-tape="bar"]')).toHaveStyle({ height: `${LIVE_SPEC.tape.panelBarPx}px` })
     expect(within(screen.getByRole('complementary', { name: 'Running' })).getByText(/on screen only/)).toBeInTheDocument()
     const label = screen.getByText(SENTENCE).closest('div')!.parentElement!
+    // State-Preview-Only.html sizes it content-box: 48 high. The stage's tools and sun readout start under it.
+    expect(label).toHaveClass('h-12')
+    expect(label.parentElement!.style.getPropertyValue('--stage-top-shift')).toBe('66px')
     await userEvent.click(within(label).getByRole('button', { name: 'Send to lights again' }))
     expect(send).toHaveBeenCalledWith(false)
     // The server's transport push turns it off: everything goes.

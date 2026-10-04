@@ -37,6 +37,9 @@ describe("the phone's Tempo (§8.10)", () => {
       '4Deck 4Empty',
     ])
     expect(within(main()).getByText('Music Assistant: nothing playing. Audio looks wait for music.')).toBeInTheDocument()
+    // Phone-Tempo.html sizes them content-box: the drawn row is 54 high, the number's circle 32 across.
+    expect(decks()[0]).toHaveClass('min-h-13.5')
+    expect(within(decks()[0]).getByText('1')).toHaveClass('size-8')
   })
 
   // F3 decisions 26 and 40: no DJ heard, and the music playing.

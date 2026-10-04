@@ -20,7 +20,8 @@ export function ReconnectingCard({ variant }: { variant: 'desktop' | 'phone' }) 
 
   if (variant === 'phone') {
     return (
-      <section aria-labelledby={title} className="flex flex-col gap-2 rounded-panel border border-line-strong bg-raised p-4">
+      // Phone-State-Reconnecting: 16 px under the stage, 12 above the cards.
+      <section aria-labelledby={title} className="mt-1 mb-0.5 flex flex-col gap-2 rounded-panel border border-line-strong bg-raised p-4">
         <span className="flex items-center gap-2 text-meta font-bold tracking-[0.06em] text-signal uppercase">
           <Icon name="reconnect" size={16} />
           {tries}

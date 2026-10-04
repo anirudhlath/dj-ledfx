@@ -2,7 +2,7 @@
 // playing, with its track's BPM and pitch), and a MASTER badge on the deck the clock follows. A slot the
 // engine hasn't heard is "Deck N", empty, as Inputs.png names it (F3 decision 26); Phone-Tempo draws it
 // solid, where Inputs.png's dashed slots are F6's. Look: Phone-Tempo.html, which sets the number and the status
-// in mono.
+// in mono, and sizes the row and the circle content-box (drawn 54 high and 32 across).
 import type { Deck } from '@/api/contract'
 import { cx } from '@/design/cx'
 import { formatPitch, formatTrackBpm } from '@/lib/format'
@@ -20,10 +20,10 @@ export function DeckSlot({ number, deck }: { number: number; deck: Deck | undefi
   const master = deck?.master === true
   const empty = deck === undefined || deck.state === 'empty'
   return (
-    <li className={cx('flex min-h-13 items-center gap-3 rounded-card border px-3', master ? 'border-text bg-control' : 'border-line')}>
+    <li className={cx('flex min-h-13.5 items-center gap-3 rounded-card border px-3', master ? 'border-text bg-control' : 'border-line')}>
       <span
         className={cx(
-          'num inline-flex size-7.5 shrink-0 items-center justify-center rounded-full border text-size-control font-semibold',
+          'num inline-flex size-8 shrink-0 items-center justify-center rounded-full border text-size-control font-semibold',
           master ? 'border-text' : 'border-line-strong',
         )}
       >

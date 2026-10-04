@@ -4,7 +4,7 @@
 // zone's card outlined (F3 decision 23). Between 768 and 1199 px the panel lies over the stage's right
 // side and can hide (§4.4, F3 decision 22).
 import { usePrefetchQuery } from '@tanstack/react-query'
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useState, type CSSProperties } from 'react'
 import { useParams } from 'react-router'
 import type { Id } from '@/api/contract'
 import { queries } from '@/api/queries'
@@ -14,7 +14,7 @@ import { LIVE_SPEC } from '@/design/live-numbers'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
 import { EmptyHome } from '@/live/empty-home'
 import { PhoneRunning } from '@/live/phone-live'
-import { PreviewOnlyLabel } from '@/live/preview-only'
+import { PREVIEW_LABEL_FOOT_PX, PreviewOnlyLabel } from '@/live/preview-only'
 import { ReconnectingCard } from '@/live/reconnecting'
 import { RunningPanel } from '@/live/running-panel'
 import { ZoneDetail } from '@/live/zone-detail'
@@ -62,7 +62,10 @@ export function LivePage() {
   }
   return (
     <div className="relative flex h-full min-h-0">
-      <div className="relative min-w-0 flex-1">
+      <div
+        className="relative min-w-0 flex-1"
+        style={previewOnly ? ({ '--stage-top-shift': `${PREVIEW_LABEL_FOOT_PX}px` } as CSSProperties) : undefined}
+      >
         {stage}
         {previewOnly && <PreviewOnlyLabel />}
         <ReconnectingCard variant="desktop" />
