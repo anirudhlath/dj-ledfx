@@ -83,4 +83,20 @@ describe("the phone's Tempo (§8.10)", () => {
     expect(within(main()).getByText('Locked to Pro DJ Link, so tapping is off.')).toBeInTheDocument()
     expect(within(main()).getByRole('button', { name: 'Back to Auto' })).toBeInTheDocument()
   })
+
+  // F3 decision 40: Back to Auto shows under any lock. Under Internal's a tap still sets the tempo (decision 5).
+  it('offers Back to Auto under an Internal lock, and leaves TAP on', async () => {
+    openTempo()
+    act(() =>
+      liveStore.setState(({ inputs, beat }) => ({
+        inputs: { ...inputs!, tempo: { ...inputs!.tempo, lock: 'internal', source: 'internal' } },
+        beat: { ...beat!, source: 'internal' },
+      })),
+    )
+    const setTempo = vi.spyOn(api, 'setTempo').mockResolvedValue({ ...liveStore.getState().inputs!.tempo, lock: 'auto', source: 'prodjlink' })
+    expect(within(main()).getByRole('button', { name: 'Tap' })).toBeEnabled()
+    expect(within(main()).getByText('Locked to Internal. Tap along to set the tempo.')).toBeInTheDocument()
+    await userEvent.click(within(main()).getByRole('button', { name: 'Back to Auto' }))
+    expect(setTempo).toHaveBeenCalledWith({ lock: 'auto' })
+  })
 })

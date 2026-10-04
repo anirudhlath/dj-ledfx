@@ -112,11 +112,14 @@ function TapPad({ source, lock, held }: TempoState) {
       .catch((error: unknown) => announce(failureText(held ? 'give the tempo back' : 'unlock the tempo', error)))
       .finally(() => setSending(false))
   }
+  // Internal's lock leaves TAP on: a tap sets the tempo it holds, and only Back to Auto lets a DJ take over.
   const hint = held
     ? 'Internal holds the tempo until a DJ starts again.'
     : lockedTo !== null
       ? `Locked to ${lockedTo}, so tapping is off.`
-      : source === 'prodjlink'
+      : lock === 'internal'
+        ? `Locked to ${TEMPO_SOURCES.internal.label}. Tap along to set the tempo.`
+        : source === 'prodjlink'
         ? 'The DJ has the tempo. Tapping takes over with Internal.'
         : source === 'music'
           ? 'The music has the tempo. Tapping takes over with Internal.'
@@ -133,7 +136,7 @@ function TapPad({ source, lock, held }: TempoState) {
       </button>
       <div className="-mt-1.5 flex flex-col items-center gap-2">
         <p className="text-center text-meta text-text-3">{hint}</p>
-        {(held || lockedTo !== null) && (
+        {(held || lock !== 'auto') && (
           <Button size="sm" disabled={sending} onClick={backToAuto}>
             Back to Auto
           </Button>
