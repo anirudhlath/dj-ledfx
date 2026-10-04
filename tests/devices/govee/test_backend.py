@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from govee_fakes import NO_RAZER, TEST_MODEL, UPRIGHT, lamp_row, lamp_transport, sent
+from govee_fakes import LAMP, NO_RAZER, TEST_MODEL, UPRIGHT, lamp_row, lamp_transport, sent
 from loguru import logger
 
 from dj_ledfx.config import (
@@ -208,3 +208,34 @@ async def test_a_lamp_is_set_up_again_from_its_row_without_asking_it(config: App
     assert backend.rebuild({"id": "lifx:test", "backend": "lifx"}, config, tracker) is None
     backend._transport = None  # shut down
     assert backend.rebuild(lamp_row(), config, tracker) is None
+
+
+def _hints(records: list[Any]) -> list[Any]:
+    return [record for record in records if "LAN control" in record["message"]]
+
+
+async def test_a_scan_that_hears_only_lamps_already_online_gives_no_hint(
+    config: AppConfig,
+) -> None:
+    backend = GoveeBackend()
+    backend._transport = lamp_transport()
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="INFO")
+    try:
+        assert await backend.discover(config, skip_ids={LAMP}) == []
+    finally:
+        logger.remove(sink)
+    assert _hints(records) == []
+
+
+async def test_a_scan_no_lamp_answers_gives_the_hint(config: AppConfig) -> None:
+    backend = GoveeBackend()
+    transport = backend._transport = lamp_transport()
+    transport.discover = AsyncMock(return_value=[])  # no lamp answers
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="INFO")
+    try:
+        assert await backend.discover(config) == []
+    finally:
+        logger.remove(sink)
+    assert len(_hints(records)) == 1
