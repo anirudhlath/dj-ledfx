@@ -102,6 +102,12 @@ async def test_set_power_and_prepare_stream(record: GoveeDeviceRecord) -> None:
     await adapter.prepare_stream()
     assert sent(transport) == [
         {"msg": {"cmd": "turn", "data": {"value": 1}}},
+        {
+            "msg": {
+                "cmd": "colorwc",
+                "data": {"color": {"r": 0, "g": 0, "b": 0}, "colorTemInKelvin": 0},
+            }
+        },
         {"msg": {"cmd": "brightness", "data": {"value": 100}}},
     ]
 

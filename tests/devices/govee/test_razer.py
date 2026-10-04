@@ -7,13 +7,14 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from govee_fakes import STATUS, lamp_record, lamp_transport, sent
+from govee_fakes import STATUS, WARM_WHITE, lamp_record, lamp_transport, sent
 
 from dj_ledfx.devices.govee import adapter_base
 from dj_ledfx.devices.govee.adapter_base import OFF_TRIES, UPRIGHT_HEIGHT_M
 from dj_ledfx.devices.govee.protocol import (
     build_brightness_message,
     build_razer_switch,
+    build_solid_color_message,
     build_turn_message,
 )
 from dj_ledfx.devices.govee.razer import RAZER_IDLE_S, GoveeRazerAdapter
@@ -25,6 +26,10 @@ RAZER_ON, RAZER_OFF = build_razer_switch(on=True), build_razer_switch(on=False)
 OFF = build_turn_message(on=False)
 CAPTURED_OFF = GoveeDeviceState(on_off=0, brightness=50, r=10, g=20, b=30).to_bytes()
 LIT = {**STATUS, "onOff": 1}
+# Out of white: colorwc at colour temperature 0, in black, which can't flash before razer
+WHITE_OFF = {
+    "msg": {"cmd": "colorwc", "data": {"color": {"r": 0, "g": 0, "b": 0}, "colorTemInKelvin": 0}}
+}
 
 
 def _razer_rgb(message: dict[str, Any]) -> bytes:
@@ -75,9 +80,11 @@ async def test_razer_is_switched_on_again_after_a_pause(transport: MagicMock) ->
     assert [m == RAZER_ON for m in sent(transport)] == [True, False, False, True, False]
 
 
-async def test_a_prepared_lamp_gets_full_brightness_and_razer_with_its_next_frame(
-    transport: MagicMock,
-) -> None:
+async def test_a_prepared_lamp_leaves_white_for_full_brightness_then_razer() -> None:
+    """Razer drives only the colour LEDs: a lamp left on white kept its white LEDs lit behind
+    every frame, washing the colours out. The prepare switches its white off before brightness,
+    and its next frame switches razer on again."""
+    transport = lamp_transport(WARM_WHITE)
     adapter = GoveeRazerAdapter(transport, lamp_record(), 3, clock=lambda: 100.0)
     frame = np.zeros((3, 3), dtype=np.uint8)
     await adapter.send_frame(frame)
@@ -86,7 +93,18 @@ async def test_a_prepared_lamp_gets_full_brightness_and_razer_with_its_next_fram
     await adapter.prepare_stream()
     await adapter.send_frame(frame)
 
-    assert sent(transport)[:2] == [build_brightness_message(100), RAZER_ON]
+    white_off, brightness, switch, first = sent(transport)
+    assert (white_off, brightness, switch) == (WHITE_OFF, build_brightness_message(100), RAZER_ON)
+    assert first["msg"]["cmd"] == "razer"
+
+
+async def test_a_prepare_gives_the_lamp_time_to_take_each_command(transport: MagicMock) -> None:
+    sent_at: list[float] = []
+    transport.send_command.side_effect = lambda *_: sent_at.append(time.monotonic())
+    adapter = GoveeRazerAdapter(transport, lamp_record(), 3)
+    await adapter.prepare_stream()
+    assert len(sent_at) == 2  # white off, brightness
+    assert sent_at[1] - sent_at[0] > 0.9 * adapter_base.COMMAND_GAP_S
 
 
 # Review Focus 2: a look started right after another re-arms razer.
@@ -110,6 +128,25 @@ async def test_a_restore_takes_the_lamp_out_of_razer_first(transport: MagicMock)
     first, *rest = sent(transport)
     assert first == RAZER_OFF
     assert [m["msg"]["cmd"] for m in rest] == ["colorwc", "brightness", "turn"]
+
+
+async def test_a_lamp_captured_on_white_gets_its_white_back() -> None:
+    """The capture comes before the prepare's white off, so Off still puts the white back."""
+    transport = lamp_transport(WARM_WHITE)
+    adapter = GoveeRazerAdapter(transport, lamp_record(), 3, clock=lambda: 100.0)
+    captured = await adapter.capture_state()
+    assert captured is not None
+    await adapter.prepare_stream()
+    await adapter.send_frame(np.zeros((3, 3), dtype=np.uint8))
+    transport.send_command.reset_mock()
+
+    await adapter.restore_state(captured)
+
+    assert sent(transport) == [
+        RAZER_OFF,
+        build_solid_color_message(0, 0, 0, kelvin=2700),
+        build_brightness_message(80),
+    ]
 
 
 async def test_a_restore_gives_the_lamp_time_to_take_each_command(transport: MagicMock) -> None:

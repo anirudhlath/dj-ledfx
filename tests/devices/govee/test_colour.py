@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
-from govee_fakes import STATUS, lamp_record, lamp_transport, sent
+from govee_fakes import STATUS, WARM_WHITE, lamp_record, lamp_transport, sent
 
 from dj_ledfx.devices.govee.adapter_base import STATUS_TIMEOUT_S
 from dj_ledfx.devices.govee.colour import GoveeColourAdapter
@@ -82,6 +82,19 @@ async def test_a_prepared_lamp_leaves_razer_for_full_brightness(transport: Magic
     adapter = GoveeColourAdapter(transport, lamp_record(), 15)
     await adapter.prepare_stream()
     assert sent(transport) == [RAZER_OFF, build_brightness_message(100)]
+
+
+async def test_a_lamp_on_white_needs_no_white_off() -> None:
+    """No white off here: each colorwc frame carries colour temperature 0 itself, which takes
+    the lamp out of white."""
+    transport = lamp_transport(WARM_WHITE)
+    adapter = GoveeColourAdapter(transport, lamp_record(), 3)
+    await adapter.prepare_stream()
+    await adapter.send_frame(np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255]], dtype=np.uint8))
+    razer_off, brightness, frame = sent(transport)
+    assert (razer_off, brightness) == (RAZER_OFF, build_brightness_message(100))
+    assert frame == build_solid_color_message(85, 85, 85)
+    assert frame["msg"]["data"]["colorTemInKelvin"] == 0
 
 
 async def test_capture_state_returns_original(transport: MagicMock) -> None:
