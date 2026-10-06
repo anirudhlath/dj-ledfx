@@ -123,8 +123,16 @@ def test_frames_are_rendered_for_now_plus_the_horizon() -> None:
     assert frame.colors.dtype == np.float32 and frame.colors.shape == (8, 3)
 
 
-def test_the_horizon_is_capped() -> None:
-    runtime = runtime_of(look_of(field_layer()), latencies={"lamp": 5.0}, max_lookahead_s=1.0)
+def test_a_zone_with_a_400_ms_light_renders_400_ms_and_a_frame_ahead() -> None:
+    runtime = runtime_of(look_of(field_layer()), latencies={"lamp": 0.4})  # a dozing lamp
+    assert runtime.horizon_s == pytest.approx(0.4 + 1 / 60)
+    runtime.tick(100.0)
+    assert nearest_frame(runtime.ring, 100.5).target_time == pytest.approx(100.4 + 1 / 60)
+
+
+def test_the_horizon_is_capped_at_500_ms() -> None:
+    assert HORIZON_CAP_S == 0.5
+    runtime = runtime_of(look_of(field_layer()), latencies={"lamp": 0.6}, max_lookahead_s=1.0)
     assert runtime.horizon_s == HORIZON_CAP_S
     shorter = runtime_of(look_of(field_layer()), latencies={"lamp": 5.0}, max_lookahead_s=0.05)
     assert shorter.horizon_s == 0.05
@@ -156,10 +164,10 @@ def test_opacity_scales_the_frame_and_brightness_the_send() -> None:
 
 
 def test_a_light_slower_than_the_cap_gets_the_newest_frame() -> None:
-    runtime = runtime_of(look_of(field_layer(level=0.8)), latencies={"lamp": 0.5})
+    runtime = runtime_of(look_of(field_layer(level=0.8)), latencies={"lamp": 0.6})
     assert runtime.horizon_s == HORIZON_CAP_S
     runtime.tick(100.0)
-    assert np.all(sent(runtime, "lamp", 100.0 + 0.5, 3) == 204)  # 0.8 in 8 bits: late, not dark
+    assert np.all(sent(runtime, "lamp", 100.0 + 0.6, 3) == 204)  # 0.8 in 8 bits: late, not dark
 
 
 def test_a_crash_holds_the_last_good_frame_and_is_logged_once() -> None:
