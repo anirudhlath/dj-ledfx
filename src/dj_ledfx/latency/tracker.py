@@ -71,6 +71,12 @@ class LatencyTracker:
         return self._doze.dozing
 
     @property
+    def static(self) -> bool:
+        """Whether a static strategy sets the latency: it stays the configured one, whatever
+        the round trips or a recall say."""
+        return isinstance(self._strategy, StaticLatency)
+
+    @property
     def measured(self) -> bool:
         """Whether a round trip measured while the light streamed has landed since the last
         reset or recall. Until one has, the latency is the seed (the config's, or the type's
@@ -103,7 +109,7 @@ class LatencyTracker:
         else:
             self._strategy.update(rtt_ms * self._share)
         # A static latency ignores the sample: it stays the configured one.
-        self._measured = not isinstance(self._strategy, StaticLatency)
+        self._measured = not self.static
 
     def recall(self, latency_ms: float, dozing: bool) -> None:
         """Start from a latency and mode the light had before (spec §7): the strategy's
@@ -126,7 +132,7 @@ class LatencyTracker:
     def _log_mode(self) -> None:
         reading = self._doze.reading()
         assert reading is not None  # the mode changes only over enough round trips
-        if isinstance(self._strategy, StaticLatency):
+        if self.static:
             latency = "stays the configured one"  # the check runs, but nothing moves it
         elif self._doze.dozing:
             latency = "is its whole round trip"

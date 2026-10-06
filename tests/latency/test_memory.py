@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from pathlib import Path
 from typing import Any
 
@@ -54,10 +55,73 @@ async def test_a_light_with_no_row_starts_at_its_seed_awake(db: StateDB) -> None
     assert (tracker.link_latency_ms, tracker.dozing) == (100.0, False)
 
 
-# Ruling 16: a recall is logged at INFO, with the latency and the mode. A light with no row
-# keeps its seed and gets no line.
-@pytest.mark.parametrize("dozing", [True, False], ids=["dozing", "awake"])
-async def test_a_recall_is_logged_with_the_latency_and_the_mode(db: StateDB, dozing: bool) -> None:
+# The table isn't STRICT, so a hand-edited state.db can hold anything. A stored row the app
+# can't use never stops it starting (the reason behind ruling 3): it's skipped, its light
+# starts at its seed, awake, and the light's next write replaces it.
+async def test_rows_the_app_can_t_use_are_skipped_with_one_warning(db: StateDB) -> None:
+    bad = [
+        ("govee:text", "fast", 0),
+        ("govee:infinite", math.inf, 0),
+        ("govee:negative", -5.0, 0),
+        ("govee:mode", 250.0, "yes"),
+    ]
+    await db.write_many(
+        [
+            (
+                "INSERT INTO link_memory (stable_id, latency_ms, dozing, updated_at) "
+                "VALUES (?, ?, ?, '2026-10-06T00:00:00+00:00')",
+                row,
+            )
+            for row in [*bad, (LAMP, 250.0, 1)]
+        ]
+    )
+    memory = LinkMemory(db)
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="INFO")
+    try:
+        await memory.load()
+    finally:
+        logger.remove(sink)
+
+    assert [(record["level"].name, record["message"]) for record in records] == [
+        (
+            "WARNING",
+            "Skipped 4 link memory row(s) the app can't use: those lights start at their"
+            " seed, awake",
+        ),
+    ]
+    for stable_id, *_ in bad:
+        tracker = LatencyTracker(WindowedMedianLatency(LATENCY_WINDOW, 100.0))
+        memory.recall(stable_id, tracker)
+        assert (tracker.link_latency_ms, tracker.dozing) == (100.0, False)
+    tracker = LatencyTracker(WindowedMedianLatency(LATENCY_WINDOW, 100.0))
+    memory.recall(LAMP, tracker)
+    assert (tracker.link_latency_ms, tracker.dozing) == (250.0, True)
+
+    assert await memory.save([("govee:infinite", measured(120.0))]) == 1
+    assert ("govee:infinite", 120.0, 0) in await _rows(db)
+
+
+# Ruling 16: a recall is logged at INFO, with the latency and the mode. Under a static
+# strategy the latency stays the configured one, and the line says so, as the tracker's
+# change of mode does. A light with no row keeps its seed and gets no line.
+@pytest.mark.parametrize(
+    ("dozing", "static", "line"),
+    [
+        (True, False, "test-lamp starts from the latency it last had: 250 ms, dozing"),
+        (False, False, "test-lamp starts from the latency it last had: 250 ms, awake"),
+        (
+            True,
+            True,
+            "test-lamp starts in the mode it last had (dozing): its latency stays the"
+            " configured one",
+        ),
+    ],
+    ids=["dozing", "awake", "static"],
+)
+async def test_a_recall_is_logged_with_the_latency_and_the_mode(
+    db: StateDB, dozing: bool, static: bool, line: str
+) -> None:
     await LinkMemory(db).save([(LAMP, measured(250.0, dozing=dozing))])
     memory = LinkMemory(db)
     await memory.load()
@@ -65,16 +129,13 @@ async def test_a_recall_is_logged_with_the_latency_and_the_mode(db: StateDB, doz
     sink = logger.add(lambda message: records.append(message.record), level="INFO")
     try:
         for stable_id in (LAMP, "govee:no-row"):
-            tracker = LatencyTracker(
-                WindowedMedianLatency(LATENCY_WINDOW, 100.0), name="test-lamp"
+            strategy = (
+                StaticLatency(5.0) if static else WindowedMedianLatency(LATENCY_WINDOW, 100.0)
             )
-            memory.recall(stable_id, tracker)
+            memory.recall(stable_id, LatencyTracker(strategy, name="test-lamp"))
     finally:
         logger.remove(sink)
-    mode = "dozing" if dozing else "awake"
-    assert [(record["level"].name, record["message"]) for record in records] == [
-        ("INFO", f"test-lamp starts from the latency it last had: 250 ms, {mode}"),
-    ]
+    assert [(record["level"].name, record["message"]) for record in records] == [("INFO", line)]
 
 
 async def test_a_row_is_written_when_the_mode_changes_or_the_latency_moves_over_5_ms(
@@ -102,6 +163,19 @@ async def test_a_light_not_measured_since_it_came_online_writes_nothing(db: Stat
     lights = [("govee:seeded", seeded), ("govee:recalled", recalled), ("openrgb:pc:0", static)]
     assert await LinkMemory(db).save(lights) == 0
     assert await _rows(db) == []
+
+
+async def test_a_latency_that_isn_t_a_number_holds_up_no_other_light_s_row(db: StateDB) -> None:
+    """NaN would bind as NULL and fail the row's NOT NULL, rolling back every light's write
+    in the same transaction, every period."""
+    broken = LatencyTracker(WindowedMedianLatency(LATENCY_WINDOW, 100.0), name="test-lamp")
+    broken.note_send()
+    broken.update_rtt(math.nan)
+    assert broken.measured and math.isnan(broken.link_latency_ms)
+
+    lights = [("govee:broken", broken), (LAMP, measured(250.0, dozing=True))]
+    assert await LinkMemory(db).save(lights) == 1
+    assert await _rows(db) == [(LAMP, 250.0, 1)]
 
 
 async def test_the_writer_writes_every_period_and_once_more_at_shutdown(db: StateDB) -> None:

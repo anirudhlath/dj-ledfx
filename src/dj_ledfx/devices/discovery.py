@@ -271,15 +271,17 @@ class DiscoveryOrchestrator:
             return True
         if existing.status != "offline":
             return False  # a duplicate: its tracker never gets the light's round trips
-        self._recall(device)
+        self._recall(device, had=existing.tracker)  # the ghost's, before the swap
         self._promote(existing.adapter.device_info.effective_id, device)
         return True
 
-    def _recall(self, device: DiscoveredDevice) -> None:
-        """Start a light taken in from the latency and mode it last had (light-sync spec §7).
-        A light set up again with its own tracker (_play) keeps what that tracker has."""
+    def _recall(self, device: DiscoveredDevice, had: LatencyTracker | None = None) -> None:
+        """Start a light taken in from the latency and mode it last had (light-sync spec §7):
+        what the tracker it `had` measured, a ghost's found again within a run, else its
+        row. A light set up again with its own tracker (_play) keeps what that tracker has."""
         if self._link_memory is not None:
-            self._link_memory.recall(device.adapter.device_info.effective_id, device.tracker)
+            stable_id = device.adapter.device_info.effective_id
+            self._link_memory.recall(stable_id, device.tracker, had=had)
 
     async def _persist_device(self, adapter: DeviceAdapter) -> None:
         if not self._state_db:
