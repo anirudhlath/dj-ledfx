@@ -16,10 +16,12 @@ from dj_ledfx.latency.doze import (
 
 
 def fed(check: DozeCheck, arrivals: Iterable[float], rtt_ms: float) -> list[bool]:
-    """Whether the check calls the light dozing after each reply."""
+    """Whether the check calls the light dozing after each reply, each `add` saying whether
+    the reply changed the mode."""
     modes: list[bool] = []
     for arrived in arrivals:
-        check.add(arrived, rtt_ms)
+        was = check.dozing
+        assert check.add(arrived, rtt_ms) is (check.dozing != was)
         modes.append(check.dozing)
     return modes
 
@@ -72,6 +74,7 @@ def test_a_dozing_light_turns_awake_when_its_median_drops_under_50_ms() -> None:
     assert fed(check, map(on_beat, range(20)), 60.0)[-1]
     quicker = fed(check, map(on_beat, range(20, 40)), 20.0)  # bunched as much as before
     assert quicker == [True] * 19 + [False]  # 20 of its 40 at 20 ms: a median of 40 ms
+    assert all(fed(DozeCheck(dozing=True), map(on_beat, range(KEPT)), 50.0))  # 50 isn't under
 
 
 def test_a_dozing_light_turns_awake_when_its_replies_stop_bunching() -> None:
