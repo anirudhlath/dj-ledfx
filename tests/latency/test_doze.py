@@ -21,7 +21,8 @@ def fed(check: DozeCheck, arrivals: Iterable[float], rtt_ms: float) -> list[bool
     modes: list[bool] = []
     for arrived in arrivals:
         was = check.dozing
-        assert check.add(arrived, rtt_ms) is (check.dozing != was)
+        changed = check.add(arrived, rtt_ms)
+        assert changed is (check.dozing != was)
         modes.append(check.dozing)
     return modes
 
