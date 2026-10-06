@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (CLAUDE.md's choice for this repo) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Keep every light in step with every other without supervision: the Govee lamps are probed about every 0.5 s while they stream, a light whose Wi-Fi dozes is recognised by when its replies land and gets its whole round trip as its latency, the horizon cap rises to 500 ms, each light's latency and mode are remembered across restarts, and the device settings in state.db apply at last.
+**Goal:** Keep every light in step with every other without supervision: the Govee lamps are probed about every 0.5 s while they stream, a light whose Wi-Fi dozes is recognised by when its replies land and gets its whole round trip as its latency, the horizon cap rises to 500 ms, each light's latency and mode are remembered across restarts, and the device settings in state.db apply at last, those saved in the app included.
 
-**Architecture:** A new `latency/doze.py` holds a light's last 40 round trips with their arrival times and works out the Rayleigh statistic of the arrivals' phases in the 102.4 ms beacon cycle, and their median. `LatencyTracker` feeds its strategy the whole round trip of a light the check calls dozing and half of an awake one's, restarting the strategy from the held round trips when the mode changes. `GoveeTransport` gains a probe loop like LIFX's, asking each lamp that streams for its status after random waits of 75–125% of the interval, and the zone runtime's `HORIZON_CAP_S` becomes 0.5 s. `latency/memory.py`'s `LinkMemory` keeps each light's latency and mode in a new `link_memory` table (migration 010): the discovery orchestrator recalls a light's row as it takes the light in, and a task writes what changed every 30 s and at shutdown. `main.py` builds `DevicesConfig` from state.db, after a run-once step deletes the `devices.*` rows that never applied.
+**Architecture:** A new `latency/doze.py` holds a light's last 40 round trips with their arrival times and works out the Rayleigh statistic of the arrivals' phases in the 102.4 ms beacon cycle, and their median. `LatencyTracker` feeds its strategy the whole round trip of a light the check calls dozing and half of an awake one's, restarting the strategy from the held round trips when the mode changes. `GoveeTransport` gains a probe loop like LIFX's, asking each lamp that streams for its status after random waits of 75–125% of the interval, and the zone runtime's `HORIZON_CAP_S` becomes 0.5 s. `latency/memory.py`'s `LinkMemory` keeps each light's latency and mode in a new `link_memory` table (migration 010): the discovery orchestrator recalls a light's row as it takes the light in, and a task writes what changed every 30 s and at shutdown. `main.py` builds `DevicesConfig` from state.db, after a run-once step deletes the `devices.*` rows that never applied, and `PUT /api/config` saves there the device settings a request names.
 
 **Tech Stack:** Python 3.11+ (3.14 in the venv and the container), asyncio, SQLite through `StateDB`, loguru, numpy (the replay test's quartiles), pytest with pytest-asyncio. No new dependency: the doze check uses only `math` and `statistics`, and the probe loop `random`. Context7 is unavailable here (its server needs authorizing), and no outside library's API is new to the repo, so no outside docs were needed.
 
@@ -16,6 +16,7 @@
 - The LIFX transport echo-probes each light that streams every 2 s (`register_device(..., streaming=)`). The Govee transport times each status query to its reply (`register_device(record, rtt_callback)`; the light monitor's reads, every 5 s, are what it times today), and its docstring says there's no probe loop. `GoveeConfig.probe_interval_s` (5 s) is kept only so old config files load.
 - `zones/runtime.py` has `HORIZON_CAP_S = 0.12`, which `tests/zones/test_runtime.py::test_the_horizon_is_capped` pins.
 - `main.py`'s `_load_config_from_db` builds every section but `DevicesConfig`, so no `devices.*` row has ever applied. The deployed database holds rows from an old config file (spec §2): `ema` over 60 samples, Govee at 40 frames a second with probes every 5 s, a LIFX seed of 50 ms.
+- `PUT /api/config` (`web/router_config.py`) saves each flat section of the merged config to state.db's config table, whole, and no device setting: `devices` holds only tables, which its loop skips. `POST /api/config/import` saves nothing there. A backup (`GET /api/state/export`) carries the config table but not its run-once marks (`load_all_config` leaves `_meta` out), and a restore upserts its rows.
 - Migrations 001–009. `StateDB.write_many` (one transaction), `fetch_all`, and the run-once marks' `has_mark` and `mark_statement`; `tests/conftest.py`'s `db` fixture and `as_schema()`.
 - `tests/fixtures/latency/doze-replay-2026-10-04.json` and `doze-replay-2026-10-05.json`: the spike's replies from lamps a–d in relative times, `{"about", "beacon_ms", "lights": {label: {"expect", "replies": [[arrived_s, rtt_ms], ...]}}}`.
 
@@ -36,10 +37,10 @@ Every task's requirements include these. Quotes are verbatim from the spec.
 - Probes (§4): "Each round waits a random 75–125% of `devices.govee.probe_interval_s`, which defaults to 0.5 s." It asks "each registered lamp that streams for its status, unless a status query to that lamp is already in flight". "Only a lamp that streams is probed." "Nothing is probed while another program holds UDP 4002 (`can_receive`)". "The monitor's reads every 5 s go on, and their round trips count the same." "LIFX echo probes stay at every 2 s." `probe_interval_s` "must be positive, and its default drops from 5 s to 0.5 s."
 - Horizon (§6): "`HORIZON_CAP_S` goes from 120 ms to 500 ms." "Brightness is applied at send, so a brightness change isn't delayed."
 - Memory (§7): "`stable_id`, `latency_ms` (the strategy's latency, before display and offset), `dozing` and `updated_at`." "A task writes every 30 s, and once at shutdown. It writes the rows of lights whose mode changed, or whose latency moved by more than 5 ms, since their row was last written." "A light with no row starts at the config's seed, awake." "Not in backups." A reset "restarts it from the latency and mode it had, not from the config's seed. It drops the round trips the tracker held".
-- Settings (§8): `_load_config_from_db` "builds `DevicesConfig` too, from sections `devices.openrgb`, `devices.lifx` and `devices.govee`, through `filter_fields` like the other sections." The run-once step "deletes the database's `devices.*` rows. It uses `has_mark` and `mark_statement`, with the mark `devices_config_reset`." "A setting saved after the step is kept". "The other strategies stay selectable."
+- Settings (§8): `_load_config_from_db` "builds `DevicesConfig` too, from sections `devices.openrgb`, `devices.lifx` and `devices.govee`, through `filter_fields` like the other sections." The run-once step "deletes the database's `devices.*` rows. It uses `has_mark` and `mark_statement`, with the mark `devices_config_reset`." "A setting saved after the step is kept". "The other strategies stay selectable." The owner's decisions of 2026-10-06 (rulings 20 and 22): `PUT /api/config` saves device settings to state.db as config.toml's migration writes them, so one changed in the app survives a restart; and a restored backup brings back whatever device settings it holds, old ones included, and they apply.
 - Unchanged (§3): "each light's rate (a Govee razer lamp at 30 a second), the send loops, a frame's moment (`now + latency`), the ring and its reads."
 - Out of scope (§10): wake-timed sends, rate back-off, a view of each light's link (the web app shows none of this until a design handoff does, #37), calibration and lining up with the music (#35), probing OpenRGB, other beacon intervals, router tuning.
-- The web API doesn't change. `LightLatency.estimated` gets a new comment and nothing else, so there's no `api:types` step and `tests/web/test_openapi_types.py` stays green.
+- The web API doesn't change. `PUT /api/config` saves more (Task 6) with the same request and response, and `LightLatency.estimated` gets a new comment and nothing else, so there's no `api:types` step and `tests/web/test_openapi_types.py` stays green.
 - The repo is public: no LAN address, MAC, light name, model number, room name or SSID in code, tests, commits, the PR or this plan. A test address is `127.0.0.1`, a test Govee device `test-lamp`, and the recordings' lamps are `a` to `d`. The app's own log names lights (the doze and recall lines); that log stays on the machine, and the PR gives counts.
 - Code style (CLAUDE.md): `uv` for everything, loguru for logging, mypy strict, device I/O async on the one event loop, event-bus callbacks non-blocking. A migration's comments hold no `;` (the SQL is split on it), a row is upserted with `INSERT ... ON CONFLICT DO UPDATE`, never `INSERT OR REPLACE`, and cancelled tasks are awaited with `asyncio.wait`, not `gather`.
 - Gates, per task before its commit: `uv run ruff check .` clean, `uv run ruff format --check .` with no findings, `uv run mypy src/` no worse than the baseline (16 errors in 4 files on `1d6ed22`), and `uv run pytest -q` green. During a task, run only its test files; run the full gate once, before the commit. If `ruff format --check` names a file the task touched, run `uv run ruff format` on that file only.
@@ -48,7 +49,7 @@ Every task's requirements include these. Quotes are verbatim from the spec.
 
 ## Spec Rulings
 
-The spec is silent, or loose against the code, in a few places. These rulings are what the plan builds. Task 8 lists them in the PR.
+The spec is silent, or loose against the code, in a few places. These rulings are what the plan builds. Task 8 lists them in the PR. Rulings 20 and 22 carry the owner's decisions of 2026-10-06.
 
 1. **The run-once step runs before config.toml's migration.** §8 puts it "before the config is read". It runs before `migrate_from_toml` too, so a new database still takes config.toml's device tables, which the step would otherwise delete at once.
 2. **Device settings count as a config.** `_load_config_from_db` returns None only while state.db holds none of the app's sections, and the three device sections now count: a database holding only device settings (a config.toml with only device tables, migrated) applies them.
@@ -69,14 +70,15 @@ The spec is silent, or loose against the code, in a few places. These rulings ar
 17. **The config files.** `config.toml`'s `probe_interval_s` becomes 0.5 (the deployed app doesn't read it: its state.db holds the config). `config.example.toml` gains a `[devices.govee]` table, and its LIFX table follows the code's defaults (windowed median, 10 ms), since a config made from it now applies.
 18. **The recordings check every strategy but static** (windowed median, windowed mean and EMA), since §8 keeps them selectable: a dozing lamp ends between its round trips' quartiles under each.
 19. **The horizon tests** put the light past the cap at 600 ms.
-20. **`PUT /api/config` is unchanged.** It saves only flat sections, so a device setting changed through it still lasts until the restart. §8's "A setting saved after the step is kept, and now survives a restart" holds for rows in state.db: config.toml's on a new database, a restored backup's. Whether the web app should save device settings is the owner's call (Task 9's hand-off).
+20. **`PUT /api/config` saves the device settings it's sent** (the owner's decision), each in its kind's section of state.db (`devices.govee`) as JSON, as config.toml's migration writes them, so one changed in the app applies from the next start. It saves only the device settings a request names, as the migration writes only what the file holds (a ruling): preview only's switch names none, so it pins no default (a default the code changes later still reaches each setting no one set) and doesn't write over a restored backup's settings before they apply, while the old UI's Config page sends back the whole config it read, so its Save saves every device setting it shows. The flat sections are still saved whole. A value the config refuses gets a 400 and saves nothing. `POST /api/config/import` still saves nothing to state.db, as before.
 21. **The README follows CLAUDE.md** (Task 7): its horizon and latency lines are stale once this lands, though §11 doesn't list it.
+22. **A restored backup's device settings apply** (the owner's decision): a backup brings back whatever `devices.*` rows it holds, old ones included, and they apply from the next start (a restore leaves the running config alone, as before). One exported before light sync brings back the rows the run-once step dropped, and the step doesn't drop them again: it has run, and backups carry no run-once marks. No code changes for this; CLAUDE.md's Gotchas say it (Task 7).
 
 ## Review Focus
 
 These are the five inputs the spec implies that are most likely to bite someone using this, most likely first. Each has a test in the task that owns the code.
 
-1. **The deployed database's first start.** It holds `devices.*` rows that never applied (EMA over 60, Govee at 40 a second, a 50 ms LIFX seed, probes every 5 s) and no `link_memory`. That start drops the rows once and logs them, runs on the defaults, creates the table and starts every light at its seed, awake. A setting saved after applies from the next start, a new database still takes config.toml's device tables, and a stored device setting the config refuses leaves the lights on their defaults with a warning, never stopping the app. Tests: Task 5, `test_a_database_from_before_light_sync_gains_the_table`; Task 6, `test_the_old_device_settings_go_once_and_a_setting_saved_after_stays`, `test_device_settings_the_config_refuses_leave_the_lights_on_their_defaults`, `test_device_settings_no_start_applied_go_and_one_saved_after_applies` and `test_a_new_database_takes_config_toml_s_device_settings`.
+1. **The deployed database's first start.** It holds `devices.*` rows that never applied (EMA over 60, Govee at 40 a second, a 50 ms LIFX seed, probes every 5 s) and no `link_memory`. That start drops the rows once and logs them, runs on the defaults, creates the table and starts every light at its seed, awake. A setting saved after applies from the next start, one saved in the app included (`PUT /api/config` saves only the device settings it names, and nothing it refuses), a new database still takes config.toml's device tables, and a stored device setting the config refuses leaves the lights on their defaults with a warning, never stopping the app. Tests: Task 5, `test_a_database_from_before_light_sync_gains_the_table`; Task 6, `test_the_old_device_settings_go_once_and_a_setting_saved_after_stays`, `test_device_settings_the_config_refuses_leave_the_lights_on_their_defaults`, `test_device_settings_no_start_applied_go_and_one_saved_after_applies`, `test_a_new_database_takes_config_toml_s_device_settings`, `test_a_device_setting_saved_in_the_app_applies_from_the_next_start`, `test_a_save_that_names_no_device_setting_pins_no_default` and `test_a_device_setting_the_config_refuses_saves_nothing`.
 2. **An awake light with slow or ragged round trips** (a busy access point, a LIFX light, a lamp far from the router) is never called dozing, or its latency would double and it would run early. Replies at random moments, replies spread round the cycle at 300 ms, and bunched replies at 25 ms all stay awake, and the recordings' c and d never doze. Tests: Task 1, `test_replies_at_random_moments_are_awake`, `test_replies_spread_round_the_cycle_are_awake` and `test_bunched_replies_with_a_25_ms_median_are_awake`; Task 2, `test_a_and_b_turn_dozing_and_stay_dozing_and_c_and_d_never_do`.
 3. **A lamp the app can't hear**: Home Assistant holding UDP 4002, a lamp switched off at the wall mid-look, a reply that never comes. Nothing is probed while the app is deaf, a silent lamp holds up no round, a query in flight is never doubled, and the loop and its probes stop at close. Tests: Task 3, `test_nothing_is_probed_while_another_program_holds_the_reply_port`, `test_a_silent_lamp_holds_up_no_round`, `test_a_query_in_flight_is_shared_never_doubled` and `test_the_loop_and_its_probes_stop_at_close`.
 4. **A light that comes and goes**: it drops out and comes back, comes back as a ghost promoted after a restart, has its output changed, or is new. It keeps or recalls its latency and mode, a stale latency is never written over a measured one, and a new light starts at its seed, awake. Tests: Task 2, `test_a_reset_keeps_the_latency_and_the_mode_and_drops_the_round_trips_held` and `test_recall_sets_the_latency_and_the_mode`; Task 5, `test_a_lamp_taken_in_starts_from_the_latency_and_mode_it_last_had` (new and ghost), `test_a_lamp_with_no_row_starts_at_the_config_s_seed_awake`, `test_an_output_change_keeps_the_latency_the_lamp_has_now` and `test_a_light_not_measured_since_it_came_online_writes_nothing`.
@@ -94,11 +96,11 @@ New backend files (paths under `src/dj_ledfx/`):
 | `latency/memory.py` | Each light's link memory: `LinkMemory` (`load()`, `recall()`, `save()` and the writer, `run()`), `Link`, `LINK_MEMORY_EVERY_S` and `MOVED_MS` |
 | `persistence/migrations/010_link_memory.sql` | The `link_memory` table |
 
-Modified: `latency/{strategies,tracker}.py` (Task 2), `devices/govee/{backend,transport}.py` (Tasks 2 and 3), `devices/lifx/discovery.py` and `web/contract.py` (Task 2), `config.py`, `config.toml` and `config.example.toml` (Task 3), `zones/runtime.py` (Task 4), `devices/discovery.py` (Task 5), `main.py` (Tasks 5 and 6), `CLAUDE.md` and `README.md` (Task 7).
+Modified: `latency/{strategies,tracker}.py` (Task 2), `devices/govee/{backend,transport}.py` (Tasks 2 and 3), `devices/lifx/discovery.py` and `web/contract.py` (Task 2), `config.py`, `config.toml` and `config.example.toml` (Task 3), `zones/runtime.py` (Task 4), `devices/discovery.py` (Task 5), `main.py` (Tasks 5 and 6), `web/router_config.py` (Task 6), `CLAUDE.md` and `README.md` (Task 7).
 
 Shared test helpers: `tests/doze_fakes.py` (new, Task 1): reply moments for the doze check (`on_beat()`, `bunched()`, `spread()`, `half_bunched()`, `random_moments()`, from `START`); Task 2 adds `SEED_MS` and `Lamp`, a tracker named `test-lamp` on a fake clock whose light streams.
 
-New test files: `tests/latency/test_doze.py` (Task 1), `tests/latency/test_doze_replay.py` (Task 2), `tests/latency/test_memory.py` (Task 5) and `tests/test_device_settings.py` (Task 6).
+New test files: `tests/latency/test_doze.py` (Task 1), `tests/latency/test_doze_replay.py` (Task 2), `tests/latency/test_memory.py` (Task 5), and `tests/test_device_settings.py` and `tests/web/test_config_device_settings.py` (Task 6).
 
 ---
 
@@ -2352,17 +2354,17 @@ git commit -m "feat(latency): remember each light's latency and mode across rest
 ---
 
 
-### Task 6: Device settings from state.db
+### Task 6: Device settings in state.db
 
-`_load_config_from_db` builds `DevicesConfig` from sections `devices.openrgb`, `devices.lifx` and `devices.govee` (spec §8). Before any of it, a run-once step deletes the `devices.*` rows, which no start ever applied, so the first start after this runs on the code's defaults, as every start has; it logs what it dropped (rulings 1–4). The two subprocess tests run the app for real: one on a database like the deployed one, one on a new database with a config.toml.
+`_load_config_from_db` builds `DevicesConfig` from sections `devices.openrgb`, `devices.lifx` and `devices.govee` (spec §8). Before any of it, a run-once step deletes the `devices.*` rows, which no start ever applied, so the first start after this runs on the code's defaults, as every start has; it logs what it dropped (rulings 1–4). The two subprocess tests run the app for real: one on a database like the deployed one, one on a new database with a config.toml. Then `PUT /api/config` saves the device settings a request names to those sections, as config.toml's migration writes them, so one changed in the app applies from the next start (the owner's decision, ruling 20).
 
 **Files:**
-- Modify: `src/dj_ledfx/main.py`
-- Test: `tests/test_device_settings.py` (new), `tests/test_main.py`
+- Modify: `src/dj_ledfx/main.py`, `src/dj_ledfx/web/router_config.py`
+- Test: `tests/test_device_settings.py` (new), `tests/test_main.py`, `tests/web/test_config_device_settings.py` (new)
 
 **Interfaces:**
-- Consumes: `StateDB.has_mark`, `mark_statement`, `fetch_all`, `write_many`, `load_all_config`; `config.filter_fields`; `OpenRGBConfig`, `LIFXConfig`, `GoveeConfig`, `DevicesConfig`.
-- Produces (`dj_ledfx.main`): `DEVICES_CONFIG_RESET = "devices_config_reset"`; `async _reset_device_settings_once(state_db: StateDB) -> None`; `_devices_config(sections: dict[str, dict[str, object]]) -> DevicesConfig`; `_load_config_from_db()` returns a config with `devices` built from state.db.
+- Consumes: `StateDB.has_mark`, `mark_statement`, `fetch_all`, `write_many`, `load_all_config`; `config.filter_fields`; `OpenRGBConfig`, `LIFXConfig`, `GoveeConfig`, `DevicesConfig`; `StateDB.save_config_bulk` and `load_config`; `tests/api_home.py`'s `api_home`.
+- Produces (`dj_ledfx.main`): `DEVICES_CONFIG_RESET = "devices_config_reset"`; `async _reset_device_settings_once(state_db: StateDB) -> None`; `_devices_config(sections: dict[str, dict[str, object]]) -> DevicesConfig`; `_load_config_from_db()` returns a config with `devices` built from state.db. (`dj_ledfx.web.router_config`): `_device_rows(body: dict[str, Any], devices: dict[str, Any]) -> dict[str, dict[str, str]]`, the device settings a request names as state.db's rows; `PUT /api/config` saves them, with the same request and response.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2647,7 +2649,124 @@ In `src/dj_ledfx/main.py`:
 Run: `uv run pytest tests/test_device_settings.py tests/test_main.py -q`
 Expected: PASS (15 tests).
 
-- [ ] **Step 5: Run the gate**
+- [ ] **Step 5: Write the failing tests for the save**
+
+Create `tests/web/test_config_device_settings.py`:
+
+```python
+"""PUT /api/config saves the device settings a request names in state.db, where the next
+start reads them (light-sync spec §8, as the owner decided: the plan's ruling 20)."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+import pytest_asyncio
+from api_home import Api, api_home
+from conftest import FakeLight
+
+from dj_ledfx.main import _load_config_from_db
+
+
+@pytest_asyncio.fixture
+async def api(tmp_path: Path) -> AsyncIterator[Api]:
+    async with api_home(tmp_path, [FakeLight("a")], []) as api:
+        yield api
+
+
+async def test_a_device_setting_saved_in_the_app_applies_from_the_next_start(api: Api) -> None:
+    body = {"devices": {"govee": {"max_fps": 20, "probe_interval_s": 0.8}}}
+    assert (await api.client.put("/api/config", json=body)).status_code == 200
+
+    config = await _load_config_from_db(api.home.db)
+
+    assert config is not None
+    assert (config.devices.govee.max_fps, config.devices.govee.probe_interval_s) == (20, 0.8)
+    assert config.devices == api.app.state.config.devices
+    # As config.toml's migration writes them: in the kind's own section, as JSON
+    saved = await api.home.db.load_config("devices.govee")
+    assert saved == {"max_fps": "20", "probe_interval_s": "0.8"}
+
+
+async def test_a_save_that_names_no_device_setting_pins_no_default(api: Api) -> None:
+    """Preview only's switch saves no device setting, so a default the code changes later
+    still reaches each setting no one set."""
+    body = {"engine": {"preview_only": True}}
+    assert (await api.client.put("/api/config", json=body)).status_code == 200
+
+    saved = await api.home.db.load_all_config()
+
+    assert saved[("engine", "preview_only")] is True
+    assert [section for section, _ in saved if section.startswith("devices.")] == []
+
+
+@pytest.mark.parametrize("refused", [{"probe_interval_s": 0}, {"max_fps": "fast"}])
+async def test_a_device_setting_the_config_refuses_saves_nothing(
+    api: Api, refused: dict[str, Any]
+) -> None:
+    await api.client.put("/api/config", json={"devices": {"govee": {"max_fps": 20}}})
+    body = {"devices": {"govee": {"latency_ms": 50.0, **refused}}}
+
+    assert (await api.client.put("/api/config", json=body)).status_code == 400
+    assert await api.home.db.load_config("devices.govee") == {"max_fps": "20"}
+```
+
+- [ ] **Step 6: Run them to see them fail**
+
+Run: `uv run pytest tests/web/test_config_device_settings.py -q`
+Expected: FAIL: `3 failed, 1 passed`. No device setting reaches state.db: `assert (30, 0.5) == (20, 0.8)`, and `assert {} == {'max_fps': '20'}` for each refused value. The preview-only test passes already: it holds Step 7 to saving only what a request names.
+
+- [ ] **Step 7: Save the device settings**
+
+In `src/dj_ledfx/web/router_config.py`:
+
+```diff
+--- a/src/dj_ledfx/web/router_config.py
++++ b/src/dj_ledfx/web/router_config.py
+@@ -100,6 +100,21 @@ def _requires_restart(old: AppConfig, new: AppConfig) -> str:
+     return "true" if rest(old) != rest(new) else "false"
+ 
+ 
++def _device_rows(body: dict[str, Any], devices: dict[str, Any]) -> dict[str, dict[str, str]]:
++    """The device settings a request names, as state.db keeps them: each kind's in its own
++    section (devices.govee), as JSON, as config.toml's migration writes them (light-sync spec
++    §8). Only those named, as the migration writes only what the file holds, so a save that
++    names none (preview only's) pins no default. `devices` is the merged config's, checked."""
++    named = body.get("devices")
++    if not isinstance(named, dict):
++        return {}
++    return {
++        f"devices.{kind}": {key: json.dumps(devices[kind][key]) for key in settings}
++        for kind, settings in named.items()
++        if kind in devices and settings
++    }
++
++
+ async def _apply_live(request: Request, config: AppConfig) -> None:
+     zones = getattr(request.app.state, "zone_manager", None)
+     if zones is not None:
+@@ -136,6 +151,8 @@ async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
+                 str_kv = {k: json.dumps(v) for k, v in value.items() if not isinstance(v, dict)}
+                 if str_kv:
+                     await db.save_config_bulk(section, str_kv)
++        for section, rows in _device_rows(body, result["devices"]).items():
++            await db.save_config_bulk(section, rows)
+     except HTTPException:
+         pass
+     await _apply_live(request, new_config)
+```
+
+The route keeps its signature and has no docstring, so the OpenAPI schema doesn't change: no `api:types` step.
+
+- [ ] **Step 8: Run them to see them pass**
+
+Run: `uv run pytest tests/web/test_config_device_settings.py tests/web/test_router_config.py tests/web/test_preview_only_config.py tests/web/test_openapi_types.py -q`
+Expected: PASS (18 tests).
+
+- [ ] **Step 9: Run the gate**
 
 ```bash
 uv run ruff check . && uv run ruff format --check . 2>&1 | tail -1
@@ -2655,13 +2774,13 @@ uv run mypy src/ 2>&1 | tail -1
 uv run pytest -q 2>&1 | tail -1
 ```
 
-Expected: ruff clean, `338 files already formatted`, mypy `Found 16 errors in 4 files (checked 153 source files)` (the baseline's errors, two more files checked), and `1884 passed, 1 skipped, 42 deselected`.
+Expected: ruff clean, `339 files already formatted`, mypy `Found 16 errors in 4 files (checked 153 source files)` (the baseline's errors, two more files checked), and `1888 passed, 1 skipped, 42 deselected`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add src/dj_ledfx/main.py tests/test_device_settings.py tests/test_main.py
-git commit -m "feat(config): device settings load from state.db, after the old rows go once"
+git add src/dj_ledfx/main.py src/dj_ledfx/web/router_config.py tests/test_device_settings.py tests/test_main.py tests/web/test_config_device_settings.py
+git commit -m "feat(config): device settings load from state.db, and PUT /api/config saves them" -m "A run-once step first drops the devices.* rows that no start ever applied."
 ```
 
 ---
@@ -2669,7 +2788,7 @@ git commit -m "feat(config): device settings load from state.db, after the old r
 
 ### Task 7: CLAUDE.md and the README
 
-CLAUDE.md asks for the claude-md skill after each plan, and the spec's §11 names what must change: the latency decision, the horizon and the LIFX matrix ruling, the Govee probe. This branch also changed the device settings' load, the tracker's API, the persistence (migration 010) and the testing fakes. The README's horizon and latency lines go stale too (ruling 21).
+CLAUDE.md asks for the claude-md skill after each plan, and the spec's §11 names what must change: the latency decision, the horizon and the LIFX matrix ruling, the Govee probe. This branch also changed the device settings' load and save, the tracker's API, the persistence (migration 010) and the testing fakes. The README's horizon and latency lines go stale too (ruling 21).
 
 **Files:**
 - Modify: `CLAUDE.md`, `README.md`
@@ -2773,14 +2892,15 @@ In `CLAUDE.md`:
  - Govee `colorwc` at 40 a second ran 9 commands behind, and two lamps flooded that way were unreachable for about ten minutes; `GOVEE_COLOUR_FPS` caps it at 10 whatever the config says
  - A Govee lamp can show nothing for a razer frame with more colours than it has segments: given 15, two of three upright lamps of 14 stayed dark and the third dropped the extra. The SKU table's count, or a lamp's own output, is the count the lamp shows. Check a new model's count by eye with `scripts/govee_razer_check.py`
  - A Govee lamp streaming razer still answers status queries (an upright lamp answered 9 of 10 while streaming, 5 of 5 before), so one that stops answering mid-look is still taken offline; a read asks twice, so one lost reply isn't a miss
-@@ -328,8 +329,8 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4
+@@ -328,8 +329,9 @@ web/ (the rebuilt app, F0–F11: Vite + React 19 + TypeScript + Tailwind CSS v4
  - A Govee lamp on white keeps its white LEDs lit under razer, which drives only the colour LEDs, and every streamed colour washes out. So the razer adapter's prepare sends razer-off (a lamp a run left in razer takes the white off too), then a `colorwc` of black (it can't flash) at colour temperature 0, then full brightness, each command `COMMAND_GAP_S` after the last; the capture comes before the prepare, so the restore still sends the white back
  - A run beside the deployed app can't bind UDP 50001: it warns and runs on its internal clock, with `prodjlink.state` "disconnected". To hear Pro DJ Link there, pass `--dj-listen 127.0.0.1:0` (any free loopback port; `GET /api/inputs` names it), and serve on a free `--web-port` (the deployed app holds 8080)
  - A run beside the deployed app can't hear Govee replies, so it can't capture a lamp, and Off can't restore one: keep Govee lamps out of such a run (delete their rows from its copy of the database)
 -- The container mounts `config.toml` read-only (a file bind mount: saving logs `Device or resource busy`); `state.db` lives in the `dj-ledfx_state` volume. At start the app reads its config from state.db, and config.toml only while state.db holds none of `AppConfig`'s sections, so settings saved from the web app, preview-only included, survive a restart
 -- `migrate_from_toml()` runs once per database: the first start that finds config.toml or presets.toml migrates them and writes the run-once mark `toml_migrated`, and a setting saved before then (preview-only, the tempo) doesn't stop it. Migration 008 gave the mark to every database that already held the app's config (any section but `tempo`), the deployed one included, so its read-only config.toml isn't migrated again
-+- The container mounts `config.toml` read-only (a file bind mount: saving logs `Device or resource busy`); `state.db` lives in the `dj-ledfx_state` volume. At start the app reads its config from state.db, and config.toml only while state.db holds none of `AppConfig`'s sections, so settings saved from the web app, preview-only included, survive a restart. The device settings (sections `devices.openrgb`, `devices.lifx`, `devices.govee`) load from state.db too since light sync, and before it none ever applied; a device setting the config refuses (a rate of 0, a strategy it doesn't know) logs a warning, and every kind of light runs on its defaults. `PUT /api/config` saves only flat sections, so a device setting changed there lasts until the restart; a restored backup's `devices.*` rows apply from the next start, and a backup exported before light sync carries the old rows the run-once step dropped (below): take them out before restoring it
++- The container mounts `config.toml` read-only (a file bind mount: saving logs `Device or resource busy`); `state.db` lives in the `dj-ledfx_state` volume. At start the app reads its config from state.db, and config.toml only while state.db holds none of `AppConfig`'s sections, so settings saved from the web app, preview-only included, survive a restart. The device settings (sections `devices.openrgb`, `devices.lifx`, `devices.govee`) load from state.db too since light sync, and before it none ever applied; a device setting the config refuses (a rate of 0, a strategy it doesn't know) logs a warning, and every kind of light runs on its defaults. `PUT /api/config` saves the flat sections whole but only the device settings a request names, each in its kind's section as JSON, as config.toml's migration writes them: a device setting changed in the app applies from the next start, and a save that names none (preview-only's) pins no device default, so a default changed in the code still reaches each setting no one set
 +- `migrate_from_toml()` runs once per database: the first start that finds config.toml or presets.toml migrates them and writes the run-once mark `toml_migrated`, and a setting saved before then (preview-only, the tempo) doesn't stop it. Migration 008 gave the mark to every database that already held the app's config (any section but `tempo`), the deployed one included, so its read-only config.toml isn't migrated again. The light-sync run-once step `devices_config_reset` runs just before it: it deleted the deployed database's `devices.*` rows, which came from an old config file and never applied (`ema` over 60 samples, Govee at 40 frames a second, a 50 ms LIFX seed, Govee probes every 5 s), and logs what it dropped; a new database still takes config.toml's device tables
++- A restored backup's device settings come back with it and apply from the next start, old ones included (the owner's decision): one exported before light sync brings back the `devices.*` rows `devices_config_reset` dropped, and the step doesn't drop them again, since backups carry no run-once marks. To keep a default, take its row out of the file before restoring it
  - `Path.resolve()` raises `ValueError` on a NUL byte (a request for `/%00`); path guards must catch it, as `_file_within` in `web/app.py` does
  - FastAPI's own 422 echoes the request's input, and JSON can't carry a NaN, so a NaN in a body gave a 500; `unprocessable` in `web/errors.py` answers it as text
  - Web app: tokens.css names both a colour and a font size `control`; `text-control` is the colour, `text-size-control` the size
@@ -2869,7 +2989,7 @@ uv run ruff format --check . 2>&1 | tail -1 ; uv run mypy src/ 2>&1 | tail -1
 uv run pytest tests/web/test_openapi_types.py -q
 ```
 
-Expected: ruff clean; `1884 passed, 1 skipped, 42 deselected` on `1d6ed22`, plus whatever master added; no format findings; mypy no worse than Before Task 1's baseline; and the OpenAPI test green, since the API didn't change.
+Expected: ruff clean; `1888 passed, 1 skipped, 42 deselected` on `1d6ed22`, plus whatever master added; no format findings; mypy no worse than Before Task 1's baseline; and the OpenAPI test green, since the API didn't change.
 
 - [ ] **Step 3: Check that nothing private is in the branch**
 
@@ -2897,7 +3017,7 @@ Expected: `no addresses`, `no names or models` and `no SSIDs` (each held on the 
 
 Write `/tmp/ls-pr-body.md` with these sections, in this order.
 
-**Summary.** Light sync, `docs/superpowers/specs/2026-10-04-light-sync-design.md`: Govee lamps probed about every 0.5 s while they stream; a light whose Wi-Fi dozes recognised by when its replies land, and given its whole round trip as its latency; the horizon cap at 500 ms; each light's latency and mode remembered across restarts; the device settings in state.db applied, after a run-once step drops the rows that never did. Plan: `docs/superpowers/plans/2026-10-06-light-sync.md`.
+**Summary.** Light sync, `docs/superpowers/specs/2026-10-04-light-sync-design.md`: Govee lamps probed about every 0.5 s while they stream; a light whose Wi-Fi dozes recognised by when its replies land, and given its whole round trip as its latency; the horizon cap at 500 ms; each light's latency and mode remembered across restarts; the device settings in state.db applied, after a run-once step drops the rows that never did, and saved from the app. Plan: `docs/superpowers/plans/2026-10-06-light-sync.md`.
 
 **What changed**, one bullet per area:
 
@@ -2905,21 +3025,19 @@ Write `/tmp/ls-pr-body.md` with these sections, in this order.
 - Govee: the probe loop, and `streaming=` on `register_device`.
 - Zones: `HORIZON_CAP_S` from 0.12 to 0.5.
 - Discovery: a light taken in starts from its link memory.
-- Config and start-up: `probe_interval_s` read (0.5 s, positive); `DevicesConfig` loaded from state.db; the run-once step `devices_config_reset`.
+- Config and start-up: `probe_interval_s` read (0.5 s, positive); `DevicesConfig` loaded from state.db; the run-once step `devices_config_reset`; `PUT /api/config` saves the device settings it names.
 - Persistence: migration 010, `link_memory`, left out of backups.
 - Docs: CLAUDE.md and the README.
 
-**API.** No change. A remembered latency reads `estimated: true` until the light streams; the contract's comment says so.
+**API.** No change to a request or a response. `PUT /api/config` now saves the device settings it names, and nothing it refuses (ruling 20). A remembered latency reads `estimated: true` until the light streams; the contract's comment says so.
 
-**Migration and the first start.** Migration 010 creates `link_memory`. The first start runs the run-once step: it deletes the database's `devices.*` rows, which never applied, and logs them once ("Dropped device settings that never applied: …"); the lights then run on the code's defaults, as they always have, plus the probe loop and the doze check. Every light starts at its seed, awake, until it has streamed. Rolling back to the previous image is safe: it ignores the table, and the rows it loses never applied.
+**Migration and the first start.** Migration 010 creates `link_memory`. The first start runs the run-once step: it deletes the database's `devices.*` rows, which never applied, and logs them once ("Dropped device settings that never applied: …"); the lights then run on the code's defaults, as they always have, plus the probe loop and the doze check. Every light starts at its seed, awake, until it has streamed. Rolling back to the previous image is safe: it ignores the table, and the rows it loses never applied. A backup exported before this change brings the dropped rows back if it's restored, and they apply from the next start: the owner's decision (ruling 22).
 
 **Deployment.** After the merge, from the main checkout: `git pull && docker compose up -d --build`, then check that `ss -ulne 'sport = :4002'` shows `uid:10001` (CLAUDE.md's Gotchas), and that the log holds the "Dropped device settings" line once.
 
-**Spec rulings.** Rulings 1–21 from the plan, one line each.
+**Spec rulings.** Rulings 1–22 from the plan, one line each.
 
 **Review Focus.** The plan's five items, each with its tests.
-
-**For the owner.** (1) `PUT /api/config` doesn't save device settings, so one changed in the app lasts until the restart (ruling 20): should it save them? (2) A backup exported before this change carries the dropped `devices.*` rows, and restoring it now applies them; take them out of such a backup first, or decide that a restore drops them.
 
 **On the lamps.** Pending: the plan's Task 9 (spec §9.7), the owner's. Its results come as a comment.
 
@@ -3065,4 +3183,4 @@ Expected: `uid:10001`. If it isn't, Home Assistant took the port: `docker compos
 
 - [ ] **Step 7: Hand off**
 
-Tell the owner the PR is ready to merge and deploy (its Deployment section), and ask the two questions under its "For the owner". Offer one line for the owner's auto-memory, in its dj-ledfx redesign entry: light sync built, its PR, and the acceptance's verdict. Write it only with a yes.
+Tell the owner the PR is ready to merge and deploy (its Deployment section). Offer one line for the owner's auto-memory, in its dj-ledfx redesign entry: light sync built, its PR, and the acceptance's verdict. Write it only with a yes.
