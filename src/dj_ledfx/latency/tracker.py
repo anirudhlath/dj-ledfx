@@ -126,13 +126,21 @@ class LatencyTracker:
     def _log_mode(self) -> None:
         reading = self._doze.reading()
         assert reading is not None  # the mode changes only over enough round trips
-        if self._doze.dozing:
-            message = "{} dozes (z {:.1f}, median round trip {:.0f} ms over {}): its latency is"
-            message += " its whole round trip"
+        if isinstance(self._strategy, StaticLatency):
+            latency = "stays the configured one"  # the check runs, but nothing moves it
+        elif self._doze.dozing:
+            latency = "is its whole round trip"
         else:
-            message = "{} is awake (z {:.1f}, median round trip {:.0f} ms over {}): its latency"
-            message += " is half its round trip"
-        logger.info(message, self._name, reading.z, reading.median_ms, reading.replies)
+            latency = "is half its round trip"
+        logger.info(
+            "{} {} (z {:.1f}, median round trip {:.0f} ms over {}): its latency {}",
+            self._name,
+            "dozes" if self._doze.dozing else "is awake",
+            reading.z,
+            reading.median_ms,
+            reading.replies,
+            latency,
+        )
 
 
 class LatencyConfig(Protocol):

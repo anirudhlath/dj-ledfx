@@ -145,12 +145,24 @@ def test_recall_sets_the_latency_and_the_mode() -> None:
 
 
 def test_a_static_latency_ignores_round_trips_whatever_the_mode() -> None:
-    lamp = Lamp(StaticLatency(10.0))
-    lamp.tracker.recall(250.0, dozing=False)
-    for k in range(10):
-        lamp.reply(bunched(k), 240.0)
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="INFO")
+    try:
+        lamp = Lamp(StaticLatency(10.0))
+        lamp.tracker.recall(250.0, dozing=False)
+        for k in range(10):
+            lamp.reply(bunched(k), 240.0)
+    finally:
+        logger.remove(sink)
     assert lamp.tracker.dozing  # the check still runs
     assert (lamp.tracker.link_latency_ms, lamp.tracker.measured) == (10.0, False)
+    assert [(record["level"].name, record["message"]) for record in records] == [
+        (
+            "INFO",
+            "test-lamp dozes (z 9.8, median round trip 240 ms over 10): its latency stays the"
+            " configured one",
+        ),
+    ]
 
 
 def test_each_change_of_mode_is_logged_with_z_and_the_median() -> None:
@@ -160,13 +172,25 @@ def test_each_change_of_mode_is_logged_with_z_and_the_median() -> None:
         lamp = Lamp()
         for k in range(10):
             lamp.reply(on_beat(k), 240.0)
-        for k in range(10, 30):
+        for k in range(10, 20):
+            lamp.reply(on_beat(k), 20.0)
+        turned = lamp.reply(on_beat(20), 20.0)  # it turns awake, over the 21 it holds
+        for k in range(21, 30):
             lamp.reply(on_beat(k), 20.0)
     finally:
         logger.remove(sink)
-    assert [record["message"] for record in records] == [
-        "test-lamp dozes (z 10.0, median round trip 240 ms over 10): its latency is its whole"
-        " round trip",
-        "test-lamp is awake (z 21.0, median round trip 20 ms over 21): its latency is half its"
-        " round trip",
+    assert [(record["level"].name, record["message"]) for record in records] == [
+        (
+            "INFO",
+            "test-lamp dozes (z 10.0, median round trip 240 ms over 10): its latency is its"
+            " whole round trip",
+        ),
+        (
+            "INFO",
+            "test-lamp is awake (z 21.0, median round trip 20 ms over 21): its latency is half"
+            " its round trip",
+        ),
     ]
+    # At the turn the 21 held are replayed oldest first, halved, so the window ends on the
+    # newest 9, the 20 ms ones (replayed newest first, it would end on the 240s: 120 ms).
+    assert turned == 10.0
