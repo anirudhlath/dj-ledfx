@@ -158,7 +158,7 @@ class AppConfig:
             raise ValueError("lifx default_kelvin must be between 2500 and 9000")
         if lifx.discovery_timeout_s <= 0:
             raise ValueError("lifx discovery_timeout_s must be positive")
-        if lifx.echo_probe_interval_s <= 0:
+        if not (is_finite_number(lifx.echo_probe_interval_s) and lifx.echo_probe_interval_s > 0):
             raise ValueError("lifx echo_probe_interval_s must be positive")
         govee = self.devices.govee
         if govee.discovery_timeout_s <= 0:

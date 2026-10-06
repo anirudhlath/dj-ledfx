@@ -21,10 +21,10 @@ COMMAND_PORT = 4003
 # every phase of a dozing lamp's beacon cycle (light-sync spec §4).
 PROBE_SPREAD = (0.75, 1.25)
 # How long a probe waits for its reply, asked once: as long as a light monitor's read does
-# (adapter_base.STATUS_TIMEOUT_S). A reply that comes later times nothing, unless a newer
-# query to the lamp is in flight by then: a status reply carries nothing to match it by, so
-# that query takes it as its own and times a round trip too short. A read's second try
-# could already do the same.
+# (adapter_base.STATUS_TIMEOUT_S). A reply that comes later times nothing unless a query to
+# the lamp is still in flight then, since a status reply carries nothing to match it by: a
+# read sharing the probe's query takes it and times the round trip right, and a newer query
+# takes it as its own and times one too short, as a read's second try already could.
 PROBE_TIMEOUT_S = 1.0
 
 

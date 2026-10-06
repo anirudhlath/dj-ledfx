@@ -282,6 +282,9 @@ class TestProbeLoop:
         transport.start_probing(0.5)
         await waits.round()
         await asyncio.sleep(0.05)  # past the probe's timeout, with no reply
+        # A late wake can come in the same pass of the event loop as the probe's timeout: one
+        # more pass lets the probe's done-callback take it out of _probes.
+        await asyncio.sleep(0)
         assert _asked(transport) == 1 and not transport._probes  # it gave up, asking once
         await waits.round()
         assert _asked(transport) == 2  # the next round asks again

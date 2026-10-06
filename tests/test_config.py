@@ -137,6 +137,12 @@ def test_lifx_config_validation_bad_strategy() -> None:
         AppConfig(devices=DevicesConfig(lifx=LIFXConfig(latency_strategy="invalid")))
 
 
+@pytest.mark.parametrize("interval", [0.0, -2.0, float("nan"), float("inf")])
+def test_lifx_echo_probe_interval_must_be_positive(interval: float) -> None:
+    with pytest.raises(ValueError, match="lifx echo_probe_interval_s must be positive"):
+        AppConfig(devices=DevicesConfig(lifx=LIFXConfig(echo_probe_interval_s=interval)))
+
+
 def test_lifx_config_negative_offset_allowed() -> None:
     config = AppConfig(devices=DevicesConfig(lifx=LIFXConfig(manual_offset_ms=-10.0)))
     assert config.devices.lifx.manual_offset_ms == -10.0
