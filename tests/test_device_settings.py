@@ -71,6 +71,23 @@ async def test_device_settings_the_config_refuses_leave_the_lights_on_their_defa
     assert reason in warning["message"]
 
 
+async def test_a_stored_window_no_light_can_use_leaves_every_kind_on_its_defaults(
+    db: StateDB,
+) -> None:
+    await _save(db, "devices.lifx", latency_ms="12.0")  # one the config takes
+    await _save(db, "devices.govee", latency_window_size="2.5")
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        config = await _load_config_from_db(db)
+    finally:
+        logger.remove(sink)
+
+    assert config is not None and config.devices == AppConfig().devices
+    [warning] = records
+    assert "govee latency_window_size must be a whole number" in warning["message"]
+
+
 async def test_the_old_device_settings_go_once_and_a_setting_saved_after_stays(
     db: StateDB,
 ) -> None:

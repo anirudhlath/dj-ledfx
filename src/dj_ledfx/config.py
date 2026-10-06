@@ -120,6 +120,11 @@ class DiscoveryConfig:
     subnet_mask: int = 24
 
 
+def _is_whole_number(value: object) -> bool:
+    """An int that isn't a bool: a rate in frames a second, or a count of samples."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 @dataclass
 class AppConfig:
     engine: EngineConfig = field(default_factory=EngineConfig)
@@ -153,16 +158,29 @@ class AppConfig:
                 raise ValueError(f"{name} latency_ms must be non-negative")
             if hasattr(dev_cfg, "latency_window_size") and dev_cfg.latency_window_size <= 0:
                 raise ValueError(f"{name} latency_window_size must be positive")
+            # A request or a stored row can carry a number no light can use (NaN, an
+            # infinity, a bool, a rate or a window that isn't whole), and the next start
+            # applies what's saved (light-sync spec §8), so the config refuses it.
+            for key in ("max_fps", "latency_window_size"):
+                if not _is_whole_number(getattr(dev_cfg, key)):
+                    raise ValueError(f"{name} {key} must be a whole number")
+            for key in ("latency_ms", "manual_offset_ms"):
+                if not is_finite_number(getattr(dev_cfg, key)):
+                    raise ValueError(f"{name} {key} must be a finite number")
         lifx = self.devices.lifx
         if not (2500 <= lifx.default_kelvin <= 9000):
             raise ValueError("lifx default_kelvin must be between 2500 and 9000")
         if lifx.discovery_timeout_s <= 0:
             raise ValueError("lifx discovery_timeout_s must be positive")
+        if not is_finite_number(lifx.discovery_timeout_s):
+            raise ValueError("lifx discovery_timeout_s must be a finite number")
         if not (is_finite_number(lifx.echo_probe_interval_s) and lifx.echo_probe_interval_s > 0):
             raise ValueError("lifx echo_probe_interval_s must be positive")
         govee = self.devices.govee
         if govee.discovery_timeout_s <= 0:
             raise ValueError("govee discovery_timeout_s must be positive")
+        if not is_finite_number(govee.discovery_timeout_s):
+            raise ValueError("govee discovery_timeout_s must be a finite number")
         if not (is_finite_number(govee.probe_interval_s) and govee.probe_interval_s > 0):
             raise ValueError("govee probe_interval_s must be positive")
         if self.web.port < 0 or self.web.port > 65535:

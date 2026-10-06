@@ -423,3 +423,45 @@ def test_each_device_config_takes_every_strategy(name: str) -> None:
             govee=GoveeConfig(latency_strategy=name),
         )
     )
+
+
+NAN, INF = float("nan"), float("inf")
+DEVICE_CONFIGS: dict[str, type[OpenRGBConfig | LIFXConfig | GoveeConfig]] = {
+    "openrgb": OpenRGBConfig,
+    "lifx": LIFXConfig,
+    "govee": GoveeConfig,
+}
+# Device settings no light can use, which a request or a stored row may carry (light-sync
+# spec §8): each kind's setting, the value, and why the config refuses it.
+UNUSABLE = [
+    *(
+        (kind, key, value, f"{kind} {key} must be a finite number")
+        for kind in DEVICE_CONFIGS
+        for key in ("latency_ms", "manual_offset_ms")
+        for value in (NAN, INF, True)
+    ),
+    *(
+        (kind, key, value, f"{kind} {key} must be a whole number")
+        for kind in DEVICE_CONFIGS
+        for key in ("max_fps", "latency_window_size")
+        for value in (NAN, INF, 2.5, True)
+    ),
+    *(
+        (kind, "discovery_timeout_s", value, f"{kind} discovery_timeout_s must be a finite number")
+        for kind in ("lifx", "govee")
+        for value in (NAN, INF, True)
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("kind", "key", "value", "message"),
+    UNUSABLE,
+    ids=[f"{kind}.{key}={value}" for kind, key, value, _ in UNUSABLE],
+)
+def test_a_device_setting_no_light_can_use_is_refused(
+    kind: str, key: str, value: object, message: str
+) -> None:
+    settings = DEVICE_CONFIGS[kind](**{key: value})
+    with pytest.raises(ValueError, match=f"^{message}$"):
+        AppConfig(devices=DevicesConfig(**{kind: settings}))
