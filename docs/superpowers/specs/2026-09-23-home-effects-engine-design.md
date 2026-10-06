@@ -8,6 +8,13 @@ Turn dj-ledfx from a Pro-DJ-Link-driven LED strip engine into an always-on effec
 
 **Amended 2026-10-02:** a device's send loop, and the web app's live stream, blend the two frames either side of their moment, where they read the nearest one (§4.1). A light's moment shifts by less than a frame each time its latency is measured again, and the engine's and the distributor's ticks are stamped with the time each ran, which wanders by a millisecond or so; near half-way between two frames, the nearest frame showed that as one frame sent twice and the next skipped. A zone over its frame budget adds a rendered frame to its horizon, not a tick, and still sends each device at the device's own rate, the blend filling in between the frames it renders. A flash shorter than a frame now reaches a light spread over two sends at lower levels, and a device past the horizon cap still gets the newest frame alone.
 
+**Amended 2026-10-06** by [the light-sync spec](2026-10-04-light-sync-design.md), which replaces §4.1's latency bullet:
+
+- Govee lamps are probed about every 0.5 s while they stream.
+- A light whose Wi-Fi dozes is recognised by when its replies land, and its latency is its whole round trip rather than half.
+- A zone renders up to 500 ms ahead, up from 120 ms.
+- Each light starts from the latency it last had.
+
 ## 1. Goals and Scope
 
 **Goals**
