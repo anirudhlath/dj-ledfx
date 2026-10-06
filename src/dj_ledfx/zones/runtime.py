@@ -64,9 +64,15 @@ ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5
 # How far ahead a zone renders at most. A light slower than this gets the newest frame and
 # runs late by the difference. A dozing Govee lamp's latency is its whole round trip, up to
 # about 0.4 s, so a zone with one renders that far ahead, a LIFX matrix's zone about 140 ms
-# (light-sync spec §6). A light whose moment comes before the zone's first frame holds that
-# frame until its moment reaches it: up to about 0.4 s in a zone with a dozing lamp, a frame
-# or two in the others. A change to a running look shows within the horizon.
+# (light-sync spec §6). A light whose moment comes before the first frame of the zone's ring
+# (at a start, or when a light joins the zone, leaves it or changes its LED count) holds
+# that frame for the horizon less its own latency: up to about 0.4 s beside a dozing lamp
+# or another light as slow, about 120 ms beside a LIFX matrix, a frame where the lights'
+# latencies are alike. When the horizon grows (a lamp turns dozing, a slow light comes
+# back), the ring skips the moments between its newest frame and the new horizon, and the
+# zone's faster lights cross that stretch as one blend between two frames: about 170 ms
+# when a lamp's latency goes from 0.15 s to 0.3 s. A change to a running look shows within
+# the horizon.
 HORIZON_CAP_S = 0.5
 
 # Process-wide, so a light running one runtime's firmware effect always sees another look's

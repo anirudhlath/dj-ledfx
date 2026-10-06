@@ -127,7 +127,7 @@ def test_a_zone_with_a_400_ms_light_renders_400_ms_and_a_frame_ahead() -> None:
     runtime = runtime_of(look_of(field_layer()), latencies={"lamp": 0.4})  # a dozing lamp
     assert runtime.horizon_s == pytest.approx(0.4 + 1 / 60)
     runtime.tick(100.0)
-    assert nearest_frame(runtime.ring, 100.5).target_time == pytest.approx(100.4 + 1 / 60)
+    assert nearest_frame(runtime.ring, 100.0 + 0.4).target_time == pytest.approx(100.4 + 1 / 60)
 
 
 def test_the_horizon_is_capped_at_500_ms() -> None:
