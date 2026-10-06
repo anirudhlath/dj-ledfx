@@ -21,6 +21,7 @@ from dj_ledfx.devices.govee.sku_registry import SKU_REGISTRY
 from dj_ledfx.devices.manager import DeviceManager, ManagedDevice
 from dj_ledfx.devices.openrgb_backend import OpenRGBBackend
 from dj_ledfx.events import DeviceOnlineEvent, EventBus
+from dj_ledfx.latency.memory import LinkMemory
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.persistence.state_db import StateDB
@@ -622,6 +623,64 @@ async def test_a_duplicate_a_scan_sets_up_never_takes_the_live_tracker(
     record, rtt = registered.args
     assert record == lamp_record() and rtt.__self__ is managed.tracker
     assert len(device_manager.devices) == 1
+
+
+async def _remembering(config, device_manager, event_bus, db, row=None):  # type: ignore[no-untyped-def]
+    """An orchestrator over the Govee backend, as `lamps` gives, whose link memory holds the
+    test lamp's row (latency_ms, dozing) when one is given."""
+    if row is not None:
+        await db.write(
+            "INSERT INTO link_memory (stable_id, latency_ms, dozing, updated_at) "
+            "VALUES (?, ?, ?, '2026-10-06T00:00:00+00:00')",
+            (LAMP, *row),
+        )
+    memory = LinkMemory(db)
+    await memory.load()
+    govee = GoveeBackend()
+    govee._transport = lamp_transport()
+    orchestrator = DiscoveryOrchestrator(
+        config, device_manager, event_bus, state_db=db, link_memory=memory
+    )
+    orchestrator._backends = [govee]
+    return orchestrator
+
+
+# The light-sync spec's §7: a light taken in starts from the latency and mode it last had,
+# whether it's new to this run or an offline light found again.
+@pytest.mark.parametrize("offline", [False, True], ids=["new", "offline"])
+async def test_a_lamp_taken_in_starts_from_the_latency_and_mode_it_last_had(
+    lamp_model, config, device_manager, event_bus, db, offline
+):
+    if offline:
+        _ghost(device_manager, "Test lamp", LAMP)
+    orchestrator = await _remembering(config, device_manager, event_bus, db, (250.0, 1))
+
+    managed = await _online_lamp(orchestrator, db)
+
+    assert (managed.tracker.link_latency_ms, managed.tracker.dozing) == (250.0, True)
+    assert not managed.tracker.measured  # estimated until it streams
+
+
+async def test_a_lamp_with_no_row_starts_at_the_config_s_seed_awake(
+    lamp_model, config, device_manager, event_bus, db
+):
+    orchestrator = await _remembering(config, device_manager, event_bus, db)
+    managed = await _online_lamp(orchestrator, db)
+    seed = config.devices.govee.latency_ms
+    assert (managed.tracker.link_latency_ms, managed.tracker.dozing) == (seed, False)
+
+
+async def test_an_output_change_keeps_the_latency_the_lamp_has_now(
+    lamp_model, config, device_manager, event_bus, db
+):
+    """The lamp is set up again with its own tracker: its row isn't read again."""
+    orchestrator = await _remembering(config, device_manager, event_bus, db, (250.0, 1))
+    managed = await _online_lamp(orchestrator, db)
+    managed.tracker.recall(180.0, dozing=False)  # what it measured since
+
+    await orchestrator.set_output(LAMP, COLOUR)
+
+    assert (managed.tracker.link_latency_ms, managed.tracker.dozing) == (180.0, False)
 
 
 async def test_only_a_known_govee_lamp_takes_an_output(config, device_manager, event_bus, db):

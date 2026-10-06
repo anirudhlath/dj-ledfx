@@ -32,6 +32,7 @@ from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnl
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.store import HomeStore
 from dj_ledfx.home.sun import Evening
+from dj_ledfx.latency.memory import LinkMemory
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.store import LookStore
@@ -204,6 +205,11 @@ def _finished(background: set[asyncio.Task[object]], task: asyncio.Task[object])
         logger.opt(exception=error).error("{} failed", task.get_name())
 
 
+def _trackers(devices: DeviceManager) -> list[tuple[str, LatencyTracker]]:
+    """Each managed light's stable id and tracker, for the link memory's writer."""
+    return [(d.adapter.device_info.effective_id, d.tracker) for d in devices.devices]
+
+
 def _switch_at_midpoints(
     bus: EventBus, zones: ZoneManager, background: set[asyncio.Task[object]]
 ) -> None:
@@ -279,11 +285,15 @@ async def _run(args: argparse.Namespace) -> None:
     if registered_devices:
         logger.info("Loaded {} registered device(s) from DB", len(registered_devices))
 
+    # Each light starts from the latency and mode it last had (light-sync spec §7).
+    link_memory = LinkMemory(state_db)
+    await link_memory.load()
     discovery_orchestrator = DiscoveryOrchestrator(
         config=config,
         device_manager=device_manager,
         event_bus=event_bus,
         state_db=state_db,
+        link_memory=link_memory,
     )
 
     # Scenes become groups once; zones that were running come back (spec §4.3, §6.5).
@@ -486,6 +496,8 @@ async def _run(args: argparse.Namespace) -> None:
     tasks.append(asyncio.create_task(light_monitor.run()))
     tasks.append(asyncio.create_task(attention_feed.run()))
     tasks.append(asyncio.create_task(previews.run()))
+    # Cancelled at shutdown, it writes once more before state.db closes.
+    tasks.append(asyncio.create_task(link_memory.run(partial(_trackers, device_manager))))
 
     discovery_orchestrator.start()
 
