@@ -58,36 +58,3 @@ broadcast_interval_s = 30.0
 unicast_concurrency = 50
 unicast_timeout_s = 0.5
 subnet_mask = 24
-
-[[scene_config.devices]]
-name = "Govee H6076 (192.168.50.180)"
-position = [
-    0.0,
-    2.411258911091374,
-    0.0,
-]
-geometry = "strip"
-direction = [
-    1,
-    0,
-    0,
-]
-length = 1.0
-
-[[scene_config.devices]]
-name = "LIFX Bulb (192.168.50.6)"
-position = [
-    0.0,
-    0.0,
-    0.0,
-]
-geometry = "point"
-
-[[scene_config.devices]]
-name = "LIFX Bulb (192.168.50.90)"
-position = [
-    0.0,
-    0.0,
-    2.3022004982523674,
-]
-geometry = "point"
