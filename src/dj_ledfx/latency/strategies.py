@@ -16,7 +16,8 @@ OUTLIERS_TO_SHIFT = 3
 class ProbeStrategy(Protocol):
     def update(self, new_sample: float) -> None: ...
     def get_latency(self) -> float: ...
-    def reset(self) -> None: ...
+    # Forget the samples and start again from latency_ms, or from the seed without one.
+    def reset(self, latency_ms: float | None = None) -> None: ...
 
 
 class StaticLatency:
@@ -29,8 +30,8 @@ class StaticLatency:
     def get_latency(self) -> float:
         return self._latency
 
-    def reset(self) -> None:
-        pass
+    def reset(self, latency_ms: float | None = None) -> None:
+        pass  # it keeps the configured latency
 
 
 class EMALatency:
@@ -72,12 +73,10 @@ class EMALatency:
         return threshold > 0 and abs(sample - mean) > threshold
 
     def get_latency(self) -> float:
-        if not self._initialized:
-            return self._initial_value_ms
-        return self._value
+        return self._value  # before its first sample, the value it starts from
 
-    def reset(self) -> None:
-        self._value = self._initial_value_ms
+    def reset(self, latency_ms: float | None = None) -> None:
+        self._value = self._initial_value_ms if latency_ms is None else latency_ms
         self._initialized = False
         self._samples.clear()
         self._outliers = 0
@@ -104,9 +103,9 @@ class WindowedLatency(ABC):
     def get_latency(self) -> float:
         return self._latency
 
-    def reset(self) -> None:
+    def reset(self, latency_ms: float | None = None) -> None:
         self._window.clear()
-        self._latency = self._initial_value_ms
+        self._latency = self._initial_value_ms if latency_ms is None else latency_ms
 
 
 class WindowedMeanLatency(WindowedLatency):

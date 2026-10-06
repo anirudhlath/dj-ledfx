@@ -1,15 +1,20 @@
 """Replies for the doze check, on a fake clock: landing at a dozing light's wakes (`on_beat`,
 `bunched`), spread evenly round the beacon cycle (`spread`), half at the wakes
-(`half_bunched`), or at random moments (`random_moments`)."""
+(`half_bunched`), or at random moments (`random_moments`); and `Lamp`, a tracker on that
+clock whose light streams."""
 
 from __future__ import annotations
 
 import math
 import random
+from typing import Any
 
 from dj_ledfx.latency.doze import BEACON_S
+from dj_ledfx.latency.strategies import LATENCY_WINDOW, ProbeStrategy, WindowedMedianLatency
+from dj_ledfx.latency.tracker import LatencyTracker
 
 START = 1000.0  # when the first reply lands, on the fake clock
+SEED_MS = 100.0  # a Govee lamp's seed: its config's latency_ms
 PHI = (math.sqrt(5) - 1) / 2  # a phase step that never repeats, so phases spread evenly
 
 
@@ -45,3 +50,25 @@ def random_moments(seed: int, count: int = 40) -> list[float]:
         arrived += rng.uniform(0.375, 0.625)
         moments.append(arrived)
     return moments
+
+
+class Lamp:
+    """A tracker on a fake clock, named test-lamp, whose light streams: a frame goes out as
+    each reply lands. A windowed median of 9 seeded at SEED_MS unless a strategy is given;
+    other keyword arguments go to the tracker (display_ms, manual_offset_ms)."""
+
+    def __init__(self, strategy: ProbeStrategy | None = None, **kwargs: Any) -> None:
+        self.now = START
+        self.tracker = LatencyTracker(
+            strategy or WindowedMedianLatency(LATENCY_WINDOW, SEED_MS),
+            clock=lambda: self.now,
+            name="test-lamp",
+            **kwargs,
+        )
+
+    def reply(self, arrived: float, rtt_ms: float) -> float:
+        """A round trip that lands at arrived while the light streams; the latency after it."""
+        self.now = arrived
+        self.tracker.note_send()
+        self.tracker.update_rtt(rtt_ms)
+        return self.tracker.link_latency_ms

@@ -157,7 +157,9 @@ class LifxBackend(DeviceBackend):
             return None
         if adapter is None:
             return None
-        tracker = tracker_for(config.devices.lifx, display_ms=adapter.display_ms)
+        tracker = tracker_for(
+            config.devices.lifx, display_ms=adapter.display_ms, name=adapter.device_info.name
+        )
         await adapter.connect()
         # Probed while it streams, its echoes timed for this tracker, once the orchestrator
         # takes it in

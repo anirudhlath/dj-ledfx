@@ -181,6 +181,13 @@ async def test_a_light_fades_over_the_engine_s_gap_when_the_engine_is_slower() -
     assert duration == fade == 31
 
 
+async def test_a_light_s_tracker_carries_its_name_for_the_log() -> None:
+    transport = FakeLifxTransport(product=1)
+    record = LifxDeviceRecord(mac=MAC, ip="127.0.0.1", port=56700, vendor=1, product=1)
+    device = await _backend(transport)._setup(record, AppConfig())
+    assert device is not None and device.tracker.name == device.adapter.device_info.name
+
+
 ECHO_REQUEST = 58
 
 

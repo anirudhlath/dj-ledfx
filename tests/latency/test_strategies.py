@@ -152,3 +152,22 @@ def test_every_strategy_a_config_names_can_be_made(name: str) -> None:
 def test_make_strategy_refuses_an_unknown_name() -> None:
     with pytest.raises(ValueError, match="Unknown latency strategy 'fastest'"):
         make_strategy("fastest", 10.0, LATENCY_WINDOW)
+
+
+@pytest.mark.parametrize("name", ["ema", "windowed_mean", "windowed_median"])
+def test_a_reset_to_a_latency_starts_there_until_the_next_sample(name: str) -> None:
+    strategy = make_strategy(name, 10.0, LATENCY_WINDOW)
+    for _ in range(5):
+        strategy.update(80.0)
+    strategy.reset(250.0)
+    assert strategy.get_latency() == 250.0
+    strategy.update(40.0)
+    assert strategy.get_latency() == 40.0  # the samples before the reset are gone
+    strategy.reset()
+    assert strategy.get_latency() == 10.0  # without a latency: the seed
+
+
+def test_a_static_latency_keeps_its_own_through_a_reset_to_another() -> None:
+    static = StaticLatency(10.0)
+    static.reset(250.0)
+    assert static.get_latency() == 10.0

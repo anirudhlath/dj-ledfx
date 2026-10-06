@@ -86,6 +86,11 @@ async def _connect(
     return device
 
 
+async def test_a_lamp_s_tracker_carries_its_name_for_the_log(config: AppConfig) -> None:
+    device = await _connect(config)
+    assert device.tracker.name == device.adapter.device_info.name
+
+
 async def test_an_upright_razer_lamp_streams_each_segment_standing(
     monkeypatch: pytest.MonkeyPatch, config: AppConfig
 ) -> None:

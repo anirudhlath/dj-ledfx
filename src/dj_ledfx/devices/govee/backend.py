@@ -177,7 +177,9 @@ class GoveeBackend(DeviceBackend):
         status reads time its round trips. Raises ConnectionError when it doesn't answer."""
         adapter = self._adapter(transport, record, config, output)
         await adapter.connect()
-        tracker = tracker_for(config.devices.govee, display_ms=adapter.display_ms)
+        tracker = tracker_for(
+            config.devices.govee, display_ms=adapter.display_ms, name=adapter.device_info.name
+        )
         return DiscoveredDevice(
             adapter=adapter,
             tracker=tracker,
