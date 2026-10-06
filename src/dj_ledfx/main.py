@@ -17,10 +17,14 @@ import dj_ledfx.devices  # noqa: F401  # triggers backend auto-registration
 from dj_ledfx import metrics
 from dj_ledfx.config import (
     AppConfig,
+    DevicesConfig,
     DiscoveryConfig,
     EffectConfig,
     EngineConfig,
+    GoveeConfig,
+    LIFXConfig,
     NetworkConfig,
+    OpenRGBConfig,
     WebConfig,
     filter_fields,
     load_config,
@@ -37,7 +41,7 @@ from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.store import LookStore
 from dj_ledfx.persistence.state_db import StateDB
-from dj_ledfx.persistence.toml_io import migrate_from_toml
+from dj_ledfx.persistence.toml_io import DEVICES_CONFIG_RESET, migrate_from_toml
 from dj_ledfx.prodjlink.listener import (
     BeatEvent,
     Listening,
@@ -136,14 +140,48 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-_CONFIG_SECTIONS = frozenset({"engine", "network", "web", "discovery", "effect"})
+_CONFIG_SECTIONS = frozenset(
+    {"engine", "network", "web", "discovery", "effect"}
+    | {"devices.openrgb", "devices.lifx", "devices.govee"}
+)
+
+
+async def _reset_device_settings_once(state_db: StateDB) -> None:
+    """Delete state.db's devices.* rows, once (light-sync spec §8). No start ever applied
+    them, and the deployed database's came from an old config file, so the first start that
+    reads them runs on the code's defaults, as every start before it did. A setting saved
+    after this step is kept."""
+    if await state_db.has_mark(DEVICES_CONFIG_RESET):
+        return
+    rows = await state_db.fetch_all(
+        "SELECT section, key FROM config WHERE section LIKE 'devices.%' ORDER BY section, key"
+    )
+    await state_db.write_many(
+        [
+            ("DELETE FROM config WHERE section LIKE 'devices.%'", ()),
+            state_db.mark_statement(DEVICES_CONFIG_RESET),
+        ]
+    )
+    if rows:
+        settings = ", ".join(f"{section}.{key}" for section, key in rows)
+        logger.info("Dropped device settings that never applied: {}", settings)
+
+
+def _devices_config(sections: dict[str, dict[str, object]]) -> DevicesConfig:
+    return DevicesConfig(
+        openrgb=OpenRGBConfig(**filter_fields(OpenRGBConfig, sections.get("devices.openrgb", {}))),
+        lifx=LIFXConfig(**filter_fields(LIFXConfig, sections.get("devices.lifx", {}))),
+        govee=GoveeConfig(**filter_fields(GoveeConfig, sections.get("devices.govee", {}))),
+    )
 
 
 async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
     """Build AppConfig from StateDB config table.
 
     Returns None if the table holds none of AppConfig's sections (a fresh DB with no
-    migrated config). Other sections, such as the tempo clock's, don't count.
+    migrated config). Other sections, such as the tempo clock's, don't count. Device
+    settings the config refuses (a rate of 0, a strategy it doesn't know) are logged, and
+    every kind of light runs on its defaults.
     """
     all_config = await state_db.load_all_config()
 
@@ -160,14 +198,23 @@ async def _load_config_from_db(state_db: StateDB) -> AppConfig | None:
     discovery = DiscoveryConfig(**filter_fields(DiscoveryConfig, sections.get("discovery", {})))
     effect = EffectConfig(**filter_fields(EffectConfig, sections.get("effect", {})))
 
+    def config_with(devices: DevicesConfig) -> AppConfig:
+        return AppConfig(
+            engine=engine,
+            effect=effect,
+            network=network,
+            web=web,
+            devices=devices,
+            discovery=discovery,
+        )
+
+    defaults = config_with(DevicesConfig())  # the other sections are checked as before
     logger.info("Config loaded from StateDB")
-    return AppConfig(
-        engine=engine,
-        effect=effect,
-        network=network,
-        web=web,
-        discovery=discovery,
-    )
+    try:
+        return config_with(_devices_config(sections))
+    except (TypeError, ValueError) as refused:
+        logger.warning("Saved device settings refused ({}): the lights run on defaults", refused)
+        return defaults
 
 
 @dataclass
@@ -227,6 +274,8 @@ async def _run(args: argparse.Namespace) -> None:
     state_db = StateDB(db_path)
     await state_db.open()
 
+    # Before config.toml's migration, so a new database still takes its device tables.
+    await _reset_device_settings_once(state_db)
     # config.toml and presets.toml move into state.db once, at the first start that finds
     # them (a run-once mark); from then on the database is the source of truth
     await migrate_from_toml(

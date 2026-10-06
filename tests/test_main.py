@@ -307,6 +307,44 @@ async def test_a_setting_saved_before_config_toml_came_doesn_t_stop_its_migratio
     assert (tmp_path / "config.toml.bak").exists()
 
 
+async def _govee_settings(tmp_path: Path) -> dict[str, Any]:
+    """The Govee settings one start of the app runs with."""
+    async with _app(tmp_path) as (app, port):
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+            config = (await _get_when_up(client, "/config", app)).json()
+        output = await _stop(app)
+    assert "Traceback" not in output, output
+    govee: dict[str, Any] = config["devices"]["govee"]
+    return govee
+
+
+async def test_device_settings_no_start_applied_go_and_one_saved_after_applies(
+    tmp_path: Path,
+) -> None:
+    """The deployed database holds devices.* rows from an old config file, which no start
+    applied: the first start drops them and runs on the defaults, and a setting saved after
+    that applies from the next start on (light-sync spec §8)."""
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    await db.save_config_key("engine", "fps", "60")
+    await db.save_config_key("devices.govee", "max_fps", "40")
+    await db.close()
+
+    assert (await _govee_settings(tmp_path))["max_fps"] == 30  # the default
+
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    await db.save_config_key("devices.govee", "max_fps", "20")
+    await db.close()
+
+    assert (await _govee_settings(tmp_path))["max_fps"] == 20
+
+
+async def test_a_new_database_takes_config_toml_s_device_settings(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text("[engine]\nfps = 60\n\n[devices.govee]\nmax_fps = 20\n")
+    assert (await _govee_settings(tmp_path))["max_fps"] == 20
+
+
 async def test_a_tempo_set_at_start_is_kept_across_a_restart(tmp_path: Path) -> None:
     for extra in (["--bpm", "97"], []):  # the second start has no --bpm
         async with _app(tmp_path, *extra) as (app, port):

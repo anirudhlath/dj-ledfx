@@ -100,6 +100,21 @@ def _requires_restart(old: AppConfig, new: AppConfig) -> str:
     return "true" if rest(old) != rest(new) else "false"
 
 
+def _device_rows(body: dict[str, Any], devices: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """The device settings a request names, as state.db keeps them: each kind's in its own
+    section (devices.govee), as JSON, as config.toml's migration writes them (light-sync spec
+    §8). Only those named, as the migration writes only what the file holds, so a save that
+    names none (preview only's) pins no default. `devices` is the merged config's, checked."""
+    named = body.get("devices")
+    if not isinstance(named, dict):
+        return {}
+    return {
+        f"devices.{kind}": {key: json.dumps(devices[kind][key]) for key in settings}
+        for kind, settings in named.items()
+        if kind in devices and settings
+    }
+
+
 async def _apply_live(request: Request, config: AppConfig) -> None:
     zones = getattr(request.app.state, "zone_manager", None)
     if zones is not None:
@@ -136,6 +151,8 @@ async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
                 str_kv = {k: json.dumps(v) for k, v in value.items() if not isinstance(v, dict)}
                 if str_kv:
                     await db.save_config_bulk(section, str_kv)
+        for section, rows in _device_rows(body, result["devices"]).items():
+            await db.save_config_bulk(section, rows)
     except HTTPException:
         pass
     await _apply_live(request, new_config)
