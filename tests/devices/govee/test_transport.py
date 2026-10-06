@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -122,7 +124,7 @@ class TestRoundTrips:
         transport = GoveeTransport(clock=lambda: now[0])
         transport._send_transport = MagicMock()
         rtts: list[float] = []
-        transport.register_device(lamp_record(), rtt_callback=rtts.append)
+        transport.register_device(lamp_record(), rtt_callback=rtts.append, streaming=lambda: True)
         return transport, now, rtts
 
     async def test_a_status_reply_feeds_the_lamp_s_round_trip(self) -> None:
@@ -151,8 +153,131 @@ class TestRoundTrips:
         _reply(transport, STATUS)  # late, or sent to another program's query
         assert rtts == []
 
-    def test_there_is_no_probe_loop(self) -> None:
-        assert not hasattr(GoveeTransport, "start_probing")
+
+class _Waits:
+    """The probe loop's sleep: each wait is held until the test lets a round run."""
+
+    def __init__(self) -> None:
+        self.asked: list[float] = []  # how long each wait was
+        self._asleep = asyncio.Event()
+        self._wake: asyncio.Future[None] | None = None
+
+    async def __call__(self, seconds: float) -> None:
+        self.asked.append(seconds)
+        self._wake = asyncio.get_running_loop().create_future()
+        self._asleep.set()
+        await self._wake
+
+    async def round(self) -> None:
+        """End the wait the loop is in, and let its round run until it waits again."""
+        await self._asleep.wait()
+        self._asleep.clear()
+        assert self._wake is not None
+        self._wake.set_result(None)
+        await self._asleep.wait()
+        await asyncio.sleep(0)  # each probe the round started has sent its query
+
+
+def _probed(
+    *, can_receive: bool = True, clock: Callable[[], float] = lambda: 100.0
+) -> tuple[GoveeTransport, _Waits, list[bool], list[float]]:
+    """A transport that probes the test lamp on held waits; whether the lamp streams, which a
+    test can change; and the lamp's round trips."""
+    waits = _Waits()
+    transport = GoveeTransport(clock, sleep=waits, rng=random.Random(7))
+    transport._is_open = True
+    transport._send_transport = MagicMock()
+    transport._recv_transport = MagicMock() if can_receive else None
+    streams = [True]
+    rtts: list[float] = []
+    transport.register_device(lamp_record(), rtts.append, streaming=lambda: streams[0])
+    return transport, waits, streams, rtts
+
+
+def _asked(transport: GoveeTransport) -> int:
+    """How many status queries went to the lamp."""
+    return transport._send_transport.sendto.call_count  # type: ignore[union-attr]
+
+
+class TestProbeLoop:
+    """The light-sync spec's §4: a lamp that streams is asked for its status about every
+    probe interval, and its reply times a round trip."""
+
+    async def test_only_a_lamp_that_streams_is_probed(self) -> None:
+        transport, waits, streams, _ = _probed()
+        streams[0] = False
+        transport.start_probing(0.5)
+        await waits.round()
+        assert _asked(transport) == 0  # idle: its round trip wouldn't count
+        streams[0] = True
+        await waits.round()
+        assert _asked(transport) == 1
+        await transport.close()
+
+    async def test_each_wait_is_75_to_125_percent_of_the_interval(self) -> None:
+        transport, waits, streams, _ = _probed()
+        streams[0] = False
+        transport.start_probing(0.5)
+        for _ in range(40):
+            await waits.round()
+        assert all(0.375 <= wait <= 0.625 for wait in waits.asked)
+        assert min(waits.asked) < 0.4 and max(waits.asked) > 0.6  # random, not one wait
+        await transport.close()
+
+    async def test_a_query_in_flight_is_shared_never_doubled(self) -> None:
+        transport, waits, _, rtts = _probed()
+        read = asyncio.create_task(transport.query_status(LAMP_IP, timeout_s=5.0))
+        await asyncio.sleep(0)  # the light monitor's read is in flight
+        transport.start_probing(0.5)
+        await waits.round()
+        assert _asked(transport) == 1  # the read's query, not a probe's
+        _reply(transport, STATUS)
+        assert await read == STATUS and len(rtts) == 1
+        await waits.round()
+        assert _asked(transport) == 2  # answered: the next round asks again
+        await transport.close()
+
+    async def test_a_silent_lamp_holds_up_no_round(self) -> None:
+        transport, waits, _, _ = _probed()
+        transport.start_probing(0.5)
+        for _ in range(5):
+            await waits.round()
+        assert len(waits.asked) == 6  # the rounds go on
+        assert _asked(transport) == 1  # while its one probe waits for the reply
+        await transport.close()
+
+    async def test_a_probe_s_reply_times_the_lamp_s_round_trip(self) -> None:
+        now = [100.0]
+        transport, waits, _, rtts = _probed(clock=lambda: now[0])
+        transport.start_probing(0.5)
+        await waits.round()
+        now[0] += 0.25
+        _reply(transport, STATUS)
+        assert rtts == [pytest.approx(250.0)]
+        await transport.close()
+
+    async def test_nothing_is_probed_while_another_program_holds_the_reply_port(self) -> None:
+        transport, waits, _, _ = _probed(can_receive=False)
+        transport.start_probing(0.5)
+        for _ in range(3):
+            await waits.round()
+        assert _asked(transport) == 0
+        await transport.close()
+
+    async def test_the_loop_and_its_probes_stop_at_close(self) -> None:
+        transport, waits, _, _ = _probed()
+        transport.start_probing(0.5)
+        loop = transport._probe_task
+        transport.start_probing(0.5)
+        assert transport._probe_task is loop  # one loop
+        await waits.round()
+        probes = set(transport._probes)
+        assert len(probes) == 1  # in flight
+
+        await transport.close()
+
+        assert loop is not None and loop.done()
+        assert all(probe.done() for probe in probes) and not transport._probes
 
 
 class TestHeardFrom:

@@ -86,6 +86,28 @@ async def _connect(
     return device
 
 
+@pytest.mark.parametrize("path", ["connect_known", "discover"])
+async def test_a_lamp_set_up_is_probed_while_its_tracker_says_it_streams(
+    config: AppConfig, path: str
+) -> None:
+    backend = GoveeBackend()
+    transport = backend._transport = lamp_transport()
+    if path == "connect_known":
+        (device,) = await backend.connect_known([lamp_row()], config)
+    else:
+        (device,) = await backend.discover(config)
+    assert device.on_accepted is not None
+    device.on_accepted()  # the orchestrator takes it in
+
+    [registered] = transport.register_device.call_args_list
+    assert registered.args[1] == device.tracker.update_rtt
+    streaming = registered.kwargs["streaming"]
+    assert streaming() is False  # no frame sent yet
+    device.tracker.note_send()
+    assert streaming() is True
+    transport.start_probing.assert_called_once_with(config.devices.govee.probe_interval_s)
+
+
 async def test_a_lamp_s_tracker_carries_its_name_for_the_log(config: AppConfig) -> None:
     device = await _connect(config)
     assert device.tracker.name == device.adapter.device_info.name

@@ -159,6 +159,7 @@ class TestGoveeConfigValidation:
         assert config.devices.govee.latency_strategy == "windowed_median"
         assert config.devices.govee.latency_window_size == LATENCY_WINDOW
         assert config.devices.govee.latency_ms == 100.0
+        assert config.devices.govee.probe_interval_s == 0.5
         assert config.devices.govee.segment_override is None
 
     def test_govee_max_fps_must_be_positive(self) -> None:
@@ -168,6 +169,11 @@ class TestGoveeConfigValidation:
     def test_govee_invalid_strategy(self) -> None:
         with pytest.raises(ValueError, match="govee latency_strategy"):
             AppConfig(devices=DevicesConfig(govee=GoveeConfig(latency_strategy="invalid")))
+
+    @pytest.mark.parametrize("interval", [0.0, -0.5])
+    def test_govee_probe_interval_must_be_positive(self, interval: float) -> None:
+        with pytest.raises(ValueError, match="govee probe_interval_s must be positive"):
+            AppConfig(devices=DevicesConfig(govee=GoveeConfig(probe_interval_s=interval)))
 
     def test_govee_discovery_timeout_must_be_positive(self) -> None:
         with pytest.raises(ValueError, match="govee discovery_timeout_s"):
