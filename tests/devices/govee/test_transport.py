@@ -3,12 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from govee_fakes import STATUS, lamp_record
+from loguru import logger
 
+from dj_ledfx.devices.govee import transport as govee_transport
 from dj_ledfx.devices.govee.colour import GoveeColourAdapter
 from dj_ledfx.devices.govee.transport import GoveeTransport
 
@@ -169,12 +173,14 @@ class _Waits:
         await self._wake
 
     async def round(self) -> None:
-        """End the wait the loop is in, and let its round run until it waits again."""
-        await self._asleep.wait()
-        self._asleep.clear()
-        assert self._wake is not None
-        self._wake.set_result(None)
-        await self._asleep.wait()
+        """End the wait the loop is in, and let its round run until it waits again. A loop
+        that never waits again fails the test rather than hanging it."""
+        async with asyncio.timeout(1.0):
+            await self._asleep.wait()
+            self._asleep.clear()
+            assert self._wake is not None
+            self._wake.set_result(None)
+            await self._asleep.wait()
         await asyncio.sleep(0)  # each probe the round started has sent its query
 
 
@@ -197,6 +203,24 @@ def _probed(
 def _asked(transport: GoveeTransport) -> int:
     """How many status queries went to the lamp."""
     return transport._send_transport.sendto.call_count  # type: ignore[union-attr]
+
+
+@pytest.fixture
+def patient_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each probe waits a minute for its reply, so a test that holds one in flight never
+    races the wall clock's PROBE_TIMEOUT_S."""
+    monkeypatch.setattr(govee_transport, "PROBE_TIMEOUT_S", 60.0)
+
+
+@contextmanager
+def _logged_errors() -> Iterator[list[Any]]:
+    """Every record logged at ERROR in the block."""
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="ERROR")
+    try:
+        yield records
+    finally:
+        logger.remove(sink)
 
 
 class TestProbeLoop:
@@ -237,6 +261,7 @@ class TestProbeLoop:
         assert _asked(transport) == 2  # answered: the next round asks again
         await transport.close()
 
+    @pytest.mark.usefixtures("patient_probes")
     async def test_a_silent_lamp_holds_up_no_round(self) -> None:
         transport, waits, _, _ = _probed()
         transport.start_probing(0.5)
@@ -246,6 +271,23 @@ class TestProbeLoop:
         assert _asked(transport) == 1  # while its one probe waits for the reply
         await transport.close()
 
+    def test_a_probe_waits_a_second_for_its_reply(self) -> None:
+        assert govee_transport.PROBE_TIMEOUT_S == 1.0  # ruling 5
+
+    async def test_a_probe_gives_up_at_its_timeout_having_asked_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(govee_transport, "PROBE_TIMEOUT_S", 0.01)
+        transport, waits, _, _ = _probed()
+        transport.start_probing(0.5)
+        await waits.round()
+        await asyncio.sleep(0.05)  # past the probe's timeout, with no reply
+        assert _asked(transport) == 1 and not transport._probes  # it gave up, asking once
+        await waits.round()
+        assert _asked(transport) == 2  # the next round asks again
+        await transport.close()
+
+    @pytest.mark.usefixtures("patient_probes")
     async def test_a_probe_s_reply_times_the_lamp_s_round_trip(self) -> None:
         now = [100.0]
         transport, waits, _, rtts = _probed(clock=lambda: now[0])
@@ -264,7 +306,10 @@ class TestProbeLoop:
         assert _asked(transport) == 0
         await transport.close()
 
-    async def test_the_loop_and_its_probes_stop_at_close(self) -> None:
+    @pytest.mark.usefixtures("patient_probes")
+    async def test_the_loop_and_its_probes_stop_at_close(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         transport, waits, _, _ = _probed()
         transport.start_probing(0.5)
         loop = transport._probe_task
@@ -274,10 +319,26 @@ class TestProbeLoop:
         probes = set(transport._probes)
         assert len(probes) == 1  # in flight
 
-        await transport.close()
+        with _logged_errors() as errors:
+            await transport.close()
 
-        assert loop is not None and loop.done()
-        assert all(probe.done() for probe in probes) and not transport._probes
+        assert loop is not None and loop.cancelled()
+        assert all(probe.cancelled() for probe in probes) and not transport._probes
+        assert errors == [] and caplog.records == []  # a loop cancelled at close ends quietly
+
+    async def test_a_loop_that_fails_logs_it_once(self) -> None:
+        async def nan_sleep(seconds: float) -> None:
+            raise ValueError("Invalid delay: NaN (not a number)")  # as asyncio.sleep(nan)
+
+        transport = GoveeTransport(sleep=nan_sleep)
+        transport._is_open = True
+        with _logged_errors() as errors:
+            transport.start_probing(0.5)
+            assert transport._probe_task is not None
+            await asyncio.wait([transport._probe_task])
+        assert [error["exception"].type for error in errors] == [ValueError]
+        assert "probe loop" in errors[0]["message"]
+        await transport.close()
 
 
 class TestHeardFrom:

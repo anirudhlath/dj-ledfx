@@ -20,8 +20,11 @@ COMMAND_PORT = 4003
 # Each probe round waits a random share of the interval in this range, so the probes land at
 # every phase of a dozing lamp's beacon cycle (light-sync spec §4).
 PROBE_SPREAD = (0.75, 1.25)
-# How long a probe waits for its reply, as long as a light monitor's read does
-# (adapter_base.STATUS_TIMEOUT_S). A reply that comes later times nothing.
+# How long a probe waits for its reply, asked once: as long as a light monitor's read does
+# (adapter_base.STATUS_TIMEOUT_S). A reply that comes later times nothing, unless a newer
+# query to the lamp is in flight by then: a status reply carries nothing to match it by, so
+# that query takes it as its own and times a round trip too short. A read's second try
+# could already do the same.
 PROBE_TIMEOUT_S = 1.0
 
 
@@ -33,6 +36,13 @@ class _StatusQuery:
     reply: asyncio.Future[dict[str, Any]]
     sent_at: float  # on the transport's clock: the reply times the lamp's round trip
     waiting: int = 0  # callers still waiting for the reply
+
+
+def _log_a_failure(loop: asyncio.Task[None]) -> None:
+    """A probe loop that ends with an error logs it, once: nothing else awaits the loop.
+    One cancelled at close ends quietly."""
+    if not loop.cancelled() and (error := loop.exception()) is not None:
+        logger.opt(exception=error).error("The Govee probe loop failed")
 
 
 class GoveeTransport:
@@ -212,9 +222,10 @@ class GoveeTransport:
 
     def start_probing(self, interval_s: float) -> None:
         """Probe each lamp that streams about every interval_s, until the transport closes.
-        Called again while the loop runs, it changes nothing."""
+        Called again while the loop runs, it changes nothing. A loop that fails logs why."""
         if self._probe_task is None or self._probe_task.done():
             self._probe_task = asyncio.create_task(self._probe_loop(interval_s))
+            self._probe_task.add_done_callback(_log_a_failure)
 
     async def _probe_loop(self, interval_s: float) -> None:
         """Each round waits a random 75–125% of interval_s, then asks each lamp that streams

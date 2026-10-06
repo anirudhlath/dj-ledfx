@@ -87,9 +87,8 @@ async def _connect(
 
 
 @pytest.mark.parametrize("path", ["connect_known", "discover"])
-async def test_a_lamp_set_up_is_probed_while_its_tracker_says_it_streams(
-    config: AppConfig, path: str
-) -> None:
+async def test_a_lamp_set_up_is_probed_while_its_tracker_says_it_streams(path: str) -> None:
+    config = AppConfig(devices=DevicesConfig(govee=GoveeConfig(probe_interval_s=0.8)))
     backend = GoveeBackend()
     transport = backend._transport = lamp_transport()
     if path == "connect_known":
@@ -105,7 +104,7 @@ async def test_a_lamp_set_up_is_probed_while_its_tracker_says_it_streams(
     assert streaming() is False  # no frame sent yet
     device.tracker.note_send()
     assert streaming() is True
-    transport.start_probing.assert_called_once_with(config.devices.govee.probe_interval_s)
+    transport.start_probing.assert_called_once_with(0.8)  # the config's interval
 
 
 async def test_a_lamp_s_tracker_carries_its_name_for_the_log(config: AppConfig) -> None:

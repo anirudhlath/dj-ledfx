@@ -170,7 +170,7 @@ class TestGoveeConfigValidation:
         with pytest.raises(ValueError, match="govee latency_strategy"):
             AppConfig(devices=DevicesConfig(govee=GoveeConfig(latency_strategy="invalid")))
 
-    @pytest.mark.parametrize("interval", [0.0, -0.5])
+    @pytest.mark.parametrize("interval", [0.0, -0.5, float("nan"), float("inf")])
     def test_govee_probe_interval_must_be_positive(self, interval: float) -> None:
         with pytest.raises(ValueError, match="govee probe_interval_s must be positive"):
             AppConfig(devices=DevicesConfig(govee=GoveeConfig(probe_interval_s=interval)))

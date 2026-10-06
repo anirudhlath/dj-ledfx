@@ -10,6 +10,7 @@ from loguru import logger
 
 from dj_ledfx.latency.strategies import LATENCY_WINDOW as LATENCY_WINDOW
 from dj_ledfx.latency.strategies import STRATEGIES
+from dj_ledfx.types import is_finite_number
 
 # The most frames a second a LIFX strip or matrix takes: LIFX's documented ceiling per
 # device. Matrices were measured queueing frames above about 30; plain bulbs keep max_fps.
@@ -162,7 +163,7 @@ class AppConfig:
         govee = self.devices.govee
         if govee.discovery_timeout_s <= 0:
             raise ValueError("govee discovery_timeout_s must be positive")
-        if govee.probe_interval_s <= 0:
+        if not (is_finite_number(govee.probe_interval_s) and govee.probe_interval_s > 0):
             raise ValueError("govee probe_interval_s must be positive")
         if self.web.port < 0 or self.web.port > 65535:
             raise ValueError("web port must be 0-65535")
