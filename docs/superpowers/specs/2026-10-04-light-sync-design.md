@@ -162,6 +162,8 @@ The tracker tells a dozing light from an awake one by when its replies land.
 - **Other beacon intervals.** Behind an access point whose beacon interval isn't a multiple of 100 TU, a dozing light isn't recognised and keeps half its round trip. Every access point here uses 100 TU.
 - **Router tuning.** A shorter beacon interval would wake dozing lamps more often, but it helps only the network it's done on, and nothing here depends on it.
 - **Still at the wakes.** A dozing lamp still takes its frames only at its wakes, about three at a time. At 30 a second it looked smooth.
+- **A slow awake light, now and then called dozing.** The median rules out only an awake light under 50 ms. Simulated for 200 hours at a 60 ms median, its replies 0.375–0.625 s apart at random, an awake light was called dozing about 3.3 times an hour, for a median 11 s (the longest 44 s): about 1% of the time. While it's so called, it runs early by half its round trip, 30 ms at that median. Stricter rules call it dozing less often, but leave the 2026-10-04 recording's lamp a awake, against §1's criterion 3, so the rule stays as §5 has it, and any change to it is the owner's.
+- **LIFX follows a step more slowly.** Its echo probes come every 2 s, so a LIFX light's median of 9 takes about 10 s to follow a step in its round trips. §1's 5 s is the Govee lamps', probed about every 0.5 s.
 
 ## 11. Where It Lives
 

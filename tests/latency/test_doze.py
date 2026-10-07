@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from itertools import pairwise
 
 import pytest
 from doze_fakes import START, bunched, half_bunched, on_beat, random_moments, spread
@@ -58,6 +59,32 @@ def test_replies_spread_round_the_cycle_are_awake() -> None:
 
 def test_bunched_replies_with_a_25_ms_median_are_awake() -> None:
     assert not any(fed(DozeCheck(), map(bunched, range(KEPT)), 25.0))
+
+
+def test_a_slow_awake_light_is_now_and_then_called_dozing_and_a_quicker_one_never() -> None:
+    """Random replies bunch past DOZE_Z now and then, and an awake light whose median round
+    trip is 50 ms or more passes the median's test, so it's called dozing for some seconds
+    (spec §10: over 200 simulated hours at a 60 ms median, about 3.3 times an hour, about
+    1% of the time). Ten hours of replies 0.375–0.625 s apart at random, as the Govee probe
+    loop's waits put them: a light at 60 ms is called dozing 33 times, 0.98% of the time,
+    which the caps allow with headroom, and one at 45 ms never. Without the median's guard
+    the 45 ms light turns too; turning at STAY_Z, the 60 ms light dozes about a fifth of the
+    time, and staying only above DOZE_Z, it turns 52 times."""
+    moments = random_moments(10, count=72_000)
+    slow, quick = DozeCheck(), DozeCheck()
+    turns, dozing_s = 0, 0.0
+    for arrived, following in pairwise(moments):
+        was = slow.dozing
+        slow.add(arrived, 60.0)
+        quick.add(arrived, 45.0)
+        assert not quick.dozing
+        turns += slow.dozing and not was
+        if slow.dozing:
+            dozing_s += following - arrived
+    span_s = moments[-1] - moments[0]
+    assert 9.9 * 3600 < span_s < 10.1 * 3600
+    assert 0 < turns <= 40  # 4 an hour
+    assert dozing_s / span_s <= 0.015
 
 
 def test_a_dozing_light_stays_dozing_while_z_is_at_least_2() -> None:
