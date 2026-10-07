@@ -1,6 +1,6 @@
 # dj-ledfx
 
-Beat-synced LED lighting engine driven by Pioneer Pro DJ Link. A passive UDP listener picks beat packets straight off the DJ booth network, a 60 fps effect engine renders frames ahead of time into a future-frame ring buffer, and a lookahead scheduler sends each device the frame that matches its measured latency — so USB peripherals (~5 ms), LIFX (~20 ms a bulb, ~35 ms a strip, ~120 ms a matrix), and Govee (~100 ms) fixtures all hit the beat together. Ships with a FastAPI + WebSocket backend, a React control UI with a three.js 3D scene editor, and Prometheus/Grafana monitoring.
+Beat-synced LED lighting engine driven by Pioneer Pro DJ Link. A passive UDP listener picks beat packets straight off the DJ booth network, a 60 fps effect engine renders frames ahead of time into a future-frame ring buffer, and a lookahead scheduler sends each device the frame that matches its measured latency — so USB peripherals (~5 ms), LIFX (~20 ms a bulb, ~35 ms a strip, ~120 ms a matrix), and Govee (from ~15 ms, to ~300 ms for a lamp whose Wi-Fi dozes) fixtures all hit the beat together. Ships with a FastAPI + WebSocket backend, a React control UI with a three.js 3D scene editor, and Prometheus/Grafana monitoring.
 
 ## How it works
 
@@ -15,7 +15,7 @@ CDJ/XDJ decks ──UDP:50001──▶ Pro DJ Link listener ──▶ TempoClock
                         OpenRGB · LIFX LAN · Govee LAN adapters
 ```
 
-The key idea: the ring buffer stores *future* frames. Each zone renders at `now + horizon` (its slowest light's latency plus a frame, at most 120 ms); each device's send loop picks the frame at `now + device_latency`, so higher-latency devices simply read further into the future.
+The key idea: the ring buffer stores *future* frames. Each zone renders at `now + horizon` (its slowest light's latency plus a frame, at most 500 ms); each device's send loop picks the frame at `now + device_latency`, so higher-latency devices simply read further into the future.
 
 ## Features
 
@@ -23,7 +23,7 @@ The key idea: the ring buffer stores *future* frames. Each zone renders at `now 
 - **Always-running tempo clock** — with no DJ, an internal clock keeps the tempo: set a BPM, tap it or nudge the phase from the web app, and it's kept across restarts. A DJ who starts playing takes over; when the decks go quiet, the clock carries on at the DJ's last tempo without a jump.
 - **Modifiers and transitions** — a look's layers can be masked (to a height band, a room, a sub-zone or the reach of an anchor), mirrored and moved; a look can leave trails, flash on every downbeat, stay under a brightness cap (lights running their own effects included) and turn warmer and dimmer in the evening, from an hour before sunset at the home's location. A look comes in with a cut, fade, wipe, spread or dissolve from whatever the lights showed, and lights running their own effects switch at the transition's midpoint.
 - **60 fps effect engine** — effects are pure-NumPy render functions behind an auto-registry, with a hot-swappable effect deck, runtime-introspectable parameters, and TOML presets. Built-in effects: beat_pulse, breathe, color_chase, fire_storm, rainbow_wave, strobe.
-- **Per-device latency compensation** — per-device send loops run at each device's own rate (LIFX strips and matrices at most 20 a second, a Govee lamp 30 by razer or 10 in one colour) and skip a frame the device already shows; latency is one way, half the round trips measured while a device streams (a LIFX echo probe's, a Govee status read's), in a windowed median (static, EMA and windowed-mean strategies remain), plus the device's display delay.
+- **Per-device latency compensation** — per-device send loops run at each device's own rate (LIFX strips and matrices at most 20 a second, a Govee lamp 30 by razer or 10 in one colour) and skip a frame the device already shows; latency is one way, measured while a device streams (a LIFX echo probe every 2 s, a Govee status probe about every 0.5 s): half the round trip of a light that's awake, and all of it for a light whose Wi-Fi dozes, which its replies give away by bunching at the access point's beacons. It's kept in a windowed median (static, EMA and windowed-mean strategies remain), plus the device's display delay, and remembered across restarts.
 - **Device adapters** — OpenRGB (USB/desktop RGB), LIFX LAN (bulbs, strips, tile chains), Govee LAN (one colour per segment by razer, or one colour, with an SKU registry and each lamp's own output). Discovery orchestrator with multi-wave scanning, fast reconnect, and ghost placeholders for offline devices.
 - **Multi-scene 3D spatial mapping** — place devices in 3D space, map effects spatially (linear/radial), and run independent scene pipelines with conflict detection.
 - **Web control** — FastAPI REST + WebSocket backend (binary LED frame broadcast) with a React 19 + TypeScript UI: live performance view, effect deck, transport controls, device monitor, and a react-three-fiber 3D scene editor.

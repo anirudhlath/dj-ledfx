@@ -191,6 +191,6 @@ def test_each_change_of_mode_is_logged_with_z_and_the_median() -> None:
             " its round trip",
         ),
     ]
-    # At the turn the 21 held are replayed oldest first, halved, so the window ends on the
+    # At the turn the 21 held are replayed oldest first, at half each, so the window ends on the
     # newest 9, the 20 ms ones (replayed newest first, it would end on the 240s: 120 ms).
     assert turned == 10.0
