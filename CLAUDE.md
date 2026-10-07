@@ -4,17 +4,12 @@ Beat-synced LED effect engine driven by Pro DJ Link network data with per-device
 
 ## Superpowers Skill Guidelines
 
-- Use opus with max effort from brainstorming and planning.
-- Use /executing-plans skill for executing the plan.
-- Use sonnet or opus for implementing the plan.
-- Use opus for reviewing and simplification stages.
-- Use haiku for committing.
 - Prefer latest internet grounded knowledge over training knowledge.
 - Use context7 to check latest docs and for external dependencies.
 - Add claude md skill as a task to improve and revise claude context, memories etc.
 - Finally create a PR with the changes.
 - Run a @feature-dev:code-architect review or /simplify only when the owner asks for one. Never run one on your own, and never put one in a plan as a task. Fix every issue a requested review raises and push the fixes to the PR.
-- A plan's run ends with /executing-plans' own final review of the whole branch. A fix or small change made without a plan needs only a passing gate before its PR.
+- A plan's run ends with a final review of the whole branch. A fix or small change made without a plan needs only a passing gate before its PR.
 
 ## Redesign in Progress
 
