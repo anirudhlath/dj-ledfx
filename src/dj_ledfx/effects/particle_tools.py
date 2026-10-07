@@ -368,7 +368,10 @@ class Ground:
         if grid is None:
             if len(self._grids) >= _GRID_SIZES:
                 self._grids.clear()
-            origin = (self.low - np.float32(width)).astype(np.float32)
+            # From the LEDs' own lowest corner, not the frame's: a layer's mirror or transform
+            # can move them below the frame.
+            low = self.leds.pos.min(axis=0) if self.leds.count else self.low
+            origin = (low - np.float32(width)).astype(np.float32)
             cells = np.floor((self.leds.pos - origin) / np.float32(width)).astype(np.int64)
             np.maximum(cells, 1, out=cells)  # rounding never puts an LED in an edge cell
             dims = cells.max(axis=0) + 2 if len(cells) else np.full(3, 2, dtype=np.int64)

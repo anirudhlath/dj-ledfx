@@ -7,6 +7,7 @@ import time
 import numpy as np
 import pytest
 from map_home import ROW, leds_at, lights_at
+from numpy.typing import NDArray
 
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import (
@@ -18,6 +19,7 @@ from dj_ledfx.effects.particle_tools import (
     SAME_STOP_M,
     WANDER_DRAWS,
     Ground,
+    Particles,
     _densely,
     arc,
     around,
@@ -38,6 +40,15 @@ def _scattered(count: int, seed: int) -> LedSet:
     """`count` LEDs scattered through a 15 x 15 x 3 m home, as one light."""
     points = np.random.default_rng(seed).uniform((0.0, 0.0, 0.0), (15.0, 15.0, 3.0), (count, 3))
     return lights_at([tuple(point) for point in points])
+
+
+def _exactly(leds: LedSet, particles: Particles) -> NDArray[np.float64]:
+    """What lit() means, worked out in float64 with every LED against every particle."""
+    gap = leds.pos[:, None, :].astype(np.float64) - particles.pos[None, :, :]
+    square = np.einsum("ijk,ijk->ij", gap, gap)
+    reach = particles.radius.astype(np.float64) ** 2
+    weight = np.where(square <= REACH**2 * reach, np.exp(-square / reach), 0.0)
+    return np.minimum(weight @ particles.colour, 1.0)
 
 
 def test_a_particle_lights_each_led_by_a_gaussian_falloff_out_to_its_reach() -> None:
@@ -107,6 +118,28 @@ def test_the_grid_lights_a_few_far_larger_particles_as_the_dense_sum_does() -> N
     _densely(ground, particles, dense)
 
     np.testing.assert_allclose(lit(ground, particles), np.minimum(dense, 1.0), atol=1e-4)
+
+
+# A layer's mirror or transform moves its LEDs and keeps the zone's frame (LedSet.moved), so
+# LEDs can sit below the frame's low corner, and the grid must find them there.
+def test_the_grid_lights_leds_moved_below_the_frame_as_the_exact_sum_does() -> None:
+    leds = _scattered(GRID_FROM_LEDS + 500, seed=1)
+    moved = leds.moved(leds.pos.astype(np.float64) - np.array([3.0, 2.0, 1.0]))
+    ground = Ground.of(moved)
+    rng = np.random.default_rng(2)
+    particles = swarm(
+        rng.uniform((-4.0, -3.0, -2.0), (13.0, 14.0, 3.0), (300, 3)),
+        rng.uniform(0.0, 1.0, (300, 3)),
+        rng.uniform(0.05, 0.6, 300),
+    )
+
+    by_grid = lit(ground, particles)
+
+    assert (moved.pos < ground.low).any(axis=0).all()  # LEDs below the frame, on every axis
+    assert by_grid.any()
+    # Against the float64 sum, not _densely's: that one is float32, and its distances are
+    # worked out from the frame's centre, so this far out it's off by about 1e-4 itself.
+    np.testing.assert_allclose(by_grid, _exactly(moved, particles), atol=1e-4)
 
 
 def test_a_ground_keeps_a_few_grids_and_reuses_one_for_close_sizes() -> None:
