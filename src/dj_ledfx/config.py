@@ -121,7 +121,7 @@ class DiscoveryConfig:
 
 
 # The most samples a kind's latency window keeps: about 8 minutes of a Govee lamp's probes
-# (one every 0.5 s), where the windows used are 9 and 60. Past 2**63 the window's deque
+# (one every 0.5 s), where the windows used are 9 and 60. From 2**63 the window's deque
 # can't be made, and every start failed that kind's lights.
 MAX_LATENCY_WINDOW = 1000
 
