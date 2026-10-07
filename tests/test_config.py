@@ -475,6 +475,12 @@ UNUSABLE = [
         ("govee", "segment_override", value, "govee segment_override must be a whole number")
         for value in (NAN, 2.5, True, "10")
     ),
+    # 2**63 or more overflowed the window's deque at every start, failing the kind's lights
+    *(
+        (kind, "latency_window_size", value, f"{kind} latency_window_size must be at most 1000")
+        for kind in DEVICE_CONFIGS
+        for value in (1001, 2**63)
+    ),
 ]
 
 
@@ -499,6 +505,7 @@ USABLE = [
     ("lifx", "default_kelvin", 2500),
     ("lifx", "default_kelvin", 9000),
     ("govee", "segment_override", 500),
+    *((kind, "latency_window_size", 1000) for kind in DEVICE_CONFIGS),
 ]
 
 

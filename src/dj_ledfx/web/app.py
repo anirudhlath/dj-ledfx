@@ -139,7 +139,8 @@ def create_app(
     app.state.compositor = compositor
     app.state.config = config
     app.state.config_path = config_path
-    app.state.config_turn = asyncio.Lock()  # config writes take turns (router_config)
+    # Writes to the running config take turns (router_config, router_scene)
+    app.state.config_turn = asyncio.Lock()
     app.state.state_db = state_db
     app.state.event_bus = event_bus
     app.state.look_store = look_store

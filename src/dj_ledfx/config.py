@@ -120,6 +120,12 @@ class DiscoveryConfig:
     subnet_mask: int = 24
 
 
+# The most samples a kind's latency window keeps: about 8 minutes of a Govee lamp's probes
+# (one every 0.5 s), where the windows used are 9 and 60. Past 2**63 the window's deque
+# can't be made, and every start failed that kind's lights.
+MAX_LATENCY_WINDOW = 1000
+
+
 def _is_whole_number(value: object) -> bool:
     """An int that isn't a bool: a rate in frames a second, a count, a port or a colour
     temperature."""
@@ -168,6 +174,13 @@ class AppConfig:
             for key in ("max_fps", "latency_window_size"):
                 if not _is_whole_number(getattr(dev_cfg, key)):
                     raise ValueError(f"{name} {key} must be a whole number")
+            if (
+                hasattr(dev_cfg, "latency_window_size")
+                and dev_cfg.latency_window_size > MAX_LATENCY_WINDOW
+            ):
+                raise ValueError(
+                    f"{name} latency_window_size must be at most {MAX_LATENCY_WINDOW}"
+                )
             for key in ("latency_ms", "manual_offset_ms"):
                 if not is_finite_number(getattr(dev_cfg, key)):
                     raise ValueError(f"{name} {key} must be a finite number")

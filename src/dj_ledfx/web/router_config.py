@@ -83,20 +83,19 @@ def _merge_config(existing: AppConfig, updates: dict[str, Any]) -> AppConfig:
     )
 
 
-def _holds_non_finite(body: object) -> bool:
-    """Whether a body holds NaN or an infinity, at any depth: Python's JSON reads them, but no
-    setting can use one and no answer can carry one (a saved one answered that save and every
-    later one with a 500)."""
+def _check_finite(body: object) -> None:
+    """Refuse a body holding NaN or an infinity, at any depth: Python's JSON and TOML read
+    them, but no setting can use one and no answer can carry one (a saved one answered that
+    save and every later one with a 500)."""
     values: list[object] = [body]
     while values:
         value = values.pop()
         if isinstance(value, float) and not math.isfinite(value):
-            return True
+            raise HTTPException(status_code=400, detail="config numbers must be finite")
         if isinstance(value, dict):
             values.extend(value.values())
         elif isinstance(value, list):
             values.extend(value)
-    return False
 
 
 def _check_preview_only(body: dict[str, Any]) -> None:
@@ -183,8 +182,7 @@ async def get_config(request: Request) -> dict[str, Any]:
 
 @router.put("/config")
 async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
-    if _holds_non_finite(body):
-        raise HTTPException(status_code=400, detail="config numbers must be finite")
+    _check_finite(body)
     _check_preview_only(body)
     # One config write at a time: a save reads the running config and replaces it only
     # once saved, so another write in between would be lost
@@ -208,6 +206,7 @@ async def import_config(request: Request) -> dict[str, Any]:
         data = tomllib.loads(body.decode())
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {e}") from e
+    _check_finite(data)
     _check_preview_only(data)
     async with request.app.state.config_turn:  # config writes take turns, as PUT's do
         config = request.app.state.config

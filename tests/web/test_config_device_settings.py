@@ -1,5 +1,7 @@
 """PUT /api/config saves the device settings a request names in state.db, where the next
-start reads them (light-sync spec §8, as the owner decided: the plan's ruling 20)."""
+start reads them (light-sync spec §8, as the owner decided: the plan's ruling 20). A config
+write refuses a number that isn't finite, changes nothing it couldn't save and answer, and
+takes its turn with the other writes to the running config."""
 
 from __future__ import annotations
 
@@ -146,6 +148,67 @@ async def test_a_config_import_while_a_save_is_on_its_way_waits_its_turn(api: Ap
     assert [answer.status_code for answer in answers] == [200, 200]
     engine = api.app.state.config.engine
     assert (engine.fps, engine.max_lookahead_ms) == (30, 500)
+
+
+A_PLACED_AT = {"name": "a", "position": [0.0, 0.0, 0.0], "geometry": "point"}
+# The old scene page's writes, which set scene_config on the running config in place: the
+# request, then the scene_config it leaves.
+SCENE_WRITES: dict[str, tuple[str, str, dict[str, Any] | None, dict[str, Any]]] = {
+    "mapping": (
+        "PUT",
+        "/api/scene/mapping",
+        {"type": "radial", "params": {"center": [0.0, 0.0, 0.0]}},
+        {
+            "mapping": "radial",
+            "mapping_params": {"center": [0.0, 0.0, 0.0]},
+            "devices": [A_PLACED_AT],
+        },
+    ),
+    "placement": (
+        "PUT",
+        "/api/scene/devices/a",
+        {"position": [1.0, 2.0, 0.0]},
+        {"devices": [{**A_PLACED_AT, "position": [1.0, 2.0, 0.0]}]},
+    ),
+    "removal": ("DELETE", "/api/scene/devices/a", None, {"devices": []}),
+}
+
+
+@pytest.mark.parametrize("write", SCENE_WRITES.values(), ids=list(SCENE_WRITES))
+async def test_a_scene_write_while_a_save_is_on_its_way_waits_its_turn(
+    api: Api, tmp_path: Path, write: tuple[str, str, dict[str, Any] | None, dict[str, Any]]
+) -> None:
+    """After a start from state.db the running config has no scene_config, and a scene write
+    landing while a save was on its way went with the config the save replaced."""
+    method, path, body, scene_config = write
+    # Placed in the scene but not the config, as a start from state.db leaves it
+    await api.client.put("/api/scene/devices/a", json={"position": [0.0, 0.0, 0.0]})
+    api.app.state.config_path = tmp_path / "config.toml"  # the scene's writes reach the config
+
+    save = api.client.put("/api/config", json={"engine": {"fps": 30}})
+    scene = api.client.request(method, path, json=body)
+    answers = await asyncio.gather(save, scene)
+
+    assert [answer.status_code for answer in answers] == [200, 200]
+    assert api.app.state.config.engine.fps == 30
+    assert api.app.state.config.scene_config == scene_config
+
+
+async def test_a_config_import_holding_a_number_that_isn_t_finite_gets_a_400_and_changes_nothing(
+    api: Api, tmp_path: Path
+) -> None:
+    config_toml = tmp_path / "config.toml"
+    api.app.state.config_path = config_toml
+    running = api.app.state.config
+
+    for number in ("nan", "inf", "-inf"):
+        body = f"[engine]\nfps = {number}\n"
+        response = await api.client.post("/api/config/import", content=body)
+        refused = (response.status_code, response.json())
+        assert refused == (400, {"detail": "config numbers must be finite"}), number
+
+    assert api.app.state.config is running
+    assert not config_toml.exists()
 
 
 def _as_javascript_sends(value: Any) -> Any:

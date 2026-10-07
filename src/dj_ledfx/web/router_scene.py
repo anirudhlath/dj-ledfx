@@ -50,7 +50,8 @@ def _placements_to_config(scene: SceneModel) -> list[dict]:
 
 
 async def _persist_scene_config(request: Request) -> None:
-    """Persist current scene placements back to the TOML config file."""
+    """Persist current scene placements back to the TOML config file. Its caller holds the
+    config turn: a config save replaces the running config this writes into."""
     config = request.app.state.config
     config_path = request.app.state.config_path
     if config_path is None:
@@ -188,49 +189,51 @@ async def update_scene_device(
     elif body.geometry == "matrix":
         geometry = MatrixGeometry()
 
-    if device_name in scene.placements:
-        position = tuple(body.position) if body.position is not None else None
-        scene.update_placement(device_name, position=position, geometry=geometry)
-    else:
-        if body.position is None:
-            raise HTTPException(
-                status_code=400,
-                detail="position is required when adding a new device",
+    async with request.app.state.config_turn:  # scene_config is in the running config
+        if device_name in scene.placements:
+            position = tuple(body.position) if body.position is not None else None
+            scene.update_placement(device_name, position=position, geometry=geometry)
+        else:
+            if body.position is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="position is required when adding a new device",
+                )
+            from dj_ledfx.spatial.scene import DevicePlacement
+
+            # Look up real LED count from device manager
+            led_count = body.led_count or 1
+            device_manager = request.app.state.device_manager
+            managed = device_manager.get_device(device_name)
+            if managed is not None:
+                led_count = managed.adapter.led_count
+                has_geometry = hasattr(managed.adapter, "geometry")
+                if geometry is None and has_geometry and managed.adapter.geometry is not None:
+                    geometry = managed.adapter.geometry
+
+            scene.add_placement(
+                DevicePlacement(
+                    device_id=device_name,
+                    position=tuple(body.position),
+                    geometry=geometry or PointGeometry(),
+                    led_count=led_count,
+                )
             )
-        from dj_ledfx.spatial.scene import DevicePlacement
 
-        # Look up real LED count from device manager
-        led_count = body.led_count or 1
-        device_manager = request.app.state.device_manager
-        managed = device_manager.get_device(device_name)
-        if managed is not None:
-            led_count = managed.adapter.led_count
-            has_geometry = hasattr(managed.adapter, "geometry")
-            if geometry is None and has_geometry and managed.adapter.geometry is not None:
-                geometry = managed.adapter.geometry
-
-        scene.add_placement(
-            DevicePlacement(
-                device_id=device_name,
-                position=tuple(body.position),
-                geometry=geometry or PointGeometry(),
-                led_count=led_count,
-            )
-        )
-
-    _rebuild_compositor(request, scene)
-    await _persist_scene_config(request)
-    return _placement_to_response(scene.placements[device_name])
+        _rebuild_compositor(request, scene)
+        await _persist_scene_config(request)
+        return _placement_to_response(scene.placements[device_name])
 
 
 @router.delete("/devices/{device_name}")
 async def delete_scene_device(request: Request, device_name: str) -> dict:
     scene = _ensure_scene(request)
-    if device_name not in scene.placements:
-        raise HTTPException(status_code=404, detail=f"Device '{device_name}' not in scene")
-    scene.remove_placement(device_name)
-    _rebuild_compositor(request, scene)
-    await _persist_scene_config(request)
+    async with request.app.state.config_turn:  # scene_config is in the running config
+        if device_name not in scene.placements:
+            raise HTTPException(status_code=404, detail=f"Device '{device_name}' not in scene")
+        scene.remove_placement(device_name)
+        _rebuild_compositor(request, scene)
+        await _persist_scene_config(request)
     return {"removed": device_name}
 
 
@@ -238,13 +241,14 @@ async def delete_scene_device(request: Request, device_name: str) -> dict:
 async def update_mapping(request: Request, body: UpdateMappingRequest) -> MappingResponse:
     scene = _ensure_scene(request)
 
-    config = request.app.state.config
-    if config.scene_config is None:
-        config.scene_config = {}
-    config.scene_config["mapping"] = body.type
-    config.scene_config["mapping_params"] = body.params
+    async with request.app.state.config_turn:  # scene_config is in the running config
+        config = request.app.state.config
+        if config.scene_config is None:
+            config.scene_config = {}
+        config.scene_config["mapping"] = body.type
+        config.scene_config["mapping_params"] = body.params
 
-    _rebuild_compositor(request, scene)
-    await _persist_scene_config(request)
+        _rebuild_compositor(request, scene)
+        await _persist_scene_config(request)
 
     return MappingResponse(type=body.type, params=body.params)
