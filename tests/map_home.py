@@ -165,6 +165,20 @@ def leds_at(
     return build_ledset([LedSource("light", len(points), placed=placed)], space)
 
 
+def lights_at(*lights: Sequence[Sequence[float]], ceiling: float | None = 3.0) -> LedSet:
+    """Lights' LEDs at these map positions, one light for each list of points, in this
+    order, in a zone with this ceiling and no anchors."""
+    sources = [
+        LedSource(
+            f"light-{index}",
+            len(points),
+            placed=PlacedLeds.from_positions(np.asarray(points, dtype=np.float64).reshape(-1, 3)),
+        )
+        for index, points in enumerate(lights)
+    ]
+    return build_ledset(sources, Space(ceiling=ceiling))
+
+
 ROW = [[x, 0.0, 1.0] for x in np.linspace(0.0, 4.0, 9)]  # 0.5 m apart, west to east
 
 
