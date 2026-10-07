@@ -6447,7 +6447,7 @@ git commit -m "test(web): Put a look on's states on both sizes, its keyboard pat
 
 ### Task 11: Revise CLAUDE.md
 
-CLAUDE.md asks every plan for this task: "Add claude md skill as a task to improve and revise claude context, memories etc." The file gains the preview's new answer, the composer's modules, and the gotchas this branch found. No design values go in, because CLAUDE.md forbids restating them there.
+CLAUDE.md gains the preview's new answer, the composer's modules, and the gotchas this branch found. No design values go in, because CLAUDE.md forbids restating them there.
 
 **Files:**
 - Modify: `CLAUDE.md`

@@ -5481,7 +5481,7 @@ Tell the owner it's done. There's nothing to commit here: a fix found in this ta
 
 ### Task 10: CLAUDE.md and the README
 
-CLAUDE.md asks for the claude-md skill to revise Claude's context after each plan. M5 adds a kind of effect, its toolkit, eleven effect modules and their built-in looks, and the runtime now draws particle layers, so CLAUDE.md's architecture, design decisions, testing and gotchas all need lines. The README's feature list gains one.
+M5 adds a kind of effect, its toolkit, eleven effect modules and their built-in looks, and the runtime now draws particle layers, so CLAUDE.md's architecture, design decisions, testing and gotchas all need lines. The README's feature list gains one.
 
 **Files:**
 - Modify: `CLAUDE.md`, `README.md`
