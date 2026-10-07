@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest_asyncio
 from api_home import Api, api_home
-from conftest import FakeLight
+from conftest import OPENRGB, SERVER, FakeLight
 from map_home import IN_THE_EAST_ROOM, tiny_home
+from runtime_fakes import TILE
 from zone_home import zone_record
 
 IN_THE_WEST_ROOM = {"kind": "point", "position": [1.0, 1.0, 1.0]}
@@ -70,6 +72,26 @@ async def test_a_new_preview_replaces_the_last(api: Api) -> None:
     assert first != second and len(api.previews.runtimes()) == 1
     stale = await api.client.put(f"/api/preview/{first}", json={"look": await _draft(api, "x")})
     assert stale.status_code == 404
+
+
+# F4 ruling 1: the PC answers as one light, as its most active part does.
+async def test_a_preview_says_what_each_light_would_do(tmp_path: Path) -> None:
+    keyboard = FakeLight(f"{SERVER}:0", name="Keyboard", caps=replace(OPENRGB, matrix=True))
+    ram = FakeLight(f"{SERVER}:1", name="RAM", led_count=2, caps=OPENRGB)
+    lights = [FakeLight("tile", caps=TILE), keyboard, ram, FakeLight("lamp")]
+    desk = [zone_record("desk", "tile", keyboard.stable_id, ram.stable_id, "lamp")]
+    async with api_home(tmp_path, lights, desk) as api:
+        glow = {"id": "glow", "name": "Glow", "type": "firmware", "kind": "glow_firmware"}
+        draft = {**await _draft(api, "Glow"), "layers": [glow]}
+
+        started = await api.client.post("/api/preview", json={"zoneId": "desk", "look": draft})
+
+    assert started.status_code == 201
+    assert started.json()["lights"] == [
+        {"id": "tile", "mode": "own-effect", "effect": "Glow"},
+        {"id": SERVER, "mode": "own-effect", "effect": "Glow"},  # the keyboard runs it
+        {"id": "lamp", "mode": "streamed-copy", "effect": "Glow"},
+    ]
 
 
 async def test_a_bad_preview_request_says_why(api: Api) -> None:

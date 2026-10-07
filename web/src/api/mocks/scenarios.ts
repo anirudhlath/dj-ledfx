@@ -7,7 +7,7 @@ import type {
   SunPathPoint, TempoSource, Zone,
 } from '../contract'
 import {
-  HOME_ZONE, homeFixture, lightFixtures, lookFixtures, lookName, partId, roomName, runningZone, zoneFixtures,
+  HOME_ZONE, homeFixture, lightFixtures, lightPlan, lookFixtures, lookName, partId, roomName, runningZone, zoneFixtures,
 } from './fixtures'
 
 export const SCENARIOS = [
@@ -409,10 +409,11 @@ const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
   },
   firmware(state, now) {
     run(state, HOME_ZONE, 'firmware', after(now, -10 * MINUTE), 0.9)
+    const firmware = state.looks.find((look) => look.id === 'firmware')!
     for (const light of state.lights) {
       // State-Firmware: "Streamed copy of Flame". The engine names the effect a copy streams in ownEffect.
-      if (light.builtInEffects.length === 0) setLight(state, light.id, { status: 'streamed-copy', ownEffect: 'LIFX Flame' })
-      else setLight(state, light.id, { status: 'own-effect', ownEffect: light.builtInEffects[0] })
+      const { mode, effect } = lightPlan(firmware, light)
+      setLight(state, light.id, { status: mode, ownEffect: effect })
     }
   },
   'inputs-down'(state, now) {

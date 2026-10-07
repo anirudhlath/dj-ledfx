@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HERO_NOW, startMockServer } from '@/test/live'
 import { BeatClock } from '../beat'
-import type { Deck, Home, Inputs, Light, Look, Placement, RecentLook, Zone } from '../contract'
+import type { Deck, Home, Inputs, Light, Look, Placement, PreviewStarted, RecentLook, Zone } from '../contract'
 import { FrameStore, decodeFrame } from '../frames'
 import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
 import type { ClientCommand, RunningMessage } from '../ws-messages'
 import { inMemorySockets } from './in-memory-socket'
 import { RECENT_LIMIT, beatMessage, snapshotMessages, statsMessage, type MockServer } from './mock-server'
-import { HOME_TOTALS } from './fixtures'
+import { COPIED_EFFECT, HOME_TOTALS } from './fixtures'
 import { SCENARIOS, buildScenario } from './scenarios'
 
 /** Moves the wall clock on: the mock's times come from Date.now(). */
@@ -298,7 +298,7 @@ describe('the REST API', () => {
     socket.send({ action: 'subscribe_frames', fps: 60, protocol: 2, streams: ['live', 'preview'] })
     const lights = JSON.stringify(server.state.lights)
     const reply = server.handle('POST', '/api/preview', { zoneId: 'living', lookId: 'embers' })
-    expect(reply).toEqual({ status: 201, body: { previewId: expect.any(String) } })
+    expect(reply).toEqual({ status: 201, body: { previewId: expect.any(String), lights: expect.any(Array) } })
     vi.advanceTimersByTime(500)
     const frames = decoded(socket.binary(), 2)
     expect(frames.preview.size).toBe(server.state.zones.find((zone) => zone.id === 'living')?.lights.length)
@@ -308,6 +308,43 @@ describe('the REST API', () => {
     socket.clear()
     vi.advanceTimersByTime(500)
     expect(decoded(socket.binary(), 2).preview.size).toBe(0)
+  })
+
+  // F4 ruling 2: the consequence line's lights. Mock looks have no layers, so a look's description names its effect.
+  it('answers what each light would do: a built-in effect the look names, else its frames', () => {
+    const server = startMockServer()
+    const living = server.state.zones.find((zone) => zone.id === 'living')!
+    const embers = server.state.looks.find((look) => look.id === 'embers')!
+    const { lights } = server.handle('POST', '/api/preview', { zoneId: 'living', lookId: 'embers' }).body as PreviewStarted
+    expect(lights.map((light) => light.id)).toEqual(living.lights)
+    const own = lights.filter((light) => light.mode === 'own-effect')
+    expect(own.length).toBeGreaterThan(0)
+    for (const { id, effect } of own) {
+      expect(embers.description).toContain(effect)
+      expect(server.state.lights.find((light) => light.id === id)?.builtInEffects).toContain(effect)
+    }
+    expect(lights.filter((light) => light.mode !== 'own-effect').every((light) => light.mode === 'streaming' && light.effect === null)).toBe(true)
+  })
+
+  it("answers the firmware look as State-Firmware runs it: each light's first effect, or a streamed copy", () => {
+    const server = startMockServer()
+    const { lights } = server.handle('POST', '/api/preview', { zoneId: 'home', lookId: 'firmware' }).body as PreviewStarted
+    for (const { id, mode, effect } of lights) {
+      const offers = server.state.lights.find((light) => light.id === id)!.builtInEffects
+      expect({ mode, effect }).toEqual(offers.length > 0 ? { mode: 'own-effect', effect: offers[0] } : { mode: 'streamed-copy', effect: COPIED_EFFECT })
+    }
+    expect(new Set(lights.map((light) => light.mode))).toEqual(new Set(['own-effect', 'streamed-copy']))
+  })
+
+  // Engine M2's ZoneError: "<zone> has no lights".
+  it('neither previews nor starts a look on a zone with no lights', () => {
+    const server = startMockServer()
+    const empty = server.state.zones.find((zone) => zone.lights.length === 0)!
+    const running = JSON.stringify(server.state.running)
+    const refused = { status: 400, body: { detail: `${empty.name} has no lights` } }
+    expect(server.handle('POST', '/api/preview', { zoneId: empty.id, lookId: 'embers' })).toEqual(refused)
+    expect(server.handle('POST', `/api/zones/${empty.id}/start`, { lookId: 'embers' })).toEqual(refused)
+    expect(JSON.stringify(server.state.running)).toBe(running)
   })
 
   it('puts preview only on through the config, and pushes transport', () => {

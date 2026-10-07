@@ -2,7 +2,7 @@
 // byte copies of home.json and looks.json, so no name, position or description is typed here
 // (CLAUDE.md, "Web App Design"), except the owner's name for one room (decision 8). What the files don't say, the mock makes up in the API's shape:
 // addresses from the documentation range (RFC 5737), no MACs, and M1's latency heuristics.
-import type { Home, Id, InputKind, Light, LightShape, Location, Look, Room, RunningZone, Vec3, Zone } from '../contract'
+import type { Home, Id, InputKind, Light, LightShape, Location, Look, PreviewLight, Room, RunningZone, Vec3, Zone } from '../contract'
 import homeJson from './home.json'
 import looksJson from './looks.json'
 
@@ -123,6 +123,23 @@ function builtInEffects(protocol: Protocol, capabilities: Capability[]): string[
   if (matrix) return ['LIFX Flame', 'LIFX Morph']
   if (multizone) return ['LIFX Move']
   return ['LIFX waveform']
+}
+
+/** The effect a light that can run none of the firmware look's streams a copy of (State-Firmware: "Streamed copy of Flame"). */
+export const COPIED_EFFECT = 'LIFX Flame'
+
+/**
+ * What a light does in a look, as the mock tells it (F4 ruling 2): in a firmware look, its first
+ * built-in effect, else a streamed copy of COPIED_EFFECT; in any other look, a built-in effect of its own
+ * that the look's description names, else the look's frames. Mock looks have no layers to plan from.
+ */
+export function lightPlan(look: Pick<Look, 'category' | 'description'>, light: Pick<Light, 'builtInEffects'>): Omit<PreviewLight, 'id'> {
+  if (look.category === 'firmware') {
+    const own = light.builtInEffects[0]
+    return own === undefined ? { mode: 'streamed-copy', effect: COPIED_EFFECT } : { mode: 'own-effect', effect: own }
+  }
+  const named = light.builtInEffects.find((effect) => look.description.includes(effect))
+  return named === undefined ? { mode: 'streaming', effect: null } : { mode: 'own-effect', effect: named }
 }
 
 /** CLAUDE.md's device-type heuristics: LIFX 50 ms, Govee 100 ms, USB 5 ms. Only LIFX can be probed. */

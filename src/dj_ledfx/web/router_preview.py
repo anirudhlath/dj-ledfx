@@ -10,18 +10,21 @@ from fastapi import APIRouter, Request, Response
 from dj_ledfx.web import contract as api
 from dj_ledfx.web.errors import answers
 from dj_ledfx.web.router_zones import requested_look
-from dj_ledfx.web.state import get_previews
+from dj_ledfx.web.state import get_previews, light_index
 
 router = APIRouter()
 
 
 @router.post("/preview", status_code=201)
 async def start_preview(request: Request, body: api.PreviewRequest) -> api.PreviewStarted:
-    """Replaces any previous preview. A request that fails leaves it as it was."""
+    """Replaces any previous preview. A request that fails leaves it as it was. The answer
+    says what each of the zone's lights would do if the look started now."""
     with answers():
         look = requested_look(request, body.look_id, body.look)
-        preview_id = get_previews(request).start(body.zone_id, look)
-    return api.PreviewStarted(preview_id=preview_id)
+        previews = get_previews(request)
+        preview_id = previews.start(body.zone_id, look)
+        lights = previews.lights(preview_id)
+    return api.preview_started(preview_id, lights, light_index(request.app))
 
 
 @router.put("/preview/{preview_id}", status_code=204)

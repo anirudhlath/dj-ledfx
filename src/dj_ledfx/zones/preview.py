@@ -6,6 +6,11 @@ preview stream only, has no route, so it never sends to a light, and is never sy
 it never captures one. It follows its zone's lights as the map changes and ends with its
 zone. A browser tab that closes mid-preview sends no DELETE, so a preview nobody has
 watched for PREVIEW_IDLE_S ends by itself (Review Focus 1).
+
+The composer's consequence line (web spec §8.2) reads from a preview what each of its
+lights would do if the look started now (preview_lights): the runtime plans each light's
+firmware effect as a started look's would, since both are built from the same look and
+lights.
 """
 
 from __future__ import annotations
@@ -25,13 +30,34 @@ from dj_ledfx.timing import paced
 if TYPE_CHECKING:
     from dj_ledfx.looks.model import Look
     from dj_ledfx.zones.manager import ZoneManager
-    from dj_ledfx.zones.runtime import ZoneRuntime
+    from dj_ledfx.zones.runtime import LightMode, ZoneRuntime
 
 PREVIEW_IDLE_S = 10.0
 
 
 class PreviewNotFoundError(KeyError):
     """No preview has that id: it ended, or a newer one replaced it."""
+
+
+@dataclass(frozen=True)
+class PreviewLight:
+    """What one of a preview's lights would do if its look started: stream the look, run a
+    firmware effect itself, or stream a copy of one (effect: that effect's name)."""
+
+    device_id: str
+    mode: LightMode
+    effect: str | None
+
+
+def preview_lights(runtime: ZoneRuntime) -> tuple[PreviewLight, ...]:
+    """The runtime's lights in its order. A look that waits for an input runs no firmware
+    effect: it waits dark (ZoneRuntime._render_look), so every light reads as streaming."""
+    return tuple(
+        PreviewLight(
+            light.device_id, runtime.mode_of(light.device_id), runtime.effect_name(light.device_id)
+        )
+        for light in runtime.lights
+    )
 
 
 @dataclass
@@ -69,6 +95,10 @@ class PreviewManager:
         self._end()
         self._preview = _Preview(preview_id, runtime, self._clock())
         return preview_id
+
+    def lights(self, preview_id: str) -> tuple[PreviewLight, ...]:
+        """What each of the preview's lights would do if its look started now."""
+        return preview_lights(self._require(preview_id).runtime)
 
     def update(self, preview_id: str, look: Look) -> None:
         """The editor changed the look: take it in place where the layers allow."""
