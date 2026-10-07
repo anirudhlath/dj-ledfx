@@ -168,9 +168,12 @@ async def test_a_light_not_measured_since_it_came_online_writes_nothing(db: Stat
 async def test_a_latency_that_isn_t_a_number_holds_up_no_other_light_s_row(db: StateDB) -> None:
     """NaN would bind as NULL and fail the row's NOT NULL, rolling back every light's write
     in the same transaction, every period."""
-    broken = LatencyTracker(WindowedMedianLatency(LATENCY_WINDOW, 100.0), name="test-lamp")
+    strategy = WindowedMedianLatency(LATENCY_WINDOW, 100.0)
+    broken = LatencyTracker(strategy, name="test-lamp")
     broken.note_send()
-    broken.update_rtt(math.nan)
+    broken.update_rtt(80.0)
+    # The tracker takes no round trip that isn't a number: a latency gone NaN another way
+    strategy.update(math.nan)
     assert broken.measured and math.isnan(broken.link_latency_ms)
 
     lights = [("govee:broken", broken), (LAMP, measured(250.0, dozing=True))]

@@ -1,5 +1,7 @@
+import math
 from typing import Any
 
+import pytest
 from doze_fakes import SEED_MS, START, Lamp, bunched, on_beat, spread
 from loguru import logger
 
@@ -122,6 +124,21 @@ def test_round_trips_that_land_while_the_light_is_idle_never_reach_the_doze_chec
         lamp.tracker.update_rtt(240.0)  # no frame went out: an idle light's round trip
     assert (lamp.tracker.link_latency_ms, lamp.tracker.dozing) == (SEED_MS, False)
     assert not lamp.tracker.measured
+
+
+@pytest.mark.parametrize("rtt_ms", [math.nan, math.inf, -math.inf])
+def test_a_round_trip_that_isn_t_a_finite_number_is_no_round_trip(rtt_ms: float) -> None:
+    """It would poison the strategy's median and the doze check's: the latency, whether one
+    was measured, and the round trips the check holds all stay as they were."""
+    lamp = Lamp()
+    assert lamp.reply(bunched(0), rtt_ms) == SEED_MS
+    assert not lamp.tracker.measured
+    for k in range(1, 10):
+        lamp.reply(bunched(k), 240.0)
+    assert lamp.reply(bunched(10), rtt_ms) == 120.0  # half of 240, as before it
+    # The check holds only the 9 that are numbers: the next turns the light dozing.
+    assert not lamp.tracker.dozing
+    assert lamp.reply(bunched(11), 240.0) == 240.0 and lamp.tracker.dozing
 
 
 def test_a_reset_keeps_the_latency_and_the_mode_and_drops_the_round_trips_held() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from typing import Protocol
@@ -98,8 +99,9 @@ class LatencyTracker:
         """A probe's round trip, counted only while the light streams: an idle light's Wi-Fi
         dozes, and its round trips run long. The strategy takes all of a dozing light's round
         trip and half of an awake light's; when the doze check changes the light's mode, the
-        strategy starts again from the round trips the check holds, at the new share."""
-        if not self.streaming:
+        strategy starts again from the round trips the check holds, at the new share. One
+        that isn't a finite number (NaN, an infinity) is none: it would poison the medians."""
+        if not self.streaming or not math.isfinite(rtt_ms):
             return
         if self._doze.add(self._clock(), rtt_ms):
             self._log_mode()
