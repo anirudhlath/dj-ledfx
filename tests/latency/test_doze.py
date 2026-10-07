@@ -61,8 +61,9 @@ def test_bunched_replies_with_a_25_ms_median_are_awake() -> None:
 
 
 def test_a_dozing_light_stays_dozing_while_z_is_at_least_2() -> None:
-    """Replies half at the wakes bunch less than an awake light needs to turn dozing, and
-    as much as a dozing light needs to stay dozing."""
+    """Ten to 20 replies half at the wakes bunch less than an awake light needs to turn
+    dozing, and as much as a dozing light needs to stay dozing. Their z grows at about n/4,
+    so from about 27 they turn an awake light dozing."""
     arrivals = [half_bunched(k) for k in range(20)]
     zs = [rayleigh_z(arrivals[:n]) for n in range(10, 21)]
     assert all(STAY_Z <= z < DOZE_Z for z in zs)
