@@ -281,10 +281,13 @@ class TestProbeLoop:
         transport, waits, _, _ = _probed()
         transport.start_probing(0.5)
         await waits.round()
-        await asyncio.sleep(0.05)  # past the probe's timeout, with no reply
-        # A late wake can come in the same pass of the event loop as the probe's timeout: one
-        # more pass lets the probe's done-callback take it out of _probes.
-        await asyncio.sleep(0)
+        probes = set(transport._probes)
+        assert probes  # the round's probe is in flight
+        # It gives up at its timeout, with no reply. The test waits for the probe itself, not
+        # a sleep past its timeout: on Python 3.11 wait_for's cancel takes more passes of the
+        # event loop, so a stall of a few tens of ms left it in _probes. Its done-callback,
+        # added first, has taken it out by the time this wait ends.
+        await asyncio.wait(probes, timeout=1.0)
         assert _asked(transport) == 1 and not transport._probes  # it gave up, asking once
         await waits.round()
         assert _asked(transport) == 2  # the next round asks again
