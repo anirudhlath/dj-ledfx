@@ -51,7 +51,7 @@ latency_ms = 100.0
 manual_offset_ms = 0.0
 max_fps = 30
 latency_window_size = 9
-probe_interval_s = 5.0
+probe_interval_s = 0.5
 
 [discovery]
 broadcast_interval_s = 30.0

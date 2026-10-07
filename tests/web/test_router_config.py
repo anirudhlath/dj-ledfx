@@ -58,7 +58,6 @@ def test_import_config(client):
 # fields stay until every way in ignores keys it doesn't know.
 UNREAD = {
     "discovery": {"unicast_concurrency": 50, "unicast_timeout_s": 0.5, "subnet_mask": 24},
-    "devices": {"govee": {"probe_interval_s": 5.0}},
 }
 
 

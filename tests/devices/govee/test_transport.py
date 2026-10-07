@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from govee_fakes import STATUS, lamp_record
+from loguru import logger
 
+from dj_ledfx.devices.govee import transport as govee_transport
 from dj_ledfx.devices.govee.colour import GoveeColourAdapter
 from dj_ledfx.devices.govee.transport import GoveeTransport
 
@@ -122,7 +128,7 @@ class TestRoundTrips:
         transport = GoveeTransport(clock=lambda: now[0])
         transport._send_transport = MagicMock()
         rtts: list[float] = []
-        transport.register_device(lamp_record(), rtt_callback=rtts.append)
+        transport.register_device(lamp_record(), rtt_callback=rtts.append, streaming=lambda: True)
         return transport, now, rtts
 
     async def test_a_status_reply_feeds_the_lamp_s_round_trip(self) -> None:
@@ -151,8 +157,194 @@ class TestRoundTrips:
         _reply(transport, STATUS)  # late, or sent to another program's query
         assert rtts == []
 
-    def test_there_is_no_probe_loop(self) -> None:
-        assert not hasattr(GoveeTransport, "start_probing")
+
+class _Waits:
+    """The probe loop's sleep: each wait is held until the test lets a round run."""
+
+    def __init__(self) -> None:
+        self.asked: list[float] = []  # how long each wait was
+        self._asleep = asyncio.Event()
+        self._wake: asyncio.Future[None] | None = None
+
+    async def __call__(self, seconds: float) -> None:
+        self.asked.append(seconds)
+        self._wake = asyncio.get_running_loop().create_future()
+        self._asleep.set()
+        await self._wake
+
+    async def round(self) -> None:
+        """End the wait the loop is in, and let its round run until it waits again. A loop
+        that never waits again fails the test rather than hanging it."""
+        async with asyncio.timeout(1.0):
+            await self._asleep.wait()
+            self._asleep.clear()
+            assert self._wake is not None
+            self._wake.set_result(None)
+            await self._asleep.wait()
+        await asyncio.sleep(0)  # each probe the round started has sent its query
+
+
+def _probed(
+    *, can_receive: bool = True, clock: Callable[[], float] = lambda: 100.0
+) -> tuple[GoveeTransport, _Waits, list[bool], list[float]]:
+    """A transport that probes the test lamp on held waits; whether the lamp streams, which a
+    test can change; and the lamp's round trips."""
+    waits = _Waits()
+    transport = GoveeTransport(clock, sleep=waits, rng=random.Random(7))
+    transport._is_open = True
+    transport._send_transport = MagicMock()
+    transport._recv_transport = MagicMock() if can_receive else None
+    streams = [True]
+    rtts: list[float] = []
+    transport.register_device(lamp_record(), rtts.append, streaming=lambda: streams[0])
+    return transport, waits, streams, rtts
+
+
+def _asked(transport: GoveeTransport) -> int:
+    """How many status queries went to the lamp."""
+    return transport._send_transport.sendto.call_count  # type: ignore[union-attr]
+
+
+@pytest.fixture
+def patient_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each probe waits a minute for its reply, so a test that holds one in flight never
+    races the wall clock's PROBE_TIMEOUT_S."""
+    monkeypatch.setattr(govee_transport, "PROBE_TIMEOUT_S", 60.0)
+
+
+@contextmanager
+def _logged_errors() -> Iterator[list[Any]]:
+    """Every record logged at ERROR in the block."""
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="ERROR")
+    try:
+        yield records
+    finally:
+        logger.remove(sink)
+
+
+class TestProbeLoop:
+    """The light-sync spec's §4: a lamp that streams is asked for its status about every
+    probe interval, and its reply times a round trip."""
+
+    async def test_only_a_lamp_that_streams_is_probed(self) -> None:
+        transport, waits, streams, _ = _probed()
+        streams[0] = False
+        transport.start_probing(0.5)
+        await waits.round()
+        assert _asked(transport) == 0  # idle: its round trip wouldn't count
+        streams[0] = True
+        await waits.round()
+        assert _asked(transport) == 1
+        await transport.close()
+
+    async def test_each_wait_is_75_to_125_percent_of_the_interval(self) -> None:
+        transport, waits, streams, _ = _probed()
+        streams[0] = False
+        transport.start_probing(0.5)
+        for _ in range(40):
+            await waits.round()
+        assert all(0.375 <= wait <= 0.625 for wait in waits.asked)
+        assert min(waits.asked) < 0.4 and max(waits.asked) > 0.6  # random, not one wait
+        await transport.close()
+
+    async def test_a_query_in_flight_is_shared_never_doubled(self) -> None:
+        transport, waits, _, rtts = _probed()
+        read = asyncio.create_task(transport.query_status(LAMP_IP, timeout_s=5.0))
+        await asyncio.sleep(0)  # the light monitor's read is in flight
+        transport.start_probing(0.5)
+        await waits.round()
+        assert _asked(transport) == 1  # the read's query, not a probe's
+        _reply(transport, STATUS)
+        assert await read == STATUS and len(rtts) == 1
+        await waits.round()
+        assert _asked(transport) == 2  # answered: the next round asks again
+        await transport.close()
+
+    @pytest.mark.usefixtures("patient_probes")
+    async def test_a_silent_lamp_holds_up_no_round(self) -> None:
+        transport, waits, _, _ = _probed()
+        transport.start_probing(0.5)
+        for _ in range(5):
+            await waits.round()
+        assert len(waits.asked) == 6  # the rounds go on
+        assert _asked(transport) == 1  # while its one probe waits for the reply
+        await transport.close()
+
+    def test_a_probe_waits_a_second_for_its_reply(self) -> None:
+        assert govee_transport.PROBE_TIMEOUT_S == 1.0  # ruling 5
+
+    async def test_a_probe_gives_up_at_its_timeout_having_asked_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(govee_transport, "PROBE_TIMEOUT_S", 0.01)
+        transport, waits, _, _ = _probed()
+        transport.start_probing(0.5)
+        await waits.round()
+        probes = set(transport._probes)
+        assert probes  # the round's probe is in flight
+        # It gives up at its timeout, with no reply. The test waits for the probe itself, not
+        # a sleep past its timeout: on Python 3.11 wait_for's cancel takes more passes of the
+        # event loop, so a stall of a few tens of ms left it in _probes. Its done-callback,
+        # added first, has taken it out by the time this wait ends.
+        await asyncio.wait(probes, timeout=1.0)
+        assert _asked(transport) == 1 and not transport._probes  # it gave up, asking once
+        await waits.round()
+        assert _asked(transport) == 2  # the next round asks again
+        await transport.close()
+
+    @pytest.mark.usefixtures("patient_probes")
+    async def test_a_probe_s_reply_times_the_lamp_s_round_trip(self) -> None:
+        now = [100.0]
+        transport, waits, _, rtts = _probed(clock=lambda: now[0])
+        transport.start_probing(0.5)
+        await waits.round()
+        now[0] += 0.25
+        _reply(transport, STATUS)
+        assert rtts == [pytest.approx(250.0)]
+        await transport.close()
+
+    async def test_nothing_is_probed_while_another_program_holds_the_reply_port(self) -> None:
+        transport, waits, _, _ = _probed(can_receive=False)
+        transport.start_probing(0.5)
+        for _ in range(3):
+            await waits.round()
+        assert _asked(transport) == 0
+        await transport.close()
+
+    @pytest.mark.usefixtures("patient_probes")
+    async def test_the_loop_and_its_probes_stop_at_close(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        transport, waits, _, _ = _probed()
+        transport.start_probing(0.5)
+        loop = transport._probe_task
+        transport.start_probing(0.5)
+        assert transport._probe_task is loop  # one loop
+        await waits.round()
+        probes = set(transport._probes)
+        assert len(probes) == 1  # in flight
+
+        with _logged_errors() as errors:
+            await transport.close()
+
+        assert loop is not None and loop.cancelled()
+        assert all(probe.cancelled() for probe in probes) and not transport._probes
+        assert errors == [] and caplog.records == []  # a loop cancelled at close ends quietly
+
+    async def test_a_loop_that_fails_logs_it_once(self) -> None:
+        async def nan_sleep(seconds: float) -> None:
+            raise ValueError("Invalid delay: NaN (not a number)")  # as asyncio.sleep(nan)
+
+        transport = GoveeTransport(sleep=nan_sleep)
+        transport._is_open = True
+        with _logged_errors() as errors:
+            transport.start_probing(0.5)
+            assert transport._probe_task is not None
+            await asyncio.wait([transport._probe_task])
+        assert [error["exception"].type for error in errors] == [ValueError]
+        assert "probe loop" in errors[0]["message"]
+        await transport.close()
 
 
 class TestHeardFrom:

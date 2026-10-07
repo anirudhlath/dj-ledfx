@@ -18,6 +18,7 @@ from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOnlineEvent, EventBus
 if TYPE_CHECKING:
     from dj_ledfx.devices.adapter import DeviceAdapter
     from dj_ledfx.devices.govee.output import GoveeOutput
+    from dj_ledfx.latency.memory import LinkMemory
     from dj_ledfx.latency.tracker import LatencyTracker
     from dj_ledfx.persistence.state_db import StateDB
 
@@ -31,11 +32,13 @@ class DiscoveryOrchestrator:
         device_manager: DeviceManager,
         event_bus: EventBus,
         state_db: StateDB | None = None,
+        link_memory: LinkMemory | None = None,
     ) -> None:
         self._config = config
         self._manager = device_manager
         self._event_bus = event_bus
         self._state_db = state_db
+        self._link_memory = link_memory  # each light's last latency and mode
         self._running = False
         self._task: asyncio.Task[None] | None = None
         # One scan at a time: a Govee scan has one reply handler, so two at once would cut
@@ -261,14 +264,24 @@ class DiscoveryOrchestrator:
             if len(named) == 1 and named[0].status == "offline":
                 existing = named[0]
         if existing is None:
+            self._recall(device)
             self._manager.add_device(device.adapter, device.tracker, device.max_fps)
             device.accepted()
             self._event_bus.emit(DeviceDiscoveredEvent(stable_id=stable_id, name=name))
             return True
         if existing.status != "offline":
             return False  # a duplicate: its tracker never gets the light's round trips
+        self._recall(device, had=existing.tracker)  # the ghost's, before the swap
         self._promote(existing.adapter.device_info.effective_id, device)
         return True
+
+    def _recall(self, device: DiscoveredDevice, had: LatencyTracker | None = None) -> None:
+        """Start a light taken in from the latency and mode it last had (light-sync spec §7):
+        what the tracker it `had` measured, a ghost's found again within a run, else its
+        row. A light set up again with its own tracker (_play) keeps what that tracker has."""
+        if self._link_memory is not None:
+            stable_id = device.adapter.device_info.effective_id
+            self._link_memory.recall(stable_id, device.tracker, had=had)
 
     async def _persist_device(self, adapter: DeviceAdapter) -> None:
         if not self._state_db:

@@ -68,11 +68,19 @@ class StateDB:
         logger.info("StateDB opened: {}", self._path)
 
     def _open_sync(self) -> None:
-        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.commit()
-        self._run_migrations()
+        conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn = conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.commit()
+            self._run_migrations()
+        except BaseException:
+            # A database that can't be brought up to date isn't held open: closed here, not
+            # by the garbage collector, which warns of it (ResourceWarning).
+            self._conn = None
+            conn.close()
+            raise
 
     def _run_migrations(self) -> None:
         """Apply unapplied SQL migration files in order.

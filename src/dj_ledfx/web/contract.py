@@ -643,7 +643,9 @@ def _placed(home_map: HomeMap | None, target_id: str) -> dict[str, Any]:
 class LightLatency(ContractModel):
     measured_ms: float | None
     override_ms: float | None = None  # overrides move to PUT /lights/{id}/latency (F6)
-    estimated: bool  # nothing measured while it streamed since it came online: the seed
+    # Nothing measured while it streamed since it came online: the seed, or the latency it
+    # had before (its link memory, or before it dropped out).
+    estimated: bool
 
 
 class LightPart(ContractModel):

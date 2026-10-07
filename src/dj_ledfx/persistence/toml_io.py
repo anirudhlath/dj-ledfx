@@ -2,6 +2,8 @@
 
 Export format:
   [config.<section>]          — config key-value pairs
+  [marks]                     — devices_config_reset = true once the database has run light
+                                sync's run-once step: its devices.* config rows are real settings
   [devices."<name>"]          — device records keyed by display name; extra is JSON text
   [scenes."<id>"]             — scene records
   [scenes."<id>".effect]      — scene effect state
@@ -23,7 +25,8 @@ Export format:
 
 Import merges into what is there. Zones and looks in the file replace those with the
 same id, and each running entry becomes that zone's assignment. Each recent look merges
-by zone and look, keeping the newer stop.
+by zone and look, keeping the newer stop. A backup without [marks] was exported before light
+sync: its devices.* config rows never applied, so the import leaves them out.
 """
 
 from __future__ import annotations
@@ -61,6 +64,11 @@ _EXPORTABLE_CONFIG_SECTIONS = {
     "discovery",
 }
 
+# Light sync's run-once step (main._reset_device_settings_once): it dropped the devices.*
+# config rows saved before any start applied them. A backup carries the mark ([marks]) once
+# its database has run the step, and a restore keeps a backup's device settings only then.
+DEVICES_CONFIG_RESET = "devices_config_reset"
+
 
 async def export_toml(db: StateDB) -> str:
     """Export entire DB state as structured TOML string."""
@@ -76,6 +84,8 @@ async def export_toml(db: StateDB) -> str:
 
     if config_by_section:
         doc["config"] = config_by_section
+    if await db.has_mark(DEVICES_CONFIG_RESET):
+        doc["marks"] = {DEVICES_CONFIG_RESET: True}
 
     # --- Devices ---
     # Load once and reuse for both the devices section and scene placement name resolution
@@ -216,14 +226,27 @@ def _extra_text(value: object) -> str | None:
         return None
 
 
+def _device_settings_kept(data: dict[str, Any]) -> bool:
+    """Whether a backup's devices.* config rows are settings to restore: its database had run
+    light sync's run-once step, as its [marks] say. Before it, none ever applied."""
+    marks = data.get("marks")
+    return isinstance(marks, dict) and marks.get(DEVICES_CONFIG_RESET) is True
+
+
 async def import_toml(db: StateDB, toml_str: str) -> None:
-    """Import structured TOML into DB, merging with existing state."""
+    """Import structured TOML into DB, merging with existing state. The device settings of a
+    backup from before light sync are left out, and named in one log line."""
     data = tomllib.loads(toml_str)
 
     # --- Config ---
     config_data = data.get("config", {})
+    keep_devices = _device_settings_kept(data)
+    dropped: list[str] = []
     for section, kv in config_data.items():
         if isinstance(kv, dict):
+            if section.startswith("devices.") and not keep_devices:
+                dropped.extend(f"{section}.{key}" for key in kv)
+                continue
             # Convert all values to JSON-serialized strings for storage
             # Using json.dumps preserves type fidelity: booleans -> "true"/"false",
             # numbers stay numeric strings, strings get quoted then stripped by load_all_config
@@ -234,6 +257,9 @@ async def import_toml(db: StateDB, toml_str: str) -> None:
                 len(str_kv),
                 section,
             )
+    if dropped:
+        settings = ", ".join(sorted(dropped))
+        logger.info("Dropped a backup's device settings from before light sync: {}", settings)
 
     # --- Devices ---
     devices_data = data.get("devices", {})

@@ -26,6 +26,7 @@ from dj_ledfx.config import (
     save_config,
     strip_none,
 )
+from dj_ledfx.web.errors import check_finite
 from dj_ledfx.web.state import get_db, get_looks, get_tempo, get_zones
 
 router = APIRouter()
@@ -100,10 +101,60 @@ def _requires_restart(old: AppConfig, new: AppConfig) -> str:
     return "true" if rest(old) != rest(new) else "false"
 
 
+def _device_rows(body: dict[str, Any], devices: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """The device settings a request names, as state.db keeps them: each kind's in its own
+    section (devices.govee), as JSON, as config.toml's migration writes them (light-sync spec
+    §8). Only those named, as the migration writes only what the file holds, so a save that
+    names none (preview only's) pins no default. `devices` is the merged config's, checked."""
+    named = body.get("devices")
+    if not isinstance(named, dict):
+        return {}
+    return {
+        f"devices.{kind}": {key: json.dumps(devices[kind][key]) for key in settings}
+        for kind, settings in named.items()
+        if kind in devices and settings
+    }
+
+
 async def _apply_live(request: Request, config: AppConfig) -> None:
     zones = getattr(request.app.state, "zone_manager", None)
     if zones is not None:
         await zones.set_preview_only(config.engine.preview_only)
+
+
+async def _write_config(request: Request, body: dict[str, Any]) -> JSONResponse:
+    """PUT /config's work, in its turn: the config is checked, answered and saved before it
+    replaces the running one, so a failure on the way leaves the running config as it was
+    and saves nothing that couldn't be answered."""
+    config = request.app.state.config
+    try:
+        new_config = _merge_config(config, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except TypeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
+    result = dataclasses.asdict(new_config)
+    response = JSONResponse(
+        content=result,
+        headers={"X-Requires-Restart": _requires_restart(config, new_config)},
+    )
+    if request.app.state.config_path:
+        await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
+    # Persist to StateDB when available
+    try:
+        db = get_db(request)
+        for section, value in result.items():
+            if isinstance(value, dict):
+                str_kv = {k: json.dumps(v) for k, v in value.items() if not isinstance(v, dict)}
+                if str_kv:
+                    await db.save_config_bulk(section, str_kv)
+        for section, rows in _device_rows(body, result["devices"]).items():
+            await db.save_config_bulk(section, rows)
+    except HTTPException:
+        pass
+    request.app.state.config = new_config
+    await _apply_live(request, new_config)
+    return response
 
 
 @router.get("/config")
@@ -116,33 +167,12 @@ async def get_config(request: Request) -> dict[str, Any]:
 
 @router.put("/config")
 async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
+    check_finite(body)
     _check_preview_only(body)
-    config = request.app.state.config
-    try:
-        new_config = _merge_config(config, body)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except TypeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
-    request.app.state.config = new_config
-    if request.app.state.config_path:
-        await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
-    result = dataclasses.asdict(new_config)
-    # Persist to StateDB when available
-    try:
-        db = get_db(request)
-        for section, value in result.items():
-            if isinstance(value, dict):
-                str_kv = {k: json.dumps(v) for k, v in value.items() if not isinstance(v, dict)}
-                if str_kv:
-                    await db.save_config_bulk(section, str_kv)
-    except HTTPException:
-        pass
-    await _apply_live(request, new_config)
-    return JSONResponse(
-        content=result,
-        headers={"X-Requires-Restart": _requires_restart(config, new_config)},
-    )
+    # One config write at a time: a save reads the running config and replaces it only
+    # once saved, so another write in between would be lost
+    async with request.app.state.config_turn:
+        return await _write_config(request, body)
 
 
 @router.get("/config/export")
@@ -161,22 +191,26 @@ async def import_config(request: Request) -> dict[str, Any]:
         data = tomllib.loads(body.decode())
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {e}") from e
+    check_finite(data)
     _check_preview_only(data)
-    config = request.app.state.config
-    try:
-        new_config = _merge_config(config, data)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except TypeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
-    request.app.state.config = new_config
-    if request.app.state.config_path:
-        await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
-    await _apply_live(request, new_config)
-    return JSONResponse(
-        content=dataclasses.asdict(new_config),
-        headers={"X-Requires-Restart": _requires_restart(config, new_config)},
-    )
+    async with request.app.state.config_turn:  # config writes take turns, as PUT's do
+        config = request.app.state.config
+        try:
+            new_config = _merge_config(config, data)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except TypeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
+        # Answered, then saved, before the running config changes, as PUT's (_write_config)
+        response = JSONResponse(
+            content=dataclasses.asdict(new_config),
+            headers={"X-Requires-Restart": _requires_restart(config, new_config)},
+        )
+        if request.app.state.config_path:
+            await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
+        request.app.state.config = new_config
+        await _apply_live(request, new_config)
+    return response
 
 
 @router.get("/state/export")

@@ -1,4 +1,5 @@
-"""Zone, look, home and tempo errors as HTTP answers, with the reason for the web app to show."""
+"""Zone, look, home and tempo errors as HTTP answers, with the reason for the web app to show;
+and the one refusal of a body holding a number that isn't finite."""
 
 from __future__ import annotations
 
@@ -36,6 +37,22 @@ def answers() -> Iterator[None]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (ZoneError, LookError, TempoError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def check_finite(body: object) -> None:
+    """Refuse a body holding NaN or an infinity, at any depth: Python's JSON and TOML read
+    them, but no setting can use one and no answer can carry one. The config's writes and the
+    old scene page's, which write the running config, check theirs first (a saved one
+    answered that save and every later one with a 500)."""
+    values: list[object] = [body]
+    while values:
+        value = values.pop()
+        if isinstance(value, float) and not math.isfinite(value):
+            raise HTTPException(status_code=400, detail="config numbers must be finite")
+        if isinstance(value, dict):
+            values.extend(value.values())
+        elif isinstance(value, list):
+            values.extend(value)
 
 
 async def unprocessable(request: Request, exc: RequestValidationError) -> JSONResponse:

@@ -10,6 +10,7 @@ from loguru import logger
 
 from dj_ledfx.latency.strategies import LATENCY_WINDOW as LATENCY_WINDOW
 from dj_ledfx.latency.strategies import STRATEGIES
+from dj_ledfx.types import is_finite_number
 
 # The most frames a second a LIFX strip or matrix takes: LIFX's documented ceiling per
 # device. Matrices were measured queueing frames above about 30; plain bulbs keep max_fps.
@@ -95,10 +96,9 @@ class GoveeConfig:
     manual_offset_ms: float = 0.0
     max_fps: int = GOVEE_RAZER_FPS  # one colour is capped at GOVEE_COLOUR_FPS
     latency_window_size: int = LATENCY_WINDOW
-    # Unread: a lamp's round trips come from its status reads (the light monitor's polls).
-    # Kept so config files and exports that carry it still load: PUT /config and
-    # POST /config/import refuse a key GoveeConfig doesn't have.
-    probe_interval_s: float = 5.0
+    # About how often a lamp that streams is asked for its status, its reply timing a round
+    # trip: each probe round waits a random 75–125% of it (light-sync spec §4).
+    probe_interval_s: float = 0.5
     segment_override: int | None = None
 
 
@@ -118,6 +118,26 @@ class DiscoveryConfig:
     unicast_concurrency: int = 50
     unicast_timeout_s: float = 0.5
     subnet_mask: int = 24
+
+
+# The most samples a kind's latency window keeps: about 8 minutes of a Govee lamp's probes
+# (one every 0.5 s), where the windows used are 9 and 60. From 2**63 the window's deque
+# can't be made, and every start failed that kind's lights.
+MAX_LATENCY_WINDOW = 1000
+
+# The probe intervals' floors. A device setting saved in the app applies at every start, so a
+# typo (0.005) would flood the lights.
+# Govee's probe_interval_s: the doze spike probed every 0.15–0.25 s without harm.
+MIN_GOVEE_PROBE_INTERVAL_S = 0.1
+# LIFX's echo_probe_interval_s: a light's stream alone already runs at 20–30 messages a
+# second, against LIFX's guidance of about 20 a second per device.
+MIN_LIFX_ECHO_PROBE_INTERVAL_S = 0.5
+
+
+def _is_whole_number(value: object) -> bool:
+    """An int that isn't a bool: a rate in frames a second, a count, a port or a colour
+    temperature."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 @dataclass
@@ -153,16 +173,61 @@ class AppConfig:
                 raise ValueError(f"{name} latency_ms must be non-negative")
             if hasattr(dev_cfg, "latency_window_size") and dev_cfg.latency_window_size <= 0:
                 raise ValueError(f"{name} latency_window_size must be positive")
+            # A request or a stored row can carry a setting no light can use (NaN, an
+            # infinity, a bool for a number, a rate or a window that isn't whole, a switch
+            # that isn't true or false), and the next start applies what's saved (light-sync
+            # spec §8), so the config refuses it.
+            if hasattr(dev_cfg, "enabled") and not isinstance(dev_cfg.enabled, bool):
+                raise ValueError(f"{name} enabled must be true or false")
+            for key in ("max_fps", "latency_window_size"):
+                if not _is_whole_number(getattr(dev_cfg, key)):
+                    raise ValueError(f"{name} {key} must be a whole number")
+            if (
+                hasattr(dev_cfg, "latency_window_size")
+                and dev_cfg.latency_window_size > MAX_LATENCY_WINDOW
+            ):
+                raise ValueError(
+                    f"{name} latency_window_size must be at most {MAX_LATENCY_WINDOW}"
+                )
+            for key in ("latency_ms", "manual_offset_ms"):
+                if not is_finite_number(getattr(dev_cfg, key)):
+                    raise ValueError(f"{name} {key} must be a finite number")
+        openrgb = self.devices.openrgb
+        if not isinstance(openrgb.host, str):
+            raise ValueError("openrgb host must be a string")
+        if not _is_whole_number(openrgb.port):
+            raise ValueError("openrgb port must be a whole number")
+        if not 1 <= openrgb.port <= 65535:
+            raise ValueError("openrgb port must be 1-65535")
         lifx = self.devices.lifx
         if not (2500 <= lifx.default_kelvin <= 9000):
             raise ValueError("lifx default_kelvin must be between 2500 and 9000")
+        if not _is_whole_number(lifx.default_kelvin):
+            raise ValueError("lifx default_kelvin must be a whole number")
         if lifx.discovery_timeout_s <= 0:
             raise ValueError("lifx discovery_timeout_s must be positive")
-        if lifx.echo_probe_interval_s <= 0:
+        if not is_finite_number(lifx.discovery_timeout_s):
+            raise ValueError("lifx discovery_timeout_s must be a finite number")
+        if not (is_finite_number(lifx.echo_probe_interval_s) and lifx.echo_probe_interval_s > 0):
             raise ValueError("lifx echo_probe_interval_s must be positive")
+        if lifx.echo_probe_interval_s < MIN_LIFX_ECHO_PROBE_INTERVAL_S:
+            raise ValueError(
+                f"lifx echo_probe_interval_s must be at least {MIN_LIFX_ECHO_PROBE_INTERVAL_S}"
+            )
         govee = self.devices.govee
         if govee.discovery_timeout_s <= 0:
             raise ValueError("govee discovery_timeout_s must be positive")
+        if not is_finite_number(govee.discovery_timeout_s):
+            raise ValueError("govee discovery_timeout_s must be a finite number")
+        if not (is_finite_number(govee.probe_interval_s) and govee.probe_interval_s > 0):
+            raise ValueError("govee probe_interval_s must be positive")
+        if govee.probe_interval_s < MIN_GOVEE_PROBE_INTERVAL_S:
+            raise ValueError(
+                f"govee probe_interval_s must be at least {MIN_GOVEE_PROBE_INTERVAL_S}"
+            )
+        # Its range is checked where it's used, with a warning (govee/output.py)
+        if govee.segment_override is not None and not _is_whole_number(govee.segment_override):
+            raise ValueError("govee segment_override must be a whole number")
         if self.web.port < 0 or self.web.port > 65535:
             raise ValueError("web port must be 0-65535")
 

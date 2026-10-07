@@ -257,8 +257,10 @@ async def test_send_loop_reconnection_resets_tracker() -> None:
     scheduler.stop()
     await task
 
-    # After reset, strategy falls back to initial_value_ms (stale samples cleared)
-    assert strategy.get_latency() == 100.0
+    # The reset keeps the latency the light had, its samples gone (light-sync spec §7)
+    assert strategy.get_latency() == 250.0
+    strategy.update(10.0)
+    assert strategy.get_latency() == 10.0
 
 
 async def test_sending_never_moves_a_light_s_latency() -> None:

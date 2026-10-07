@@ -142,7 +142,7 @@ async def test_schema_9_gives_each_placement_made_before_it_a_source(
     finally:
         await db.close()
 
-    assert version == 9
+    assert version == 10
     assert {target: placement.source for target, placement in placements.items()} == sources
 
 

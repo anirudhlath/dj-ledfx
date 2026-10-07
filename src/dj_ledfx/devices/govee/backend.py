@@ -106,6 +106,8 @@ class GoveeBackend(DeviceBackend):
 
         if not heard:  # not when every lamp that answered is online already
             logger.info("No Govee devices found — ensure LAN control is enabled in Govee app")
+        if results:
+            transport.start_probing(govee.probe_interval_s)
 
         return results
 
@@ -146,6 +148,8 @@ class GoveeBackend(DeviceBackend):
                 continue
             logger.info("Reconnected known Govee device '{}' at {}", name, record.ip)
 
+        if results:
+            transport.start_probing(config.devices.govee.probe_interval_s)
         return results
 
     def rebuild(
@@ -174,15 +178,23 @@ class GoveeBackend(DeviceBackend):
         output: GoveeOutput,
     ) -> DiscoveredDevice:
         """Connect a lamp as its plan says it plays; once the orchestrator takes it in, its
-        status reads time its round trips. Raises ConnectionError when it doesn't answer."""
+        status queries time its round trips, and it's probed while it streams. Raises
+        ConnectionError when it doesn't answer."""
         adapter = self._adapter(transport, record, config, output)
         await adapter.connect()
-        tracker = tracker_for(config.devices.govee, display_ms=adapter.display_ms)
+        tracker = tracker_for(
+            config.devices.govee, display_ms=adapter.display_ms, name=adapter.device_info.name
+        )
         return DiscoveredDevice(
             adapter=adapter,
             tracker=tracker,
             max_fps=adapter.stream_fps,
-            on_accepted=partial(transport.register_device, record, tracker.update_rtt),
+            on_accepted=partial(
+                transport.register_device,
+                record,
+                tracker.update_rtt,
+                streaming=lambda: tracker.streaming,
+            ),
         )
 
     def _adapter(

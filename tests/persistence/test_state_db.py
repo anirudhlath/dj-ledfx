@@ -1,9 +1,12 @@
 """Tests for StateDB — SQLite persistence layer."""
 
 import asyncio
+import gc
 import json
 import sqlite3
 import threading
+import warnings
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -23,9 +26,9 @@ async def test_creates_db_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_schema_version_is_9(db):
+async def test_schema_version_is_10(db):
     version = await db.get_schema_version()
-    assert version == 9
+    assert version == 10
 
 
 @pytest.mark.asyncio
@@ -54,6 +57,7 @@ async def test_tables_created(db):
         "groups",
         "home_map",
         "home_map_unreadable",
+        "link_memory",
         "look_stars",
         "looks",
         "placements",
@@ -78,7 +82,7 @@ async def test_idempotent_open(tmp_path):
     db2 = StateDB(db_path)
     await db2.open()
     version = await db2.get_schema_version()
-    assert version == 9
+    assert version == 10
     await db2.close()
 
 
@@ -768,6 +772,53 @@ async def test_migration_rollback_on_bad_sql(tmp_path):
         )
     finally:
         state_db_module._MIGRATIONS_DIR = original_dir
+
+
+def test_a_migration_that_fails_leaves_its_connection_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A database that can't be brought up to date is closed before the error goes up, not
+    left open for the garbage collector, which warns (ResourceWarning) from Python 3.13. The
+    open runs on a loop of its own, so once it's done nothing holds the StateDB, and the
+    connection is collected where the test can see a warning."""
+    from dj_ledfx.persistence import state_db as state_db_module
+
+    closed: list[bool] = []
+    connections: list[weakref.ref[sqlite3.Connection]] = []
+
+    class Watched(sqlite3.Connection):
+        def close(self) -> None:
+            closed.append(True)
+            super().close()
+
+    connect = sqlite3.connect
+
+    def watched(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection = connect(*args, factory=Watched, **kwargs)
+        connections.append(weakref.ref(connection))
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", watched)
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001_bad.sql").write_text("THIS IS NOT VALID SQL")
+    monkeypatch.setattr(state_db_module, "_MIGRATIONS_DIR", migrations)
+
+    async def open_it() -> None:
+        with pytest.raises(sqlite3.OperationalError):
+            await StateDB(tmp_path / "state.db").open()
+
+    gc.collect()  # what earlier tests left (an unclosed event loop warns too) goes first
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        asyncio.run(open_it())
+        gc.collect()
+        [connection] = connections
+        assert connection() is None  # collected here, where its warning would be caught
+
+    assert closed == [True]
+    unclosed = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
+    assert [message for message in unclosed if "unclosed database" in message] == []
 
 
 # --- close() is safe during concurrent operation ---

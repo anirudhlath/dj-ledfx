@@ -1,4 +1,5 @@
 import errno
+import math
 import textwrap
 from pathlib import Path
 
@@ -137,6 +138,12 @@ def test_lifx_config_validation_bad_strategy() -> None:
         AppConfig(devices=DevicesConfig(lifx=LIFXConfig(latency_strategy="invalid")))
 
 
+@pytest.mark.parametrize("interval", [0.0, -2.0, float("nan"), float("inf")])
+def test_lifx_echo_probe_interval_must_be_positive(interval: float) -> None:
+    with pytest.raises(ValueError, match="lifx echo_probe_interval_s must be positive"):
+        AppConfig(devices=DevicesConfig(lifx=LIFXConfig(echo_probe_interval_s=interval)))
+
+
 def test_lifx_config_negative_offset_allowed() -> None:
     config = AppConfig(devices=DevicesConfig(lifx=LIFXConfig(manual_offset_ms=-10.0)))
     assert config.devices.lifx.manual_offset_ms == -10.0
@@ -159,6 +166,7 @@ class TestGoveeConfigValidation:
         assert config.devices.govee.latency_strategy == "windowed_median"
         assert config.devices.govee.latency_window_size == LATENCY_WINDOW
         assert config.devices.govee.latency_ms == 100.0
+        assert config.devices.govee.probe_interval_s == 0.5
         assert config.devices.govee.segment_override is None
 
     def test_govee_max_fps_must_be_positive(self) -> None:
@@ -168,6 +176,11 @@ class TestGoveeConfigValidation:
     def test_govee_invalid_strategy(self) -> None:
         with pytest.raises(ValueError, match="govee latency_strategy"):
             AppConfig(devices=DevicesConfig(govee=GoveeConfig(latency_strategy="invalid")))
+
+    @pytest.mark.parametrize("interval", [0.0, -0.5, float("nan"), float("inf")])
+    def test_govee_probe_interval_must_be_positive(self, interval: float) -> None:
+        with pytest.raises(ValueError, match="govee probe_interval_s must be positive"):
+            AppConfig(devices=DevicesConfig(govee=GoveeConfig(probe_interval_s=interval)))
 
     def test_govee_discovery_timeout_must_be_positive(self) -> None:
         with pytest.raises(ValueError, match="govee discovery_timeout_s"):
@@ -411,3 +424,109 @@ def test_each_device_config_takes_every_strategy(name: str) -> None:
             govee=GoveeConfig(latency_strategy=name),
         )
     )
+
+
+NAN, INF = float("nan"), float("inf")
+DEVICE_CONFIGS: dict[str, type[OpenRGBConfig | LIFXConfig | GoveeConfig]] = {
+    "openrgb": OpenRGBConfig,
+    "lifx": LIFXConfig,
+    "govee": GoveeConfig,
+}
+# Device settings no light can use, which a request or a stored row may carry (light-sync
+# spec §8): each kind's setting, the value, and why the config refuses it.
+UNUSABLE = [
+    *(
+        (kind, key, value, f"{kind} {key} must be a finite number")
+        for kind in DEVICE_CONFIGS
+        for key in ("latency_ms", "manual_offset_ms")
+        for value in (NAN, INF, True)
+    ),
+    *(
+        (kind, key, value, f"{kind} {key} must be a whole number")
+        for kind in DEVICE_CONFIGS
+        for key in ("max_fps", "latency_window_size")
+        for value in (NAN, INF, 2.5, True)
+    ),
+    *(
+        (kind, "discovery_timeout_s", value, f"{kind} discovery_timeout_s must be a finite number")
+        for kind in ("lifx", "govee")
+        for value in (NAN, INF, True)
+    ),
+    *(
+        (kind, "enabled", value, f"{kind} enabled must be true or false")
+        for kind in DEVICE_CONFIGS
+        for value in (1, "true", None)
+    ),
+    *(("openrgb", "host", value, "openrgb host must be a string") for value in (5, None)),
+    *(
+        ("openrgb", "port", value, "openrgb port must be a whole number")
+        for value in (NAN, 2.5, True, "6742")
+    ),
+    *(("openrgb", "port", value, "openrgb port must be 1-65535") for value in (0, 65536)),
+    *(
+        ("lifx", "default_kelvin", value, "lifx default_kelvin must be a whole number")
+        for value in (3000.5, 3500.0)
+    ),
+    # Refused by the range before a whole number was asked for, with its message still
+    *(
+        ("lifx", "default_kelvin", value, "lifx default_kelvin must be between 2500 and 9000")
+        for value in (NAN, True)
+    ),
+    *(
+        ("govee", "segment_override", value, "govee segment_override must be a whole number")
+        for value in (NAN, 2.5, True, "10")
+    ),
+    # 2**63 or more overflowed the window's deque at every start, failing the kind's lights
+    *(
+        (kind, "latency_window_size", value, f"{kind} latency_window_size must be at most 1000")
+        for kind in DEVICE_CONFIGS
+        for value in (1001, 2**63)
+    ),
+    # A probe interval under its floor, just under or a typo's, would flood the lights
+    *(
+        ("govee", "probe_interval_s", value, "govee probe_interval_s must be at least 0.1")
+        for value in (math.nextafter(0.1, 0.0), 0.005)
+    ),
+    *(
+        ("lifx", "echo_probe_interval_s", value, "lifx echo_probe_interval_s must be at least 0.5")
+        for value in (math.nextafter(0.5, 0.0), 0.005)
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("kind", "key", "value", "message"),
+    UNUSABLE,
+    ids=[f"{kind}.{key}={value}" for kind, key, value, _ in UNUSABLE],
+)
+def test_a_device_setting_no_light_can_use_is_refused(
+    kind: str, key: str, value: object, message: str
+) -> None:
+    settings = DEVICE_CONFIGS[kind](**{key: value})
+    with pytest.raises(ValueError, match=f"^{message}$"):
+        AppConfig(devices=DevicesConfig(**{kind: settings}))
+
+
+# Device settings at their bounds, which the config takes. A lamp's segment_override is
+# checked where it's used, with a warning (govee/output.py), so any whole number is taken.
+USABLE = [
+    ("openrgb", "port", 1),
+    ("openrgb", "port", 65535),
+    ("lifx", "default_kelvin", 2500),
+    ("lifx", "default_kelvin", 9000),
+    ("govee", "segment_override", 500),
+    *((kind, "latency_window_size", 1000) for kind in DEVICE_CONFIGS),
+    ("govee", "probe_interval_s", 0.1),
+    ("lifx", "echo_probe_interval_s", 0.5),
+]
+
+
+@pytest.mark.parametrize(
+    ("kind", "key", "value"), USABLE, ids=[f"{kind}.{key}={value}" for kind, key, value in USABLE]
+)
+def test_a_device_setting_at_its_bounds_is_taken(kind: str, key: str, value: object) -> None:
+    settings = DEVICE_CONFIGS[kind](**{key: value})
+
+    config = AppConfig(devices=DevicesConfig(**{kind: settings}))
+
+    assert getattr(getattr(config.devices, kind), key) == value
