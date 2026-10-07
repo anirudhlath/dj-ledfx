@@ -2,8 +2,9 @@
 the web server stops through granian's Server.stop(), so the ASGI lifespan shutdown runs
 and an open /ws closes cleanly. Browser tabs closing their sockets never freeze the app.
 The app serves the home map, its zones and previews, and its tempo clock follows a DJ and
-keeps its settings. Each app here hears Pro DJ Link on a free loopback port (the deployed
-app holds 50001), and one that can't bind its port runs on its internal clock."""
+keeps its settings. Its link memory's last write lands before state.db closes. Each app
+here hears Pro DJ Link on a free loopback port (the deployed app holds 50001), and one that
+can't bind its port runs on its internal clock."""
 
 from __future__ import annotations
 
@@ -39,6 +40,29 @@ import dj_ledfx.main
 from dj_ledfx.devices.backend import DeviceBackend
 
 DeviceBackend._registry.clear()
+sys.argv = ["dj_ledfx", *sys.argv[1:]]
+dj_ledfx.main.main()
+"""
+
+# _DRIVER's app, whose link memory's writer finds one light measured while it streamed (a
+# round trip of 80 ms: 40 ms one way, awake) through main's _trackers, and puts its write
+# every 30 s off for an hour: the one write in a run this short is the shutdown's.
+_ONE_MEASURED_LIGHT = """
+import sys
+
+import dj_ledfx.main
+from dj_ledfx.devices.backend import DeviceBackend
+from dj_ledfx.latency.memory import LinkMemory
+from dj_ledfx.latency.strategies import make_strategy
+from dj_ledfx.latency.tracker import LatencyTracker
+
+DeviceBackend._registry.clear()
+tracker = LatencyTracker(make_strategy("windowed_median", 100.0, 9), clock=lambda: 0.0)
+tracker.note_send()
+tracker.update_rtt(80.0)
+dj_ledfx.main._trackers = lambda devices: [("test-lamp", tracker)]
+run = LinkMemory.run
+LinkMemory.run = lambda self, trackers: run(self, trackers, every_s=3600.0)
 sys.argv = ["dj_ledfx", *sys.argv[1:]]
 dj_ledfx.main.main()
 """
@@ -119,15 +143,16 @@ async def _close_code(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 
 @asynccontextmanager
 async def _app(
-    tmp_path: Path, *extra: str, dj_listen: str = "127.0.0.1:0"
+    tmp_path: Path, *extra: str, dj_listen: str = "127.0.0.1:0", driver: str = _DRIVER
 ) -> AsyncIterator[tuple[asyncio.subprocess.Process, int]]:
     """The app and its web port, hearing Pro DJ Link at dj_listen (port 0: any free one,
-    which GET /inputs names); killed on the way out if the test left it running."""
+    which GET /inputs names), run by driver; killed on the way out if the test left it
+    running."""
     port = _free_port()
     app = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
-        _DRIVER,
+        driver,
         "--dj-listen",
         dj_listen,
         *extra,
@@ -354,6 +379,25 @@ async def test_a_tempo_set_at_start_is_kept_across_a_restart(tmp_path: Path) -> 
         assert "Traceback" not in output, output
 
     assert (tempo["source"], tempo["bpm"], tempo["internal"]["how"]) == ("internal", 97.0, "set")
+
+
+async def test_the_link_memory_s_last_write_lands_before_state_db_closes(tmp_path: Path) -> None:
+    """Shutdown cancels the link memory's writer, which writes once more, and only then
+    closes state.db (light-sync spec §7): the light's row is there for the next start."""
+    async with _app(tmp_path, driver=_ONE_MEASURED_LIGHT) as (app, port):
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api") as client:
+            await _get_when_up(client, "/running", app)
+        output = await _stop(app)
+
+    assert "Traceback" not in output, output
+    assert app.returncode == 0
+    db = StateDB(tmp_path / "state.db")
+    await db.open()
+    try:
+        rows = await db.fetch_all("SELECT stable_id, latency_ms, dozing FROM link_memory")
+    finally:
+        await db.close()
+    assert rows == [("test-lamp", 40.0, 0)]
 
 
 async def test_a_background_task_that_fails_is_logged_and_one_cancelled_is_not() -> None:
