@@ -1,6 +1,6 @@
 # F4 Web App Put a Look On Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (CLAUDE.md's choice for this repo) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Put a look on works, on both sizes. From Live, `L`, **Put a look on**, a room clicked on the stage, a card's **Change look** or Zone detail's **Change** opens the composer at `/live/put?zone=&look=`. It has Where (`ZonePicker`), What (search, categories and `LookTile`s on desktop, look rows on the phone) and How (the transition, the consequence line, **Cancel** and **Start**). Choosing a look previews it on the stage at once, in `compose` mode, while the lights keep what they run until Start. Done when a look starts in three clicks from Live, and the mock shows the lights unchanged until Start.
 
@@ -45,7 +45,7 @@
 - F3 already links to `/live/put`, from the Running panel's and the phone's **Put a look on**, a card's **Change look**, Zone detail's **Change** and **Put a look on**, Nothing running, and a room clicked on the stage (`composerFor` in `stage/stage.tsx`). The route draws F0's placeholder.
 - `SPEC.compose {dimmed, outlinePx}` is generated (F3 Task 1). `ZoneOutline` draws the hovered zone's outline, from `zonePolygons()`.
 
-**Execution:** /executing-plans in a new worktree, `~/code/.worktrees/dj-ledfx/web-f4`, on branch `feature/web-f4-put-a-look-on`, from `origin/master` (Before Task 1). After Task 12 opens the PR, /executing-plans' own final review of the whole branch runs: fix every finding it raises and push the fixes to the PR. Then stop.
+**Execution:** in a new worktree, `~/code/.worktrees/dj-ledfx/web-f4`, on branch `feature/web-f4-put-a-look-on`, from `origin/master` (Before Task 1), by the method the owner picks. After Task 12 opens the PR, the run's own final review of the whole branch runs: fix every finding it raises and push the fixes to the PR. Then stop.
 
 **How to read the code.** A new file is given whole after "Create". A change to an existing file is a unified diff, in a `diff` block, against the file as master at `d6f959e` and the earlier tasks leave it; apply the blocks in the order given. Save a block to a file and run `git apply` on it (`git apply /tmp/f4-step.diff`), or make the same edit by hand. If master has moved past `d6f959e` and a block no longer applies, make the edit by hand: its hunks say where. Every block was applied, and every count below measured, on a copy of `d6f959e`; a newer master may add tests. Two kinds of file are never written by hand: `web/src/api/generated/*` (`npm run api:types` writes them, in Task 1) and `web/src/design/live-numbers.ts` (`npm run design:numbers`, in Task 2). Task 10's screenshots are recorded by Playwright.
 
@@ -6844,7 +6844,7 @@ Expected: `gh` prints the PR's URL. Don't merge it.
 
 - [ ] **Step 7: The final review**
 
-Run /executing-plans' own final review of the whole branch now. Fix every finding it raises, Minor ones included: each fix goes in its own commit, after the gate of the task that owns the code. Push the fixes to the PR. Then stop: the owner merges.
+Run the final review of the whole branch now, the one the run's method ends with. Fix every finding it raises, Minor ones included: each fix goes in its own commit, after the gate of the task that owns the code. Push the fixes to the PR. Then stop: the owner merges.
 
 ---
 

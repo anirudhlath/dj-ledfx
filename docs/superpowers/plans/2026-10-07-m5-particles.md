@@ -18,7 +18,7 @@
 - The built-ins are M2's and M3's looks and the `firmware` look, in `looks.json`'s order, then the six classics. `looks.json`'s other looks, the eleven particle looks among them, have no layers yet, so they aren't served.
 - Spec §4.1's benchmark put 500 particles on this home's 412 LEDs at 1.28 ms a frame.
 
-**Execution:** `/executing-plans` in a new worktree, `~/code/.worktrees/dj-ledfx/m5-particles` on branch `feature/m5-particles`. Branch it from `origin/master` after the docs PR with this plan has merged; Before Task 1 sets it up.
+**Execution:** in a new worktree, `~/code/.worktrees/dj-ledfx/m5-particles` on branch `feature/m5-particles`, by the method the owner picks. Branch it from `origin/master` after the docs PR with this plan has merged; Before Task 1 sets it up.
 
 F4, the web app's Put a look on, is planned at the same time and may merge first. This plan changes nothing under `web/`, but F4 may change `web/src/api/generated/*`, `web/src/api/contract.ts` and the mocks, and the backend tests that list the built-in looks. Task 11 rebases over whatever has merged, settles any conflict and runs every gate again.
 
@@ -5680,4 +5680,4 @@ gh pr create --base master --head feature/m5-particles \
 gh pr view --json url --jq .url
 ```
 
-Give the owner the URL. Don't merge: the owner does, after review. /executing-plans' own final review of the whole branch closes the run; a code-architect review or `/simplify` runs only if the owner asks for one.
+Give the owner the URL. Don't merge: the owner does, after review. The run's own final review of the whole branch closes it; a code-architect review or `/simplify` runs only if the owner asks for one.
