@@ -15,6 +15,7 @@ from dj_ledfx.spatial.geometry import (
     StripGeometry,
 )
 from dj_ledfx.spatial.mapping import mapping_from_config
+from dj_ledfx.web.errors import check_finite
 from dj_ledfx.web.schemas import (
     GeometrySchema,
     MappingResponse,
@@ -177,6 +178,7 @@ async def update_scene_device(
     request: Request, device_name: str, body: UpdatePlacementRequest
 ) -> PlacementResponse:
     """Add or update a device placement."""
+    check_finite(body.model_dump())  # a placement goes into scene_config, the running config's
     scene = _ensure_scene(request)
 
     geometry = None
@@ -239,6 +241,7 @@ async def delete_scene_device(request: Request, device_name: str) -> dict:
 
 @router.put("/mapping", response_model=MappingResponse)
 async def update_mapping(request: Request, body: UpdateMappingRequest) -> MappingResponse:
+    check_finite(body.model_dump())  # the mapping goes into scene_config, the running config's
     scene = _ensure_scene(request)
 
     async with request.app.state.config_turn:  # scene_config is in the running config

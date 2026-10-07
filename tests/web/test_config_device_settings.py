@@ -211,6 +211,69 @@ async def test_a_config_import_holding_a_number_that_isn_t_finite_gets_a_400_and
     assert not config_toml.exists()
 
 
+async def test_a_config_import_it_can_t_answer_changes_nothing(api: Api, tmp_path: Path) -> None:
+    """A number that isn't finite already running (config.toml's nan at a start, here in the
+    old scene page's mapping) can't be answered with, and the answer is written first: the
+    import stops before config.toml is saved or the running config replaced."""
+    config_toml = tmp_path / "config.toml"
+    api.app.state.config_path = config_toml
+    mapping = {"mapping": "linear", "mapping_params": {"origin": [math.nan, 0.0, 0.0]}}
+    running = AppConfig(scene_config=mapping)
+    api.app.state.config = running
+
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        await api.client.post("/api/config/import", content="[engine]\nfps = 30\n")
+
+    assert api.app.state.config is running
+    assert not config_toml.exists()
+
+
+# A number that isn't finite in each of the old scene page's bodies that write the running
+# config: the mapping, and a placement added or moved
+SCENE_NOT_FINITE: dict[str, tuple[str, dict[str, Any]]] = {
+    "mapping": (
+        "/api/scene/mapping",
+        {"type": "linear", "params": {"origin": [math.nan, 0.0, 0.0]}},
+    ),
+    "added": ("/api/scene/devices/b", {"position": [math.nan, 0.0, 0.0]}),
+    "moved": ("/api/scene/devices/a", {"position": [0.0, math.inf, 0.0]}),
+    "direction": ("/api/scene/devices/a", {"geometry": "strip", "direction": [-math.inf, 0, 0]}),
+    "length": ("/api/scene/devices/a", {"geometry": "strip", "length": math.nan}),
+}
+
+
+@pytest.mark.parametrize("sent", SCENE_NOT_FINITE.values(), ids=list(SCENE_NOT_FINITE))
+async def test_a_scene_body_holding_a_number_that_isn_t_finite_gets_a_400_and_changes_nothing(
+    api: Api, tmp_path: Path, sent: tuple[str, dict[str, Any]]
+) -> None:
+    path, body = sent
+    await api.client.put("/api/scene/devices/a", json={"position": [0.0, 0.0, 0.0]})
+    config_toml = tmp_path / "config.toml"
+    api.app.state.config_path = config_toml  # the scene's writes reach the config
+    scene, running = (await api.client.get("/api/scene")).json(), api.app.state.config
+
+    response = await api.client.put(path, **raw_json(json.dumps(body)))
+
+    refused = (response.status_code, response.json())
+    assert refused == (400, {"detail": "config numbers must be finite"})
+    assert (await api.client.get("/api/scene")).json() == scene
+    assert api.app.state.config is running
+    assert running.scene_config is None
+    assert not config_toml.exists()
+
+
+async def test_a_scene_nan_refused_leaves_the_next_config_save_answering(api: Api) -> None:
+    """A scene mapping holding NaN went into the running config, and every config save
+    after it answered 500."""
+    body = json.dumps({"type": "linear", "params": {"origin": [math.nan, 0.0, 0.0]}})
+    assert (await api.client.put("/api/scene/mapping", **raw_json(body))).status_code == 400
+
+    response = await api.client.put("/api/config", json={"engine": {"fps": 30}})
+
+    assert response.status_code == 200
+    assert response.json()["engine"]["fps"] == 30
+
+
 def _as_javascript_sends(value: Any) -> Any:
     """A value through JSON.parse and JSON.stringify, as the old UI sends it back: a whole
     float comes back an int."""

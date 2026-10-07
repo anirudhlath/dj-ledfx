@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-import math
 import tomllib
 from typing import Any
 
@@ -27,6 +26,7 @@ from dj_ledfx.config import (
     save_config,
     strip_none,
 )
+from dj_ledfx.web.errors import check_finite
 from dj_ledfx.web.state import get_db, get_looks, get_tempo, get_zones
 
 router = APIRouter()
@@ -81,21 +81,6 @@ def _merge_config(existing: AppConfig, updates: dict[str, Any]) -> AppConfig:
         discovery=kwargs.get("discovery", existing.discovery),
         scene_config=existing.scene_config,
     )
-
-
-def _check_finite(body: object) -> None:
-    """Refuse a body holding NaN or an infinity, at any depth: Python's JSON and TOML read
-    them, but no setting can use one and no answer can carry one (a saved one answered that
-    save and every later one with a 500)."""
-    values: list[object] = [body]
-    while values:
-        value = values.pop()
-        if isinstance(value, float) and not math.isfinite(value):
-            raise HTTPException(status_code=400, detail="config numbers must be finite")
-        if isinstance(value, dict):
-            values.extend(value.values())
-        elif isinstance(value, list):
-            values.extend(value)
 
 
 def _check_preview_only(body: dict[str, Any]) -> None:
@@ -182,7 +167,7 @@ async def get_config(request: Request) -> dict[str, Any]:
 
 @router.put("/config")
 async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
-    _check_finite(body)
+    check_finite(body)
     _check_preview_only(body)
     # One config write at a time: a save reads the running config and replaces it only
     # once saved, so another write in between would be lost
@@ -206,7 +191,7 @@ async def import_config(request: Request) -> dict[str, Any]:
         data = tomllib.loads(body.decode())
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {e}") from e
-    _check_finite(data)
+    check_finite(data)
     _check_preview_only(data)
     async with request.app.state.config_turn:  # config writes take turns, as PUT's do
         config = request.app.state.config
@@ -216,14 +201,16 @@ async def import_config(request: Request) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except TypeError as e:
             raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
-        request.app.state.config = new_config
-        if request.app.state.config_path:
-            await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
-        await _apply_live(request, new_config)
-        return JSONResponse(
+        # Answered, then saved, before the running config changes, as PUT's (_write_config)
+        response = JSONResponse(
             content=dataclasses.asdict(new_config),
             headers={"X-Requires-Restart": _requires_restart(config, new_config)},
         )
+        if request.app.state.config_path:
+            await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
+        request.app.state.config = new_config
+        await _apply_live(request, new_config)
+    return response
 
 
 @router.get("/state/export")
