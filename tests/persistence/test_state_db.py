@@ -808,6 +808,7 @@ def test_a_migration_that_fails_leaves_its_connection_closed(
         with pytest.raises(sqlite3.OperationalError):
             await StateDB(tmp_path / "state.db").open()
 
+    gc.collect()  # what earlier tests left (an unclosed event loop warns too) goes first
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         asyncio.run(open_it())
@@ -816,7 +817,8 @@ def test_a_migration_that_fails_leaves_its_connection_closed(
         assert connection() is None  # collected here, where its warning would be caught
 
     assert closed == [True]
-    assert [w.message for w in caught if issubclass(w.category, ResourceWarning)] == []
+    unclosed = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
+    assert [message for message in unclosed if "unclosed database" in message] == []
 
 
 # --- close() is safe during concurrent operation ---
