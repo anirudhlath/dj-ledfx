@@ -2,15 +2,6 @@
 
 Beat-synced LED effect engine driven by Pro DJ Link network data with per-device latency compensation.
 
-## Superpowers Skill Guidelines
-
-- Prefer latest internet grounded knowledge over training knowledge.
-- Use context7 to check latest docs and for external dependencies.
-- Add claude md skill as a task to improve and revise claude context, memories etc.
-- Finally create a PR with the changes.
-- Run a @feature-dev:code-architect review or /simplify only when the owner asks for one. Never run one on your own, and never put one in a plan as a task. Fix every issue a requested review raises and push the fixes to the PR.
-- A plan's run ends with a final review of the whole branch. A fix or small change made without a plan needs only a passing gate before its PR.
-
 ## Redesign in Progress
 
 - Engine: `docs/superpowers/specs/2026-09-23-home-effects-engine-design.md`, milestones M1–M8, one plan each.
