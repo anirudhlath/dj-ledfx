@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import math
 import tomllib
 from typing import Any
 
@@ -82,6 +83,22 @@ def _merge_config(existing: AppConfig, updates: dict[str, Any]) -> AppConfig:
     )
 
 
+def _holds_non_finite(body: object) -> bool:
+    """Whether a body holds NaN or an infinity, at any depth: Python's JSON reads them, but no
+    setting can use one and no answer can carry one (a saved one answered that save and every
+    later one with a 500)."""
+    values: list[object] = [body]
+    while values:
+        value = values.pop()
+        if isinstance(value, float) and not math.isfinite(value):
+            return True
+        if isinstance(value, dict):
+            values.extend(value.values())
+        elif isinstance(value, list):
+            values.extend(value)
+    return False
+
+
 def _check_preview_only(body: dict[str, Any]) -> None:
     engine = body.get("engine")
     value = engine.get("preview_only") if isinstance(engine, dict) else None
@@ -121,17 +138,10 @@ async def _apply_live(request: Request, config: AppConfig) -> None:
         await zones.set_preview_only(config.engine.preview_only)
 
 
-@router.get("/config")
-async def get_config(request: Request) -> dict[str, Any]:
-    config = request.app.state.config
-    data = dataclasses.asdict(config)
-    strip_none(data)
-    return data
-
-
-@router.put("/config")
-async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
-    _check_preview_only(body)
+async def _write_config(request: Request, body: dict[str, Any]) -> JSONResponse:
+    """PUT /config's work, in its turn: the config is checked, answered and saved before it
+    replaces the running one, so a failure on the way leaves the running config as it was
+    and saves nothing that couldn't be answered."""
     config = request.app.state.config
     try:
         new_config = _merge_config(config, body)
@@ -139,10 +149,13 @@ async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except TypeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
-    request.app.state.config = new_config
+    result = dataclasses.asdict(new_config)
+    response = JSONResponse(
+        content=result,
+        headers={"X-Requires-Restart": _requires_restart(config, new_config)},
+    )
     if request.app.state.config_path:
         await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
-    result = dataclasses.asdict(new_config)
     # Persist to StateDB when available
     try:
         db = get_db(request)
@@ -155,11 +168,28 @@ async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
             await db.save_config_bulk(section, rows)
     except HTTPException:
         pass
+    request.app.state.config = new_config
     await _apply_live(request, new_config)
-    return JSONResponse(
-        content=result,
-        headers={"X-Requires-Restart": _requires_restart(config, new_config)},
-    )
+    return response
+
+
+@router.get("/config")
+async def get_config(request: Request) -> dict[str, Any]:
+    config = request.app.state.config
+    data = dataclasses.asdict(config)
+    strip_none(data)
+    return data
+
+
+@router.put("/config")
+async def update_config(request: Request, body: dict[str, Any]) -> JSONResponse:
+    if _holds_non_finite(body):
+        raise HTTPException(status_code=400, detail="config numbers must be finite")
+    _check_preview_only(body)
+    # One config write at a time: a save reads the running config and replaces it only
+    # once saved, so another write in between would be lost
+    async with request.app.state.config_turn:
+        return await _write_config(request, body)
 
 
 @router.get("/config/export")
@@ -179,21 +209,22 @@ async def import_config(request: Request) -> dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid TOML: {e}") from e
     _check_preview_only(data)
-    config = request.app.state.config
-    try:
-        new_config = _merge_config(config, data)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except TypeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
-    request.app.state.config = new_config
-    if request.app.state.config_path:
-        await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
-    await _apply_live(request, new_config)
-    return JSONResponse(
-        content=dataclasses.asdict(new_config),
-        headers={"X-Requires-Restart": _requires_restart(config, new_config)},
-    )
+    async with request.app.state.config_turn:  # config writes take turns, as PUT's do
+        config = request.app.state.config
+        try:
+            new_config = _merge_config(config, data)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except TypeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid config value type: {e}") from e
+        request.app.state.config = new_config
+        if request.app.state.config_path:
+            await asyncio.to_thread(save_config, new_config, request.app.state.config_path)
+        await _apply_live(request, new_config)
+        return JSONResponse(
+            content=dataclasses.asdict(new_config),
+            headers={"X-Requires-Restart": _requires_restart(config, new_config)},
+        )
 
 
 @router.get("/state/export")

@@ -451,6 +451,30 @@ UNUSABLE = [
         for kind in ("lifx", "govee")
         for value in (NAN, INF, True)
     ),
+    *(
+        (kind, "enabled", value, f"{kind} enabled must be true or false")
+        for kind in DEVICE_CONFIGS
+        for value in (1, "true", None)
+    ),
+    *(("openrgb", "host", value, "openrgb host must be a string") for value in (5, None)),
+    *(
+        ("openrgb", "port", value, "openrgb port must be a whole number")
+        for value in (NAN, 2.5, True, "6742")
+    ),
+    *(("openrgb", "port", value, "openrgb port must be 1-65535") for value in (0, 65536)),
+    *(
+        ("lifx", "default_kelvin", value, "lifx default_kelvin must be a whole number")
+        for value in (3000.5, 3500.0)
+    ),
+    # Refused by the range before a whole number was asked for, with its message still
+    *(
+        ("lifx", "default_kelvin", value, "lifx default_kelvin must be between 2500 and 9000")
+        for value in (NAN, True)
+    ),
+    *(
+        ("govee", "segment_override", value, "govee segment_override must be a whole number")
+        for value in (NAN, 2.5, True, "10")
+    ),
 ]
 
 
@@ -465,3 +489,25 @@ def test_a_device_setting_no_light_can_use_is_refused(
     settings = DEVICE_CONFIGS[kind](**{key: value})
     with pytest.raises(ValueError, match=f"^{message}$"):
         AppConfig(devices=DevicesConfig(**{kind: settings}))
+
+
+# Device settings at their bounds, which the config takes. A lamp's segment_override is
+# checked where it's used, with a warning (govee/output.py), so any whole number is taken.
+USABLE = [
+    ("openrgb", "port", 1),
+    ("openrgb", "port", 65535),
+    ("lifx", "default_kelvin", 2500),
+    ("lifx", "default_kelvin", 9000),
+    ("govee", "segment_override", 500),
+]
+
+
+@pytest.mark.parametrize(
+    ("kind", "key", "value"), USABLE, ids=[f"{kind}.{key}={value}" for kind, key, value in USABLE]
+)
+def test_a_device_setting_at_its_bounds_is_taken(kind: str, key: str, value: object) -> None:
+    settings = DEVICE_CONFIGS[kind](**{key: value})
+
+    config = AppConfig(devices=DevicesConfig(**{kind: settings}))
+
+    assert getattr(getattr(config.devices, kind), key) == value

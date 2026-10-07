@@ -121,7 +121,8 @@ class DiscoveryConfig:
 
 
 def _is_whole_number(value: object) -> bool:
-    """An int that isn't a bool: a rate in frames a second, or a count of samples."""
+    """An int that isn't a bool: a rate in frames a second, a count, a port or a colour
+    temperature."""
     return isinstance(value, int) and not isinstance(value, bool)
 
 
@@ -158,18 +159,30 @@ class AppConfig:
                 raise ValueError(f"{name} latency_ms must be non-negative")
             if hasattr(dev_cfg, "latency_window_size") and dev_cfg.latency_window_size <= 0:
                 raise ValueError(f"{name} latency_window_size must be positive")
-            # A request or a stored row can carry a number no light can use (NaN, an
-            # infinity, a bool, a rate or a window that isn't whole), and the next start
-            # applies what's saved (light-sync spec §8), so the config refuses it.
+            # A request or a stored row can carry a setting no light can use (NaN, an
+            # infinity, a bool for a number, a rate or a window that isn't whole, a switch
+            # that isn't true or false), and the next start applies what's saved (light-sync
+            # spec §8), so the config refuses it.
+            if hasattr(dev_cfg, "enabled") and not isinstance(dev_cfg.enabled, bool):
+                raise ValueError(f"{name} enabled must be true or false")
             for key in ("max_fps", "latency_window_size"):
                 if not _is_whole_number(getattr(dev_cfg, key)):
                     raise ValueError(f"{name} {key} must be a whole number")
             for key in ("latency_ms", "manual_offset_ms"):
                 if not is_finite_number(getattr(dev_cfg, key)):
                     raise ValueError(f"{name} {key} must be a finite number")
+        openrgb = self.devices.openrgb
+        if not isinstance(openrgb.host, str):
+            raise ValueError("openrgb host must be a string")
+        if not _is_whole_number(openrgb.port):
+            raise ValueError("openrgb port must be a whole number")
+        if not 1 <= openrgb.port <= 65535:
+            raise ValueError("openrgb port must be 1-65535")
         lifx = self.devices.lifx
         if not (2500 <= lifx.default_kelvin <= 9000):
             raise ValueError("lifx default_kelvin must be between 2500 and 9000")
+        if not _is_whole_number(lifx.default_kelvin):
+            raise ValueError("lifx default_kelvin must be a whole number")
         if lifx.discovery_timeout_s <= 0:
             raise ValueError("lifx discovery_timeout_s must be positive")
         if not is_finite_number(lifx.discovery_timeout_s):
@@ -183,6 +196,9 @@ class AppConfig:
             raise ValueError("govee discovery_timeout_s must be a finite number")
         if not (is_finite_number(govee.probe_interval_s) and govee.probe_interval_s > 0):
             raise ValueError("govee probe_interval_s must be positive")
+        # Its range is checked where it's used, with a warning (govee/output.py)
+        if govee.segment_override is not None and not _is_whole_number(govee.segment_override):
+            raise ValueError("govee segment_override must be a whole number")
         if self.web.port < 0 or self.web.port > 65535:
             raise ValueError("web port must be 0-65535")
 
