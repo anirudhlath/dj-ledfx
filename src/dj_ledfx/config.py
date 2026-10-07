@@ -125,6 +125,14 @@ class DiscoveryConfig:
 # can't be made, and every start failed that kind's lights.
 MAX_LATENCY_WINDOW = 1000
 
+# The probe intervals' floors. A device setting saved in the app applies at every start, so a
+# typo (0.005) would flood the lights.
+# Govee's probe_interval_s: the doze spike probed every 0.15–0.25 s without harm.
+MIN_GOVEE_PROBE_INTERVAL_S = 0.1
+# LIFX's echo_probe_interval_s: a light's stream alone already runs at 20–30 messages a
+# second, against LIFX's guidance of about 20 a second per device.
+MIN_LIFX_ECHO_PROBE_INTERVAL_S = 0.5
+
 
 def _is_whole_number(value: object) -> bool:
     """An int that isn't a bool: a rate in frames a second, a count, a port or a colour
@@ -202,6 +210,10 @@ class AppConfig:
             raise ValueError("lifx discovery_timeout_s must be a finite number")
         if not (is_finite_number(lifx.echo_probe_interval_s) and lifx.echo_probe_interval_s > 0):
             raise ValueError("lifx echo_probe_interval_s must be positive")
+        if lifx.echo_probe_interval_s < MIN_LIFX_ECHO_PROBE_INTERVAL_S:
+            raise ValueError(
+                f"lifx echo_probe_interval_s must be at least {MIN_LIFX_ECHO_PROBE_INTERVAL_S}"
+            )
         govee = self.devices.govee
         if govee.discovery_timeout_s <= 0:
             raise ValueError("govee discovery_timeout_s must be positive")
@@ -209,6 +221,10 @@ class AppConfig:
             raise ValueError("govee discovery_timeout_s must be a finite number")
         if not (is_finite_number(govee.probe_interval_s) and govee.probe_interval_s > 0):
             raise ValueError("govee probe_interval_s must be positive")
+        if govee.probe_interval_s < MIN_GOVEE_PROBE_INTERVAL_S:
+            raise ValueError(
+                f"govee probe_interval_s must be at least {MIN_GOVEE_PROBE_INTERVAL_S}"
+            )
         # Its range is checked where it's used, with a warning (govee/output.py)
         if govee.segment_override is not None and not _is_whole_number(govee.segment_override):
             raise ValueError("govee segment_override must be a whole number")

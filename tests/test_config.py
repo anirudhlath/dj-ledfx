@@ -1,4 +1,5 @@
 import errno
+import math
 import textwrap
 from pathlib import Path
 
@@ -481,6 +482,15 @@ UNUSABLE = [
         for kind in DEVICE_CONFIGS
         for value in (1001, 2**63)
     ),
+    # A probe interval under its floor, just under or a typo's, would flood the lights
+    *(
+        ("govee", "probe_interval_s", value, "govee probe_interval_s must be at least 0.1")
+        for value in (math.nextafter(0.1, 0.0), 0.005)
+    ),
+    *(
+        ("lifx", "echo_probe_interval_s", value, "lifx echo_probe_interval_s must be at least 0.5")
+        for value in (math.nextafter(0.5, 0.0), 0.005)
+    ),
 ]
 
 
@@ -506,6 +516,8 @@ USABLE = [
     ("lifx", "default_kelvin", 9000),
     ("govee", "segment_override", 500),
     *((kind, "latency_window_size", 1000) for kind in DEVICE_CONFIGS),
+    ("govee", "probe_interval_s", 0.1),
+    ("lifx", "echo_probe_interval_s", 0.5),
 ]
 
 

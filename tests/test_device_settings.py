@@ -45,17 +45,30 @@ async def test_device_settings_alone_are_a_config(db: StateDB) -> None:
 
 
 @pytest.mark.parametrize(
-    ("key", "value", "reason"),
+    ("section", "key", "value", "reason"),
     [
-        ("probe_interval_s", "0", "govee probe_interval_s must be positive"),
-        ("max_fps", '"fast"', "not supported between instances"),
+        ("devices.govee", "probe_interval_s", "0", "govee probe_interval_s must be positive"),
+        ("devices.govee", "max_fps", '"fast"', "not supported between instances"),
+        # Under its floor: saved, it would flood the lights at every start
+        (
+            "devices.govee",
+            "probe_interval_s",
+            "0.005",
+            "govee probe_interval_s must be at least 0.1",
+        ),
+        (
+            "devices.lifx",
+            "echo_probe_interval_s",
+            "0.25",
+            "lifx echo_probe_interval_s must be at least 0.5",
+        ),
     ],
 )
 async def test_device_settings_the_config_refuses_leave_the_lights_on_their_defaults(
-    db: StateDB, key: str, value: str, reason: str
+    db: StateDB, section: str, key: str, value: str, reason: str
 ) -> None:
     await _save(db, "engine", fps="42")
-    await _save(db, "devices.govee", **{key: value})
+    await _save(db, section, **{key: value})
     records: list[Any] = []
     sink = logger.add(lambda message: records.append(message.record), level="WARNING")
     try:

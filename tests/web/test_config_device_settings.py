@@ -65,6 +65,21 @@ async def test_a_device_setting_the_config_refuses_saves_nothing(
     assert await api.home.db.load_config("devices.govee") == {"max_fps": "20"}
 
 
+async def test_a_probe_interval_under_its_floor_gets_a_400_and_saves_nothing(api: Api) -> None:
+    """A device setting saved in the app applies at every start, so a typo's interval would
+    have the lamps asked for their status every 5 ms."""
+    await api.client.put("/api/config", json={"devices": {"govee": {"max_fps": 20}}})
+    running = api.app.state.config
+    body = {"devices": {"govee": {"probe_interval_s": 0.005}}}
+
+    response = await api.client.put("/api/config", json=body)
+
+    refused = (response.status_code, response.json())
+    assert refused == (400, {"detail": "govee probe_interval_s must be at least 0.1"})
+    assert await api.home.db.load_config("devices.govee") == {"max_fps": "20"}
+    assert api.app.state.config is running
+
+
 NOT_FINITE = (math.nan, math.inf, -math.inf)
 # A number that isn't finite where a body can hold one: a flat section's setting, a device
 # setting, and deep in a value the old UI sends back whole (the old scene page's mapping).
