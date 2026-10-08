@@ -37,7 +37,7 @@ describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)",
       previewTag: null,
       cadenceMs: 1000 / SPEC.phoneFps,
     })
-    expect(behaviour({ mode: 'focus' })).toMatchObject({ overlays: false, labels: false, cadenceMs: 1000 / SPEC.target.fps })
+    expect(behaviour({ mode: 'focus' })).toMatchObject({ overlays: false, legend: false, labels: false, cadenceMs: 1000 / SPEC.target.fps })
   })
 
   // §7.6 compose; Live-PutLookOn keeps the labels, the sun and the legend, and draws a PREVIEW ON SCREEN card.

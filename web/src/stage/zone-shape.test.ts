@@ -46,6 +46,13 @@ describe("a zone's place on the stage", () => {
     expect(boxOf([])).toBeNull()
   })
 
+  it('keeps the card on the stage when its zone runs off the bottom or the right', () => {
+    const stage = { width: 1000, height: 800 }
+    const card = { width: 200, height: 80 }
+    expect(besideZone({ left: 500, right: 700, top: 780, bottom: 900 }, stage, card)).toEqual([300, 720])
+    expect(besideZone({ left: 100, right: 1800, top: 300, bottom: 500 }, stage, card)).toEqual([800, 360])
+  })
+
   // F3 decision 18.
   it("puts a zone's tag at the middle of its lights, and nowhere when none is placed", () => {
     const bodies = stageBodies(lights)

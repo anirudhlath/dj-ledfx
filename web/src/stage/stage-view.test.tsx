@@ -17,6 +17,7 @@ import { lightBodies } from './bodies'
 import { FIT_VIEW, fitPose, projectPoint } from './camera'
 import { SPEC } from './design-numbers'
 import { anchorOf } from './marks'
+import { cssColour } from './palette'
 import { STAGE_LABEL } from './stage-pending'
 import { sunPosition, sunScene } from './sun'
 import Stage from './stage'
@@ -189,6 +190,17 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent(light.name)
   })
 
+  // The link drops with the mouse over a room: the frozen picture does nothing there, and its cursor says so.
+  it('takes the pointer cursor off a room when the link drops', async () => {
+    const { state, pose } = await openLive()
+    const lit = state.home.rooms.find((room) => room.hasLights)!
+    const [x, y] = projectPoint(pose, [...lit.labelAt, 0])
+    fireEvent.pointerMove(picture(), { clientX: x, clientY: y, pointerType: 'mouse' })
+    expect(picture().style.cursor).toBe('pointer')
+    act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
+    expect(picture().style.cursor).toBe('')
+  })
+
   it('opens the composer for a room with lights, and not for one without', async () => {
     const { state, pose, router } = await openLive()
     const lit = state.home.rooms.find((room) => room.hasLights)!
@@ -196,6 +208,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     fireEvent.click(picture(), { clientX: x, clientY: y })
     expect(router.state.location.pathname).toBe('/next/live/put')
     expect(router.state.location.search).toBe(`?zone=${lit.id}`)
+    expect(router.state.historyAction).toBe('PUSH')
     await act(() => router.navigate('/live'))
     await loadedStage()
     act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
@@ -389,6 +402,52 @@ describe('the stage in compose (§7.6)', () => {
   it('says the lights are as they were where nothing runs', async () => {
     await openCompose(`?zone=kitchen&look=embers${previewing('embers')}`, { scenario: 'nothing-running' })
     expect(document.querySelector('[data-preview-card]')).toHaveTextContent(/\. The lights are as they were\.$/)
+  })
+
+  // The whole home's lights run three looks in the hero: the card names each, the last after an "and".
+  it("names every look the zone's lights still run", async () => {
+    const { state } = await openCompose(`?zone=home&look=embers${previewing('embers')}`)
+    const zone = state.zones.find((each) => each.id === 'home')!
+    expect(document.querySelector('[data-preview-card]')).toHaveTextContent(
+      `Preview on screen${lookName('embers')} on ${zone.name}. The lights are still running ${lookName('homesunset')}, ${lookName('comets')} and ${lookName('fireflies')}.`,
+    )
+  })
+
+  // The card is placed from its own size, so it stays hidden until it has one rather than show in the wrong place.
+  it('keeps the card hidden until it has been measured', async () => {
+    await openCompose(`?zone=living&look=embers${previewing('embers')}`)
+    const card = document.querySelector<HTMLElement>('[data-preview-card]')!
+    expect(card.style.visibility).toBe('hidden')
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    expect(card.style.visibility).toBe('')
+  })
+
+  // §7.6 compose: the rooms outside the zone dimmed to SPEC.compose.dimmed: the background over them, at the rest.
+  it('dims the rooms outside the zone with the background', async () => {
+    await openCompose('?zone=living&look=embers')
+    const dims = document.querySelector('[data-dims]')!
+    expect(dims).toHaveAttribute('fill', cssColour('--color-bg'))
+    expect(dims).toHaveAttribute('fill-opacity', String(1 - SPEC.compose.dimmed))
+  })
+
+  // Live-PutLookOn: the looks beneath the other rooms' names are dimmed with them, and a sub-zone's own label is lit with its room's.
+  it("dims the looks of the other rooms' labels with their names", async () => {
+    await openCompose('?zone=living&look=embers')
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    // The whole home's look on its rooms, and the office desk's own.
+    for (const look of [...stage.getAllByText(lookName('homesunset')), stage.getByText(lookName('comets'))]) expect(look).toHaveClass('fill-text-3')
+  })
+
+  it("lights a sub-zone's own label and its room's, and dims the other rooms", async () => {
+    const { state } = await openCompose('?zone=office&look=embers')
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    const office = state.home.subZones.find((sub) => sub.id === 'office')!
+    const room = state.home.rooms.find((candidate) => candidate.id === office.room)!
+    const other = state.home.rooms.find((candidate) => candidate.id !== room.id && candidate.hasLights)!
+    expect(stage.getByText(office.name)).toHaveClass('fill-text')
+    expect(stage.getByText(room.name)).toHaveClass('fill-text')
+    expect(stage.getByText(other.name)).toHaveClass('fill-text-3')
+    expect(document.querySelector('[data-dims]')!.querySelectorAll('polygon')).toHaveLength(state.home.rooms.length - 1)
   })
 
   // §6.3 ZonePicker: "Clicking a room on the stage selects the same zone": in place, the look kept, no tooltip.

@@ -142,6 +142,16 @@ describe('the frame writer', () => {
     expect([...writer.glowColours]).toEqual([0, 0, 1])
   })
 
+  // A stage that mounts already previewing builds its writer from entries that name the preview stream.
+  it('draws from the stream its entry names from the first write, in a writer laid out with it', () => {
+    const frames = new FrameStore()
+    stream(frames, POINT.id, solid(POINT.leds, [255, 0, 0]))
+    pushFrame(POINT.id, (seq += 1), solid(POINT.leds, [0, 0, 255]), { store: frames, stream: 'preview' })
+    const writer = new FrameWriter([entry(POINT, { stream: 'preview' })])
+    writer.write(frames)
+    expect([...writer.glowColours]).toEqual([0, 0, 1])
+  })
+
   it('lights no floor for a light in no room', () => {
     const frames = new FrameStore()
     stream(frames, POINT.id, solid(POINT.leds, [255, 255, 255]))

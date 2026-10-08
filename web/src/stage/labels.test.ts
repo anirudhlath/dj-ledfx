@@ -53,6 +53,16 @@ describe('the room labels (§7.6)', () => {
     expect(home).not.toHaveProperty('office')
   })
 
+  // The whole home runs on the kitchen's lights too, and on rooms the preview leaves alone: it stays there,
+  // and on the kitchen the preview comes before it.
+  it("leaves the rooms a preview doesn't cover to the look running there, and puts the preview first on its own", () => {
+    const hero = buildScenario('hero', HERO_NOW)
+    const kitchen = hero.zones.find((zone) => zone.id === 'kitchen')!
+    const previewed = { zoneId: kitchen.id, lookName: lookName('embers'), lights: kitchen.lights }
+    const looks = Object.fromEntries(stageLabels(hero.home, hero.running, hero.lights, previewed).map((label) => [label.key, label.look]))
+    expect(looks).toMatchObject({ kitchen: lookName('embers'), bedroom: lookName('homesunset'), corridor: lookName('homesunset') })
+  })
+
   it('shows the newest look where two run on one room', () => {
     const hero = buildScenario('hero', HERO_NOW)
     const living = hero.running.find((zone) => zone.zoneId === 'living')!
