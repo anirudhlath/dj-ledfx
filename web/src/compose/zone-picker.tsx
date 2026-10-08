@@ -6,7 +6,9 @@
 // one leads the row as the composer opens, as drawn, and a later choice scrolls only as far as it must.
 // A note on a chip that isn't chosen is text-2, not the renders' text-3, which on the control fill falls
 // short of §14's contrast (F4 ruling 19). Picking lights has no milestone yet, so its chip is drawn but
-// can't be used (F4 ruling 6).
+// can't be used (F4 ruling 6): aria-disabled, with the default cursor where app.css gives every other
+// button a pointer. Only Live-PutLookOn draws it; Phone-PutLookOn's row is the zones alone, and the renders
+// are the layout's authority, so the phone has none.
 // Sizes: the desktop chips are Live-PutLookOn's, with its 11.5 px note (no token has it), and the phone's
 // buttons Phone-PutLookOn's. Both are <button>s, which draw border-box, so a render's heights are the ones
 // drawn. The desktop chips are under --touch-min, so they keep their face and grow their hit area
@@ -71,20 +73,6 @@ export function ZonePicker({ zones, running, selected, locked, onSelect, variant
       </button>
     )
   })
-  const pickLights = (
-    <button
-      type="button"
-      aria-disabled="true"
-      className={cx(
-        'inline-flex shrink-0 items-center gap-1.5 border border-dashed border-line-strong font-semibold text-text-2',
-        phone ? 'snap-start rounded-card px-3.5 text-body' : 'h-8 rounded-pill px-3 text-size-control touch-target',
-      )}
-      style={phone ? { height: LIVE_SPEC.phoneComposer.zonePx } : undefined}
-    >
-      <Icon name="plus" size={14} />
-      Pick lights…
-    </button>
-  )
 
   if (phone) {
     return (
@@ -94,7 +82,6 @@ export function ZonePicker({ zones, running, selected, locked, onSelect, variant
         </span>
         <div role="group" aria-labelledby={label} className="-m-1 flex snap-x snap-proximity scroll-px-1 gap-2 overflow-x-auto p-1">
           {chips}
-          {pickLights}
         </div>
       </div>
     )
@@ -105,7 +92,14 @@ export function ZonePicker({ zones, running, selected, locked, onSelect, variant
         Where
       </span>
       {chips}
-      {pickLights}
+      <button
+        type="button"
+        aria-disabled="true"
+        className="inline-flex h-8 items-center gap-1.5 rounded-pill border border-dashed border-line-strong px-3 text-size-control font-semibold text-text-2 touch-target aria-disabled:cursor-default"
+      >
+        <Icon name="plus" size={14} />
+        Pick lights…
+      </button>
     </div>
   )
 }

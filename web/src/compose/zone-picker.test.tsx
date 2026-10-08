@@ -91,6 +91,13 @@ describe('ZonePicker (§6.3)', () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 
+  // app.css gives every button that isn't disabled a pointer, and an aria-disabled one isn't; jsdom loads no CSS,
+  // so the class that overrides it is what a test can pin.
+  it("overrides app.css's pointer on Pick lights… with aria-disabled:cursor-default, since it's inert", () => {
+    const { group } = pick()
+    expect(within(group).getByRole('button', { name: 'Pick lights…' })).toHaveClass('aria-disabled:cursor-default')
+  })
+
   // Phone-PutLookOn's Where: tall buttons in a row that scrolls. The chosen one leads the row as the
   // composer opens, as drawn; a later choice scrolls only as far as it must.
   it("draws the phone's buttons at LIVE_SPEC.phoneComposer.zonePx and keeps the chosen one in view", () => {
@@ -147,17 +154,20 @@ describe('ZonePicker (§6.3)', () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 
-  // F4 ruling 6: the chip comes last in the group, with its plus; on the phone it's as tall as the zones' buttons.
-  it.each(['desktop', 'phone'] as const)('ends the group with Pick lights… and its plus on the %s', (variant) => {
-    const { group } = pick({ variant })
+  // F4 ruling 6: the chip comes last in the desktop's group, with its plus.
+  it("ends the desktop's group with Pick lights… and its plus", () => {
+    const { group } = pick()
     const pickLights = within(group).getAllByRole('button').at(-1)!
     expect(pickLights).toHaveAccessibleName('Pick lights…')
     expect(pickLights.querySelector('svg')!.innerHTML).toBe(payload('plus'))
   })
 
-  it("draws the phone's Pick lights… as tall as its zone buttons", () => {
+  // Only Live-PutLookOn draws Pick lights…; Phone-PutLookOn's row is the zones alone, and the renders are the
+  // layout's authority.
+  it("draws no Pick lights… in the phone's row, only a button for each zone", () => {
     const { group } = pick({ variant: 'phone' })
-    expect(within(group).getByRole('button', { name: 'Pick lights…' })).toHaveStyle({ height: `${LIVE_SPEC.phoneComposer.zonePx}px` })
+    expect(within(group).queryByRole('button', { name: 'Pick lights…' })).not.toBeInTheDocument()
+    expect(within(group).getAllByRole('button')).toHaveLength(hero.zones.length)
   })
 
   // §8.2 Where: "zone chips across the top of the stage", wrapping; they're under --touch-min, so their hit
@@ -179,7 +189,7 @@ describe('ZonePicker (§6.3)', () => {
     expect(group).toHaveClass('overflow-x-auto', 'snap-x', 'snap-proximity')
     expect(group).toHaveClass('p-1', '-m-1', 'scroll-px-1')
     const buttons = within(group).getAllByRole('button')
-    expect(buttons).toHaveLength(hero.zones.length + 1)
+    expect(buttons).toHaveLength(hero.zones.length)
     for (const button of buttons) expect(button).toHaveClass('snap-start', 'shrink-0')
   })
 
