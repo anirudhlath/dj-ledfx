@@ -213,6 +213,39 @@ describe('Put a look on (§8.2)', () => {
     expect(composer()).toHaveTextContent('No starred looks yet.')
   })
 
+  // The box is 38 px of icon and padding round the input, and a pointer lands on any of it: the whole face is the input's label, and a
+  // browser focuses a label's control on a click. (jsdom forwards the click to the control, and leaves the focus to the browser.)
+  it('makes the whole face of the search box its label, so a click on the icon reaches the input', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const search = within(composer()).getByRole<HTMLInputElement>('searchbox', { name: 'Search looks' })
+    expect(search.labels).toHaveLength(1)
+    const face = search.labels![0]!
+    const icon = face.querySelector('svg')!
+    const clicked = vi.fn()
+    search.addEventListener('click', clicked)
+    fireEvent.click(icon)
+    fireEvent.click(face)
+    expect(clicked).toHaveBeenCalledTimes(2)
+  })
+
+  // The row clips (as drawn), so the browser's scroll to a focused chip, which no wheel or touch can undo, would leave the first
+  // chip cut: it goes back to its start once focus has left the row, and stays put while focus moves between its chips.
+  it('puts the categories row back at its start once focus leaves it', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const categories = screen.getByRole('group', { name: 'Categories' })
+    const chips = within(categories).getAllByRole('button')
+    const last = chips[chips.length - 1]!
+    last.focus()
+    categories.scrollLeft = 36
+    fireEvent.blur(last, { relatedTarget: chips[0] })
+    expect(categories.scrollLeft).toBe(36)
+    fireEvent.blur(last, { relatedTarget: tile('embers') })
+    expect(categories.scrollLeft).toBe(0)
+    categories.scrollLeft = 12
+    fireEvent.blur(chips[0]!, { relatedTarget: null })
+    expect(categories.scrollLeft).toBe(0)
+  })
+
   // F4 ruling 12.
   it('opens on L, chooses on the arrows, starts on Enter and closes on Esc', async () => {
     const { server, router } = await openApp('/next/live')
@@ -353,19 +386,21 @@ describe('Put a look on (§8.2)', () => {
     expect(router.state.location.pathname).toBe('/next/live')
   })
 
-  // CLAUDE.md: a control drawn under --touch-min keeps its face and grows its hit area (touch-target). The categories' row
-  // clips, so it pads, and is pulled back by as much, to leave room for a chip's focus ring and that area. jsdom has no
-  // layout, so these are the classes; that the area reaches 44 px and the ring stays whole is for a browser to see.
-  it('grows the hit areas of the controls drawn under the touch minimum', async () => {
+  // CLAUDE.md: a control drawn under --touch-min keeps its face and grows its hit area (touch-target). The categories' row clips, so
+  // it pads on its left, top and bottom, and is pulled back by as much, to leave room for a chip's focus ring and that area. jsdom has
+  // no layout, so this checks the classes; that the area reaches 44 px and the ring stays whole is for a browser to see (Task 10's e2e).
+  it('marks each control drawn under the touch minimum with the touch-target class, and pads the categories row for it', async () => {
     await openApp('/next/live/put?zone=living&look=embers')
     const panel = within(composer())
     const categories = panel.getByRole('group', { name: 'Categories' })
     const chips = within(categories).getAllByRole('button')
     expect(chips.length).toBeGreaterThan(1)
-    for (const each of [...chips, panel.getByRole('button', { name: 'Close' }), panel.getByRole('combobox', { name: 'Transition' })]) {
+    const face = panel.getByRole<HTMLInputElement>('searchbox', { name: 'Search looks' }).labels![0]!
+    for (const each of [...chips, face, panel.getByRole('button', { name: 'Close' }), panel.getByRole('combobox', { name: 'Transition' })]) {
       expect(each).toHaveClass('touch-target')
     }
-    expect(categories).toHaveClass('overflow-hidden', '-mx-1', '-my-2', 'px-1', 'py-2')
+    expect(categories).toHaveClass('overflow-hidden', '-ml-1', '-my-2', 'pl-1', 'py-2', 'scroll-px-1')
+    expect(categories).not.toHaveClass('-mx-1', 'px-1')
   })
 })
 
@@ -635,8 +670,9 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
   })
 
   // §4.4: between 768 and 1199 px the panel lies over the stage's right side, and the composer lies there in its place, with Where
-  // stopping short of it; the button that brings a hidden Running panel back isn't drawn beside the composer.
-  it('between 768 and 1199 px, lays the composer over the stage in the panel\'s place', async () => {
+  // stopping short of it; the button that brings a hidden Running panel back isn't drawn beside the composer. jsdom has no layout, so
+  // the position is the classes (Task 10's e2e measures it).
+  it("between 768 and 1199 px, puts the composer over the stage in the panel's place with the Where chips stopping short of it", async () => {
     setViewportWidth(1000)
     await openApp('/next/live')
     expect(screen.getByRole('complementary', { name: 'Running' })).toBeInTheDocument()
@@ -644,7 +680,7 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     await settle()
     expect(composer()).toHaveClass('absolute')
     expect(screen.queryByRole('complementary', { name: 'Running' })).not.toBeInTheDocument()
-    expect(screen.getByRole('group', { name: 'Where' }).parentElement!.style.right).toBe('calc(var(--live-panel-w) + 1.25rem)')
+    expect(screen.getByRole('group', { name: 'Where' }).parentElement).toHaveClass('right-[calc(var(--live-panel-w)+--spacing(5))]')
 
     fireEvent.keyDown(document.body, { key: 'Escape' })
     await settle()

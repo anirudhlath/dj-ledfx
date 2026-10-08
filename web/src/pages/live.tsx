@@ -85,7 +85,7 @@ export function LivePage() {
         style={previewOnly ? ({ '--stage-top-shift': `${PREVIEW_LABEL_FOOT_PX}px` } as CSSProperties) : undefined}
       >
         {stage}
-        {composing && <ComposerWhere style={narrow ? { right: 'calc(var(--live-panel-w) + 1.25rem)' } : undefined} />}
+        {composing && <ComposerWhere narrow={narrow} />}
         {previewOnly && <PreviewOnlyLabel />}
         <ReconnectingCard variant="desktop" />
         <EmptyHome variant="desktop" />
