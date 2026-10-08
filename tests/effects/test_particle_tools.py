@@ -411,23 +411,28 @@ def _alive_the_long_way(
     """Every (lamp, birth) alive at t, from the rule alone: event n of lamp s is born at
     (n + start + window * u) * every, from its own draws, and lives its usual life give or
     take half the spread of it. Looks at far more events than can be alive."""
-    every, found = usual / streams.rate, []
-    for n in range(math.floor(t / every) - 40, math.floor(t / every) + 40):
-        for lamp in streams.lamp.tolist():
-            u = draws(seed, [n * LAMP_KEYS + lamp], count)[0]
-            born = (n + streams.start[lamp] + streams.window * u[0]) * every
-            if born <= t < born + usual * (1.0 - spread / 2.0 + spread * u[1]):
-                found.append((lamp, float(born)))
-    found.sort()
+    every = usual / streams.rate
+    n = (math.floor(t / every) - 40 + np.arange(80, dtype=np.int64))[:, None]  # (events, 1)
+    lamp = streams.lamp[None, :]  # (1, lamps)
+    u = draws(seed, (n * LAMP_KEYS + lamp).ravel(), count).reshape(80, lamp.shape[1], count)
+    born = (n + streams.start[lamp] + streams.window * u[..., 0]) * every
+    alive = (born <= t) & (t < born + usual * (1.0 - spread / 2.0 + spread * u[..., 1]))
+    found = sorted(
+        zip(np.broadcast_to(lamp, born.shape)[alive].tolist(), born[alive].tolist(), strict=True)
+    )
     return [lamp for lamp, _ in found], [born for _, born in found]
 
 
+# At 9 events to a usual life, a spread of half makes lives of up to 11 stretches, past the 9
+# that recent() would look back over if it forgot the spread; 40 lamps narrow the windows to
+# fit the room, and so give each lamp a start in its stretch (births up to a stretch late).
+@pytest.mark.parametrize("rate", [3.0, 9.0])
 @pytest.mark.parametrize("spread", [0.0, 0.5])
 @pytest.mark.parametrize("lamps", [3, 40])
 def test_the_events_alive_are_those_born_and_not_yet_over_oldest_first(
-    lamps: int, spread: float
+    lamps: int, spread: float, rate: float
 ) -> None:
-    streams = lamp_streams(1, lamps, 3.0, spread, 500)
+    streams = lamp_streams(1, lamps, rate, spread, 500)
     for t in (500.0, 503.3, 517.77, 1e6 + 0.25):
         now = streams.alive(1, t, 4.0, 5)
 

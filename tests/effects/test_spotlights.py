@@ -9,6 +9,7 @@ from conftest import render_ctx
 from map_home import lights_at, upright
 from stray_lamps import STRAYS, run_heights, stays_in_band
 
+from dj_ledfx.effects import particle_tools
 from dj_ledfx.effects import spotlights as spotlights_module
 from dj_ledfx.effects.particle_tools import Ground
 from dj_ledfx.effects.particles import drawn
@@ -111,6 +112,22 @@ def test_each_spotlight_is_on_a_tour_of_its_own() -> None:
     assert shared < 0.35 * resting  # about one time in five, as chance has it, not half
 
 
+def test_each_spotlight_picks_its_leds_from_draws_of_its_own() -> None:
+    one = lights_at(upright(2.0, 2.0))  # one lamp, so the spotlights differ only by their LEDs
+    spots = _spots(count=3, hold_s=4.0, move_s=0.5)
+    resting = alike = 0
+    for t in np.arange(700.0, 1400.0, 0.5):
+        drawn(spots, render_ctx(t=float(t)), one)
+        z = spots.particles.pos[:, 2].astype(np.float64)
+        on_led = np.abs(z[:, None] - one.pos[None, :, 2]).min(axis=1) < 1e-4
+        for a, b in ((0, 1), (0, 2), (1, 2)):
+            if on_led[a] and on_led[b]:  # both rest, each on an LED of the lamp
+                resting += 1
+                alike += abs(z[a] - z[b]) < 1e-4
+    assert resting > 2000
+    assert alike < 0.2 * resting  # about one in the lamp's 14 LEDs; from one stream, over half
+
+
 def test_a_spotlight_sets_off_gently() -> None:
     spots = _spots(count=1, hold_s=4.0, move_s=3.0)  # a step is 7 s: rest till 704, glide to 707
 
@@ -159,8 +176,8 @@ def test_every_spotlight_is_worked_out_at_once_not_one_after_another(
 
         return call
 
-    monkeypatch.setattr(spotlights_module, "tour", counted("tour", spotlights_module.tour))
-    monkeypatch.setattr(spotlights_module, "draws", counted("draws", spotlights_module.draws))
+    monkeypatch.setattr(spotlights_module, "tour", counted("tour", particle_tools.tour))
+    monkeypatch.setattr(spotlights_module, "draws", counted("draws", particle_tools.draws))
     monkeypatch.setattr(Ground, "on", counted("on", Ground.on))
 
     drawn(_spots(count=6), render_ctx(t=500.0), FIVE)
