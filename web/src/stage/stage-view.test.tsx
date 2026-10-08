@@ -352,10 +352,13 @@ describe('the stage in focus (§7.6)', () => {
 })
 
 describe('the stage in compose (§7.6)', () => {
-  /** The composer's stage on what the URL says, as the composer hands it over: ?zone=, ?look= and the look previewed. */
+  /** The zone a click on a room chose, as the composer would hear of it. */
+  const choose = vi.fn()
+  beforeEach(() => choose.mockClear())
+  /** The composer's stage on what the URL says, as the composer hands it over: ?zone= and the look previewed. */
   function Composing({ variant }: { variant: StageVariant }) {
     const [params] = useSearchParams()
-    const compose = { zoneId: params.get('zone')!, lookId: params.get('look'), previewing: params.get('previewing') }
+    const compose = { zoneId: params.get('zone')!, previewing: params.get('previewing'), choose }
     return <Stage variant={variant} compose={compose} />
   }
 
@@ -504,7 +507,7 @@ describe('the stage in compose (§7.6)', () => {
   })
 
   // Composing is the stage's mode whenever the composer asks for it: before the zones load, or for a zone that isn't there, the stage
-  // is still the composer's, with none of Live's tools, links, tags or tooltip, and a room still chooses its zone in place.
+  // is still the composer's, with none of Live's tools, links, tags or tooltip, and a room still hands its zone to the composer.
   it.each([
     ['are still loading', 'living', false],
     ['have no zone of that id', 'gone', true],
@@ -522,20 +525,20 @@ describe('the stage in compose (§7.6)', () => {
     const room = state.home.rooms.find((candidate) => candidate.hasLights)!
     const [x, y] = projectPoint(pose, [...room.labelAt, 0])
     fireEvent.click(picture(), { clientX: x, clientY: y })
-    expect(router.state.location.search).toBe(`?zone=${room.id}&look=embers`)
-    expect(router.state.historyAction).toBe('REPLACE')
+    expect(choose).toHaveBeenCalledExactlyOnceWith(room.id)
+    // The composer chooses: the stage navigates nowhere itself.
+    expect(router.state.location.search).toBe(`?zone=${zoneId}&look=embers`)
+    expect(router.state.historyAction).toBe('POP')
   })
 
-  // §6.3 ZonePicker: "Clicking a room on the stage selects the same zone": in place, the look kept, no tooltip.
-  it('chooses the zone of a room clicked, keeping the look, and shows no tooltip', async () => {
+  // §6.3 ZonePicker: "Clicking a room on the stage selects the same zone": the room is the zone the composer is told to choose, and no tooltip.
+  it('hands the zone of a room clicked to the composer, and shows no tooltip', async () => {
     const { state, router, pose } = await openCompose('?zone=living&look=embers')
     const room = state.home.rooms.find((candidate) => candidate.hasLights && candidate.id !== 'living')!
     const [x, y] = projectPoint(pose, [...room.labelAt, 0])
     fireEvent.click(picture(), { clientX: x, clientY: y })
-    expect(router.state.location.pathname).toBe('/next/live/put')
-    expect(router.state.location.search).toBe(`?zone=${room.id}&look=embers`)
-    expect(router.state.historyAction).toBe('REPLACE')
-    expect(document.querySelector('[data-outline]')).toHaveAttribute('data-outline', room.id)
+    expect(choose).toHaveBeenCalledExactlyOnceWith(room.id)
+    expect(router.state.location.search).toBe('?zone=living&look=embers')
     const light = state.lights.find((candidate) => candidate.shape != null)!
     const [lx, ly] = projectPoint(pose, anchorOf(lightBodies(light)[0]))
     fireEvent.pointerMove(picture(), { clientX: lx, clientY: ly, pointerType: 'mouse' })

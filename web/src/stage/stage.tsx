@@ -8,11 +8,8 @@ import type { StageVariant } from './behaviour'
 import { StageView, type StageCompose } from './stage-view'
 import { useStageData } from './use-stage-data'
 
-/**
- * "Click a room → /live/put?zone=<room>" (§8.1): a room's zone has the room's id. In the composer the
- * room becomes its zone, and the look stays chosen.
- */
-const composerFor = (room: Room, lookId: Id | null = null) => composerPath(room.id, lookId)
+/** "Click a room → /live/put?zone=<room>" (§8.1): a room's zone has the room's id. */
+const composerFor = (room: Room) => composerPath(room.id)
 
 export interface StageProps {
   variant: StageVariant
@@ -27,6 +24,5 @@ export interface StageProps {
 export default function Stage({ variant, outlined = null, focus = null, compose = null }: StageProps) {
   const data = useStageData()
   if (data === null) return <StagePending />
-  const roomTo = compose === null ? composerFor : (room: Room) => composerFor(room, compose.lookId)
-  return <StageView data={data} variant={variant} route="live" roomTo={roomTo} outlined={outlined} focus={focus} compose={compose} />
+  return <StageView data={data} variant={variant} route="live" roomTo={composerFor} outlined={outlined} focus={focus} compose={compose} />
 }

@@ -54,10 +54,10 @@ export type { StageVariant } from './behaviour'
 export interface StageCompose {
   /** The zone it puts the look on: outlined, with the rooms outside it dimmed. */
   zoneId: Id
-  /** The look chosen, which a click on a room keeps; null for none yet. */
-  lookId: Id | null
   /** The look the preview stream draws on the zone, by name; null while it draws none. */
   previewing: string | null
+  /** A click on a room (§6.3: "selects the same zone"): the composer chooses its zone as it does a zone chip's. */
+  choose: (zoneId: Id) => void
 }
 
 export interface StageViewProps {
@@ -66,7 +66,7 @@ export interface StageViewProps {
   variant: StageVariant
   /** Where the view is remembered (view-memory.ts). */
   route: string
-  /** Where a click on a room goes: its zone's composer (§8.1), or in the composer the room's zone (§6.3). */
+  /** Where a click on a room goes on Live: its zone's composer (§8.1). In the composer a room is chosen as a zone instead (`compose`). */
   roomTo: (room: Room) => string
   /** The zone to outline: the card under the pointer, or the one /live/zones/:zoneId names (F3 decision 23). */
   outlined?: Id | null
@@ -179,7 +179,9 @@ export function StageView({ data, variant, route, roomTo, outlined = null, focus
     },
     onClick: (event: MouseEvent<HTMLElement>) => {
       const { room } = under(event)
-      if (room !== null) navigate(roomTo(room), { replace: behaviour.roomClick === 'choose' })
+      if (room === null) return
+      if (behaviour.roomClick === 'choose' && compose !== null) compose.choose(room.id)
+      else navigate(roomTo(room))
     },
   }
 

@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Id } from '@/api/contract'
+import type { Id, Room } from '@/api/contract'
 import { previewSession } from '@/api/live'
 import { lookName } from '@/api/mocks/fixtures'
 import type { MockServer, MockServerOptions } from '@/api/mocks/mock-server'
@@ -27,13 +27,36 @@ beforeEach(() => {
 /** Time for the in-memory socket and the stubbed fetch, which answer in microtasks between the timers. */
 const settle = (ms = 1000) => act(() => vi.advanceTimersByTimeAsync(ms))
 
-/** The app at `path` on the hero's mock server (or another scenario), REST and socket alike, settled. */
-async function openApp(path: string, options: MockServerOptions = {}) {
+/**
+ * From here the REST reads of `paths` wait for the test to let them go (restOn's stub answers every one at once): the data
+ * comes in a different order from the one the app is written for. Returns what lets one go.
+ */
+function holdReads(paths: readonly string[]) {
+  const answer = globalThis.fetch
+  const waiting = new Map(
+    paths.map((path) => {
+      let release = () => {}
+      const promise = new Promise<void>((resolve) => (release = resolve))
+      return [path, { promise, release }] as const
+    }),
+  )
+  if (waiting.size > 0) {
+    vi.stubGlobal('fetch', async (input: URL | string, init?: RequestInit) => {
+      await waiting.get(new URL(input).pathname)?.promise
+      return answer(input, init)
+    })
+  }
+  return (path: string) => waiting.get(path)!.release()
+}
+
+/** The app at `path` on the hero's mock server (or another scenario), REST and socket alike, settled; `held` are REST reads it waits on. */
+async function openApp(path: string, options: MockServerOptions = {}, held: readonly string[] = []) {
   const server = startMockDataLayer(options)
   restOn(server)
+  const release = holdReads(held)
   const router = renderApp(path)
   await settle()
-  return { server, router }
+  return { server, router, release }
 }
 
 const composer = () => screen.getByRole('complementary', { name: 'Put a look on' })
@@ -52,6 +75,11 @@ function press(element: HTMLElement) {
   fireEvent.click(element, { button: 0 })
 }
 const previewCard = () => document.querySelector('[data-preview-card]')
+/** A click on a room's label on the stage, where the pointer picks the room. */
+function clickRoom(room: Room) {
+  const [x, y] = projectPoint(heroPose(), [...room.labelAt, 0])
+  fireEvent.click(screen.getByTestId('stage-canvas').parentElement!, { clientX: x, clientY: y })
+}
 /** From here each preview request waits for the test to let it go: the choices come faster than the answers. */
 function holdPreviews() {
   const real = api.startPreview.bind(api)
@@ -447,10 +475,39 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     await loadedStage()
     act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
     const room = server.state.home.rooms.find((each) => each.hasLights && each.id !== 'living')!
-    const [x, y] = projectPoint(heroPose(), [...room.labelAt, 0])
-    fireEvent.click(screen.getByTestId('stage-canvas').parentElement!, { clientX: x, clientY: y })
+    clickRoom(room)
     await settle()
     expect(router.state.location.search).toBe(`?zone=${room.id}&look=embers`)
+    expect(router.state.historyAction).toBe('REPLACE')
+  })
+
+  // The chips choose a zone through the one choice, and so does the stage: a home look has locked the zone to the whole home, where the
+  // chips are disabled, so a room clicked changes nothing; and the zone already chosen is no choice.
+  it.each([
+    ['leaves the zone alone under a home look, which locks it to the whole home', '?zone=living&look=goodnight', 'kitchen'],
+    ['ignores a click on the room of the zone already chosen', '?zone=living&look=embers', 'living'],
+  ])('%s, when a room is clicked on the stage', async (_, search, roomId) => {
+    const { server, router } = await openApp(`/next/live/put${search}`)
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    clickRoom(server.state.home.rooms.find((each) => each.id === roomId)!)
+    await settle()
+    expect(router.state.location.search).toBe(search)
+    expect(router.state.historyAction).toBe('POP')
+  })
+
+  // The panel waits for the looks, so a click on a room can come before the composer knows the look: the URL's look goes with it all the same.
+  it('keeps the look in the URL when a room is clicked on the stage while the looks are still on their way', async () => {
+    const { server, router, release } = await openApp('/next/live/put?zone=living&look=embers', {}, ['/api/looks'])
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    const room = server.state.home.rooms.find((each) => each.hasLights && each.id !== 'living')!
+    clickRoom(room)
+    await settle()
+    expect(router.state.location.search).toBe(`?zone=${room.id}&look=embers`)
+    release('/api/looks')
+    await settle()
+    expect(title()).toHaveTextContent(`Put a look on ${zoneName(server, room.id)}`)
   })
 
   // The stage draws a zone from the preview stream only once the server has answered for that zone: until then nothing is said to be

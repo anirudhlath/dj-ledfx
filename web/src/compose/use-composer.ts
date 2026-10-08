@@ -59,14 +59,17 @@ export function useComposeChoice(composing = true): ComposeChoice {
   const lookId = params.get('look')
   const look = lookId === null ? undefined : looks?.find((each) => each.id === lookId)
   const zone = zones === undefined ? undefined : chosenZone(zones, asked, remembered, look)
+  const locked = locksToHome(look)
   return {
     zones,
     looks,
     zone,
     look,
-    locked: locksToHome(look),
+    locked,
     choose: (zoneId) => {
-      if (zoneId !== zone?.id) navigate(composerPath(zoneId, lookId), { replace: true })
+      // The chips are disabled under a home look, which locks the zone to the whole home, and a room on the stage isn't: it changes nothing.
+      if (locked || zoneId === zone?.id) return
+      navigate(composerPath(zoneId, lookId), { replace: true })
     },
     pick: (next) => navigate(composerPath(asked, next), { replace: true }),
   }
@@ -80,10 +83,10 @@ function previewing(preview: PreviewState, zone: Zone, looks: readonly Look[] | 
 
 /** What the stage shows of the composer (§7.6 compose), while it's open. */
 export function useStageCompose(composing: boolean): StageCompose | null {
-  const { zone, look, looks } = useComposeChoice(composing)
+  const { zone, looks, choose } = useComposeChoice(composing)
   const preview = usePreviewState()
   if (!composing || zone === undefined) return null
-  return { zoneId: zone.id, lookId: look?.id ?? null, previewing: previewing(preview, zone, looks) }
+  return { zoneId: zone.id, previewing: previewing(preview, zone, looks), choose }
 }
 
 type InputsRead = Pick<Inputs, 'music' | 'homeAssistant'> | null
