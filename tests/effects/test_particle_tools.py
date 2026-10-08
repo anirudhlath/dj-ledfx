@@ -26,6 +26,7 @@ from dj_ledfx.effects.particle_tools import (
     arc,
     around,
     draws,
+    in_birth_order,
     joined,
     lamp_streams,
     lamps_of,
@@ -592,6 +593,28 @@ def test_joined_keeps_each_swarm_in_order_and_pick_keeps_the_marked() -> None:
     picked = both.pick(np.array([True, False, True]))
     np.testing.assert_array_equal(picked.pos[:, 0], [0.0, 2.0])
     np.testing.assert_array_equal(picked.colour, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+
+
+def test_pick_also_takes_the_particles_it_names_in_the_order_it_names_them() -> None:
+    particles = swarm([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], [1.0, 0.0, 0.0], 0.1)
+
+    picked = particles.pick(np.array([2, 0, 0]))
+
+    np.testing.assert_array_equal(picked.pos[:, 0], [2.0, 0.0, 0.0])
+    assert picked.count == 3 and particles.pick(np.array([], dtype=np.intp)).count == 0
+
+
+def test_swarms_are_merged_oldest_first_by_when_their_particles_were_born() -> None:
+    first = swarm([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], [1.0, 0.0, 0.0], 0.1)
+    second = swarm([[2.0, 0.0, 0.0], [3.0, 0.0, 0.0]], [0.0, 1.0, 0.0], [0.2, 0.3])
+
+    both = in_birth_order((first, np.array([1.0, 3.0])), (second, np.array([2.0, 3.0])))
+
+    np.testing.assert_array_equal(both.pos[:, 0], [0.0, 2.0, 1.0, 3.0])  # a tie keeps the order
+    np.testing.assert_allclose(both.radius, [0.1, 0.2, 0.1, 0.3])
+    np.testing.assert_array_equal(both.colour[:, 0], [1.0, 0.0, 1.0, 0.0])
+    nothing = in_birth_order((NO_PARTICLES, np.zeros(0)), (first, np.array([5.0, 4.0])))
+    np.testing.assert_array_equal(nothing.pos[:, 0], [1.0, 0.0])  # and with a part with none
 
 
 def _median_seconds(ground: Ground, particles: Particles) -> float:

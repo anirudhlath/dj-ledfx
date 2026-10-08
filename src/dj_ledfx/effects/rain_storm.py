@@ -8,9 +8,10 @@ random spot over the zone's floor at half the ceiling's height: one particle as 
 strike_reach, so each lamp lights by its distance from the strike. It flashes, dims, and
 flickers once more.
 
-A home with so many lamps that the drops would pass MAX_PARTICLES, with the lightning's room
-kept, makes fewer of them (lamp_streams): every lamp's rate comes down together, so that none
-is ever cut mid-life.
+A home with so many lamps that the drops would pass MAX_PARTICLES, with the room kept for the
+lightning at its fastest (STRIKES_MAX a minute, whatever the setting is at the moment), makes
+fewer of them (lamp_streams): every lamp's rate comes down together, so that none is ever cut
+mid-life. Drops and strikes are listed together oldest first, by when each began.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.particle_tools import (
     NO_PARTICLES,
     draws,
-    joined,
+    in_birth_order,
     lamp_streams,
     recent,
     swarm,
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from dj_ledfx.effects.context import RenderContext
-    from dj_ledfx.effects.particle_tools import Ground, Particles
+    from dj_ledfx.effects.particle_tools import F64, Ground, Particles
 
 RAIN_PALETTE = ("#2850ff", "#78b4ff", "#c8e6ff")
 LIGHTNING = "#e6eeff"
@@ -45,6 +46,7 @@ UNDER_M = 0.15  # and runs out this far under its bottom, or at the floor if tha
 JITTER_M = 0.05  # how far from its LED a drop runs
 EDGE = 0.1  # a drop fades in over this share of its run, and out over the last
 FLASH_S = 0.6  # a strike is over in this long
+STRIKES_MAX = 30.0  # the most strikes a minute the setting allows: the room kept for them
 LIFE_SPREAD = 0.0  # every drop takes fall_s: none of it given or taken
 
 
@@ -102,7 +104,7 @@ class RainStorm(ParamParticles):
                 type="float",
                 default=4.0,
                 min=0.0,
-                max=30.0,
+                max=STRIKES_MAX,
                 step=1.0,
                 label="Lightning",
                 description="Strikes a minute; none at 0",
@@ -124,13 +126,17 @@ class RainStorm(ParamParticles):
         self._lightning = palette_float([self._values["lightning"]])[0]
 
     def positions(self, ctx: RenderContext, ground: Ground) -> Particles:
-        return joined(self._drops(ctx, ground), self._strikes(ctx, ground))
+        return in_birth_order(self._drops(ctx, ground), self._strikes(ctx, ground))
 
-    def _drops(self, ctx: RenderContext, ground: Ground) -> Particles:
+    def _drops(self, ctx: RenderContext, ground: Ground) -> tuple[Particles, F64]:
+        """The drops, and when each began."""
         values = self._values
         lamps = ground.lamps
         fall = float(values["fall_s"])
-        room = MAX_PARTICLES - flashes_at_once(float(values["strikes_per_min"]))
+        # The lightning's room is kept for its fastest, not for this moment's setting, which a
+        # signal can bind: the drops' rate must not jump as the setting moves, through 0 too. A
+        # rate past the setting's range (only a constructor allows one) is given the room it needs.
+        room = MAX_PARTICLES - flashes_at_once(max(float(values["strikes_per_min"]), STRIKES_MAX))
         streams = lamp_streams(
             self._seed, lamps.count, float(values["drops_per_lamp"]), LIFE_SPREAD, room
         )
@@ -152,19 +158,21 @@ class RainStorm(ParamParticles):
         )
         fade = np.minimum(1.0, np.minimum(share, 1.0 - share) / EDGE)
         colour = palette_at(self._palette, u[:, 2]) * fade[:, None].astype(np.float32)
-        return swarm(pos, colour, float(values["size"]))
+        return swarm(pos, colour, float(values["size"])), now.born
 
-    def _strikes(self, ctx: RenderContext, ground: Ground) -> Particles:
+    def _strikes(self, ctx: RenderContext, ground: Ground) -> tuple[Particles, F64]:
+        """The strikes, and when each began."""
         per_min = float(self._values["strikes_per_min"])
         if per_min <= 0.0:
-            return NO_PARTICLES
+            return NO_PARTICLES, np.zeros(0)
         every = 60.0 / per_min
         n = recent(ctx.t, every, FLASH_S)
         u = draws(self._seed, n, 3, stream=1)
-        age = ctx.t - (n + u[:, 0]) * every
+        born = (n + u[:, 0]) * every
+        age = ctx.t - born
         alive = (age >= 0.0) & (age < FLASH_S)
         low, high = ground.low.astype(np.float64), ground.high.astype(np.float64)
         spot = low[:2] + u[alive, 1:] * (high[:2] - low[:2])
         pos = np.column_stack([spot, np.full(len(spot), (ground.floor + ground.ceiling) / 2.0)])
         colour = self._lightning[None, :] * flash(age[alive])[:, None].astype(np.float32)
-        return swarm(pos, colour, float(self._values["strike_reach"]))
+        return swarm(pos, colour, float(self._values["strike_reach"])), born[alive]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from conftest import render_ctx
@@ -11,7 +13,7 @@ from stray_lamps import STRAYS, stays_in_band, unpassed
 from dj_ledfx.effects import rain_storm as rain_module
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.ledset import LedSet
-from dj_ledfx.effects.particle_tools import Ground, lamps_of
+from dj_ledfx.effects.particle_tools import Ground, draws, lamps_of
 from dj_ledfx.effects.particles import MAX_PARTICLES, drawn
 from dj_ledfx.effects.rain_storm import (
     EDGE,
@@ -273,18 +275,24 @@ def test_two_strikes_can_flash_at_once_at_30_a_minute_but_not_three() -> None:
     assert at_once == {0, 1, 2}
 
 
-@pytest.mark.parametrize("lamps", [100, 700])
-def test_rain_on_a_crowded_home_with_no_lightning_keeps_the_whole_cap_for_drops(
+@pytest.mark.parametrize("lamps", [3, 100, 250, 700])
+def test_the_drops_of_a_crowded_home_stay_as_they_are_whatever_the_lightning_setting(
     lamps: int,
 ) -> None:
+    """strikes_per_min is bindable, so it moves at will, through 0 and the whole of its range;
+    the room the drops are given must not move with it, or the whole rain would jump."""
     crowd = bulbs(lamps)
     ground = Ground.of(crowd)
-    stormy = _storm(drops_per_lamp=8.0, strikes_per_min=30.0)
-    calm = _storm(drops_per_lamp=8.0, strikes_per_min=0.0)
-    ahead = [render_ctx(t=float(t)) for t in np.arange(500.0, 530.0, 0.37)]
-    stormy_drops = np.mean([(stormy.positions(c, ground).radius < 1.0).sum() for c in ahead])
-    calm_drops = np.mean([calm.positions(c, ground).count for c in ahead])
-    assert calm_drops > stormy_drops  # the room kept for strikes is the drops' when there are none
+    setting = RainStorm.parameters()["strikes_per_min"]
+    rates = np.linspace(float(setting.min or 0.0), float(setting.max or 0.0), 7)
+    storms = [_storm(drops_per_lamp=8.0, strikes_per_min=float(rate)) for rate in rates]
+    for t in np.arange(500.0, 530.0, 0.37):
+        ctx = render_ctx(t=float(t))
+        made = [storm.positions(ctx, ground) for storm in storms]
+        drops = [each.pick(each.radius < 1.0) for each in made]  # leaving the strikes out
+        for other in drops[1:]:
+            np.testing.assert_array_equal(other.pos, drops[0].pos)
+            np.testing.assert_array_equal(other.colour, drops[0].colour)
 
 
 def test_the_lamps_of_a_crowded_home_are_not_in_step_so_its_rain_does_not_breathe() -> None:
@@ -310,18 +318,40 @@ def test_however_the_draws_fall_no_more_strikes_flash_at_once_than_the_room_kept
     assert most == flashes_at_once(per_min)  # the room is enough, and no more than needed
 
 
+def test_drops_and_strikes_are_listed_oldest_first_by_when_they_began() -> None:
+    storm = _storm(strikes_per_min=15.0, drops_per_lamp=8.0, fall_s=1.0)
+    ground, every, mixed = Ground.of(LAMPS), 60.0 / 15.0, 0
+    top = 1.4 + OVER_M  # the lamps stand from 0.1 m: a drop runs from here to the floor
+    for t in np.arange(500.0, 600.0, 0.01):
+        made = storm.positions(render_ctx(t=float(t)), ground)
+        strike = made.radius > 2.0
+        if not strike.any():
+            continue
+        n = np.arange(math.floor(t / every) - 1, math.floor(t / every) + 1)
+        u = draws(1, n, 3, stream=1)[:, 0]  # strike n comes at (n + u) * every
+        age = t - (n + u) * every
+        began = np.empty(made.count)
+        began[~strike] = t - (top - made.pos[~strike, 2]) / top * 1.0  # a drop's run takes fall_s
+        began[strike] = t - age[(age >= 0.0) & (age < FLASH_S)]
+        assert (np.diff(began) >= -1e-4).all()
+        mixed += int(began[strike].min() < began[~strike].max())  # younger drops than a strike
+    assert mixed > 100  # a strike in among the drops, not always last
+
+
 def test_there_is_no_room_kept_for_lightning_that_never_comes() -> None:
     assert flashes_at_once(0.0) == 0
 
 
+@pytest.mark.parametrize("per_min", [0.0, 4.0, 30.0, 200.0])  # the last is past the setting
 @pytest.mark.parametrize("lamps", [100, 250, 500, 700])
 def test_however_the_draws_fall_rain_never_passes_the_cap_on_a_crowded_home(
-    monkeypatch: pytest.MonkeyPatch, lamps: int
+    monkeypatch: pytest.MonkeyPatch, lamps: int, per_min: float
 ) -> None:
-    storm = _storm(drops_per_lamp=8.0, strikes_per_min=30.0, fall_s=1.0)
+    storm = _storm(drops_per_lamp=8.0, strikes_per_min=per_min, fall_s=1.0)
     served, most = worst_crowd(monkeypatch, rain_module, storm, bulbs(lamps), 20.0)
-    room = MAX_PARTICLES - 2  # the lightning's: two strikes can flash at once at 30 a minute
+    fastest = max(per_min, float(RainStorm.parameters()["strikes_per_min"].max or 0.0))
+    room = MAX_PARTICLES - flashes_at_once(fastest)  # kept for the lightning at its fastest
     assert served == min(lamps, room)
     each = room // served  # the rest of the cap, shared out in whole drops
     assert most == each  # the worst hand fills a lamp's share, and never past it
-    assert served * most + 2 <= MAX_PARTICLES
+    assert served * most + flashes_at_once(per_min) <= MAX_PARTICLES

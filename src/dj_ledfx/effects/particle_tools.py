@@ -69,8 +69,8 @@ class Particles:
             return self
         return Particles(self.pos[-count:], self.colour[-count:], self.radius[-count:])
 
-    def pick(self, which: NDArray[np.bool_]) -> Particles:
-        """The particles `which` marks, in order."""
+    def pick(self, which: NDArray[np.bool_] | NDArray[np.intp]) -> Particles:
+        """The particles `which` marks (a mask) or names (indices), in that order."""
         return Particles(self.pos[which], self.colour[which], self.radius[which])
 
 
@@ -96,6 +96,13 @@ def joined(*parts: Particles) -> Particles:
         np.concatenate([part.colour for part in parts]),
         np.concatenate([part.radius for part in parts]),
     )
+
+
+def in_birth_order(*parts: tuple[Particles, F64]) -> Particles:
+    """Several swarms as one, oldest first: each part is its particles and when each of them
+    was born, in seconds. Particles born together keep the order of the parts."""
+    whole = joined(*(particles for particles, _ in parts))
+    return whole.pick(np.argsort(np.concatenate([born for _, born in parts]), kind="stable"))
 
 
 def _mix(x: NDArray[np.uint64]) -> NDArray[np.uint64]:
