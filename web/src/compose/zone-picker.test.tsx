@@ -144,9 +144,9 @@ describe('ZonePicker (§6.3)', () => {
 
   // Only Live-PutLookOn draws Pick lights…; Phone-PutLookOn's row is the zones alone, and the renders are the
   // layout's authority.
-  it("draws no Pick lights… in the phone's row, only a button for each zone", () => {
+  it("draws no Pick lights… on the phone, and only a button for each zone in its row", () => {
     const { group } = pick({ variant: 'phone' })
-    expect(within(group).queryByRole('button', { name: 'Pick lights…' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Pick lights…' })).not.toBeInTheDocument()
     expect(within(group).getAllByRole('button')).toHaveLength(hero.zones.length)
   })
 
