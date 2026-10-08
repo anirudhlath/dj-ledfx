@@ -189,6 +189,16 @@ const LIVE_ENTRIES: Record<string, Entry> = {
     pattern: /`AttentionPopover` \(desktop, (\d+) px, anchored under the button\)/,
     take: (m) => n(m[1]),
   },
+  lookTile: {
+    where: '§6.4 LookTile',
+    pattern: /\*\*`LookTile`\*\* \(composer, (\d+) px\): thumb, serif (\d+) name/,
+    take: (m) => ({ px: n(m[1]), namePx: n(m[2]) }),
+  },
+  phoneComposer: {
+    where: '§8.10 Put a look on',
+    pattern: /sheet: Where \((\d+) px zone buttons, horizontal scroll\), What \(category chips, look rows with (\d+) × (\d+) thumbs\)/,
+    take: (m) => ({ zonePx: n(m[1]), thumb: { width: n(m[2]), height: n(m[3]) } }),
+  },
 }
 
 /** Each entry's number, from the spec's text. Each sentence must say it once. */
@@ -249,7 +259,13 @@ const luminance = (hex: string) => [1, 3, 5].reduce((sum, at) => sum + parseInt(
 /** The renders RENDER reads. */
 const RENDERS = ['reference/Main.html', 'reference/State-Firmware.html']
 /** The renders LIVE_RENDER reads. */
-const LIVE_RENDERS = ['reference/Main.html', 'reference/State-Sheet.html', 'reference/State-Problems.html']
+const LIVE_RENDERS = [
+  'reference/Main.html',
+  'reference/State-Sheet.html',
+  'reference/State-Problems.html',
+  'reference/Live-PutLookOn.html',
+  'reference/Phone-PutLookOn.html',
+]
 
 /** Fails unless each named file of docs/design/web-app is the one HANDOFF.sha256 (`pins`) pins. */
 export function checkPins(pins: string, names: readonly string[], readBytes: (name: string) => Uint8Array): void {
@@ -436,13 +452,17 @@ export function extractRender(read: ReadText): Record<string, unknown> {
  * `@keyframes pip`, is turned from a cycle's percentages into beats: the four pips share one animation,
  * each a beat behind the last, so a cycle is as many beats as the delays' step goes into it. An overlay's
  * gold is State-Sheet.html's: tokens.css has no colour for it. A ZoneRow's small swatches are State-Problems.html's
- * size: §6.3 gives them none (F3 decision 34).
+ * size: §6.3 gives them none (F3 decision 34). The composer's (Live-PutLookOn.html, Phone-PutLookOn.html): a
+ * LookThumb's scene, its viewBox and background, the same in every render that draws one; and the note under the
+ * selected zone's name, which tokens.css has no colour for, on a chip (desktop) and a zone button (phone).
  */
 export function extractLiveRender(read: ReadText): Record<string, unknown> {
   const tokens = read('tokens.css')
   const main = read('reference/Main.html')
   const sheet = read('reference/State-Sheet.html')
   const problems = read('reference/State-Problems.html')
+  const put = read('reference/Live-PutLookOn.html')
+  const phonePut = read('reference/Phone-PutLookOn.html')
   const curve = same(main, {
     where: 'Main.html @keyframes pip',
     pattern:
@@ -467,6 +487,21 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     pattern:
       /font-size: 20px; white-space: nowrap">[^<]*<\/span><span style="font-size: 12px; color: #[0-9a-f]{6}; white-space: nowrap">[^<]*<\/span><\/div><div style="display: flex; align-items: center; flex-wrap: wrap; gap: \d+px"><span title="[^"]*" style="display: inline-block; width: (\d+)px; height: \1px; border-radius: 50%/,
   })
+  const thumb = same(put + phonePut, {
+    where: "Live-PutLookOn.html's and Phone-PutLookOn.html's thumbs",
+    pattern:
+      /<svg class="tb " viewBox="0 0 (\d+) (\d+)" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: block; background: (#[0-9a-f]{6}); ">/,
+  })
+  const chipNote = same(put, {
+    where: "Live-PutLookOn.html, the selected zone chip's note",
+    pattern:
+      /<button type="button" aria-pressed="true" style="display: inline-flex;[^"]*">[^<]*<span style="font-size: [\d.]+px; color: (#[0-9a-f]{6}); font-weight: 500; font-style: normal">/,
+  })
+  const buttonNote = same(phonePut, {
+    where: "Phone-PutLookOn.html, the selected zone button's note",
+    pattern:
+      /<button type="button" aria-pressed="true" style="display: flex; flex-direction: column;[^"]*"><span style="[^"]*">[^<]*<\/span><span style="font-size: [\d.]+px; color: (#[0-9a-f]{6}); white-space: nowrap">/,
+  })
   return {
     pip: {
       rest: colour(tokens, curve[1]),
@@ -480,6 +515,8 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     },
     overlay: { background: card[1], border: card[2], ink: card[3], track: card[4], fill: card[5] },
     rowSwatchPx: n(row[1]),
+    lookThumb: { width: n(thumb[1]), height: n(thumb[2]), background: colour(tokens, thumb[3]) },
+    selectedZoneNote: { chip: colour(tokens, chipNote[1]), button: colour(tokens, buttonNote[1]) },
   }
 }
 

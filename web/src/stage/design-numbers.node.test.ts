@@ -44,9 +44,15 @@ describe('the design numbers', () => {
     expect(LIVE_RENDER.rowSwatchPx).toBeLessThan(LIVE_SPEC.swatch.px)
   })
 
+  // §6.4: LookThumb is "a small 16:10 scene", and the composer's tile holds one (F4 ruling 7).
+  it("draw a look's thumb at 16:10", () => {
+    expect(LIVE_RENDER.lookThumb.width / LIVE_RENDER.lookThumb.height).toBe(16 / 10)
+  })
+
   it('name the sentence that moved', () => {
     expect(() => extractSpec('')).toThrow(/§7\.1 Floors/)
     expect(() => extractLive('')).toThrow(/§4\.4/)
+    expect(() => extractLive(handoff.spec.replace('**`LookTile`** (composer', '**`LookTile`** (library'))).toThrow(/§6\.4 LookTile/)
   })
 
   it('come only from pinned files', () => {
