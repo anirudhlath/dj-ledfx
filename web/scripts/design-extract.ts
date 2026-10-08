@@ -455,6 +455,8 @@ export function extractRender(read: ReadText): Record<string, unknown> {
  * size: §6.3 gives them none (F3 decision 34). The composer's (Live-PutLookOn.html, Phone-PutLookOn.html): a
  * LookThumb's scene, its viewBox and background, read in each render and the same in both; and the note beside the
  * chosen zone's name on the desktop's chip, and under it on the phone's zone button: tokens.css has no colour for it.
+ * The phone's stage outlines the chosen zone in a narrower stroke than the spec's number, which Live-PutLookOn.html's
+ * matches: the phone's render isn't scaled (its floor strokes are as wide as the desktop's).
  */
 export function extractLiveRender(read: ReadText): Record<string, unknown> {
   const tokens = read('tokens.css')
@@ -507,6 +509,11 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     pattern:
       /<button type="button" aria-pressed="true" style="display: flex; flex-direction: column;[^"]*"><span style="[^"]*">[^<]*<\/span><span style="font-size: [\d.]+px; color: (#[0-9a-f]{6}); white-space: nowrap">/,
   })
+  // The zone's outline on the phone's stage: the one closed path stroked in `text` and not filled.
+  const phoneOutline = same(phonePut, {
+    where: "Phone-PutLookOn.html's zone outline",
+    pattern: /<path d="M[\d. L]+ Z" fill="none" stroke="#[0-9a-f]{6}" stroke-width="([\d.]+)"/,
+  })
   return {
     pip: {
       rest: colour(tokens, curve[1]),
@@ -522,6 +529,7 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     rowSwatchPx: n(row[1]),
     lookThumb: { width: n(thumb[1]), height: n(thumb[2]), background: colour(tokens, thumb[3]) },
     selectedZoneNote: { chip: colour(tokens, chipNote[1]), button: colour(tokens, buttonNote[1]) },
+    phoneOutlinePx: n(phoneOutline[1]),
   }
 }
 

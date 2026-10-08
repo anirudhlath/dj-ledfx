@@ -74,5 +74,6 @@ export const LIVE_RENDER = {
   "selectedZoneNote": {
     "chip": "#4a4640",
     "button": "#5a564e"
-  }
+  },
+  "phoneOutlinePx": 1.4
 } as const

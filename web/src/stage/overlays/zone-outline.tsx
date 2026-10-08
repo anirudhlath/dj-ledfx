@@ -1,5 +1,6 @@
 // §8.1 "Hover a card → its zone outlines on the stage", drawn as §7.6 compose outlines its chosen zone:
-// SPEC.compose.outlinePx of `text`, on the floor; and compose's other rooms, dimmed.
+// `text`, on the floor, as wide as the stage's behaviour says; and compose's other rooms, dimmed. Neither
+// render sets a line join (Live-PutLookOn's, Phone-PutLookOn's), so the outline sets none.
 import type { Id, Vec2 } from '@/api/contract'
 import { SPEC } from '../design-numbers'
 import { cssColour } from '../palette'
@@ -10,11 +11,13 @@ export interface ZoneOutlineShape {
   zoneId: Id
   /** On the stage, in CSS px. */
   polygons: readonly (readonly Vec2[])[]
+  /** The stroke's width, in CSS px: StageBehaviour's `outlinePx`. */
+  widthPx: number
 }
 
 export function ZoneOutline({ outline }: { outline: ZoneOutlineShape }) {
   return (
-    <g data-outline={outline.zoneId} fill="none" stroke={cssColour('--color-text')} strokeWidth={SPEC.compose.outlinePx} strokeLinejoin="round">
+    <g data-outline={outline.zoneId} fill="none" stroke={cssColour('--color-text')} strokeWidth={outline.widthPx}>
       {outline.polygons.map((polygon, index) => (
         <polygon key={index} points={points(polygon)} />
       ))}

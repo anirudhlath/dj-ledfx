@@ -37,7 +37,7 @@ import { tooltipText } from './tooltip'
 import type { StageData } from './use-stage-data'
 import { useStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
-import { boxOf, zonePolygons, zoneRooms } from './zone-shape'
+import { boxOf, subZonesIn, zonePolygons, zoneRooms } from './zone-shape'
 
 /** §7.6 frozen: the last frame, greyed as SPEC.frozen says. */
 const GREYED = `grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`
@@ -86,7 +86,8 @@ export function StageView({ data, variant, route, roomTo, outlined = null, focus
   // The composer's zone, once the zones load; a drop keeps it, greyed (§7.6 frozen).
   const composeZone = compose === null ? undefined : zones.find((zone) => zone.id === compose.zoneId)
   const previewing = composeZone === undefined ? null : (compose?.previewing ?? null)
-  const mode = frozen ? 'frozen' : focusZone !== undefined ? 'focus' : composeZone !== undefined ? 'compose' : 'live'
+  // The composer's stage is the composer's before its zone is known too: not Live's, for a moment, while the zones load.
+  const mode = frozen ? 'frozen' : focusZone !== undefined ? 'focus' : compose !== null ? 'compose' : 'live'
   const behaviour = stageBehaviour({ mode, variant, reducedMotion, labels: stored.labels })
   // The phone's stage has no view controls, so it shows the fitted view (§8.10).
   const view = behaviour.overlays ? stored.view : FIT_VIEW
@@ -143,18 +144,19 @@ export function StageView({ data, variant, route, roomTo, outlined = null, focus
   const outline = useMemo(() => {
     if (pose === null || outlineZone === undefined) return null
     const polygons = zonePolygons(home, outlineZone, lights).map((polygon) => polygon.map(([x, y]) => projectPoint(pose, [x, y, 0])))
-    return polygons.length === 0 ? null : { zoneId: outlineZone.id, polygons }
-  }, [pose, outlineZone, home, lights])
-  // §7.6 compose: "Rooms outside the chosen zone dimmed", and the zone's own labels in `text`.
+    return polygons.length === 0 ? null : { zoneId: outlineZone.id, polygons, widthPx: behaviour.outlinePx }
+  }, [pose, outlineZone, home, lights, behaviour.outlinePx])
+  // §7.6 compose: "Rooms outside the chosen zone dimmed", and the zone's own labels in `text`: its rooms',
+  // its own, and those of the running sub-zones inside it.
   const composeShape = useMemo((): ComposeShape | null => {
     if (pose === null || composeZone === undefined) return null
     const lit = zoneRooms(home, composeZone, lights)
     const dims = home.rooms.filter((room) => !lit.has(room.id)).map((room) => room.polygon.map(([x, y]) => projectPoint(pose, [x, y, 0])))
-    return { dims, chosen: new Set([...lit, composeZone.id]) }
-  }, [pose, composeZone, home, lights])
-  // State-Problems' and State-Transition's tags: desktop `live` only (F3 decision 18).
-  const tagged = behaviour.overlays && behaviour.interactive
-  const tags = useMemo(() => (tagged ? zoneTags(running, bodies) : []), [tagged, running, bodies])
+    return { dims, chosen: new Set([...lit, composeZone.id, ...subZonesIn(composeZone, zones)]) }
+  }, [pose, composeZone, home, lights, zones])
+  // §8.1's overlays, and State-Problems' and State-Transition's tags: desktop `live` only (F3 decision 18).
+  const overlaid = behaviour.overlays && behaviour.interactive
+  const tags = useMemo(() => (overlaid ? zoneTags(running, bodies) : []), [overlaid, running, bodies])
 
   /** The pointer on the stage, in CSS px, with the room under it. */
   const under = (event: MouseEvent<HTMLElement>) => {
@@ -217,26 +219,27 @@ export function StageView({ data, variant, route, roomTo, outlined = null, focus
       ) : (
         <NoWebGL />
       )}
-      {webgl && behaviour.legend && <Legend />}
       {webgl && previewWords !== null && behaviour.previewTag === 'card' && zoneBox !== null && (
         <PreviewCard {...previewWords} zoneBox={zoneBox} stage={size} />
       )}
       {webgl && previewWords !== null && behaviour.previewTag === 'tag' && <PreviewTag />}
-      {/* The interactive layer: §7.6 `live` only. */}
+      {/* Each render's order: Main.html's tools and readout, its legend, then its zoom; Live-PutLookOn's card before the legend. */}
+      {webgl && overlaid && (
+        <>
+          <StageTools
+            mode={view.mode}
+            onMode={(mode) => store({ ...stored, view: { ...view, mode } })}
+            labels={stored.labels}
+            onLabels={(on) => store({ ...stored, labels: on })}
+          />
+          <SunReadout sun={sun} />
+        </>
+      )}
+      {webgl && behaviour.legend && <Legend />}
+      {webgl && overlaid && <ViewControls view={view} onView={(next) => store({ ...stored, view: next })} />}
+      {/* The rest of the interactive layer: §7.6 `live` only. */}
       {behaviour.interactive && (
         <>
-          {webgl && behaviour.overlays && (
-            <>
-              <StageTools
-                mode={view.mode}
-                onMode={(mode) => store({ ...stored, view: { ...view, mode } })}
-                labels={stored.labels}
-                onLabels={(on) => store({ ...stored, labels: on })}
-              />
-              <SunReadout sun={sun} />
-              <ViewControls view={view} onView={(next) => store({ ...stored, view: next })} />
-            </>
-          )}
           {webgl && pose !== null && tags.length > 0 && <ZoneTags tags={tags} pose={pose} />}
           {webgl && pose !== null && light !== undefined && body !== undefined && state !== undefined && (
             <LightTooltip

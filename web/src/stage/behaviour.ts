@@ -1,7 +1,7 @@
 // §7.6's modes table in code: what the stage does in each mode, on each variant (§8.10's phone).
 // StageView asks once and hands the answers down; nothing else checks the mode or the variant. The
 // mode F7 brings (map) extends it.
-import { LIVE_SPEC } from '@/design/live-numbers'
+import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import { SPEC } from './design-numbers'
 
 /**
@@ -42,6 +42,11 @@ export interface StageBehaviour {
   overlays: boolean
   /** §8.1's legend: Live's, and the composer's (Live-PutLookOn draws it). */
   legend: boolean
+  /**
+   * The width, in CSS px, of the outline round the zone the stage draws: SPEC.compose.outlinePx's on
+   * desktop, and the narrower one Phone-PutLookOn draws (its render isn't scaled).
+   */
+  outlinePx: number
   /** The rooms' labels (§7.6). */
   labels: boolean
   /** The sun's mono label (§7.4); Phone-Live.png draws the sun without it. */
@@ -73,6 +78,7 @@ export function stageBehaviour({ mode, variant, reducedMotion, labels }: StageOp
     framesComposeZone: phone,
     overlays: !phone && !focus,
     legend: !phone && (live || compose),
+    outlinePx: phone ? LIVE_RENDER.phoneOutlinePx : SPEC.compose.outlinePx,
     labels: !phone && !focus && labels,
     sunLabel: !phone && !focus,
     greyed: mode === 'frozen',

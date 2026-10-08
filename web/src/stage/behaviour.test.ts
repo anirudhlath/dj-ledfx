@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LIVE_SPEC } from '@/design/live-numbers'
+import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import { stageBehaviour, type StageOptions } from './behaviour'
 import { SPEC } from './design-numbers'
 
@@ -18,6 +18,7 @@ describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)",
       sunLabel: true,
       greyed: false,
       previewTag: null,
+      outlinePx: SPEC.compose.outlinePx,
       cadenceMs: 1000 / SPEC.target.fps,
     })
     expect(behaviour({ labels: false })).toMatchObject({ labels: false, sunLabel: true })
@@ -35,6 +36,7 @@ describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)",
       sunLabel: false,
       greyed: false,
       previewTag: null,
+      outlinePx: LIVE_RENDER.phoneOutlinePx,
       cadenceMs: 1000 / SPEC.phoneFps,
     })
     expect(behaviour({ mode: 'focus' })).toMatchObject({ overlays: false, legend: false, labels: false, cadenceMs: 1000 / SPEC.target.fps })
@@ -52,15 +54,17 @@ describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)",
       sunLabel: true,
       greyed: false,
       previewTag: 'card',
+      outlinePx: SPEC.compose.outlinePx,
       cadenceMs: 1000 / SPEC.target.fps,
     })
-    // Phone-PutLookOn: the zone framed, a tag on the stage, and no labels or legend.
+    // Phone-PutLookOn: the zone framed, a tag on the stage, and no labels or legend, and an outline narrower than the spec's.
     expect(behaviour({ mode: 'compose', variant: 'phone' })).toMatchObject({
       roomClick: 'choose',
       framesComposeZone: true,
       legend: false,
       labels: false,
       previewTag: 'tag',
+      outlinePx: LIVE_RENDER.phoneOutlinePx,
     })
   })
 

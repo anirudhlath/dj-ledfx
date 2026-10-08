@@ -4,7 +4,7 @@ import { buildScenario } from '@/api/mocks/scenarios'
 import { HERO_NOW } from '@/test/live'
 import { stageBodies } from './bodies'
 import { anchorOf } from './marks'
-import { besideZone, boxOf, zoneMiddle, zonePolygons, zoneRooms } from './zone-shape'
+import { besideZone, boxOf, subZonesIn, zoneMiddle, zonePolygons, zoneRooms } from './zone-shape'
 
 const { home, lights, zones } = buildScenario('hero', HERO_NOW)
 const zone = (id: string) => zones.find((each) => each.id === id)!
@@ -31,6 +31,18 @@ describe("a zone's place on the stage", () => {
     const pair = [lights.find((light) => light.room === 'kitchen')!, lights.find((light) => light.room === 'bedroom')!]
     const group: Zone = { id: 'pair', name: 'Pair', kind: 'group', lights: pair.map((light) => light.id) }
     expect(zoneRooms(home, group, lights)).toEqual(new Set(['kitchen', 'bedroom']))
+  })
+
+  // §7.6 compose: the chosen zone's running sub-zones are lit with it, so their labels are the zone's too.
+  it('holds the sub-zones whose lights are all its own', () => {
+    expect(subZonesIn(zone('home'), zones)).toEqual(['office'])
+    expect(subZonesIn(zone('bedroom'), zones)).toEqual(['office'])
+    expect(subZonesIn(zone('office'), zones)).toEqual(['office'])
+    // Not one in another room, nor one with no lights to be inside anything, nor one only partly inside.
+    expect(subZonesIn(zone('living'), zones)).toEqual([])
+    expect(subZonesIn(zone('kitchen'), zones)).toEqual([])
+    const part: Zone = { id: 'part', name: 'Part', kind: 'group', lights: zone('office').lights.slice(0, 1) }
+    expect(subZonesIn(part, zones)).toEqual([])
   })
 
   // F4 ruling 15: Live-PutLookOn's card sits left of the room it previews on.

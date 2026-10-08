@@ -1,6 +1,7 @@
 // Where a zone is on the stage: its floor polygons, for §8.1's "Hover a card → its zone outlines on the
-// stage", the rooms it lights, which §7.6 compose leaves undimmed, and the middle of its lights, where its
-// tag goes (F3 decision 18), in plan metres; and where a card beside it goes, in CSS px.
+// stage", the rooms it lights and the sub-zones inside it, which §7.6 compose leaves undimmed, and the
+// middle of its lights, where its tag goes (F3 decision 18), in plan metres; and where a card beside it
+// goes, in CSS px.
 import type { Home, Id, Light, Vec2, Vec3, Zone } from '@/api/contract'
 import type { ElementSize } from '@/lib/use-element-size'
 import type { Body } from './bodies'
@@ -50,6 +51,17 @@ export function zoneRooms(home: Home, zone: Zone, lights: readonly Light[]): Set
       return new Set(lights.flatMap((light) => (members.has(light.id) && light.room != null ? [light.room] : [])))
     }
   }
+}
+
+/**
+ * The ids of the sub-zones inside a zone: those whose lights are all the zone's, and which have lights. A
+ * sub-zone's label on the stage is its own (labels.ts), so compose lights it with the zone it is in.
+ */
+export function subZonesIn(zone: Zone, zones: readonly Zone[]): Id[] {
+  const own = new Set(zone.lights)
+  return zones
+    .filter((candidate) => candidate.kind === 'sub-zone' && candidate.lights.length > 0 && candidate.lights.every((id) => own.has(id)))
+    .map((sub) => sub.id)
 }
 
 /** A box round some points on the stage, CSS px. */

@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { useSearchParams } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { applyMessage, liveStore } from '@/api/live-store'
+import { queries, queryClient } from '@/api/queries'
 import { lookName, roomName } from '@/api/mocks/fixtures'
 import type { ScenarioName } from '@/api/mocks/scenarios'
-import { LIVE_SPEC } from '@/design/live-numbers'
+import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import type { ElementSize } from '@/lib/use-element-size'
 import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
@@ -64,6 +65,20 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(stage.getByText(sunScene(state.home, sun)!.label!)).toBeInTheDocument()
     expect(stage.getByText(sunPosition(sun)!)).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')).toHaveLength(4)
+  })
+
+  // Main.html's markup: the tools, the sun's readout, the legend, then the view controls.
+  it("lays the overlays out in Main.html's order", async () => {
+    const { state } = await openLive()
+    const overlays = [
+      screen.getByRole('switch', { name: 'Labels' }),
+      screen.getByText(sunPosition(state.inputs.sun)!),
+      screen.getByRole('list', { name: 'What the lights show' }),
+      screen.getByRole('button', { name: 'Zoom in' }),
+    ]
+    overlays.slice(1).forEach((overlay, index) => {
+      expect(overlays[index].compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
   })
 
   // I1: the engine pushes `lights` every 5 s while a look plays, with the colours it read back. Only a
@@ -346,9 +361,19 @@ describe('the stage in compose (§7.6)', () => {
 
   async function openCompose(
     search: string,
-    { variant = 'desktop', size = MAIN_STAGE, scenario = 'hero' }: { variant?: StageVariant; size?: ElementSize; scenario?: ScenarioName } = {},
+    {
+      variant = 'desktop',
+      size = MAIN_STAGE,
+      scenario = 'hero',
+      zonesLoaded = true,
+    }: { variant?: StageVariant; size?: ElementSize; scenario?: ScenarioName; zonesLoaded?: boolean } = {},
   ) {
     const state = seedStage(scenario)
+    if (!zonesLoaded) {
+      // The home and the lights are in, and the zones are still on their way: a request that never answers.
+      queryClient.removeQueries({ queryKey: queries.zones().queryKey })
+      vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    }
     const router = renderApp(`/next/live/put${search}`, { routes: [{ path: '/live/put', element: <Composing variant={variant} /> }] })
     await loadedStage()
     act(() => resizeObserved(size.width, size.height))
@@ -448,6 +473,57 @@ describe('the stage in compose (§7.6)', () => {
     expect(stage.getByText(room.name)).toHaveClass('fill-text')
     expect(stage.getByText(other.name)).toHaveClass('fill-text-3')
     expect(document.querySelector('[data-dims]')!.querySelectorAll('polygon')).toHaveLength(state.home.rooms.length - 1)
+  })
+
+  // The zone's floor is lit and outlined, so its running sub-zones' labels are lit: the whole home's and a room's hold the office desk's.
+  it.each(['home', 'bedroom'])('lights the label of a running sub-zone inside the chosen %s', async (zoneId) => {
+    const { state } = await openCompose(`?zone=${zoneId}&look=embers`)
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    const office = state.home.subZones.find((sub) => sub.id === 'office')!
+    expect(stage.getByText(office.name)).toHaveClass('fill-text')
+    expect(stage.getByText(lookName('comets'))).toHaveClass('fill-text')
+  })
+
+  // Live-PutLookOn draws the PREVIEW ON SCREEN card before the legend.
+  it('puts the card before the legend', async () => {
+    await openCompose(`?zone=living&look=embers${previewing('embers')}`)
+    const card = document.querySelector('[data-preview-card]')!
+    const legend = screen.getByRole('list', { name: 'What the lights show' })
+    expect(card.compareDocumentPosition(legend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  // Live-PutLookOn draws the outline at the spec's width and Phone-PutLookOn at its own narrower one, each with no join.
+  it.each([
+    ['desktop', MAIN_STAGE, SPEC.compose.outlinePx],
+    ['phone', LIVE_SPEC.phoneStage, LIVE_RENDER.phoneOutlinePx],
+  ] as const)('outlines the zone as the %s render does', async (variant, size, widthPx) => {
+    await openCompose('?zone=living&look=embers', { variant, size })
+    const outline = document.querySelector('[data-outline]')!
+    expect(outline).toHaveAttribute('stroke-width', String(widthPx))
+    expect(outline).not.toHaveAttribute('stroke-linejoin')
+  })
+
+  // Composing is the stage's mode whenever the composer asks for it: before the zones load, or for a zone that isn't there, the stage
+  // is still the composer's, with none of Live's tools, links, tags or tooltip, and a room still chooses its zone in place.
+  it.each([
+    ['are still loading', 'living', false],
+    ['have no zone of that id', 'gone', true],
+  ] as const)("stays the composer's stage while the zones %s", async (_, zoneId, zonesLoaded) => {
+    const { state, router, pose } = await openCompose(`?zone=${zoneId}&look=embers`, { scenario: 'problems', zonesLoaded })
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Zoom in' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
+    expect(stage.queryByText('Lava stopped · 19:12')).not.toBeInTheDocument()
+    const light = state.lights.find((candidate) => candidate.status === 'streaming' && candidate.shape != null)!
+    const [lx, ly] = projectPoint(pose, anchorOf(lightBodies(light)[0]))
+    fireEvent.pointerMove(picture(), { clientX: lx, clientY: ly, pointerType: 'mouse' })
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    const room = state.home.rooms.find((candidate) => candidate.hasLights)!
+    const [x, y] = projectPoint(pose, [...room.labelAt, 0])
+    fireEvent.click(picture(), { clientX: x, clientY: y })
+    expect(router.state.location.search).toBe(`?zone=${room.id}&look=embers`)
+    expect(router.state.historyAction).toBe('REPLACE')
   })
 
   // §6.3 ZonePicker: "Clicking a room on the stage selects the same zone": in place, the look kept, no tooltip.

@@ -19,7 +19,7 @@ import { ZoneDims, ZoneOutline, type ZoneOutlineShape } from './zone-outline'
 export interface ComposeShape {
   /** The other rooms' floors, on the stage in CSS px. */
   dims: readonly (readonly Vec2[])[]
-  /** The keys of the labels in the chosen zone: its rooms, and itself where it's a sub-zone. */
+  /** The keys of the labels in the chosen zone: its rooms, the sub-zones inside it, and itself where it's a sub-zone. */
   chosen: ReadonlySet<string>
 }
 

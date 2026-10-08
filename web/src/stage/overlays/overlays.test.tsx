@@ -4,6 +4,7 @@ import type { SunInput } from '@/api/contract'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { ButtonLink } from '@/design/button'
+import { LIVE_RENDER } from '@/design/live-numbers'
 import { HERO_NOW, pushFrame } from '@/test/live'
 import { linkNames, renderAt } from '@/test/router'
 import { heroPose, MAIN_STAGE } from '@/test/stage'
@@ -76,14 +77,22 @@ describe("the stage's SVG layer (§7.3, §7.4, §7.6, §9.1)", () => {
     expect(container.querySelector('text')).not.toBeInTheDocument()
   })
 
-  // §8.1 "Hover a card → its zone outlines on the stage", drawn as §7.6 compose outlines its zone.
-  it('outlines a zone in SPEC.compose.outlinePx of text', () => {
-    const outline = { zoneId: 'living', polygons: [[[0, 0], [10, 0], [10, 10]] as [number, number][]] }
-    const { container } = render(<StageSvg pose={pose} marks={[]} labels={null} sun={null} outline={outline} />)
-    const drawn = container.querySelector('[data-outline="living"]')!
-    expect(drawn).toHaveAttribute('stroke', 'var(--color-text)')
-    expect(drawn).toHaveAttribute('stroke-width', String(SPEC.compose.outlinePx))
-    expect(drawn.querySelector('polygon')).toHaveAttribute('points', '0,0 10,0 10,10')
+  // §8.1 "Hover a card → its zone outlines on the stage", drawn as §7.6 compose outlines its zone: in `text`, at the
+  // width it is given (the spec's, or the phone render's), and with no join, as Live-PutLookOn's and Phone-PutLookOn's paths set none.
+  it('outlines a zone in text, as wide as the outline says, with no join', () => {
+    const polygons = [[[0, 0], [10, 0], [10, 10]] as [number, number][]]
+    const { container, rerender } = render(
+      <StageSvg pose={pose} marks={[]} labels={null} sun={null} outline={{ zoneId: 'living', polygons, widthPx: SPEC.compose.outlinePx }} />,
+    )
+    const drawn = () => container.querySelector('[data-outline="living"]')!
+    expect(drawn()).toHaveAttribute('stroke', 'var(--color-text)')
+    expect(drawn()).toHaveAttribute('stroke-width', String(SPEC.compose.outlinePx))
+    expect(drawn()).not.toHaveAttribute('stroke-linejoin')
+    expect(drawn().querySelector('polygon')).toHaveAttribute('points', '0,0 10,0 10,10')
+    rerender(
+      <StageSvg pose={pose} marks={[]} labels={null} sun={null} outline={{ zoneId: 'living', polygons, widthPx: LIVE_RENDER.phoneOutlinePx }} />,
+    )
+    expect(drawn()).toHaveAttribute('stroke-width', String(LIVE_RENDER.phoneOutlinePx))
   })
 })
 

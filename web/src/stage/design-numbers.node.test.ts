@@ -53,6 +53,13 @@ describe('the design numbers', () => {
     expect(LIVE_RENDER.lookThumb.width / LIVE_RENDER.lookThumb.height).toBe(16 / 10)
   })
 
+  // Phone-PutLookOn draws the chosen zone's outline narrower than the spec's number, which Live-PutLookOn's matches; the phone's
+  // render isn't scaled (its floor strokes are as wide as the desktop's), so the narrower outline is the render's own.
+  it("draw the phone's zone outline narrower than the desktop's", () => {
+    expect(LIVE_RENDER.phoneOutlinePx).toBeGreaterThan(0)
+    expect(LIVE_RENDER.phoneOutlinePx).toBeLessThan(SPEC.compose.outlinePx)
+  })
+
   // The composer's thumb and its chosen-zone notes use these three as raw CSS colours. If tokens.css ever gains one of the hexes,
   // colour() names its custom property instead (`--color-…`), and the style built from that would silently be nothing.
   it("give the composer's three colours as hex", () => {
@@ -72,6 +79,12 @@ describe('the design numbers', () => {
     const renamed = (html: string) => html.replaceAll('<svg class="tb "', '<svg class="tile "')
     expect(() => extractLiveRender(edited('Phone-PutLookOn', renamed))).toThrow(/Phone-PutLookOn\.html's thumbs no longer reads/)
     expect(() => extractLiveRender(edited('Live-PutLookOn', renamed))).toThrow(/Live-PutLookOn\.html's thumbs no longer reads/)
+  })
+
+  // The phone's outline is read from the one path Phone-PutLookOn draws it with: a render that moves it is named.
+  it.runIf(handoff.read !== null)('name the render whose zone outline moved', () => {
+    const filled = (html: string) => html.replace(/(<path d="M[\d. L]+ Z") fill="none"/, '$1 fill="#000000"')
+    expect(() => extractLiveRender(edited('Phone-PutLookOn', filled))).toThrow(/Phone-PutLookOn\.html's zone outline no longer reads/)
   })
 
   // Thumbs that still read but draw another scene in one render: the two renders are named together.
