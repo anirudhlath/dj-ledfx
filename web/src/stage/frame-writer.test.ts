@@ -20,6 +20,7 @@ const bodyOf = (light: Light): Body => lightBodies(light)[0]
 const entry = (light: Light, patch: Partial<WriterEntry> = {}): WriterEntry => ({
   body: bodyOf(light),
   streamed: true,
+  stream: 'live',
   resting: null,
   room: 1,
   ...patch,
@@ -128,6 +129,19 @@ describe('the frame writer', () => {
     expect([...writer.glowColours]).toEqual([0, 0, 1])
   })
 
+  // §7.6 compose: "the chosen zone renders the preview stream instead of live".
+  it('draws a light from the stream its entry names', () => {
+    const frames = new FrameStore()
+    stream(frames, POINT.id, solid(POINT.leds, [255, 0, 0]))
+    pushFrame(POINT.id, (seq += 1), solid(POINT.leds, [0, 0, 255]), { store: frames, stream: 'preview' })
+    const writer = new FrameWriter([entry(POINT)])
+    writer.write(frames)
+    expect([...writer.glowColours]).toEqual([1, 0, 0])
+    writer.setEntries([entry(POINT, { stream: 'preview' })])
+    writer.write(frames)
+    expect([...writer.glowColours]).toEqual([0, 0, 1])
+  })
+
   it('lights no floor for a light in no room', () => {
     const frames = new FrameStore()
     stream(frames, POINT.id, solid(POINT.leds, [255, 255, 255]))
@@ -175,7 +189,7 @@ describe('the frame writer', () => {
     }
     const frames = new FrameStore()
     stream(frames, pc.id, solid(pc.leds, [9, 9, 9]))
-    const writer = new FrameWriter(lightBodies(placed).map((body) => ({ body, streamed: true, resting: null, room: 1 })))
+    const writer = new FrameWriter(lightBodies(placed).map((body) => ({ body, streamed: true, stream: 'live' as const, resting: null, room: 1 })))
     writer.write(frames)
     expect(writer.leds).toBe(pc.leds)
     writer.write(new FrameStore())
@@ -199,6 +213,15 @@ describe('the writer entries', () => {
     const [only] = writerEntries(lightBodies(light), [light], lightStates([light]), homeFixture.rooms)
     expect(only).toMatchObject({ streamed: false, resting: [0, 255, 0] })
     expect(homeFixture.rooms[only.room - 1].id).toBe(light.room)
+  })
+
+  // §7.6 compose: the chosen zone's lights draw the preview, whatever they do now.
+  it('draw the previewed lights from the preview stream, streaming or not', () => {
+    const idle: Light = { ...POINT, status: 'idle', power: true, colour: '#00ff00' }
+    const entriesOf = (previewed: Set<Id> | null) => writerEntries(lightBodies(idle), [idle], lightStates([idle]), homeFixture.rooms, previewed)
+    expect(entriesOf(new Set([idle.id]))[0]).toMatchObject({ streamed: true, stream: 'preview', resting: [0, 255, 0] })
+    expect(entriesOf(new Set())[0]).toMatchObject({ streamed: false, stream: 'live' })
+    expect(entriesOf(null)[0]).toMatchObject({ streamed: false, stream: 'live' })
   })
 
   // §9.1: offline and switched-off lights show only their marks, which are the overlay's.

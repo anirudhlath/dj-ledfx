@@ -4,11 +4,15 @@
 import type { Id, Room } from '@/api/contract'
 import { StagePending } from './stage-pending'
 import type { StageVariant } from './behaviour'
-import { StageView } from './stage-view'
+import { StageView, type StageCompose } from './stage-view'
 import { useStageData } from './use-stage-data'
 
-/** "Click a room → /live/put?zone=<room>" (§8.1): a room's zone has the room's id. */
-const composerFor = (room: Room) => `/live/put?zone=${encodeURIComponent(room.id)}`
+/**
+ * "Click a room → /live/put?zone=<room>" (§8.1): a room's zone has the room's id. In the composer the
+ * room becomes its zone, and the look stays chosen.
+ */
+const composerFor = (room: Room, lookId: Id | null = null) =>
+  `/live/put?zone=${encodeURIComponent(room.id)}${lookId === null ? '' : `&look=${encodeURIComponent(lookId)}`}`
 
 export interface StageProps {
   variant: StageVariant
@@ -16,10 +20,13 @@ export interface StageProps {
   outlined?: Id | null
   /** §7.6 focus: the zone the stage frames (Zone detail). */
   focus?: Id | null
+  /** §7.6 compose: the composer's zone and preview (Put a look on). */
+  compose?: StageCompose | null
 }
 
-export default function Stage({ variant, outlined = null, focus = null }: StageProps) {
+export default function Stage({ variant, outlined = null, focus = null, compose = null }: StageProps) {
   const data = useStageData()
   if (data === null) return <StagePending />
-  return <StageView data={data} variant={variant} route="live" roomTo={composerFor} outlined={outlined} focus={focus} />
+  const roomTo = compose === null ? composerFor : (room: Room) => composerFor(room, compose.lookId)
+  return <StageView data={data} variant={variant} route="live" roomTo={roomTo} outlined={outlined} focus={focus} compose={compose} />
 }

@@ -4,7 +4,7 @@ import { buildScenario } from '@/api/mocks/scenarios'
 import { HERO_NOW } from '@/test/live'
 import { stageBodies } from './bodies'
 import { anchorOf } from './marks'
-import { zoneMiddle, zonePolygons } from './zone-shape'
+import { besideZone, boxOf, zoneMiddle, zonePolygons, zoneRooms } from './zone-shape'
 
 const { home, lights, zones } = buildScenario('hero', HERO_NOW)
 const zone = (id: string) => zones.find((each) => each.id === id)!
@@ -21,6 +21,29 @@ describe("a zone's place on the stage", () => {
       home.rooms.filter((room) => room.id === 'kitchen' || room.id === 'bedroom').map((room) => room.polygon),
     )
     expect(zonePolygons(home, undefined, lights)).toEqual([])
+  })
+
+  // §7.6 compose: "Rooms outside the chosen zone dimmed".
+  it('lights its own rooms: all of them for the whole home, its room for a sub-zone, its lights\' for a group', () => {
+    expect(zoneRooms(home, zone('home'), lights)).toEqual(new Set(home.rooms.map((room) => room.id)))
+    expect(zoneRooms(home, zone('living'), lights)).toEqual(new Set(['living']))
+    expect(zoneRooms(home, zone('office'), lights)).toEqual(new Set([home.subZones.find((sub) => sub.id === 'office')!.room]))
+    const pair = [lights.find((light) => light.room === 'kitchen')!, lights.find((light) => light.room === 'bedroom')!]
+    const group: Zone = { id: 'pair', name: 'Pair', kind: 'group', lights: pair.map((light) => light.id) }
+    expect(zoneRooms(home, group, lights)).toEqual(new Set(['kitchen', 'bedroom']))
+  })
+
+  // F4 ruling 15: Live-PutLookOn's card sits left of the room it previews on.
+  it('puts a card left of its zone, else right, else over it, and keeps it on the stage', () => {
+    const stage = { width: 1000, height: 800 }
+    const card = { width: 200, height: 80 }
+    const box = (left: number, right: number) => ({ left, right, top: 300, bottom: 500 })
+    expect(besideZone(box(500, 700), stage, card)).toEqual([300, 360])
+    expect(besideZone(box(100, 300), stage, card)).toEqual([300, 360])
+    expect(besideZone(box(100, 900), stage, card)).toEqual([400, 360])
+    expect(besideZone({ left: 500, right: 700, top: -100, bottom: 0 }, stage, card)).toEqual([300, 0])
+    expect(boxOf([[[1, 5], [4, 2]], [[3, 9]]])).toEqual({ left: 1, top: 2, right: 4, bottom: 9 })
+    expect(boxOf([])).toBeNull()
   })
 
   // F3 decision 18.
