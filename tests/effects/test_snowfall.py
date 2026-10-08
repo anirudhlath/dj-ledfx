@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 from conftest import render_ctx
-from map_home import ROW, leds_at, lights_at
+from map_home import ROW, bulbs, leds_at, lights_at
 
+from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particles import MAX_PARTICLES, drawn
 from dj_ledfx.effects.snowfall import COLUMN_M, EDGE, Snowfall
 
@@ -15,6 +16,20 @@ def _snow(**settings: object) -> Snowfall:
     snow = Snowfall(**settings)
     snow.reseed(1)
     return snow
+
+
+def _lamp_of_each(snow: Snowfall, leds: LedSet, t: float = 500.0) -> np.ndarray:
+    """The lamp each flake falls past at moment t: the nearest, seen from above. (For snow
+    that does not drift, over lamps of one LED each that are well apart.)"""
+    drawn(snow, render_ctx(t=t), leds)
+    gaps = np.linalg.norm(snow.particles.pos[:, None, :2] - leds.pos[None, :, :2], axis=2)
+    assert (gaps.min(axis=1) <= COLUMN_M + 1e-5).all()  # each is in some lamp's column
+    return gaps.argmin(axis=1)
+
+
+def _flakes_past(snow: Snowfall, leds: LedSet) -> list[int]:
+    """How many flakes fall past each lamp, at one moment."""
+    return np.bincount(_lamp_of_each(snow, leds), minlength=leds.count).tolist()
 
 
 def test_snow_falls_from_the_ceiling_to_the_floor() -> None:
@@ -32,15 +47,25 @@ def test_snow_falls_from_the_ceiling_to_the_floor() -> None:
 
 
 def test_each_lamp_has_per_lamp_flakes_falling_past_it_up_to_the_cap() -> None:
-    snow = _snow(per_lamp=3.0)
-    drawn(snow, render_ctx(t=500.0), CORNERS)
+    snow = _snow(per_lamp=3.0, drift=0.0)
+    assert _flakes_past(snow, CORNERS) == [3, 3, 3, 3]
     assert snow.particles.count == 12
-    drawn(snow, render_ctx(t=500.0), leds_at([[1.0, 1.0, 1.0]]))
+    assert _flakes_past(snow, leds_at([[1.0, 1.0, 1.0]])) == [3]
     assert snow.particles.count == 3
-    many = lights_at(*[[(float(x), 0.0, 1.0)] for x in range(40)])
-    snow = _snow(per_lamp=20.0)
-    drawn(snow, render_ctx(t=500.0), many)  # 800 flakes asked for
-    assert snow.particles.count == MAX_PARTICLES
+    assert _flakes_past(_snow(per_lamp=1.0, drift=0.0), bulbs(19)) == [1] * 19  # none go without
+    snow = _snow(per_lamp=20.0, drift=0.0)  # 800 flakes asked for
+    over = _flakes_past(snow, bulbs(40))
+    assert snow.particles.count == MAX_PARTICLES == sum(over)
+    assert max(over) - min(over) <= 1  # the cap takes from the lamps alike
+
+
+def test_a_flake_keeps_its_lamp_from_fall_to_fall_and_as_per_lamp_changes() -> None:
+    snow = _snow(per_lamp=3.0, fall_s=3.0, drift=0.0)  # 12 flakes, each fall 2.55 to 3.45 s
+    first = _lamp_of_each(snow, CORNERS)
+    for t in (520.0, 537.0, 560.0):  # by now each has landed and started again, many times
+        np.testing.assert_array_equal(_lamp_of_each(snow, CORNERS, t=t), first)
+    more = _lamp_of_each(_snow(per_lamp=5.0, fall_s=3.0, drift=0.0), CORNERS)  # 20 flakes
+    np.testing.assert_array_equal(more[: len(first)], first)  # the first twelve stay put
 
 
 def test_each_flake_falls_past_an_led_and_along_a_long_light() -> None:

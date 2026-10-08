@@ -16,7 +16,7 @@ import numpy as np
 
 from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.effects.particle_tools import draws, swarm
+from dj_ledfx.effects.particle_tools import draws, spread_over, swarm
 from dj_ledfx.effects.particles import MAX_PARTICLES, ParamParticles
 
 if TYPE_CHECKING:
@@ -79,13 +79,15 @@ class Snowfall(ParamParticles):
         lamps = ground.lamps
         count = min(MAX_PARTICLES, max(1, round(float(values["per_lamp"]) * lamps.count)))
         flakes = np.arange(count)
+        # Flake i falls past a lamp of its own: every lamp is taken before any gets two.
+        home = spread_over(self._seed, count, lamps.count)
         own = draws(self._seed, flakes, 3)  # each flake's pace, start and colour
         fall = float(values["fall_s"]) * (0.85 + 0.3 * own[:, 0])
         progress = ctx.t / fall + own[:, 1]
         falls = np.floor(progress).astype(np.int64)
         share = progress - falls  # 0 at the ceiling, 1 at the floor
         where = draws(self._seed, falls * FALLS + flakes, 5, stream=1)  # this fall's place
-        past = ground.on(lamps.pick(where[:, 0]), where[:, 4])
+        past = ground.on(home, where[:, 4])  # (draw 0 is unused)
         out, side = COLUMN_M * np.sqrt(where[:, 1]), 2.0 * math.pi * where[:, 2]
         turn = 2.0 * math.pi * (SWAYS * share + where[:, 3])
         drift = float(values["drift"])

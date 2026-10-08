@@ -184,6 +184,11 @@ def upright(x: float, y: float, low: float = 0.1, high: float = 1.4) -> list[lis
     return [[x, y, z] for z in np.linspace(low, high, 14)]
 
 
+def bulbs(count: int) -> LedSet:
+    """A zone of `count` bulbs (one light, one LED each) in a row a metre apart, 1 m up."""
+    return lights_at(*[[(float(x), 0.0, 1.0)] for x in range(count)])
+
+
 ROW = [[x, 0.0, 1.0] for x in np.linspace(0.0, 4.0, 9)]  # 0.5 m apart, west to east
 
 

@@ -6,16 +6,19 @@ from __future__ import annotations
 
 import statistics
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
 import numpy as np
 import pytest
 from conftest import tempo_ctx
-from map_home import leds_at, seeded_ledset
+from map_home import bulbs, leds_at, seeded_ledset
 
+from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.ledset import LedSet
-from dj_ledfx.effects.particles import MAX_PARTICLES, ParticleEffect, drawn
+from dj_ledfx.effects.particle_tools import Ground
+from dj_ledfx.effects.particles import MAX_PARTICLES, ParamParticles, ParticleEffect, drawn
 from dj_ledfx.effects.registry import get_effect_class, get_effect_classes
 from dj_ledfx.types import FloatRGB
 from dj_ledfx.zones.runtime import FRAME_BUDGET_S
@@ -24,11 +27,17 @@ PARTICLE_KINDS = sorted(
     name for name, cls in get_effect_classes().items() if issubclass(cls, ParticleEffect)
 )
 START = 2000.0  # beats: 1000 s into a steady 120 BPM
+# The zones the largest settings run on: this home, and one with so many lamps that an effect
+# making particles for each lamp goes past the cap unless it keeps to it (snow's asks for 800).
+HOMES: dict[str, Callable[[], LedSet]] = {
+    "this home": seeded_ledset,
+    "forty bulbs": lambda: bulbs(40),
+}
 
 
-def _effect(kind: str, seed: int = 1, **settings: Any) -> ParticleEffect:
+def _effect(kind: str, seed: int = 1, **settings: Any) -> ParamParticles:
     effect = get_effect_class(kind)(**settings)
-    assert isinstance(effect, ParticleEffect)
+    assert isinstance(effect, ParamParticles)
     effect.reseed(seed)
     return effect
 
@@ -42,11 +51,19 @@ def _largest(kind: str) -> dict[str, Any]:
     }
 
 
-def _frames(effect: ParticleEffect, leds: LedSet, count: int = 120) -> list[FloatRGB]:
-    """Two seconds at 60 frames a second, checking the particles as they go."""
-    frames = []
+def _keeps_to_the_cap(effect: ParamParticles, ctx: RenderContext, ground: Ground) -> None:
+    """What the effect makes itself, before `step` cuts it to the cap (the cut hides a miss)."""
+    if ground.lamps.count:  # no lamps, no particles
+        assert effect.positions(ctx, ground).count <= MAX_PARTICLES
+
+
+def _frames(effect: ParamParticles, leds: LedSet, count: int = 120) -> list[FloatRGB]:
+    """`count` frames at 60 a second (two seconds by default), checking each one's particles."""
+    ground, frames = Ground.of(leds), []
     for step in range(count):
-        frames.append(drawn(effect, tempo_ctx(START + step / 30), leds))
+        ctx = tempo_ctx(START + step / 30)
+        frames.append(drawn(effect, ctx, leds))
+        _keeps_to_the_cap(effect, ctx, ground)
         particles = effect.particles
         assert particles.count <= MAX_PARTICLES
         assert np.isfinite(particles.pos).all() and np.isfinite(particles.radius).all()
@@ -88,11 +105,14 @@ def test_the_same_moment_gives_the_same_frame_however_the_frames_fall(kind: str)
 @pytest.mark.parametrize("kind", PARTICLE_KINDS)
 def test_a_tempo_from_30_to_300_bpm_keeps_every_frame_in_range(kind: str) -> None:
     leds = seeded_ledset()
+    ground = Ground.of(leds)
     effect, t, beats, frames = _effect(kind), 1000.0, START, []
     for bpm in (30.0, 300.0, 120.0):  # each for two seconds, the clock running on
         for _ in range(60):
             t, beats = t + 1 / 30, beats + bpm / 60.0 / 30
-            frames.append(drawn(effect, replace(tempo_ctx(beats, bpm=bpm), t=t), leds))
+            ctx = replace(tempo_ctx(beats, bpm=bpm), t=t)
+            frames.append(drawn(effect, ctx, leds))
+            _keeps_to_the_cap(effect, ctx, ground)
             assert effect.particles.count <= MAX_PARTICLES
     _good(frames, leds)
 
@@ -119,9 +139,10 @@ def test_a_zone_with_no_leds_draws_nothing(kind: str) -> None:
     assert frame.shape == (0, 3) and effect.particles.count == 0
 
 
+@pytest.mark.parametrize("home", HOMES)
 @pytest.mark.parametrize("kind", PARTICLE_KINDS)
-def test_the_largest_settings_keep_to_the_particle_cap(kind: str) -> None:
-    leds = seeded_ledset()
+def test_the_largest_settings_keep_to_the_particle_cap(kind: str, home: str) -> None:
+    leds = HOMES[home]()
     _good(_frames(_effect(kind, **_largest(kind)), leds, count=30), leds)
 
 

@@ -61,6 +61,17 @@ def test_fireflies_that_drift_toward_an_anchor_keep_near_it() -> None:
         assert (flies.particles.pos[:, 2] >= 0.0).all()  # never under the floor
 
 
+def test_fireflies_drawn_to_an_anchor_that_is_not_there_wander_round_the_lamps() -> None:
+    gone, plain = _flies(drift_toward="gone"), _flies()  # THREE has no anchors
+    lit = False
+    for t in _moments(10.0)[::7]:
+        frame = drawn(gone, render_ctx(t=t), THREE)
+        np.testing.assert_array_equal(frame, drawn(plain, render_ctx(t=t), THREE))
+        np.testing.assert_array_equal(gone.particles.pos, plain.particles.pos)
+        lit = lit or bool(frame.any())
+    assert lit
+
+
 def test_each_firefly_glows_softly_and_flares_now_and_then() -> None:
     leds = leds_at(ROW)
     flies = _flies(count=5, palette=["#ffffff"])
