@@ -165,9 +165,13 @@ def leds_at(
     return build_ledset([LedSource("light", len(points), placed=placed)], space)
 
 
-def lights_at(*lights: Sequence[Sequence[float]], ceiling: float | None = 3.0) -> LedSet:
+def lights_at(
+    *lights: Sequence[Sequence[float]],
+    ceiling: float | None = 3.0,
+    anchors: Mapping[str, Sequence[float]] | None = None,
+) -> LedSet:
     """Lights' LEDs at these map positions, one light for each list of points, in this
-    order, in a zone with this ceiling and no anchors."""
+    order, in a zone with this ceiling and these anchors."""
     sources = [
         LedSource(
             f"light-{index}",
@@ -176,7 +180,8 @@ def lights_at(*lights: Sequence[Sequence[float]], ceiling: float | None = 3.0) -
         )
         for index, points in enumerate(lights)
     ]
-    return build_ledset(sources, Space(ceiling=ceiling))
+    points = {name: np.asarray(p, dtype=np.float32) for name, p in (anchors or {}).items()}
+    return build_ledset(sources, Space(anchors=MappingProxyType(points), ceiling=ceiling))
 
 
 def upright(x: float, y: float, low: float = 0.1, high: float = 1.4) -> list[list[float]]:
