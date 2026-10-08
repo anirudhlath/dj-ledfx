@@ -9,7 +9,10 @@ keeps its shape at any tempo.
 
 A particle lands within SCATTER_M of its LED, but no lower than the floor or the lamp's lowest
 LED and no higher than the ceiling or the lamp's top (Ground.floor_for and ceiling_for): the
-scatter is an overhang, and an overhang stops at the floor and the ceiling.
+scatter is an overhang, and an overhang stops at the floor and the ceiling. The flight keeps to
+that band all the way, not only where it lands: from an anchor over the ceiling, or from the
+middle of a zone that stands over the ceiling of a lamp in the band, a burst leaves at the
+band's edge.
 
 At most ceil(fade_beats) bursts are in the air at once, whatever the tempo and however many
 lamps there are (a particle's lamp is drawn, not dealt out): at the largest settings 3 * 30 +
@@ -124,6 +127,7 @@ class BeatBursts(ParamParticles):
         way = 1.0 - (1.0 - np.minimum(age / ARRIVE, 1.0)) ** 2  # fast out, slowing to land
         origin = anchor_or_centre(ground.leds, str(values["anchor"])).astype(np.float64)
         pos = origin + (landing - origin) * way[:, None]
+        pos[:, 2] = ground.within(lamp, pos[:, 2])  # all the way, whatever height it leaves from
         palette = self._palette
         colour = palette[beat % len(palette)] * (1.0 - age)[:, None].astype(np.float32)
         return swarm(pos, colour, float(values["size"]))

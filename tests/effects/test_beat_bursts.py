@@ -13,6 +13,7 @@ from stray_lamps import (
     on_the_beat,
     run_frames,
     run_heights,
+    run_places,
     stays_in_band,
     unpassed,
 )
@@ -28,10 +29,11 @@ ANCHOR_ID = "anchor-a"
 ANCHOR = np.array([2.0, 0.2, 1.0], dtype=np.float32)
 
 
-def _room() -> LedSet:
-    """Four upright lamps round a 4 x 4 m room, with an anchor on its north wall."""
+def _room(anchor: np.ndarray = ANCHOR) -> LedSet:
+    """Four upright lamps round a 4 x 4 m room under a 3 m ceiling, with an anchor (on its
+    north wall, a metre up, unless it is put elsewhere)."""
     corners = (upright(0.5, 0.5), upright(3.5, 0.5), upright(3.5, 3.5), upright(0.5, 3.5))
-    return lights_at(*corners, anchors={ANCHOR_ID: ANCHOR})
+    return lights_at(*corners, anchors={ANCHOR_ID: anchor})
 
 
 def _bursts(**settings: object) -> BeatBursts:
@@ -193,6 +195,32 @@ def test_bursts_land_on_every_led_of_a_lamp_outside_the_floor_and_ceiling(where:
     assert moves(frames)  # flying out from frame to frame, not just spread over heights
     assert unpassed(z, leds) == []  # landing along the lamp's whole length
     assert stays_in_band(z, leds)  # the scatter round an LED stops at the floor and the ceiling
+
+
+@pytest.mark.parametrize("anchor_z", [4.0, -1.0], ids=["over the ceiling", "under the floor"])
+def test_bursts_from_an_anchor_outside_the_floor_and_ceiling_fly_between_them_all_the_way(
+    anchor_z: float,
+) -> None:
+    leds = _room(np.array([2.0, 0.2, anchor_z], dtype=np.float32))
+    frames = run_frames(_bursts(per_beat=30), leds, seconds=20.0, moment=on_the_beat)
+    z = np.concatenate(frames)
+    assert z.min() >= 0.0 and z.max() <= 3.0  # not only where they land: the flight too
+    assert unpassed(z, leds) == []  # and they still land along the lamps' whole length
+    assert moves(frames)
+
+
+def test_bursts_from_the_middle_of_a_zone_keep_to_the_band_of_the_lamp_they_go_to() -> None:
+    """A second lamp 6-7 m up puts the zone's middle 3.55 m up, over the 3 m ceiling that the
+    lamp in the band (where the particles that go west land) keeps to the whole way."""
+    leds = lights_at(upright(1.0, 1.0), upright(3.0, 1.0, 6.0, 7.0), ceiling=3.0)
+    assert leds.centre[0] == 2.0 and leds.centre[2] > 3.0
+    bursts = BeatBursts(anchor="", per_beat=30)
+    bursts.reseed(1)
+    # Seen every hundredth of a second: the flight over the ceiling is its first tenth.
+    where = np.concatenate(run_places(bursts, leds, seconds=10.0, step=0.01, moment=on_the_beat))
+    west = where[where[:, 0] < 2.0 - 1e-3]  # left the middle, for the lamp in the band
+    assert len(west) > 1000
+    assert west[:, 2].max() <= 3.0 + 1e-5
 
 
 def test_the_scatter_round_an_led_stops_at_the_floor_and_the_ceiling() -> None:
