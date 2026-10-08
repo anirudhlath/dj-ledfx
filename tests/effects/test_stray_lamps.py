@@ -16,6 +16,7 @@ from stray_lamps import (
     on_the_beat,
     run_frames,
     run_heights,
+    run_places,
     stays_in_band,
     unpassed,
 )
@@ -103,3 +104,12 @@ def test_the_heights_of_a_run_are_its_frames_heights_one_after_the_other() -> No
     assert all(frame.shape == (30,) and frame.dtype == np.float64 for frame in frames)
     pooled = run_heights(_vortex(count=30), leds, seconds=2.0, moment=on_the_beat)
     np.testing.assert_array_equal(pooled, np.concatenate(frames))
+
+
+def test_the_places_of_a_run_are_those_of_its_frames_and_their_heights_the_z() -> None:
+    leds = STRAYS["straddling the floor"]
+    places = run_places(_vortex(count=30), leds, seconds=2.0, moment=on_the_beat)
+    assert all(frame.shape == (30, 3) and frame.dtype == np.float64 for frame in places)
+    heights = run_frames(_vortex(count=30), leds, seconds=2.0, moment=on_the_beat)
+    for here, z in zip(places, heights, strict=True):
+        np.testing.assert_array_equal(here[:, 2], z)

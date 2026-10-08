@@ -6,7 +6,15 @@ import numpy as np
 import pytest
 from conftest import tempo_ctx
 from map_home import bulbs, lights_at, upright
-from stray_lamps import STRAYS, moves, on_the_beat, run_frames, stays_in_band, unpassed
+from stray_lamps import (
+    STRAYS,
+    moves,
+    on_the_beat,
+    run_frames,
+    run_places,
+    stays_in_band,
+    unpassed,
+)
 
 from dj_ledfx.effects import fountain as fountain_module
 from dj_ledfx.effects import particle_tools
@@ -19,10 +27,11 @@ ANCHOR_ID = "anchor-a"
 ANCHOR = np.array([2.0, 2.0, 0.45], dtype=np.float32)
 
 
-def _room() -> LedSet:
-    """Four upright lamps round a 4 x 4 m room, with an anchor in its middle, 0.45 m up."""
+def _room(anchor: np.ndarray = ANCHOR) -> LedSet:
+    """Four upright lamps round a 4 x 4 m room under a 3 m ceiling, with an anchor (in its
+    middle, 0.45 m up, unless it is put elsewhere)."""
     corners = (upright(0.5, 0.5), upright(3.5, 0.5), upright(3.5, 3.5), upright(0.5, 3.5))
-    return lights_at(*corners, anchors={ANCHOR_ID: ANCHOR})
+    return lights_at(*corners, anchors={ANCHOR_ID: anchor})
 
 
 def _fountain(**settings: object) -> Fountain:
@@ -234,6 +243,32 @@ def test_a_fountains_bursts_reach_every_led_of_a_lamp_outside_the_floor_and_ceil
     assert moves(frames)  # thrown from frame to frame, not just spread over heights
     assert unpassed(z, leds) == []  # thrown to the lamp's whole length
     assert stays_in_band(z, leds)  # the spray and the throws stop at the ceiling and the floor
+
+
+@pytest.mark.parametrize("anchor_z", [4.0, -1.0], ids=["over the ceiling", "under the floor"])
+def test_a_fountain_from_an_anchor_outside_the_floor_and_ceiling_keeps_between_them(
+    anchor_z: float,
+) -> None:
+    leds = _room(np.array([2.0, 2.0, anchor_z], dtype=np.float32))
+    frames = run_frames(_fountain(), leds, seconds=20.0, moment=on_the_beat)
+    z = np.concatenate(frames)
+    assert z.min() >= 0.0 and z.max() <= 3.0  # the spray and the throws, the whole way
+    assert unpassed(z, leds) == []  # and the bursts still land along the lamps' whole length
+    assert moves(frames)
+
+
+def test_a_fountains_bursts_from_the_middle_of_a_zone_keep_to_the_band_of_their_lamp() -> None:
+    """A second lamp 6-7 m up puts the zone's middle 3.55 m up, over the 3 m ceiling that the
+    lamp in the band (where the drops that go west land) keeps to the whole way."""
+    leds = lights_at(upright(1.0, 1.0), upright(3.0, 1.0, 6.0, 7.0), ceiling=3.0)
+    assert leds.centre[0] == 2.0 and leds.centre[2] > 3.0
+    fountain = Fountain(rate=5.0, burst=60)
+    fountain.reseed(1)
+    # Seen every hundredth of a second: the flight over the ceiling is its first tenth.
+    where = np.concatenate(run_places(fountain, leds, seconds=10.0, step=0.01, moment=on_the_beat))
+    west = where[where[:, 0] < 2.0 - 1e-3]  # left the middle, for the lamp in the band
+    assert len(west) > 1000
+    assert west[:, 2].max() <= 3.0 + 1e-5
 
 
 def _drops_in_the_air(fountain: Fountain, leds: LedSet) -> list[int]:

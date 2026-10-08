@@ -53,6 +53,23 @@ def on_the_beat(t: float) -> RenderContext:
     return tempo_ctx(2.0 * t)
 
 
+def run_places(
+    effect: ParticleEffect,
+    leds: LedSet,
+    seconds: float = 30.0,
+    step: float = 0.05,
+    moment: Callable[[float], RenderContext] = lambda t: render_ctx(t=t),
+) -> list[NDArray[np.float64]]:
+    """The places (P, 3) of the effect's particles in each frame of a run of `seconds`, seen
+    every `step`, at the moments `moment` makes of the time (render_ctx's, or on_the_beat's)."""
+    effect.place(leds)
+    frames = []
+    for t in np.arange(500.0, 500.0 + seconds, step):
+        effect.step(moment(float(t)))
+        frames.append(effect.particles.pos.astype(np.float64))
+    return frames
+
+
 def run_frames(
     effect: ParticleEffect,
     leds: LedSet,
@@ -60,14 +77,8 @@ def run_frames(
     step: float = 0.05,
     moment: Callable[[float], RenderContext] = lambda t: render_ctx(t=t),
 ) -> list[NDArray[np.float64]]:
-    """The heights of the effect's particles in each frame of a run of `seconds`, seen every
-    `step`, at the moments `moment` makes of the time (render_ctx's, or on_the_beat's)."""
-    effect.place(leds)
-    frames = []
-    for t in np.arange(500.0, 500.0 + seconds, step):
-        effect.step(moment(float(t)))
-        frames.append(effect.particles.pos[:, 2].astype(np.float64))
-    return frames
+    """The heights of the effect's particles in each frame of a run (run_places' z)."""
+    return [places[:, 2] for places in run_places(effect, leds, seconds, step, moment)]
 
 
 def run_heights(
