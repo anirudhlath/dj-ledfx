@@ -9,16 +9,22 @@ over half a beat. The spray is timed in seconds and the bursts in beats; the dro
 listed together, oldest first.
 
 Heights: the spray is the anchor's, so it keeps the zone's band, the floor to the ceiling (it
-is gone at the floor, and stops at the ceiling if it is thrown that high); a burst goes to a
-lamp, so it keeps that lamp's, widened to take in the lamp's own LEDs where the map (or a
-layer's transform) puts the lamp outside the zone's (Ground.floor_for and ceiling_for).
+is gone at the floor); a burst goes to a lamp, so it keeps that lamp's, widened to take in the
+lamp's own LEDs where the map (or a layer's transform) puts the lamp outside the zone's
+(Ground.floor_for and ceiling_for). Arcs fit under the ceiling rather than flatten against it:
+the spray is thrown no higher than the room over the anchor (but LEAST_RISE_M at the least, so
+that a drop still has a flight to be timed by) and a burst rises no more than the room over the
+higher of its two ends, under its lamp's ceiling. The spread is the same however short the
+flight: a drop lands the spread away at the anchor's height. The clip to the band stays only as
+the backstop for an anchor outside it (Ground.within).
 
 The count keeps to MAX_PARTICLES itself, so that step() never cuts a drop short: two beats'
 bursts are in the air at the most (BURSTS_ALIVE), and the spray has the rest of the room. A
 drop is in the air for `longest` seconds at the most, so at most ceil(rate * longest) + 1 are,
 and a rate that would pass the room comes down to fill it. That takes an anchor far over the
-ceiling: at the largest settings with the anchor at the ceiling of a 3 m room, a drop is in
-the air for 1.89 s at the longest, so 228 spray drops and 2 * 60 burst drops make 348.
+ceiling: at the largest settings in a 3 m room, a drop is in the air for 1.56 s at the longest
+(thrown from the floor up to the ceiling), so 189 spray drops and 2 * 60 burst drops make 309;
+for an anchor 100 m up a drop takes 4.6 s to fall, and the rate comes down to 82 a second.
 """
 
 from __future__ import annotations
@@ -43,6 +49,7 @@ if TYPE_CHECKING:
 FOUNTAIN_PALETTE = ("#2878ff", "#64c8ff", "#e6faff")
 GRAVITY = 9.81  # m/s²
 BURST_UP = 1.2  # a burst's drops rise this much higher than the spray, give or take a fifth
+LEAST_RISE_M = 0.05  # the spray is thrown at least this high, whatever room there is over it
 FLIGHT_BEATS = 1.0  # they land on their lamps on the next beat
 REST_BEATS = 0.5  # and fade there over this
 BEAT_KEYS = 256  # drop k of beat j's burst draws from key j * BEAT_KEYS + k
@@ -116,7 +123,10 @@ class Fountain(ParamParticles):
         """The steady spray: drops thrown up and out under gravity, until the floor; and when
         each was thrown."""
         values = self._values
-        up = math.sqrt(2.0 * GRAVITY * float(values["height_m"]))  # m/s to the height
+        # No higher than the room over the anchor: past the ceiling a drop would flatten on it.
+        height = float(values["height_m"])
+        height = max(min(height, ground.ceiling - float(origin[2])), LEAST_RISE_M)
+        up = math.sqrt(2.0 * GRAVITY * height)  # m/s to the height
         fall = max(float(origin[2]) - ground.floor, 0.0)
         longest = (up + math.sqrt(up * up + 2.0 * GRAVITY * fall)) / GRAVITY  # to the floor
         # The bursts' room is kept; ceil(rate * longest) + 1 drops are in the air at the most,
@@ -160,8 +170,12 @@ class Fountain(ParamParticles):
         since = beats - beat.astype(np.float64)  # beats since the burst was thrown
         share = since / FLIGHT_BEATS  # 1: landed
         rise = float(values["height_m"]) * BURST_UP * (0.8 + 0.4 * u[:, 1])
-        pos = arc(origin, landing, np.minimum(share, 1.0), rise)
-        # The throw stops at the ceiling and the floor, but never short of the lamp's own LEDs.
+        # An arc rises no more than the room over the higher of its ends, so it fits under the
+        # lamp's ceiling: its top is at most the higher end plus its rise.
+        over = np.maximum(ground.ceiling_for(lamp) - np.maximum(origin[2], landing[:, 2]), 0.0)
+        pos = arc(origin, landing, np.minimum(share, 1.0), np.minimum(rise, over))
+        # Only the backstop, for an anchor outside the lamp's band: the throw stops at the
+        # ceiling and the floor, but never short of the lamp's own LEDs.
         pos[:, 2] = ground.within(lamp, pos[:, 2])
         glow = np.clip(1.0 - (share - 1.0) * FLIGHT_BEATS / REST_BEATS, 0.0, 1.0)
         colour = palette_at(self._palette, u[:, 1]) * glow[:, None].astype(np.float32)

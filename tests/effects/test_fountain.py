@@ -40,14 +40,29 @@ def _fountain(**settings: object) -> Fountain:
     return fountain
 
 
-def _spray(fountain: Fountain, seconds: float = 4.0) -> np.ndarray:
+def _spray(fountain: Fountain, seconds: float = 4.0, room: LedSet | None = None) -> np.ndarray:
     """Every drop's place over some seconds at 120 BPM, 30 times a second."""
-    room = _room()
+    leds = _room() if room is None else room
     seen = []
     for step in range(int(seconds * 30)):
-        drawn(fountain, tempo_ctx(2000.0 + step / 15), room)
+        drawn(fountain, tempo_ctx(2000.0 + step / 15), leds)
         seen.append(fountain.particles.pos)
     return np.concatenate(seen)
+
+
+def _watched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[tuple[Particles, F64], ...]]:
+    """The spray's and the bursts' particles and birth times that each frame merges, kept in
+    a list that grows as the fountain draws."""
+    seen: list[tuple[tuple[Particles, F64], ...]] = []
+
+    def merging(*parts: tuple[Particles, F64]) -> Particles:
+        seen.append(parts)
+        return particle_tools.in_birth_order(*parts)
+
+    monkeypatch.setattr(fountain_module, "in_birth_order", merging)
+    return seen
 
 
 def test_the_spray_rises_to_its_height_and_never_falls_under_the_floor() -> None:
@@ -116,13 +131,7 @@ def test_the_spray_and_the_bursts_are_listed_together_oldest_first(
     room = _room()
     bpm, size, rate = 90.0, 16, 30.0
     fountain = _fountain(rate=rate, burst=size)
-    seen: list[tuple[tuple[Particles, F64], ...]] = []
-
-    def merging(*parts: tuple[Particles, F64]) -> Particles:
-        seen.append(parts)
-        return particle_tools.in_birth_order(*parts)
-
-    monkeypatch.setattr(fountain_module, "in_birth_order", merging)
+    seen = _watched(monkeypatch)
     mixed = 0
     for step in range(120):
         beats = 2000.0 + step / 10
@@ -224,11 +233,82 @@ def test_the_settings_reach_the_drops() -> None:
     )
 
 
-@pytest.mark.parametrize("burst", [0, 60], ids=["the spray", "the bursts"])
-def test_nothing_rises_through_the_ceiling_however_high_it_is_set(burst: int) -> None:
-    where = _spray(_fountain(burst=burst, rate=5.0 if burst else 30.0, height_m=3.0))
+@pytest.mark.parametrize(
+    ("burst", "rate", "highest"),
+    [(0, 30.0, 2.99), (60, 5.0, 2.9)],
+    ids=["the spray", "the bursts"],
+)
+def test_nothing_rises_through_the_ceiling_however_high_it_is_set(
+    burst: int, rate: float, highest: float
+) -> None:
+    """Set to 3 m from an anchor at 0.45 m, the spray goes up to the 3 m ceiling and its
+    highest drops come within a few cm of it; the bursts' arcs fit under it too."""
+    where = _spray(_fountain(burst=burst, rate=rate, height_m=3.0))
     assert where[:, 2].min() >= 0.0
-    assert where[:, 2].max() == 3.0  # thrown past the 3 m ceiling from 0.45 m, and stopped there
+    assert highest < where[:, 2].max() <= 3.0
+
+
+def test_the_drops_are_not_flattened_against_the_ceiling_at_the_largest_settings() -> None:
+    """The arcs fit under the ceiling instead of running into it: not one drop sits at the
+    ceiling, and hardly any is within a centimetre of it (that is the top of an arc)."""
+    z = _spray(_fountain(rate=120.0, height_m=3.0, burst=60))[:, 2]
+    assert z.max() <= 3.0
+    assert np.mean(z >= 3.0) == 0.0
+    assert np.mean(z > 3.0 - 0.01) < 0.01
+
+
+def test_a_bursts_arcs_fit_under_the_ceiling_at_the_largest_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    room = _room()
+    fountain = _fountain(rate=5.0, height_m=3.0, burst=60)
+    seen = _watched(monkeypatch)
+    heights = []
+    for step in range(120):
+        drawn(fountain, tempo_ctx(2000.0 + step / 15), room)
+        heights.append(seen[-1][1][0].pos[:, 2].astype(np.float64))  # the bursts' drops
+    z = np.concatenate(heights)
+    assert np.mean(z >= 3.0) == 0.0  # none against the ceiling
+    assert 2.9 < z.max() < 3.0  # and they go well up to it
+
+
+@pytest.mark.parametrize("anchor_z", [2.5, 2.9], ids=["half a metre", "10 cm"])
+def test_a_fountain_near_the_ceiling_throws_no_higher_than_the_room_over_it(
+    anchor_z: float,
+) -> None:
+    room_over = 3.0 - anchor_z
+    spread = 2.0
+    anchor = np.array([2.0, 2.0, anchor_z], dtype=np.float32)
+    where = _spray(_fountain(burst=0, height_m=3.0, spread_m=spread), room=_room(anchor))
+    z = where[:, 2]
+    assert np.mean(z >= 3.0) == 0.0  # none flattened against the ceiling
+    assert anchor_z + 0.97 * room_over < z.max() <= 3.0  # thrown right up to it
+    above = where[z >= anchor_z]  # before a drop falls past the anchor's height
+    away = np.linalg.norm(above[:, :2] - anchor[:2], axis=1)
+    assert (
+        0.9 * spread < away.max() <= spread + 1e-4
+    )  # the spread is the same however short a flight
+
+
+@pytest.mark.parametrize("anchor_z", [3.0, 3.5, 40.0], ids=["at it", "over it", "far over it"])
+def test_a_fountain_with_its_anchor_at_or_over_the_ceiling_stays_finite_and_in_the_room(
+    anchor_z: float,
+) -> None:
+    anchor = np.array([2.0, 2.0, anchor_z], dtype=np.float32)
+    where = _spray(_fountain(), room=_room(anchor))
+    assert np.isfinite(where).all()
+    assert where[:, 2].min() >= 0.0 and where[:, 2].max() <= 3.0
+
+
+@pytest.mark.parametrize("anchor_z", [0.45, 2.7, 4.0, -1.0])
+def test_a_bursts_drops_land_on_their_leds_on_the_next_beat_however_their_arc_is_fitted(
+    anchor_z: float,
+) -> None:
+    room = _room(np.array([2.0, 2.0, anchor_z], dtype=np.float32))
+    fountain = _fountain(rate=5.0, height_m=3.0, burst=60)
+    drawn(fountain, tempo_ctx(2001.0), room)
+    gaps = np.linalg.norm(fountain.particles.pos[:, None, :] - room.pos[None, :, :], axis=2)
+    assert (gaps.min(axis=1) < 1e-4).sum() == 60  # beat 2000's burst, as it lands
 
 
 @pytest.mark.parametrize("where", STRAYS)
@@ -280,16 +360,19 @@ def _drops_in_the_air(fountain: Fountain, leds: LedSet) -> list[int]:
     ]
 
 
-def test_at_its_largest_settings_the_fountain_has_at_most_a_rate_times_a_flight_in_the_air() -> (
-    None
-):
-    """The spray's drops fly up and fall to the floor from the anchor's height, at most
-    `longest` seconds, so up to ceil(rate * longest) + 1 are in the air; two beats' bursts
-    are, whatever the tempo (a burst lands on the next beat and fades for half of one)."""
+@pytest.mark.parametrize(
+    "anchor_z", [0.3, 1.5, 2.9], ids=["low", "half way up", "near the ceiling"]
+)
+def test_at_its_largest_settings_the_fountain_has_at_most_a_rate_times_a_flight_in_the_air(
+    anchor_z: float,
+) -> None:
+    """The spray's drops fly up (no higher than the ceiling) and fall to the floor from the
+    anchor's height, at most `longest` seconds, so up to ceil(rate * longest) + 1 are in the
+    air; two beats' bursts are, whatever the tempo (a burst lands on the next beat and fades
+    for half of one)."""
     biggest = {"rate": 120.0, "height_m": 3.0, "burst": 60}
-    anchor_z = 2.9
     leds = lights_at(*[upright(x, 1.0) for x in range(30)], anchors={"top": [1.0, 1.0, anchor_z]})
-    up = math.sqrt(2.0 * GRAVITY * biggest["height_m"])
+    up = math.sqrt(2.0 * GRAVITY * min(biggest["height_m"], 3.0 - anchor_z))
     longest = (up + math.sqrt(up * up + 2.0 * GRAVITY * anchor_z)) / GRAVITY
     bound = math.ceil(biggest["rate"] * longest) + 1 + 2 * biggest["burst"]
     assert bound <= MAX_PARTICLES
@@ -299,9 +382,9 @@ def test_at_its_largest_settings_the_fountain_has_at_most_a_rate_times_a_flight_
 
 
 def test_a_very_high_anchor_does_not_push_the_fountain_past_the_cap() -> None:
-    """A drop thrown from 40 m takes 3.75 s to fall; at 120 a second that is 450, and the
-    bursts come on top. The spray comes down to leave room for the bursts."""
-    leds = lights_at(*[upright(x, 1.0) for x in range(8)], anchors={"roof": [1.0, 1.0, 40.0]})
+    """A drop that falls from 100 m takes 4.6 s; at 120 a second that is 554, and the bursts
+    come on top. The spray comes down to leave room for the bursts."""
+    leds = lights_at(*[upright(x, 1.0) for x in range(8)], anchors={"roof": [1.0, 1.0, 100.0]})
     fountain = Fountain(anchor="roof", rate=120.0, height_m=3.0, burst=60)
     fountain.reseed(1)
     counts = _drops_in_the_air(fountain, leds)
