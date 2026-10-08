@@ -137,7 +137,11 @@ describe('the preview', () => {
   it("keeps drawing a zone's preview while the next look on it starts, and drops it for another zone", async () => {
     const { preview, store } = session()
     const second = held<PreviewStarted>()
-    vi.spyOn(api, 'startPreview').mockResolvedValueOnce(started('p1')).mockReturnValueOnce(second.promise)
+    // The third answers the last choice, asked for once the second is answered.
+    vi.spyOn(api, 'startPreview')
+      .mockResolvedValueOnce(started('p1'))
+      .mockReturnValueOnce(second.promise)
+      .mockResolvedValue(started('p3'))
     preview.show('living', 'embers')
     await vi.waitFor(() => expect(preview.snapshot().status).toBe('on'))
     pushFrame('a-light', 1, [1, 2, 3], { store, stream: 'preview' })
@@ -150,6 +154,7 @@ describe('the preview', () => {
     expect(preview.snapshot()).toMatchObject({ status: 'starting', showing: null })
     expect(store.preview.size).toBe(0)
     second.resolve(started('p2'))
+    await vi.waitFor(() => expect(preview.snapshot()).toMatchObject({ status: 'on', zoneId: 'kitchen' }))
   })
 
   // Review focus 4: the engine ends a preview nobody watched for 10 s, and a restarted server holds none.
@@ -272,6 +277,40 @@ describe('the preview', () => {
     await vi.waitFor(() => expect(preview.snapshot().status).toBe('on'))
     expect(ask).toHaveBeenCalledTimes(2)
     expect(preview.snapshot()).toMatchObject({ zoneId: 'living', lookId: 'embers', showing: 'living' })
+  })
+
+  // Review focus 4: the link comes back while a request is on its way, and that request then fails (it went out on the link that
+  // dropped): the preview is asked for again with its stream still watched, not given up on.
+  it('asks again, still watching the preview stream, when a request on its way as the link came back fails', async () => {
+    const { preview, subscribeFrames } = session()
+    const first = held<PreviewStarted>()
+    const ask = vi.spyOn(api, 'startPreview').mockReturnValueOnce(first.promise).mockResolvedValueOnce(started('p1'))
+    preview.show('living', 'embers')
+    preview.resume()
+    expect(ask).toHaveBeenCalledTimes(1)
+
+    first.reject(new ApiError(0, 'Failed to fetch', '/api/preview'))
+    await vi.waitFor(() => expect(preview.snapshot().status).toBe('on'))
+    expect(ask).toHaveBeenCalledTimes(2)
+    expect(ask).toHaveBeenLastCalledWith({ zoneId: 'living', lookId: 'embers' })
+    expect(preview.snapshot()).toMatchObject({ zoneId: 'living', lookId: 'embers', error: null, showing: 'living' })
+    expect(subscribeFrames).toHaveBeenLastCalledWith(['live', 'preview'])
+  })
+
+  // The one extra request is all a link coming back gets: if that fails too, it's the failure shown, and nothing is asked in a loop.
+  it('shows the failure of the request asked for after the link came back, and asks no more', async () => {
+    const { preview, subscribeFrames } = session()
+    const first = held<PreviewStarted>()
+    const refused = new ApiError(0, 'Failed to fetch', '/api/preview')
+    const ask = vi.spyOn(api, 'startPreview').mockReturnValueOnce(first.promise).mockRejectedValueOnce(refused)
+    preview.show('living', 'embers')
+    preview.resume()
+
+    first.reject(new ApiError(0, 'Failed to fetch', '/api/preview'))
+    await vi.waitFor(() => expect(preview.snapshot().status).toBe('failed'))
+    expect(ask).toHaveBeenCalledTimes(2)
+    expect(preview.snapshot()).toMatchObject({ zoneId: 'living', lookId: 'embers', error: refused, showing: null })
+    expect(subscribeFrames).toHaveBeenLastCalledWith(['live'])
   })
 
   // Review focus 4: and with no preview wanted, a reconnect neither asks for one nor watches its stream.

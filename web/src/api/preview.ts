@@ -85,10 +85,12 @@ export class PreviewSession {
   }
 
   /**
-   * After a reconnect (the live client's resync): the server may have ended the preview while nobody
-   * watched it, or restarted, so the one wanted is asked for again, and its stream watched again (a
-   * refusal in the meantime stopped that). The answer replaces whatever the server still holds, as
-   * every new preview does.
+   * Every time the link comes up, the first included (the live client's onLive): a deep link opens the
+   * composer before the link was ever up, and after a drop the server may have ended the preview while
+   * nobody watched it, or restarted. So the one wanted is asked for again, and its stream watched again (a
+   * refusal in the meantime stopped that); a request still on its way is answered first and, answer or
+   * failure, followed by that one. The answer replaces whatever the server still holds, as every new
+   * preview does.
    */
   resume(): void {
     if (this.wanted === null) return
@@ -121,8 +123,10 @@ export class PreviewSession {
         if (same(this.wanted, choice)) this.set({ ...PREVIEW_IDLE, status: 'on', ...choice, lights: started.lights, showing: choice.zoneId })
       } catch (error) {
         if (generation !== this.generation) return
-        // The server may still hold the last preview: it ends too, so the stage never shows a look not chosen.
-        if (same(this.wanted, choice)) {
+        // A resume() since this request went out cleared `asked`: the link it went out on may be the one that dropped, so its
+        // failure isn't the answer, and the loop asks again (a failure of that request shows).
+        if (same(this.wanted, choice) && this.asked !== null) {
+          // The server may still hold the last preview: it ends too, so the stage never shows a look not chosen.
           this.drop()
           this.asked = choice // asked once: a refusal isn't asked again until another choice comes between
           this.set({ ...PREVIEW_IDLE, status: 'failed', ...choice, error })
