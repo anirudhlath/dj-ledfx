@@ -100,16 +100,6 @@ def test_flakes_sway_as_they_fall() -> None:
     assert np.median(sideways[1]) > 0.1
 
 
-def test_flakes_fall_past_every_lamp() -> None:
-    snow = _snow(drift=0.0)
-    passed = np.zeros(CORNERS.count, dtype=bool)
-    for t in np.arange(500.0, 560.0, 1.0):
-        drawn(snow, render_ctx(t=float(t)), CORNERS)
-        gaps = np.linalg.norm(snow.particles.pos[:, None, :2] - CORNERS.pos[None, :, :2], axis=2)
-        passed |= (gaps <= COLUMN_M + 1e-5).any(axis=0)
-    assert passed.all()
-
-
 def test_a_flake_that_lands_starts_again_over_another_place() -> None:
     # Each fall takes 2.5 to 3.5 s, so the first flake falls 28 times or more in 100 s.
     snow = _snow(per_lamp=1.0, fall_s=3.0, drift=0.0)

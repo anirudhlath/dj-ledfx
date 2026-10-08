@@ -1,10 +1,11 @@
 """Snow's particles (looks.json "snow").
 
-Flakes fall past the lamps, per_lamp of them at once for each: each falls from the ceiling
-to the floor over its own fall, swaying as it goes, within COLUMN_M of an LED of a lamp
-(Ground.on), then starts again at the ceiling over another. Flake i's fall c is where
-draws() of that fall says. A flake fades in at the ceiling and out at the floor, and lights
-a lamp as it passes.
+Flakes fall past the lamps, per_lamp of them at once for each: flake i keeps a lamp of its
+own (spread_over: every lamp before any gets two) and falls from the ceiling to the floor
+over its own fall, swaying as it goes, then starts again at the ceiling. Each fall takes an
+LED of that lamp (Ground.on), a spot within COLUMN_M of it and a sway phase, all from
+draws() of flake i's fall c. A flake fades in at the ceiling and out at the floor, and
+lights a lamp as it passes.
 """
 
 from __future__ import annotations
@@ -86,10 +87,10 @@ class Snowfall(ParamParticles):
         progress = ctx.t / fall + own[:, 1]
         falls = np.floor(progress).astype(np.int64)
         share = progress - falls  # 0 at the ceiling, 1 at the floor
-        where = draws(self._seed, falls * FALLS + flakes, 5, stream=1)  # this fall's place
-        past = ground.on(home, where[:, 4])  # (draw 0 is unused)
-        out, side = COLUMN_M * np.sqrt(where[:, 1]), 2.0 * math.pi * where[:, 2]
-        turn = 2.0 * math.pi * (SWAYS * share + where[:, 3])
+        where = draws(self._seed, falls * FALLS + flakes, 4, stream=1)  # this fall's place
+        past = ground.on(home, where[:, 3])
+        out, side = COLUMN_M * np.sqrt(where[:, 0]), 2.0 * math.pi * where[:, 1]
+        turn = 2.0 * math.pi * (SWAYS * share + where[:, 2])
         drift = float(values["drift"])
         pos = np.stack(
             [
