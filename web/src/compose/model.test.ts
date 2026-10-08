@@ -6,10 +6,12 @@ import { HERO_NOW } from '@/test/live'
 import {
   CATEGORIES,
   chosenZone,
+  lookLabel,
   looksShown,
   lookTransition,
   missingInputs,
   openingCategory,
+  rowNote,
   runningOn,
   transitionChoices,
   transitionKey,
@@ -157,6 +159,34 @@ describe('the looks the composer shows', () => {
 
   it('come in §8.2\'s categories', () => {
     expect(CATEGORIES.map((category) => category.label)).toEqual(['Starred', 'Ambient', 'Tempo', 'Audio', 'Home', 'Firmware'])
+  })
+})
+
+describe("a look's words in the composer", () => {
+  // Phone-PutLookOn's rows: "Previewing on screen", "Running here now", "Ambient · no input".
+  it("say what a phone row's line says", () => {
+    expect(rowNote(look('embers'), true, false, [])).toEqual({ text: 'Previewing on screen', signal: false })
+    expect(rowNote(look('fireflies'), false, true, [])).toEqual({ text: 'Running here now', signal: false })
+    // The look the stage previews can be the one the zone runs: the row says it's previewing.
+    expect(rowNote(look('fireflies'), true, true, [])).toEqual({ text: 'Previewing on screen', signal: false })
+    expect(rowNote(look('aurora'), false, false, [])).toEqual({ text: 'Ambient · no input', signal: false })
+    expect(rowNote(look('spectrum'), false, false, []).text).toMatch(/^Audio · Music/)
+    // A look that uses two inputs says both, in §6.3's chip order.
+    expect(rowNote(look('drop'), false, false, []).text).toBe('Audio · Tempo · Music')
+  })
+
+  // §8.2: "its tile says 'Waits for music' / 'Needs Home Assistant' in signal", chosen or not.
+  it('say the input a look would wait for first, in signal', () => {
+    expect(rowNote(look('spectrum'), true, false, ['music'])).toEqual({ text: 'Waits for music', signal: true })
+    expect(lookLabel(look('goodnight'), false, ['home-assistant'])).toBe(`${look('goodnight').name}, Needs Home Assistant`)
+    expect(lookLabel(look('fireflies'), true, [])).toBe(`${look('fireflies').name}, running here`)
+  })
+
+  // missingInputs() hands over the inputs in §6.3's chip order, so the first is the one a tile says.
+  it('say only the first of several inputs, after the tag', () => {
+    const both = ['music', 'home-assistant'] as const
+    expect(rowNote(look('spectrum'), false, false, both)).toEqual({ text: 'Waits for music', signal: true })
+    expect(lookLabel(look('spectrum'), true, both)).toBe(`${look('spectrum').name}, running here, Waits for music`)
   })
 })
 

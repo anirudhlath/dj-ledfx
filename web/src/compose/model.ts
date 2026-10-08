@@ -4,7 +4,7 @@
 // scenario. The words are the spec's and the renders' (Live-PutLookOn, Phone-PutLookOn).
 import type { Id, InputKind, Inputs, Look, RunningZone, Transition, Zone } from '@/api/contract'
 import { newestFirst } from '@/stage/show'
-import { transitionLabel } from '@/zones/zone-view'
+import { chipsFor, transitionLabel } from '@/zones/zone-view'
 
 /** §8.2's category chips: Starred, then the looks' own categories. */
 export type Category = 'starred' | Look['category']
@@ -80,6 +80,27 @@ export function missingInputs(look: Look, inputs: Pick<Inputs, 'music' | 'homeAs
   const homeAssistant = inputs?.homeAssistant
   if (needs.has('home-assistant') && homeAssistant !== undefined && homeAssistant.state === 'disconnected') missing.push('home-assistant')
   return missing
+}
+
+/**
+ * A tile's or a row's name for a screen reader: the look, and what its tags and signal say (its
+ * PREVIEWING tag is its aria-pressed).
+ */
+export function lookLabel(look: Look, here: boolean, missing: readonly MissingInput[]): string {
+  return [look.name, ...(here ? ['running here'] : []), ...(missing.length > 0 ? [MISSING_SIGNAL[missing[0]]] : [])].join(', ')
+}
+
+/**
+ * A phone look row's line (Phone-PutLookOn): the input it would wait for, in signal (§8.2), else
+ * "Previewing on screen", "Running here now", or its category and the inputs it uses.
+ */
+export function rowNote(look: Look, selected: boolean, here: boolean, missing: readonly MissingInput[]): { text: string; signal: boolean } {
+  if (missing.length > 0) return { text: MISSING_SIGNAL[missing[0]], signal: true }
+  if (selected) return { text: 'Previewing on screen', signal: false }
+  if (here) return { text: 'Running here now', signal: false }
+  const category = CATEGORIES.find((each) => each.id === look.category)?.label ?? look.category
+  const inputs = chipsFor(look).map((chip) => chip.label)
+  return { text: `${category} · ${inputs.length === 0 ? 'no input' : inputs.join(' · ')}`, signal: false }
 }
 
 /** The tiles a category shows, or a search's over every look (F4 ruling 10), in the server's order. */
