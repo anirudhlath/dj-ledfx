@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from conftest import render_ctx
 from map_home import ROW, leds_at, lights_at, upright
 
@@ -81,3 +82,27 @@ def test_a_lamp_glows_only_while_a_firefly_drifts_through_it() -> None:
         far = gaps.min(axis=1) > REACH * 0.3
         assert not frame[far].any()  # black between them
         assert far.sum() >= len(far) - 14  # two fireflies light a few LEDs at most
+
+
+@pytest.mark.parametrize("speed", [0.3, 1.0])
+def test_fireflies_wander_at_about_their_speed(speed: float) -> None:
+    paths = _paths(_flies(count=10, speed=speed), leds_at(ROW_12), seconds=10.0)
+    metres = np.linalg.norm(np.diff(paths, axis=0), axis=2).sum(axis=0)  # each one's, in 10 s
+    assert 0.7 * speed * 10.0 < metres.mean() < speed * 10.0
+
+
+def test_each_firefly_flares_in_its_own_time() -> None:
+    flies = _flies(count=5, palette=["#ffffff"])
+    glow = []
+    for t in _moments(10.0):
+        drawn(flies, render_ctx(t=t), leds_at(ROW))
+        glow.append(flies.particles.colour[:, 0])
+    assert len(set(np.array(glow).argmax(axis=0))) > 1  # not all at the same moment
+
+
+def test_fireflies_move_in_seconds_whatever_the_tempo() -> None:
+    leds = leds_at(ROW)
+    slow = drawn(_flies(), render_ctx(t=500.0, beat_phase=0.1, bpm=60.0), leds)
+    quick = drawn(_flies(), render_ctx(t=500.0, beat_phase=0.9, bpm=300.0), leds)
+    assert slow.any()
+    np.testing.assert_array_equal(slow, quick)
