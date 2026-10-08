@@ -4,6 +4,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
+from runtime_fakes import register_fields
 
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.context import RenderContext
@@ -11,6 +12,7 @@ from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.particles import ParticleEffect
 from dj_ledfx.effects.strip_adapter import StripAdapter
 from dj_ledfx.looks.model import (
     LIGHTS_SETTING,
@@ -31,6 +33,7 @@ from dj_ledfx.looks.model import (
     look_to_dict,
     make_effect,
     setting_schema,
+    streamed_layers,
     validate_look,
     visible_field_layer,
     visible_field_layers,
@@ -143,7 +146,6 @@ def test_setting_schema_types() -> None:
         ({"category": "party"}, "category"),
         ({"scope": "whole-home"}, "M6"),
         ({"needs": ["weather"]}, "input"),
-        ({"layers": [_layer(type="particles", kind="fireflies")]}, "M5"),
         ({"layers": [_layer(settings={"beats_per_cycle": {"value": 2.0, "binding": {}}})]}, "M7"),
         ({"layers": [_layer(settings={"beats_per_cycle": 2.0})]}, "value"),
         ({"transition": {"kind": "melt", "durationS": 1.0}}, "transition"),
@@ -185,6 +187,42 @@ def test_looks_m1_cannot_run_are_refused_with_the_reason(
 def test_layer_problems_are_refused(layers: list[dict[str, Any]], reason: str) -> None:
     with pytest.raises(LookError, match=reason):
         validate_look(look_from_dict(_look(layers=layers)))
+
+
+def test_a_layer_of_another_kind_of_effect_is_refused_with_the_reason() -> None:
+    register_fields()  # flat_field and dot_particles
+    for layer_type, kind, reason in [
+        ("particles", "flat_field", "isn't a particle effect"),
+        ("particles", "lifx_flame", "isn't a particle effect"),
+        ("field", "dot_particles", "isn't a field effect"),
+        ("firmware", "dot_particles", "isn't a firmware effect"),
+    ]:
+        look = look_from_dict(_look(layers=[_layer(type=layer_type, kind=kind, settings={})]))
+        with pytest.raises(LookError, match=reason):
+            validate_look(look)
+
+
+def test_particle_layers_take_modifiers_and_round_trip_but_pick_no_lights() -> None:
+    register_fields()
+    layer = _layer(
+        type="particles",
+        kind="dot_particles",
+        settings={"x": {"value": 1.5}},
+        mask={"kind": "height", "range": [0.5, 1.5]},
+        mirror={"axis": "y", "at": 2.5},
+        transform={"offset": [1.0, 0.0, 0.0], "rotateDeg": 0.0, "scale": 1.0},
+    )
+    look = look_from_dict(_look(layers=[_layer(id="under"), {**layer, "id": "dots"}]))
+
+    validate_look(look)
+    assert [layer.id for layer in streamed_layers(look)] == ["under", "dots"]
+    assert [layer.id for layer in visible_field_layers(look)] == ["under"]
+    effect = make_effect(look.layers[1])
+    assert isinstance(effect, ParticleEffect) and effect.get_params()["x"] == 1.5
+    assert look_from_dict(look_to_dict(look, for_storage=True)) == look
+    picking = _layer(type="particles", kind="dot_particles", settings={"lights": {"value": ["a"]}})
+    with pytest.raises(LookError, match="give a streamed layer a mask"):
+        validate_look(look_from_dict(_look(layers=[picking])))
 
 
 def test_hidden_field_layers_and_firmware_layers_are_fine() -> None:

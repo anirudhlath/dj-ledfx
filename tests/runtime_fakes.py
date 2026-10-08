@@ -1,6 +1,6 @@
-"""Fakes for zone runtime tests: three lights, field effects that are easy to read, and
-looks and runtimes made of them. A test file registers the fields with an autouse fixture
-that calls register_fields() (conftest drops them after each test)."""
+"""Fakes for zone runtime tests: three lights, field and particle effects that are easy to
+read, and looks and runtimes made of them. A test file registers the effects with an
+autouse fixture that calls register_fields() (conftest drops them after each test)."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.ledset import NO_ROOM, LedSet, PlacedLeds
 from dj_ledfx.effects.params import EffectParam
+from dj_ledfx.effects.particle_tools import Ground, Particles, swarm
+from dj_ledfx.effects.particles import ParamParticles
 from dj_ledfx.looks.model import Layer, Look, Transition
 from dj_ledfx.tempo.clock import TempoClock
 from dj_ledfx.types import FloatRGB
@@ -76,9 +78,27 @@ class PlaceField(FieldEffect, register=False):
         return np.array(leds.pos, dtype=np.float32)
 
 
+class DotParticles(ParamParticles, register=False):
+    """One dot of `level` grey at `x` metres east on the map's axes (y 0, 1 m up), 0.3 m
+    across, as the layer sees it: a layer's transform moves it with the field. Its colour
+    is NaN while FlatField.mode is "nan"."""
+
+    @classmethod
+    def parameters(cls) -> dict[str, EffectParam]:
+        return {
+            "x": EffectParam(type="float", default=0.0, min=-10.0, max=10.0),
+            "level": EffectParam(type="float", default=1.0, min=0.0, max=1.0),
+        }
+
+    def positions(self, ctx: RenderContext, ground: Ground) -> Particles:
+        level = np.nan if FlatField.mode == "nan" else float(self._values["level"])
+        return swarm([[float(self._values["x"]), 0.0, 1.0]], [level, level, level], 0.3)
+
+
 def register_fields() -> None:
     Effect._registry["flat_field"] = FlatField
     Effect._registry["place_field"] = PlaceField
+    Effect._registry["dot_particles"] = DotParticles
     FlatField.mode = "ok"
     PlaceField.seen = []
 
@@ -92,6 +112,18 @@ def field_layer(level: float = 0.5, opacity: float = 1.0, **changes: Any) -> Lay
         kind="flat_field",
         opacity=opacity,
         settings={"level": level},
+        **changes,
+    )
+
+
+def dot_layer(x: float = 0.0, level: float = 1.0, **changes: Any) -> Layer:
+    """A particle layer of one dot; changes set any other field of the Layer."""
+    return Layer(
+        id=changes.pop("id", "dots"),
+        name=changes.pop("name", "Dots"),
+        type="particles",
+        kind="dot_particles",
+        settings={"x": x, "level": level},
         **changes,
     )
 
