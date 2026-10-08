@@ -1011,7 +1011,7 @@ The composer's sizes and two of its colours aren't tokens, and F0–F3 have no c
 - Produces:
   - `LIVE_SPEC.lookTile {px, namePx}` (§6.4 LookTile) and `LIVE_SPEC.phoneComposer {zonePx, thumb {width, height}}` (§8.10, Put a look on).
   - `LIVE_RENDER.lookThumb {width, height, background}`: a thumb's viewBox and its scene's colour, as both renders draw it.
-  - `LIVE_RENDER.selectedZoneNote {chip, button}`: the colour of the note under the chosen zone's name, on the desktop's chip and the phone's button. tokens.css has no colour for it.
+  - `LIVE_RENDER.selectedZoneNote {chip, button}`: the colour of the note beside the chosen zone's name on the desktop's chip, and under it on the phone's zone button. tokens.css has no colour for it.
 
 - [ ] **Step 1: Read the spec and the renders**
 

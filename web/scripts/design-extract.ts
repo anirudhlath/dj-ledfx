@@ -453,8 +453,8 @@ export function extractRender(read: ReadText): Record<string, unknown> {
  * each a beat behind the last, so a cycle is as many beats as the delays' step goes into it. An overlay's
  * gold is State-Sheet.html's: tokens.css has no colour for it. A ZoneRow's small swatches are State-Problems.html's
  * size: §6.3 gives them none (F3 decision 34). The composer's (Live-PutLookOn.html, Phone-PutLookOn.html): a
- * LookThumb's scene, its viewBox and background, the same in every render that draws one; and the note under the
- * selected zone's name, which tokens.css has no colour for, on a chip (desktop) and a zone button (phone).
+ * LookThumb's scene, its viewBox and background, read in each render and the same in both; and the note beside the
+ * chosen zone's name on the desktop's chip, and under it on the phone's zone button: tokens.css has no colour for it.
  */
 export function extractLiveRender(read: ReadText): Record<string, unknown> {
   const tokens = read('tokens.css')
@@ -487,11 +487,16 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     pattern:
       /font-size: 20px; white-space: nowrap">[^<]*<\/span><span style="font-size: 12px; color: #[0-9a-f]{6}; white-space: nowrap">[^<]*<\/span><\/div><div style="display: flex; align-items: center; flex-wrap: wrap; gap: \d+px"><span title="[^"]*" style="display: inline-block; width: (\d+)px; height: \1px; border-radius: 50%/,
   })
-  const thumb = same(put + phonePut, {
-    where: "Live-PutLookOn.html's and Phone-PutLookOn.html's thumbs",
-    pattern:
-      /<svg class="tb " viewBox="0 0 (\d+) (\d+)" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: block; background: (#[0-9a-f]{6}); ">/,
-  })
+  // One scene in both renders, each read on its own: a render whose thumbs moved fails here by its name, and never
+  // leaves the other's to stand for both.
+  const thumbPattern =
+    /<svg class="tb " viewBox="0 0 (\d+) (\d+)" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: block; background: (#[0-9a-f]{6}); ">/
+  const thumb = same(put, { where: "Live-PutLookOn.html's thumbs", pattern: thumbPattern })
+  const phoneThumb = same(phonePut, { where: "Phone-PutLookOn.html's thumbs", pattern: thumbPattern })
+  const [scene, phoneScene] = [thumb, phoneThumb].map((m) => JSON.stringify(m.slice(1)))
+  if (scene !== phoneScene) {
+    throw new Error(`design numbers: Live-PutLookOn.html's and Phone-PutLookOn.html's thumbs draws it two ways: ${scene} and ${phoneScene}`)
+  }
   const chipNote = same(put, {
     where: "Live-PutLookOn.html, the selected zone chip's note",
     pattern:
