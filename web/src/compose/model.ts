@@ -84,8 +84,8 @@ export function missingInputs(look: Look, inputs: Pick<Inputs, 'music' | 'homeAs
 
 /**
  * A tile's or a row's name for a screen reader: the look, and what its tags and signal say (its
- * PREVIEWING tag is its aria-pressed). What a tile's icons and a row's line say is its description,
- * since the label replaces what the button holds.
+ * PREVIEWING tag is its aria-pressed). What a tile's icons and a row's line show of its inputs is its
+ * description (lookInputs()), since the label replaces what the button holds.
  */
 export function lookLabel(look: Look, here: boolean, missing: readonly MissingInput[]): string {
   return [look.name, ...(here ? ['running here'] : []), ...(missing.length > 0 ? [MISSING_SIGNAL[missing[0]]] : [])].join(', ')
@@ -93,7 +93,8 @@ export function lookLabel(look: Look, here: boolean, missing: readonly MissingIn
 
 /**
  * A look's category and the inputs it uses, in Phone-PutLookOn's words ("Ambient · no input", "Audio ·
- * Tempo · Music"): a phone row's line, and what a tile's icons say to a screen reader.
+ * Tempo · Music"): a phone row's line when it has no state to show, and what a screen reader hears of
+ * every tile and row, whatever the row's line says.
  */
 export function lookInputs(look: Look): string {
   const category = CATEGORIES.find((each) => each.id === look.category)?.label ?? look.category

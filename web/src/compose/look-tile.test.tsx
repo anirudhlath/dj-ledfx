@@ -137,24 +137,36 @@ describe('LookRow (§8.10)', () => {
     expect(here).toHaveClass('border-transparent')
     expect(here.querySelectorAll('svg')).toHaveLength(0)
     const plain = screen.getByRole('button', { name: lookName('aurora') })
-    expect(within(plain).getByText('Ambient · no input')).toHaveClass('text-text-3')
+    // A row with no state to show has the same words twice: its line, and its description, hidden. The line is the drawn one.
+    expect(within(plain).getByText('Ambient · no input', { selector: ':not(.sr-only)' })).toHaveClass('text-text-3')
   })
 
-  // The line is visible and the label replaces what the button holds, so a screen reader hears the line as its description
-  // (the category shows nowhere else when a search spans every category).
-  it('describes each row by its line', () => {
+  // WCAG 1.1.1: the label replaces what the button holds, and it already says a row's state ("running here", the waiting
+  // words; aria-pressed says previewed). The line is often that state and would be heard twice, so the description is not
+  // the line: it is the look's inputs, the one thing nothing else says (the category shows nowhere else when a search
+  // spans every category).
+  it("describes each row by its look's category and inputs, whatever its line says", () => {
     inQuery(
       <>
-        <LookRow {...props('embers', { selected: true })} />
-        <LookRow {...props('fireflies', { here: true })} />
+        <LookRow {...props('drop', { selected: true })} />
+        <LookRow {...props('spectrum', { here: true })} />
+        <LookRow {...props('goodnight', { missing: ['home-assistant'] })} />
         <LookRow {...props('aurora')} />
-        <LookRow {...props('drop', { missing: ['music'] })} />
       </>,
     )
-    expect(screen.getByRole('button', { name: lookName('embers') })).toHaveAccessibleDescription('Previewing on screen')
-    expect(screen.getByRole('button', { name: `${lookName('fireflies')}, running here` })).toHaveAccessibleDescription('Running here now')
+    const previewed = screen.getByRole('button', { name: lookName('drop') })
+    expect(within(previewed).getByText('Previewing on screen')).toBeInTheDocument()
+    expect(previewed).toHaveAccessibleDescription('Audio · Tempo · Music')
+    // The words are for a screen reader only: the line stays as drawn.
+    expect(within(previewed).getByText('Audio · Tempo · Music')).toHaveClass('sr-only')
+    const running = screen.getByRole('button', { name: `${lookName('spectrum')}, running here` })
+    expect(within(running).getByText('Running here now')).toBeInTheDocument()
+    expect(running).toHaveAccessibleDescription('Audio · Music')
+    const waiting = screen.getByRole('button', { name: `${lookName('goodnight')}, Needs Home Assistant` })
+    expect(within(waiting).getByText('Needs Home Assistant')).toBeInTheDocument()
+    expect(waiting).toHaveAccessibleDescription('Home · Home Assistant')
+    // With no state to show, the line is the inputs, and the description is too.
     expect(screen.getByRole('button', { name: lookName('aurora') })).toHaveAccessibleDescription('Ambient · no input')
-    expect(screen.getByRole('button', { name: `${lookName('drop')}, Waits for music` })).toHaveAccessibleDescription('Waits for music')
   })
 
   // §8.2's signal line on a row, chosen or not; only the list's one tab stop is tabbable (F4 ruling 12).
