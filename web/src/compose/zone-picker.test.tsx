@@ -1,13 +1,14 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect } from 'react'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Id } from '@/api/contract'
 import { lookName } from '@/api/mocks/fixtures'
 import { buildScenario } from '@/api/mocks/scenarios'
-import { ICONS } from '@/design/icons'
 import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
+import { payload } from '@/test/icons'
 import { HERO_NOW } from '@/test/live'
+import { watchScrolling } from '@/test/scroll'
 import { ZonePicker, type ZonePickerProps } from './zone-picker'
 
 const hero = buildScenario('hero', HERO_NOW)
@@ -33,24 +34,6 @@ function pick(overrides: Partial<ZonePickerProps> = {}) {
   /** Any props change, as a push from the server changes what runs. */
   const update = (next: Partial<ZonePickerProps>) => rerender(<ZonePicker {...props} {...next} />)
   return { onSelect, group, chip, choose, update }
-}
-
-/** Element.scrollIntoView, which jsdom has none of, recorded: the element and the options of each call. */
-function watchScrolling() {
-  const scrolled: [Element, ScrollIntoViewOptions | boolean | undefined][] = []
-  const original = Element.prototype.scrollIntoView
-  Element.prototype.scrollIntoView = function (this: Element, options?: ScrollIntoViewOptions | boolean) {
-    scrolled.push([this, options])
-  }
-  onTestFinished(() => void (Element.prototype.scrollIntoView = original))
-  return scrolled
-}
-
-/** What an icon draws, as the markup a browser serialises. */
-function payload(icon: keyof typeof ICONS): string {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  svg.innerHTML = ICONS[icon]
-  return svg.innerHTML
 }
 
 describe('ZonePicker (§6.3)', () => {
@@ -102,12 +85,7 @@ describe('ZonePicker (§6.3)', () => {
   // Phone-PutLookOn's Where: tall buttons in a row that scrolls. The chosen one leads the row as the
   // composer opens, as drawn; a later choice scrolls only as far as it must.
   it("draws the phone's buttons at LIVE_SPEC.phoneComposer.zonePx and keeps the chosen one in view", () => {
-    const scrolled: [Element, ScrollIntoViewOptions | boolean | undefined][] = []
-    const original = Element.prototype.scrollIntoView
-    Element.prototype.scrollIntoView = function (this: Element, options?: ScrollIntoViewOptions | boolean) {
-      scrolled.push([this, options])
-    }
-    onTestFinished(() => void (Element.prototype.scrollIntoView = original))
+    const scrolled = watchScrolling()
     const { chip, choose } = pick({ variant: 'phone', selected: 'bedroom' })
     expect(chip('bedroom')).toHaveStyle({ height: `${LIVE_SPEC.phoneComposer.zonePx}px` })
     expect(within(chip('bedroom')).getByText(lookName('homesunset'))).toHaveStyle({ color: LIVE_RENDER.selectedZoneNote.button })
@@ -147,8 +125,9 @@ describe('ZonePicker (§6.3)', () => {
     expect(note('living', lookName('fireflies')).style.color).toBe('')
   })
 
-  // A home look leaves the others unavailable, and they say so by fading as well as by being disabled.
-  it('fades the zones a home look leaves out, and does not choose them', async () => {
+  // A home look leaves the others unavailable: disabled, so a click chooses nothing, and faded by the disabled
+  // class, which is what a test sees of it (jsdom loads no CSS).
+  it('disables the zones a home look leaves out, with the disabled fade, and a click on one chooses nothing', async () => {
     const { onSelect, chip } = pick({ selected: 'home', locked: true })
     expect(chip('kitchen')).toHaveClass('disabled:opacity-45')
     await userEvent.click(chip('kitchen'))
@@ -172,8 +151,9 @@ describe('ZonePicker (§6.3)', () => {
   })
 
   // §8.2 Where: "zone chips across the top of the stage", wrapping; they're under --touch-min, so their hit
-  // areas grow to it (CLAUDE.md: touch-target) and the faces stay as drawn.
-  it("wraps the desktop chips, and grows each one's hit area to the touch minimum", () => {
+  // areas grow to it (CLAUDE.md: touch-target) and the faces stay as drawn. jsdom has no layout, so these are the
+  // classes; that the chips wrap and the hit areas reach the minimum is for the e2e to see.
+  it("has the classes that wrap the desktop chips and grow every chip's hit area, Pick lights… too, to the touch minimum", () => {
     const { group } = pick()
     expect(group).toHaveClass('flex-wrap')
     const buttons = within(group).getAllByRole('button')
@@ -183,9 +163,10 @@ describe('ZonePicker (§6.3)', () => {
 
   // The brief: the row snaps, so it stops where it should whenever the fonts and the notes land. Each button
   // keeps its width, so the row overflows and scrolls. The row pads, and is pulled back by as much, so it
-  // doesn't clip the buttons' focus rings (a scrolling row clips on both axes). jsdom has no layout, so the
-  // classes are what a test can pin.
-  it("snaps the phone's row, lets its buttons overflow it, and leaves room for their focus rings", () => {
+  // doesn't clip the buttons' focus rings (a scrolling row clips on both axes). jsdom has no layout, so these
+  // are the classes; that the rings stay whole, and that the chosen button is whole after a later choice, is for
+  // the e2e to see.
+  it("has the classes that scroll and snap the phone's row, pad and pull it back for its focus rings, and keep each button's width", () => {
     const { group } = pick({ variant: 'phone' })
     expect(group).toHaveClass('overflow-x-auto', 'snap-x', 'snap-proximity')
     expect(group).toHaveClass('p-1', '-m-1', 'scroll-px-1')
