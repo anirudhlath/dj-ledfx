@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import ClassVar
 
 import numpy as np
@@ -11,7 +12,7 @@ from dj_ledfx.effects.base import ParamSettings
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.field import ParamField
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.effects.particle_tools import Ground, Particles, swarm
+from dj_ledfx.effects.particle_tools import NO_PARTICLES, Ground, Particles, swarm
 from dj_ledfx.effects.particles import MAX_PARTICLES, ParamParticles, ParticleEffect, drawn
 
 
@@ -101,6 +102,18 @@ def test_no_leds_or_no_place_give_no_particles() -> None:
     assert frame.shape == (0, 3)
     assert dots.particles.count == 0
     assert not _Dots.grounds  # positions() never ran: every effect has an LED to go by
+
+
+def test_leds_that_make_no_stop_give_no_particles() -> None:
+    # Hand-built: nine LEDs, but no light's slice covers them, so the ground has no stops. What
+    # positions() picks lamps and tours from needs one, so it is never asked.
+    leds = replace(leds_at(ROW), slices=())
+    assert leds.count == 9 and Ground.of(leds).lamps.count == 0
+    dots = _Dots(count=4)
+    frame = drawn(dots, render_ctx(t=1.0), leds)
+    assert dots.particles is NO_PARTICLES
+    assert frame.shape == (9, 3) and not frame.any()
+    assert not _Dots.grounds  # positions() never ran
 
 
 def test_a_settings_change_applies_at_the_next_step() -> None:

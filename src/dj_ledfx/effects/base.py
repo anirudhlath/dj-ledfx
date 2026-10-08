@@ -28,7 +28,7 @@ def _to_snake_case(name: str) -> str:
 
 
 class Effect(ABC):  # noqa: B024
-    """Registry and parameters shared by every effect kind (strip, field, firmware).
+    """Registry and parameters shared by every effect kind (strip, field, particle, firmware).
 
     The kinds below declare the abstract methods, so this class has none of its own.
     Concrete subclasses register under their snake_case class name unless the name

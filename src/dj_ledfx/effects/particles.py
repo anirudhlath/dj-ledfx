@@ -58,7 +58,8 @@ class ParamParticles(ParamSettings, ParticleEffect):
 
     def step(self, ctx: RenderContext) -> None:
         ground = self._ground
-        if ground is None or ground.leds.count == 0:
+        # positions() goes by the zone's stops, and a set with no LEDs has none.
+        if ground is None or ground.lamps.count == 0:
             self._particles = NO_PARTICLES
             return
         self._particles = self.positions(ctx, ground).newest(MAX_PARTICLES)
@@ -72,7 +73,8 @@ class ParamParticles(ParamSettings, ParticleEffect):
 
     @abstractmethod
     def positions(self, ctx: RenderContext, ground: Ground) -> Particles:
-        """The particles at ctx's moment, among the ground's LEDs (at least one)."""
+        """The particles at ctx's moment, among the ground's LEDs (at least one stop, so at
+        least one LED)."""
 
     def _placed(self, leds: LedSet) -> Ground:
         """The ground of these LEDs, worked out again only for another set."""
