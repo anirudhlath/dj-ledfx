@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from runtime_fakes import (
+    DotParticles,
     FlatField,
     dot_layer,
     field_layer,
@@ -67,6 +68,9 @@ def test_a_particle_layers_mask_weighs_the_leds_it_lights() -> None:
     )
     bare.tick(100.0)
     masked.tick(100.0)
+    # Each layer's ground holds both LEDs, the masked one's too: its particles move among
+    # every LED of its view, and the mask only weighs what they light.
+    assert DotParticles.ground_led_counts == [2, 2]
     assert latest(bare)[0, 0] > 0.3  # the dot lights both LEDs
     np.testing.assert_allclose(latest(masked)[0], 0.2)  # under the band: the field alone
     np.testing.assert_allclose(latest(masked)[1], latest(bare)[1])  # in it: the field and the dot

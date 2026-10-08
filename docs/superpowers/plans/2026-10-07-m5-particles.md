@@ -1498,7 +1498,7 @@ The look model stops refusing particle layers and refuses a layer of the wrong k
   - `looks.model.make_effect(layer: Layer) -> FieldEffect | ParticleEffect | FirmwareEffect`: a particle layer's kind must be a particle effect ("Layer '…': '…' isn't a particle effect"); a field layer's must be a field or strip effect, and a firmware layer's a firmware effect, as before.
   - `looks.model.streamed_layers(look: Look) -> list[Layer]`: the visible field and particle layers, bottom to top.
   - `ZoneRuntime._streamed: list[tuple[Layer, FieldEffect | ParticleEffect]]`, bottom to top, where `_fields` was; `ZoneRuntime.field_effect` is the bottom streamed layer's effect only when that is a field effect.
-  - In `tests/runtime_fakes.py`: `DotParticles(ParamParticles, register=False)`, one dot of `level` grey at `x` metres east on the map's axes (y 0, 1 m up), 0.3 m across, NaN while `FlatField.mode` is `"nan"`, registered as `dot_particles` by `register_fields()`; `dot_layer(x: float = 0.0, level: float = 1.0, **changes) -> Layer` (id `dots`, name `Dots`).
+  - In `tests/runtime_fakes.py`: `DotParticles(ParamParticles, register=False)`, one dot of `level` grey at `x` metres east on the map's axes (y 0, 1 m up), a 0.3 m radius (its light reaches 0.75 m), NaN while `FlatField.mode` is `"nan"`, registered as `dot_particles` by `register_fields()`; `dot_layer(x: float = 0.0, level: float = 1.0, **changes) -> Layer` (id `dots`, name `Dots`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1531,9 +1531,9 @@ In `tests/runtime_fakes.py`, a particle effect a test can read at a glance:
 
 
 +class DotParticles(ParamParticles, register=False):
-+    """One dot of `level` grey at `x` metres east on the map's axes (y 0, 1 m up), 0.3 m
-+    across, as the layer sees it: a layer's transform moves it with the field. Its colour
-+    is NaN while FlatField.mode is "nan"."""
++    """One dot of `level` grey at `x` metres east on the map's axes (y 0, 1 m up), of a 0.3 m
++    radius (its light reaches 0.75 m), as the layer sees it: a layer's transform moves it with
++    the field. Its colour is NaN while FlatField.mode is "nan"."""
 +
 +    @classmethod
 +    def parameters(cls) -> dict[str, EffectParam]:

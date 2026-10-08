@@ -402,7 +402,7 @@ class ZoneRuntime:
     def transition_sources(self) -> tuple[ZoneRuntime, ...]:
         """The runtimes whose looks this one's transition mixes in, while it plays."""
         transition = self._transition
-        return () if transition is None else tuple(drawn.source for drawn in transition.rows)
+        return () if transition is None else tuple(row.source for row in transition.rows)
 
     @property
     def transitioning(self) -> bool:
@@ -417,7 +417,7 @@ class ZoneRuntime:
         if transition is None or self.state != "transition":
             return None
         rows = transition.rows
-        replaced = max(rows, key=lambda drawn: drawn.lights).source.look.name if rows else ""
+        replaced = max(rows, key=lambda row: row.lights).source.look.name if rows else ""
         return TransitionInfo(
             from_name=replaced,
             kind=transition.kind,
@@ -727,7 +727,7 @@ class ZoneRuntime:
     def _render_layers(self, ctx: RenderContext) -> FloatRGB:
         """The streamed layers blended bottom to top, then each firmware layer's copy drawn
         on the lights that stream it. A particle layer's particles move to the frame's
-        moment among the LEDs its view shows, then light them."""
+        moment among every LED of its view; its mask only weighs what they light."""
         count = self.leds.count
         frame: FloatRGB | None = None
         for index, (layer, effect) in enumerate(self._streamed):
