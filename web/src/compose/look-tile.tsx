@@ -2,14 +2,17 @@
 // icons of the inputs it uses; PREVIEWING while the stage previews it, RUNNING HERE while it runs on the
 // chosen zone, and the first input it would wait for in signal (§8.2). Live-PutLookOn draws it, with no
 // input on any tile, so the icons (13 px) and the signal line (11.5 px) take the sizes Looks.html's
-// LookCard draws its inputs at.
+// LookCard draws its inputs at. The icons say nothing to a screen reader, and the label replaces what the
+// button holds, so the look's category and inputs (lookInputs()) are its description, in a visually hidden
+// span.
+import { useId } from 'react'
 import type { Look } from '@/api/contract'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { LookThumb } from '@/looks/look-thumb'
 import { chipsFor } from '@/zones/zone-view'
-import { lookLabel, MISSING_SIGNAL, type MissingInput } from './model'
+import { lookInputs, lookLabel, MISSING_SIGNAL, type MissingInput } from './model'
 
 export interface LookTileProps {
   look: Look
@@ -29,11 +32,13 @@ export interface LookTileProps {
 const TAG = 'absolute top-2 left-2 inline-flex items-center rounded-pill px-1.75 text-[10.5px] font-bold tracking-[0.06em] uppercase'
 
 export function LookTile({ look, selected, here, missing, tabbable, onSelect }: LookTileProps) {
+  const inputs = useId()
   return (
     <button
       type="button"
       aria-pressed={selected}
       aria-label={lookLabel(look, here, missing)}
+      aria-describedby={inputs}
       data-look={look.id}
       tabIndex={tabbable ? 0 : -1}
       className="flex min-w-0 flex-col gap-2 text-left"
@@ -60,6 +65,9 @@ export function LookTile({ look, selected, here, missing, tabbable, onSelect }: 
         </span>
       </span>
       {missing.length > 0 && <span className="px-0.5 text-[11.5px] text-signal">{MISSING_SIGNAL[missing[0]]}</span>}
+      <span id={inputs} className="sr-only">
+        {lookInputs(look)}
+      </span>
     </button>
   )
 }

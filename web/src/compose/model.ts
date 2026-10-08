@@ -84,10 +84,21 @@ export function missingInputs(look: Look, inputs: Pick<Inputs, 'music' | 'homeAs
 
 /**
  * A tile's or a row's name for a screen reader: the look, and what its tags and signal say (its
- * PREVIEWING tag is its aria-pressed).
+ * PREVIEWING tag is its aria-pressed). What a tile's icons and a row's line say is its description,
+ * since the label replaces what the button holds.
  */
 export function lookLabel(look: Look, here: boolean, missing: readonly MissingInput[]): string {
   return [look.name, ...(here ? ['running here'] : []), ...(missing.length > 0 ? [MISSING_SIGNAL[missing[0]]] : [])].join(', ')
+}
+
+/**
+ * A look's category and the inputs it uses, in Phone-PutLookOn's words ("Ambient · no input", "Audio ·
+ * Tempo · Music"): a phone row's line, and what a tile's icons say to a screen reader.
+ */
+export function lookInputs(look: Look): string {
+  const category = CATEGORIES.find((each) => each.id === look.category)?.label ?? look.category
+  const inputs = chipsFor(look).map((chip) => chip.label)
+  return `${category} · ${inputs.length === 0 ? 'no input' : inputs.join(' · ')}`
 }
 
 /**
@@ -98,9 +109,7 @@ export function rowNote(look: Look, selected: boolean, here: boolean, missing: r
   if (missing.length > 0) return { text: MISSING_SIGNAL[missing[0]], signal: true }
   if (selected) return { text: 'Previewing on screen', signal: false }
   if (here) return { text: 'Running here now', signal: false }
-  const category = CATEGORIES.find((each) => each.id === look.category)?.label ?? look.category
-  const inputs = chipsFor(look).map((chip) => chip.label)
-  return { text: `${category} · ${inputs.length === 0 ? 'no input' : inputs.join(' · ')}`, signal: false }
+  return { text: lookInputs(look), signal: false }
 }
 
 /** The tiles a category shows, or a search's over every look (F4 ruling 10), in the server's order. */

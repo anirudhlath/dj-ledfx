@@ -85,6 +85,25 @@ describe('LookTile (§6.4)', () => {
     expect(musicWaiting).toHaveClass('text-signal')
   })
 
+  // WCAG 1.1.1: the icons are aria-hidden and the label replaces what the button holds, so the inputs (and the category,
+  // which a search shows no other way) reach a screen reader as the tile's description, in the phone rows' words.
+  it('describes its look by its category and inputs, whatever its state', () => {
+    inQuery(
+      <>
+        <LookTile {...props('aurora')} />
+        <LookTile {...props('spectrum', { missing: ['music'] })} />
+        <LookTile {...props('drop', { selected: true, here: true })} />
+      </>,
+    )
+    const plain = screen.getByRole('button', { name: lookName('aurora') })
+    expect(plain).toHaveAccessibleDescription('Ambient · no input')
+    // The words are for a screen reader only: the tile draws no such line.
+    expect(within(plain).getByText('Ambient · no input')).toHaveClass('sr-only')
+    const waiting = screen.getByRole('button', { name: `${lookName('spectrum')}, Waits for music` })
+    expect(waiting).toHaveAccessibleDescription('Audio · Music')
+    expect(screen.getByRole('button', { name: `${lookName('drop')}, running here` })).toHaveAccessibleDescription('Audio · Tempo · Music')
+  })
+
   // The previewed look can also be the one the zone runs: the tag's one place says PREVIEWING.
   it('says PREVIEWING, not RUNNING HERE, on a look that is both, and still tells a screen reader', () => {
     inQuery(<LookTile {...props('fireflies', { selected: true, here: true })} />)
@@ -119,6 +138,23 @@ describe('LookRow (§8.10)', () => {
     expect(here.querySelectorAll('svg')).toHaveLength(0)
     const plain = screen.getByRole('button', { name: lookName('aurora') })
     expect(within(plain).getByText('Ambient · no input')).toHaveClass('text-text-3')
+  })
+
+  // The line is visible and the label replaces what the button holds, so a screen reader hears the line as its description
+  // (the category shows nowhere else when a search spans every category).
+  it('describes each row by its line', () => {
+    inQuery(
+      <>
+        <LookRow {...props('embers', { selected: true })} />
+        <LookRow {...props('fireflies', { here: true })} />
+        <LookRow {...props('aurora')} />
+        <LookRow {...props('drop', { missing: ['music'] })} />
+      </>,
+    )
+    expect(screen.getByRole('button', { name: lookName('embers') })).toHaveAccessibleDescription('Previewing on screen')
+    expect(screen.getByRole('button', { name: `${lookName('fireflies')}, running here` })).toHaveAccessibleDescription('Running here now')
+    expect(screen.getByRole('button', { name: lookName('aurora') })).toHaveAccessibleDescription('Ambient · no input')
+    expect(screen.getByRole('button', { name: `${lookName('drop')}, Waits for music` })).toHaveAccessibleDescription('Waits for music')
   })
 
   // §8.2's signal line on a row, chosen or not; only the list's one tab stop is tabbable (F4 ruling 12).

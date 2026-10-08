@@ -6,6 +6,7 @@ import { HERO_NOW } from '@/test/live'
 import {
   CATEGORIES,
   chosenZone,
+  lookInputs,
   lookLabel,
   looksShown,
   lookTransition,
@@ -187,6 +188,14 @@ describe("a look's words in the composer", () => {
     const both = ['music', 'home-assistant'] as const
     expect(rowNote(look('spectrum'), false, false, both)).toEqual({ text: 'Waits for music', signal: true })
     expect(lookLabel(look('spectrum'), true, both)).toBe(`${look('spectrum').name}, running here, Waits for music`)
+  })
+
+  // Phone-PutLookOn's "Ambient · no input": the look's category, then the inputs it uses in §6.3's chip order. A tile's icons
+  // are aria-hidden, so a tile gives a screen reader these words as its description.
+  it("say a look's category and the inputs it uses", () => {
+    expect(lookInputs(look('aurora'))).toBe('Ambient · no input')
+    expect(lookInputs(look('spectrum'))).toBe('Audio · Music')
+    expect(lookInputs(look('drop'))).toBe('Audio · Tempo · Music')
   })
 })
 
