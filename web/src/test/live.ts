@@ -1,5 +1,5 @@
-import { onTestFinished } from 'vitest'
-import type { AttentionItem, Id } from '@/api/contract'
+import { onTestFinished, vi } from 'vitest'
+import type { AttentionItem, FrameStream, Id } from '@/api/contract'
 import { decodeFrame, encodeFrame, type FrameStore } from '@/api/frames'
 import { clientNow, normaliseBeat } from '@/api/beat'
 import { beatClock, frames, startDataLayer } from '@/api/live'
@@ -40,9 +40,26 @@ export function startMockDataLayer(options: MockServerOptions = {}): MockServer 
   return server
 }
 
-/** A light's live frame, `rgb` three bytes an LED, decoded as the socket would: into the app's frame store unless given another. */
-export function pushFrame(id: Id, seq: number, rgb: ArrayLike<number>, { store = frames, at = 0 }: { store?: FrameStore; at?: number } = {}): void {
-  decodeFrame(encodeFrame(2, id, seq, Uint8Array.from(rgb)), 2, store, at)
+/** REST on a mock server: the app's fetch answered by `server`, as MSW's handlers answer it in the browser. */
+export function restOn(server: MockServer): void {
+  vi.stubGlobal('fetch', async (input: URL | string, init: RequestInit = {}) => {
+    const body = typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined
+    const reply = server.handle(init.method ?? 'GET', new URL(input).pathname, body)
+    return reply.body === undefined ? new Response(null, { status: reply.status }) : Response.json(reply.body, { status: reply.status })
+  })
+}
+
+/**
+ * A light's frame, `rgb` three bytes an LED, decoded as the socket would: live, into the app's frame
+ * store, unless told otherwise.
+ */
+export function pushFrame(
+  id: Id,
+  seq: number,
+  rgb: ArrayLike<number>,
+  { store = frames, at = 0, stream = 'live' }: { store?: FrameStore; at?: number; stream?: FrameStream } = {},
+): void {
+  decodeFrame(encodeFrame(2, id, seq, Uint8Array.from(rgb), stream), 2, store, at)
 }
 
 const KIND = { light: 'light-offline', zone: 'zone-crashed', input: 'input-disconnected' } as const
