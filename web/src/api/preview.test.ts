@@ -298,15 +298,16 @@ describe('the preview', () => {
   })
 
   // The one extra request is all a link coming back gets: if that fails too, it's the failure shown, and nothing is asked in a loop.
+  // The two failures differ in their details, because errors compare by value: equal ones couldn't tell which of them is shown.
   it('shows the failure of the request asked for after the link came back, and asks no more', async () => {
     const { preview, subscribeFrames } = session()
     const first = held<PreviewStarted>()
-    const refused = new ApiError(0, 'Failed to fetch', '/api/preview')
+    const refused = new ApiError(0, 'the second request', '/api/preview')
     const ask = vi.spyOn(api, 'startPreview').mockReturnValueOnce(first.promise).mockRejectedValueOnce(refused)
     preview.show('living', 'embers')
     preview.resume()
 
-    first.reject(new ApiError(0, 'Failed to fetch', '/api/preview'))
+    first.reject(new ApiError(0, 'the first request', '/api/preview'))
     await vi.waitFor(() => expect(preview.snapshot().status).toBe('failed'))
     expect(ask).toHaveBeenCalledTimes(2)
     expect(preview.snapshot()).toMatchObject({ zoneId: 'living', lookId: 'embers', error: refused, showing: null })
