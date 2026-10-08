@@ -1,11 +1,12 @@
 """Rain storm's particles (looks.json "rain"): drops and lightning.
 
 Drops run down each lamp from just over its top to just under its bottom (the ceiling and
-the floor stop them), a few at a time, each past an LED of its own (Ground.on), so rain runs
-along a long light's length. A strike comes once in each stretch of 60 / strikes_per_min
-seconds, at a random moment and a random spot over the zone's floor at half the ceiling's
-height: one particle as wide as strike_reach, so each lamp lights by its distance from the
-strike. It flashes, dims, and flickers once more.
+the floor stop them, but never short of the lamp: Ground.ceiling_for and floor_for), a few at
+a time, each past an LED of its own (Ground.on), so rain runs along a long light's length. A
+strike comes once in each stretch of 60 / strikes_per_min seconds, at a random moment and a
+random spot over the zone's floor at half the ceiling's height: one particle as wide as
+strike_reach, so each lamp lights by its distance from the strike. It flashes, dims, and
+flickers once more.
 
 A home with so many lamps that the drops would pass MAX_PARTICLES, with the lightning's room
 kept, makes fewer of them (lamp_streams): every lamp's rate comes down together, so that none
@@ -40,8 +41,8 @@ if TYPE_CHECKING:
 
 RAIN_PALETTE = ("#2850ff", "#78b4ff", "#c8e6ff")
 LIGHTNING = "#e6eeff"
-OVER_M = 0.25  # a drop starts this far over its lamp's top, or at the ceiling
-UNDER_M = 0.15  # and runs out this far under its bottom, or at the floor
+OVER_M = 0.25  # a drop starts this far over its lamp's top, or at the ceiling if that is higher
+UNDER_M = 0.15  # and runs out this far under its bottom, or at the floor if that is lower
 JITTER_M = 0.05  # how far from its LED a drop runs
 EDGE = 0.1  # a drop fades in over this share of its run, and out over the last
 FLASH_S = 0.6  # a strike is over in this long
@@ -143,9 +144,9 @@ class RainStorm(ParamParticles):
         alive = np.flatnonzero((share >= 0.0) & (share < 1.0))
         alive = alive[np.argsort(born[alive], kind="stable")]  # oldest first
         lamp, u, share = lamp[alive], u[alive], share[alive]
-        # A run stops at the ceiling and the floor; a lamp outside them keeps its own extent.
-        top = np.maximum(np.minimum(lamps.high[lamp] + OVER_M, ground.ceiling), lamps.low[lamp])
-        bottom = np.minimum(np.maximum(lamps.low[lamp] - UNDER_M, ground.floor), top)
+        # A run stops at the ceiling and the floor, but never short of its own lamp.
+        top = np.minimum(lamps.high[lamp] + OVER_M, ground.ceiling_for(lamp).astype(np.float32))
+        bottom = np.maximum(lamps.low[lamp] - UNDER_M, ground.floor_for(lamp).astype(np.float32))
         side = 2.0 * math.pi * u[:, 1]
         past = ground.on(lamp, u[:, 3])
         pos = np.stack(

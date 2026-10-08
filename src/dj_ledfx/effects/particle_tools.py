@@ -366,7 +366,9 @@ class Ground:
     """Where a particle effect's particles move, worked out once for each LED set: the
     LEDs, their lamps, the zone's frame (the set's bounds, which a layer's view keeps), its
     floor and its ceiling. The floor is the map's (height 0) and the ceiling the map's
-    under a map; with none, the lowest LED and CEILING_OVER_M over the highest."""
+    under a map; with none, the lowest LED and CEILING_OVER_M over the highest. A lamp the
+    map (or a layer's transform) puts outside them has a floor and a ceiling of its own
+    (floor_for, ceiling_for): what moves along a lamp takes in all of its LEDs."""
 
     leds: LedSet
     lamps: Lamps
@@ -408,17 +410,39 @@ class Ground:
         foot[..., 2] = self.lamps.low[np.asarray(stop, dtype=np.intp)]
         return foot
 
-    def box(self, margin: float = 0.0, around: ArrayLike | None = None) -> tuple[F64, F64]:
+    def floor_for(self, stop: ArrayLike) -> F64:
+        """The lowest a thing goes at each stop's lamp: the floor, or the lamp's own lowest
+        LED where the map (or a layer's transform) puts the lamp under it. What runs past a
+        lamp stops at the floor, but never short of the lamp."""
+        low = self.lamps.low[np.asarray(stop, dtype=np.intp)].astype(np.float64)
+        floor: F64 = np.minimum(self.floor, low)
+        return floor
+
+    def ceiling_for(self, stop: ArrayLike) -> F64:
+        """The highest a thing goes at each stop's lamp: the ceiling, or the lamp's own
+        highest LED where the map (or a layer's transform) puts the lamp over it."""
+        high = self.lamps.high[np.asarray(stop, dtype=np.intp)].astype(np.float64)
+        ceiling: F64 = np.maximum(self.ceiling, high)
+        return ceiling
+
+    def box(
+        self, margin: float = 0.0, around: ArrayLike | None = None, stops: ArrayLike | None = None
+    ) -> tuple[F64, F64]:
         """Where particles that roam stay: the zone's frame `margin` metres wider each way,
         or `margin` each way round each point (shape (3,) or (P, 3)), between the floor and
-        the ceiling."""
+        the ceiling. Round points that are LEDs of lamps (`stops`, a lamp for each point), a
+        box takes in the whole lamp where it stands outside them (floor_for, ceiling_for)."""
         if around is None:
             low, high = self.low.astype(np.float64), self.high.astype(np.float64)
         else:
             low = high = np.asarray(around, dtype=np.float64)
         low, high = low - margin, high + margin
-        low[..., 2] = np.maximum(low[..., 2], self.floor)
-        high[..., 2] = np.minimum(high[..., 2], self.ceiling)
+        low[..., 2] = np.maximum(
+            low[..., 2], self.floor if stops is None else self.floor_for(stops)
+        )
+        high[..., 2] = np.minimum(
+            high[..., 2], self.ceiling if stops is None else self.ceiling_for(stops)
+        )
         return low, high
 
     @cached_property

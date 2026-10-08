@@ -3,8 +3,9 @@
 Each firefly wanders on slow waves of its own (particle_tools.wander) round an LED of a lamp
 of its own (any of its LEDs), within RANGE_M of it, every lamp taken before any gets two, or
 round the anchor they drift toward, within DRIFT_REACH_M; between the floor and the ceiling
-either way. It glows at GLOW_LOW of its brightest between flares and flares once in a period
-of its own from FLARE_S, so a lamp is lit only while a firefly is near it.
+either way (widened round a lamp that stands outside them, to take in its LEDs). It glows at
+GLOW_LOW of its brightest between flares and flares once in a period of its own from
+FLARE_S, so a lamp is lit only while a firefly is near it.
 """
 
 from __future__ import annotations
@@ -68,7 +69,7 @@ class Fireflies(ParamParticles):
         if anchor is not None:
             return ground.box(DRIFT_REACH_M, around=anchor)
         lamps = spread_over(self._seed, len(spots), ground.lamps.count)
-        return ground.box(RANGE_M, around=ground.on(lamps, spots))
+        return ground.box(RANGE_M, around=ground.on(lamps, spots), stops=lamps)
 
     def positions(self, ctx: RenderContext, ground: Ground) -> Particles:
         values = self._values

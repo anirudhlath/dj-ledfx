@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 import pytest
-from map_home import ROW, leds_at, lights_at
+from map_home import ROW, leds_at, lights_at, upright
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.ledset import LedSet
@@ -426,6 +426,52 @@ def test_a_box_is_the_frame_widened_and_kept_between_the_floor_and_ceiling() -> 
     low, high = ground.box(1.0, around=[[2.0, 2.0, 0.5], [5.0, 5.0, 2.5]])
     np.testing.assert_allclose(low, [[1.0, 1.0, 0.0], [4.0, 4.0, 1.5]])
     np.testing.assert_allclose(high, [[3.0, 3.0, 1.5], [6.0, 6.0, 3.0]])
+
+
+# Five upright lamps under a 3 m ceiling: one under the floor, one over the ceiling, one in
+# between, one straddling the floor and one the ceiling.
+OUTSIDE = lights_at(
+    upright(1.0, 1.0, -1.0, -0.5),
+    upright(2.0, 1.0, 3.2, 3.5),
+    upright(3.0, 1.0, 0.1, 1.4),
+    upright(4.0, 1.0, -0.9, 0.4),
+    upright(5.0, 1.0, 2.5, 3.5),
+    ceiling=3.0,
+)
+
+
+def test_a_lamps_floor_and_ceiling_take_in_its_own_leds() -> None:
+    ground = Ground.of(OUTSIDE)
+    stops = [0, 1, 2, 3, 4]
+
+    np.testing.assert_allclose(ground.floor_for(stops), [-1.0, 0.0, 0.0, -0.9, 0.0], atol=1e-6)
+    np.testing.assert_allclose(ground.ceiling_for(stops), [3.0, 3.5, 3.0, 3.0, 3.5], atol=1e-6)
+    assert ground.floor_for(stops).dtype == np.float64  # the map's own, to the last bit
+    mapped = Ground.of(lights_at([(1.0, 1.0, 0.7), (1.0, 1.0, 2.4)], ceiling=2.45))
+    assert float(mapped.ceiling_for([0])[0]) == 2.45
+    assert float(mapped.floor_for([0])[0]) == 0.0
+
+
+def test_a_lamp_with_no_map_is_never_outside_the_floor_and_ceiling() -> None:
+    ground = Ground.of(lights_at(upright(1.0, 1.0, -1.0, -0.5), upright(3.0, 1.0), ceiling=None))
+    np.testing.assert_allclose(ground.floor_for([0, 1]), [ground.floor] * 2)
+    np.testing.assert_allclose(ground.ceiling_for([0, 1]), [ground.ceiling] * 2)
+
+
+def test_a_box_round_a_lamps_led_takes_in_the_lamp_where_it_stands_outside_the_band() -> None:
+    ground = Ground.of(OUTSIDE)
+    stops = [0, 1, 2, 3, 4]
+    middle = np.array(  # the middle of each lamp
+        [[1.0, 1.0, -0.75], [2.0, 1.0, 3.35], [3.0, 1.0, 0.75], [4.0, 1.0, -0.25], [5.0, 1.0, 3.0]]
+    )
+
+    low, high = ground.box(1.0, around=middle, stops=stops)
+
+    np.testing.assert_allclose(low[:, 2], [-1.0, 2.35, 0.0, -0.9, 2.0], atol=1e-6)
+    np.testing.assert_allclose(high[:, 2], [0.25, 3.5, 1.75, 0.75, 3.5], atol=1e-6)
+    assert (low[:, 2] <= middle[:, 2]).all() and (middle[:, 2] <= high[:, 2]).all()
+    np.testing.assert_allclose(low[:, :2], middle[:, :2] - 1.0)  # the sides are the same
+    np.testing.assert_allclose(high[:, :2], middle[:, :2] + 1.0)
 
 
 def test_newest_keeps_the_last_particles() -> None:

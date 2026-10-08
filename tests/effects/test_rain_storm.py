@@ -6,6 +6,7 @@ from conftest import render_ctx
 from crowds import SPLITS, dealt, worst_crowd
 from map_home import ROW, bulbs, leds_at, lights_at, upright
 from numpy.typing import NDArray
+from stray_lamps import STRAYS, stays_in_band, unpassed
 
 from dj_ledfx.effects import rain_storm as rain_module
 from dj_ledfx.effects.context import RenderContext
@@ -220,17 +221,13 @@ def test_a_drop_never_starts_over_the_ceiling() -> None:
     assert z.max() > 3.0 - 0.06
 
 
-def test_a_drop_does_not_run_off_a_lamp_that_stands_over_the_ceiling() -> None:
-    z = _heights(lights_at(upright(1.0, 1.0, 3.2, 3.5), ceiling=3.0))  # a map that puts it there
-    assert z.min() >= 3.2 - UNDER_M - 1e-5  # no further under it than a drop runs
-    assert z.max() <= 3.2 + 1e-5  # and never up the lamp: the ceiling has stopped it already
-    assert np.ptp(z) > 0.1  # still a drop running down, not one stuck in place
-
-
-def test_a_drop_does_not_run_up_a_lamp_that_stands_under_the_floor() -> None:
-    z = _heights(lights_at(upright(1.0, 1.0, -1.0, -0.5)))  # a map that puts it there
-    assert z.max() <= -0.5 + OVER_M + 1e-5  # the drops stay with the lamp, going down or not
-    assert z.min() >= -1.0 - UNDER_M - 1e-5
+@pytest.mark.parametrize("where", STRAYS)
+def test_drops_run_down_every_led_of_a_lamp_outside_the_floor_and_ceiling(where: str) -> None:
+    leds = STRAYS[where]
+    z = _heights(leds)
+    assert np.ptp(z) > 0.1  # running, not stuck in place
+    assert unpassed(z.astype(np.float64), leds) == []  # down the lamp's whole length
+    assert stays_in_band(z.astype(np.float64), leds)  # the overhang still stops at the ends
 
 
 def test_a_lamp_with_no_map_takes_its_drops_down_to_the_lowest_led_of_the_zone() -> None:

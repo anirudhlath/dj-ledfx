@@ -2,10 +2,11 @@
 
 Flakes fall past the lamps, per_lamp of them at once for each: flake i keeps a lamp of its
 own (spread_over: every lamp before any gets two) and falls from the ceiling to the floor
-over its own fall, swaying as it goes, then starts again at the ceiling. Each fall takes an
-LED of that lamp (Ground.on), a spot within COLUMN_M of it and a sway phase, all from
-draws() of flake i's fall c. A flake fades in at the ceiling and out at the floor, and
-lights a lamp as it passes.
+over its own fall, swaying as it goes, then starts again at the ceiling. (For a lamp that the
+map puts over the ceiling or under the floor it falls from the lamp's top or to its foot:
+Ground.ceiling_for and floor_for.) Each fall takes an LED of that lamp (Ground.on), a spot
+within COLUMN_M of it and a sway phase, all from draws() of flake i's fall c. A flake fades
+in at the ceiling and out at the floor, and lights a lamp as it passes.
 """
 
 from __future__ import annotations
@@ -92,11 +93,12 @@ class Snowfall(ParamParticles):
         out, side = COLUMN_M * np.sqrt(where[:, 0]), 2.0 * math.pi * where[:, 1]
         turn = 2.0 * math.pi * (SWAYS * share + where[:, 2])
         drift = float(values["drift"])
+        top, bottom = ground.ceiling_for(home), ground.floor_for(home)  # a lamp's own, if beyond
         pos = np.stack(
             [
                 past[:, 0] + out * np.cos(side) + drift * np.sin(turn),
                 past[:, 1] + out * np.sin(side) + drift * np.cos(turn),
-                ground.ceiling - share * (ground.ceiling - ground.floor),
+                top - share * (top - bottom),
             ],
             axis=1,
         )

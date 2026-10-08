@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from conftest import render_ctx
 from map_home import lights_at, upright
+from stray_lamps import STRAYS, run_heights, stays_in_band
 
 from dj_ledfx.effects.particles import drawn
 from dj_ledfx.effects.spotlights import Spotlights
@@ -128,3 +130,13 @@ def test_another_seed_tours_the_lamps_in_another_order() -> None:
             lamps.append(_lamp_under(spots.particles.pos[0]))
         tours.add(tuple(lamps))
     assert len(tours) == 3
+
+
+@pytest.mark.parametrize("where", STRAYS)
+def test_spotlights_move_along_a_lamp_outside_the_floor_and_ceiling(where: str) -> None:
+    leds = STRAYS[where]
+    z = run_heights(_spots(count=3), leds)
+    assert np.ptp(z) > 0.1  # moving from one of its LEDs to another
+    lamp = leds.pos[:, 2]
+    assert lamp.min() - 1e-5 <= z.min() and z.max() <= lamp.max() + 1e-5  # on the lamp itself
+    assert stays_in_band(z, leds)

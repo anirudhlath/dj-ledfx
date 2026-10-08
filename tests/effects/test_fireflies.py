@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from conftest import render_ctx
 from map_home import ROW, leds_at, lights_at, upright
+from stray_lamps import STRAYS, run_heights, stays_in_band, unpassed
 
 from dj_ledfx.effects.fireflies import DRIFT_REACH_M, GLOW_LOW, RANGE_M, Fireflies
 from dj_ledfx.effects.ledset import LedSet
@@ -117,3 +118,14 @@ def test_fireflies_move_in_seconds_whatever_the_tempo() -> None:
     quick = drawn(_flies(), render_ctx(t=500.0, beat_phase=0.9, bpm=300.0), leds)
     assert slow.any()
     np.testing.assert_array_equal(slow, quick)
+
+
+@pytest.mark.parametrize("where", STRAYS)
+def test_fireflies_wander_over_every_led_of_a_lamp_outside_the_floor_and_ceiling(
+    where: str,
+) -> None:
+    leds = STRAYS[where]
+    z = run_heights(_flies(count=12), leds)
+    assert np.ptp(z) > 0.1  # wandering, not stuck in place
+    assert unpassed(z, leds) == []  # over the lamp's whole length
+    assert stays_in_band(z, leds)

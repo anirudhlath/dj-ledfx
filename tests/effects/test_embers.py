@@ -7,6 +7,7 @@ import pytest
 from conftest import render_ctx
 from crowds import worst_crowd
 from map_home import ROW, bulbs, leds_at, lights_at, upright
+from stray_lamps import STRAYS, run_heights, stays_in_band, unpassed
 
 from dj_ledfx.effects import embers as embers_module
 from dj_ledfx.effects.embers import CLIMB_OVER_M, WOBBLE_M, Embers
@@ -148,12 +149,13 @@ def test_an_ember_brightens_as_it_catches() -> None:
     assert max(fresh) < 0.2  # it takes 0.15 s to catch: 0.13 at most
 
 
-def test_an_ember_does_not_sink_when_its_lamp_is_over_the_ceiling() -> None:
-    over = lights_at(upright(1.0, 1.0, 3.2, 3.5), ceiling=3.0)  # a map that puts a lamp up there
-    embers = _embers()
-    for t in _moments(5.0):
-        drawn(embers, render_ctx(t=t), over)
-        assert (embers.particles.pos[:, 2] >= 3.2 - 1e-5).all()
+@pytest.mark.parametrize("where", STRAYS)
+def test_embers_climb_every_led_of_a_lamp_outside_the_floor_and_ceiling(where: str) -> None:
+    leds = STRAYS[where]
+    z = run_heights(_embers(), leds)
+    assert np.ptp(z) > 0.1  # climbing, not stuck in place
+    assert unpassed(z, leds) == []  # up the lamp's whole length
+    assert stays_in_band(z, leds)  # and the overhang still stops at the floor and the ceiling
 
 
 def test_an_ember_climbing_a_lamp_near_the_ceiling_ends_at_the_ceiling() -> None:

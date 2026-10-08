@@ -3,9 +3,10 @@ them.
 
 Each lamp sends embers up from its foot (spec §5.1: "embers rise from lamp bases"), a few at
 a time, each under an LED of its own (Ground.foot), so a long light smoulders along its
-length; each climbs to just over the lamp's top as it dies: hot and bright as it catches,
-dimmer and redder as it climbs, flickering all the way. Ember n of lamp s comes from draws()
-of its key alone, so an ember is where it is whenever it's drawn.
+length; each climbs to just over the lamp's top (or to the ceiling, if that is higher) as it
+dies: hot and bright as it catches, dimmer and redder as it climbs, flickering all the way.
+Ember n of lamp s comes from draws() of its key alone, so an ember is where it is whenever
+it's drawn.
 
 A home with so many lamps that the embers would pass MAX_PARTICLES makes fewer of them
 (lamp_streams): every lamp's rate comes down together, so that none is ever cut mid-life.
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.particle_tools import Ground, Particles
 
 EMBER_PALETTE = ("#fff0a0", "#ffa020", "#ff4808", "#901000")  # catching to dying
-CLIMB_OVER_M = 0.3  # an ember dies this far over its lamp's top (or at the ceiling)
+CLIMB_OVER_M = 0.3  # an ember dies this far over its lamp's top (or at the ceiling if higher)
 WOBBLE_M = 0.06  # how far it wanders from its LED as it climbs
 WOBBLE_S = 2.0  # once round in this long
 LIFE_SPREAD = 0.5  # an ember lives its rise time, give or take a quarter
@@ -93,7 +94,10 @@ class Embers(ParamParticles):
         lamp, u, age, share = lamp[alive], u[alive], age[alive], share[alive]
         wobble = 2.0 * math.pi * (u[:, 2] + age / WOBBLE_S)
         foot = ground.foot(lamp, u[:, 4])
-        top = np.maximum(np.minimum(lamps.high[lamp] + CLIMB_OVER_M, ground.ceiling), foot[:, 2])
+        # The climb ends over the lamp's top or at the ceiling, but never short of the lamp.
+        top = np.minimum(
+            lamps.high[lamp] + CLIMB_OVER_M, ground.ceiling_for(lamp).astype(np.float32)
+        )
         pos = np.stack(
             [
                 foot[:, 0] + WOBBLE_M * np.sin(wobble),
