@@ -7,10 +7,14 @@ from typing import Any
 
 import pytest_asyncio
 from api_home import Api, api_home
-from conftest import OPENRGB, SERVER, FakeLight
+from conftest import OPENRGB, SERVER, FakeLight, pc_part_info
 from map_home import IN_THE_EAST_ROOM, tiny_home
 from runtime_fakes import TILE
 from zone_home import zone_record
+
+from dj_ledfx.devices.lights import LightIndex
+from dj_ledfx.web.contract import preview_started
+from dj_ledfx.zones.preview import PreviewLight
 
 IN_THE_WEST_ROOM = {"kind": "point", "position": [1.0, 1.0, 1.0]}
 
@@ -79,7 +83,7 @@ async def test_a_preview_says_what_each_light_would_do(tmp_path: Path) -> None:
     keyboard = FakeLight(f"{SERVER}:0", name="Keyboard", caps=replace(OPENRGB, matrix=True))
     ram = FakeLight(f"{SERVER}:1", name="RAM", led_count=2, caps=OPENRGB)
     lights = [FakeLight("tile", caps=TILE), keyboard, ram, FakeLight("lamp")]
-    desk = [zone_record("desk", "tile", keyboard.stable_id, ram.stable_id, "lamp")]
+    desk = [zone_record("desk", "tile", ram.stable_id, keyboard.stable_id, "lamp")]  # RAM first
     async with api_home(tmp_path, lights, desk) as api:
         glow = {"id": "glow", "name": "Glow", "type": "firmware", "kind": "glow_firmware"}
         draft = {**await _draft(api, "Glow"), "layers": [glow]}
@@ -89,9 +93,31 @@ async def test_a_preview_says_what_each_light_would_do(tmp_path: Path) -> None:
     assert started.status_code == 201
     assert started.json()["lights"] == [
         {"id": "tile", "mode": "own-effect", "effect": "Glow"},
-        {"id": SERVER, "mode": "own-effect", "effect": "Glow"},  # the keyboard runs it
+        # the keyboard runs it, though the RAM streams a copy and comes first
+        {"id": SERVER, "mode": "own-effect", "effect": "Glow"},
         {"id": "lamp", "mode": "streamed-copy", "effect": "Glow"},
     ]
+
+
+# F4 ruling 1, the chain on its own: a part that runs the effect beats one that streams a copy
+# of it, which beats one that streams the look, wherever the parts sit.
+def test_the_pc_answers_as_its_most_active_part() -> None:
+    index = LightIndex.from_infos(
+        [pc_part_info(0, "Keyboard", 3), pc_part_info(1, "RAM", 2), pc_part_info(2, "Mouse", 1)]
+    )
+    streaming = PreviewLight(f"{SERVER}:0", "streaming", None)
+    copy = PreviewLight(f"{SERVER}:1", "streamed-copy", "Pulse")
+    own = PreviewLight(f"{SERVER}:2", "own-effect", "Glow")
+
+    def answer(*parts: PreviewLight) -> list[dict[str, Any]]:
+        return [light.model_dump() for light in preview_started("preview-1", parts, index).lights]
+
+    runs_it = [{"id": SERVER, "mode": "own-effect", "effect": "Glow"}]
+    assert answer(streaming, copy, own) == runs_it  # as the parts rise
+    assert answer(own, copy, streaming) == runs_it  # and as they fall
+    streams_a_copy = [{"id": SERVER, "mode": "streamed-copy", "effect": "Pulse"}]
+    assert answer(streaming, copy) == streams_a_copy  # a copy beats streaming too
+    assert answer(copy, streaming) == streams_a_copy
 
 
 async def test_a_bad_preview_request_says_why(api: Api) -> None:

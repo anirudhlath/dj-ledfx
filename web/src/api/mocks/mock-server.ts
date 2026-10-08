@@ -770,6 +770,11 @@ export class MockServer {
     return withOne(this.state.zones, (zone) => zone.id === id, `No zone '${id}'`, then)
   }
 
+  /** Engine M2 neither starts nor previews a look on a zone with no lights (ZoneError, 400): the zone must have some. */
+  private withLights(zone: Zone, then: () => MockReply): MockReply {
+    return zone.lights.length === 0 ? badRequest(`${zone.name} has no lights`) : then()
+  }
+
   private withGroup(id: Id, then: (zone: Zone) => MockReply): MockReply {
     return withOne(this.state.zones, (zone) => zone.id === id && zone.kind === 'group', `No zone '${id}'`, then)
   }
@@ -860,13 +865,10 @@ export class MockServer {
     ]
     if (problems.length > 0) return { status: 422, body: { detail: problems } }
     return this.withZone(zoneId, (zone) =>
-      this.withLookFor(body, (look) => this.lit(zone) ?? this.takeOver(zone, look, body.transition ?? look.transition)),
+      this.withLookFor(body, (look) =>
+        this.withLights(zone, () => this.takeOver(zone, look, body.transition ?? look.transition)),
+      ),
     )
-  }
-
-  /** Engine M2 neither starts nor previews a look on a zone with no lights (ZoneError, 400); null when it has some. */
-  private lit(zone: Zone): MockReply | null {
-    return zone.lights.length === 0 ? badRequest(`${zone.name} has no lights`) : null
   }
 
   private takeOver(zone: Zone, look: Look, transition: Transition | undefined): MockReply {
@@ -1123,23 +1125,23 @@ export class MockServer {
    */
   private startPreview(body: PreviewRequest): MockReply {
     return this.withZone(body.zoneId, (zone) =>
-      this.withLookFor(body, (look) => {
-        const refused = this.lit(zone)
-        if (refused !== null) return refused
-        const lights = new Map(this.state.lights.map((light) => [light.id, light]))
-        const spec = motifFor(look)
-        const id = this.newId('preview')
-        this.preview = {
-          id,
-          lights: zone.lights.map((lightId) => this.painted(lightId, lights.get(lightId)?.leds ?? 0, spec, 1, false)),
-          watchedAt: this.clock(),
-        }
-        const plans = zone.lights.map((lightId): PreviewLight => {
-          const light = lights.get(lightId)
-          return { id: lightId, ...(light === undefined ? { mode: 'streaming', effect: null } : lightPlan(look, light)) }
-        })
-        return created({ previewId: id, lights: plans })
-      }),
+      this.withLookFor(body, (look) =>
+        this.withLights(zone, () => {
+          const lights = new Map(this.state.lights.map((light) => [light.id, light]))
+          const spec = motifFor(look)
+          const id = this.newId('preview')
+          this.preview = {
+            id,
+            lights: zone.lights.map((lightId) => this.painted(lightId, lights.get(lightId)?.leds ?? 0, spec, 1, false)),
+            watchedAt: this.clock(),
+          }
+          const plans = zone.lights.map((lightId): PreviewLight => {
+            const light = lights.get(lightId)
+            return { id: lightId, ...(light === undefined ? { mode: 'streaming', effect: null } : lightPlan(look, light)) }
+          })
+          return created({ previewId: id, lights: plans })
+        }),
+      ),
     )
   }
 

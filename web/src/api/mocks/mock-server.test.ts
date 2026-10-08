@@ -331,7 +331,8 @@ describe('the REST API', () => {
     const { lights } = server.handle('POST', '/api/preview', { zoneId: 'home', lookId: 'firmware' }).body as PreviewStarted
     for (const { id, mode, effect } of lights) {
       const offers = server.state.lights.find((light) => light.id === id)!.builtInEffects
-      expect({ mode, effect }).toEqual(offers.length > 0 ? { mode: 'own-effect', effect: offers[0] } : { mode: 'streamed-copy', effect: COPIED_EFFECT })
+      const expected = offers.length > 0 ? { mode: 'own-effect', effect: offers[0] } : { mode: 'streamed-copy', effect: COPIED_EFFECT }
+      expect({ mode, effect }).toEqual(expected)
     }
     expect(new Set(lights.map((light) => light.mode))).toEqual(new Set(['own-effect', 'streamed-copy']))
   })
