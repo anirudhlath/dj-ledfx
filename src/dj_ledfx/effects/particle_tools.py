@@ -203,6 +203,17 @@ STARTS = 900  # the stream the lamps' starts are drawn from
 
 
 @dataclass(frozen=True, eq=False, slots=True)
+class Alive:
+    """The events of lamps (embers, drops) that are alive at one moment, oldest first."""
+
+    lamp: NDArray[np.intp]  # each event's lamp
+    u: F64  # (events, draws): each event's own random numbers
+    born: F64  # when each was born, in seconds
+    age: F64  # seconds since
+    share: F64  # how far through its life each is, from 0 to 1 (1 left out)
+
+
+@dataclass(frozen=True, eq=False, slots=True)
 class Streams:
     """The events (embers climbing, drops running) that lamps make, from lamp_streams."""
 
@@ -210,6 +221,7 @@ class Streams:
     rate: float  # events to a usual life, for each of them
     window: float  # the share of its stretch that an event is born in
     start: F64  # (lamps,): where in its stretch each lamp's window starts, as a share of it
+    spread: float  # a life is its usual one give or take half of this share of it
 
     def events(self, n: NDArray[np.int64]) -> tuple[NDArray[np.int64], NDArray[np.intp]]:
         """Events n of every lamp that makes them, n by n: each event's n, and its lamp."""
@@ -220,25 +232,44 @@ class Streams:
         born: F64 = event + self.start[lamp] + self.window * u
         return born
 
+    def alive(self, seed: int, t: float, usual: float, count: int) -> Alive:
+        """The events alive at time t, a usual life being `usual` seconds, with `count` random
+        numbers drawn for each from the key of its lamp and its n alone (draws), so an event is
+        where it is whenever it is drawn. Column 0 of u sets its birth in its window, and
+        column 1 its life, between 1 - spread / 2 and 1 + spread / 2 usual lives (a spread of 0
+        leaves the column to the effect). Oldest first."""
+        every = usual / self.rate  # one event leaves each lamp this often
+        n = recent(t, every, usual * (1.0 + self.spread / 2.0))
+        event, lamp = self.events(n)
+        u = draws(seed, event * LAMP_KEYS + lamp, count)
+        born = self.born(event, lamp, u[:, 0]) * every
+        age = t - born
+        share = age / (usual * (1.0 - self.spread / 2.0 + self.spread * u[:, 1]))
+        alive = np.flatnonzero((age >= 0.0) & (share < 1.0))
+        alive = alive[np.argsort(born[alive], kind="stable")]
+        return Alive(lamp[alive], u[alive], born[alive], age[alive], share[alive])
 
-def lamp_streams(seed: int, lamps: int, rate: float, longest: float, room: int) -> Streams:
+
+def lamp_streams(seed: int, lamps: int, rate: float, spread: float, room: int) -> Streams:
     """How `lamps` lamps make events (embers, drops) so that no more than `room` are alive at
     once, however many lamps there are and however the draws fall.
 
     Each lamp makes one event in each stretch of `every` seconds, `rate` events to a usual
     life: event n is born at (n + start + window * u) * every, u from 0 to 1 its own draw, and
-    lives `longest` usual lives at the most. Born anywhere in their stretches (window 1, start
-    0, as recent() has them), a lamp's events can come to ceil(longest * rate + 1) alive at
-    once; born in a `window` of them, ceil(longest * rate + window). The lamps share the room
-    in whole events, `room // served` each, and a rate that fits that is left as it was, with
-    the window narrowed as far as WINDOW_MIN to make it fit; past that the rate comes down.
-    Both are the same for every lamp, and each lamp's window starts at a place of its own in
-    the stretch, so the lamps are not in step. ROOM_MARGIN keeps a rounding from tipping a
-    count that comes out even. With more lamps than room, a seeded `room` of them make events
-    (as snow gives its flakes to as many lamps as it has) and the others make none."""
+    lives `longest` usual lives at the most, `longest` being 1 + spread / 2. Born anywhere in
+    their stretches (window 1, start 0, as recent() has them), a lamp's events can come to
+    ceil(longest * rate + 1) alive at once; born in a `window` of them, ceil(longest * rate +
+    window). The lamps share the room in whole events, `room // served` each, and a rate that
+    fits that is left as it was, with the window narrowed as far as WINDOW_MIN to make it
+    fit; past that the rate comes down. Both are the same for every lamp, and each lamp's
+    window starts at a place of its own in the stretch, so the lamps are not in step.
+    ROOM_MARGIN keeps a rounding from tipping a count that comes out even. With more lamps
+    than room, a seeded `room` of them make events (as snow gives its flakes to as many lamps
+    as it has) and the others make none."""
+    longest = 1.0 + spread / 2.0
     served = min(lamps, room)
     if served <= 0:
-        return Streams(np.zeros(0, np.intp), rate, 1.0, np.zeros(max(lamps, 0)))
+        return Streams(np.zeros(0, np.intp), rate, 1.0, np.zeros(max(lamps, 0)), spread)
     slack = room // served - ROOM_MARGIN  # what a lamp's longest count must stay under
     window = min(1.0, slack - longest * rate)
     if window < WINDOW_MIN:
@@ -251,7 +282,7 @@ def lamp_streams(seed: int, lamps: int, rate: float, longest: float, room: int) 
     start = np.zeros(lamps)
     if window < 1.0:
         start[lamp] = draws(seed, lamp, 1, stream=STARTS)[:, 0]
-    return Streams(lamp, rate, window, start)
+    return Streams(lamp, rate, window, start, spread)
 
 
 @dataclass(frozen=True, eq=False, slots=True)

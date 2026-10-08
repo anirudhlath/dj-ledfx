@@ -243,5 +243,5 @@ def test_however_the_draws_fall_embers_never_pass_the_cap_on_a_crowded_home(
     served, most = worst_crowd(monkeypatch, embers_module, embers, bulbs(lamps), 40.0, lives=True)
     assert served == min(lamps, MAX_PARTICLES)
     each = MAX_PARTICLES // served  # the cap, shared out in whole embers
-    assert each - 1 <= most <= each  # a lamp comes within one of its share, and never past it
+    assert most == each  # the worst hand fills a lamp's share, and never past it
     assert served * most <= MAX_PARTICLES

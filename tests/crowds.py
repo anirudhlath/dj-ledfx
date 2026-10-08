@@ -12,7 +12,6 @@ lives as long as it can.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from types import ModuleType
 
 import numpy as np
@@ -20,6 +19,7 @@ import pytest
 from conftest import render_ctx
 from numpy.typing import ArrayLike, NDArray
 
+from dj_ledfx.effects import particle_tools
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import LAMP_KEYS, Ground, draws
 from dj_ledfx.effects.particles import ParamParticles
@@ -28,23 +28,34 @@ LATE = 1.0 - 1e-9  # the latest a draw can be, short of 1
 SPLITS = 3  # where the crowding falls among a lamp's events depends on the moment: try these
 
 
-def dealt(split: int, *, lives: bool = False) -> Callable[..., NDArray[np.float64]]:
-    """draws() with the worst hand dealt. Stream 0 is a lamp's events, event n of lamp s from
-    key n * LAMP_KEYS + s (birth in column 0, the length of the life in column 1); stream 1
-    is the rain's strikes, strike n from key n. Where the older events fall among the newer
-    depends on the moment, so a test tries a few `split`s."""
+class Dealt:
+    """draws() with the worst hand dealt, and a record of the streams it was asked for.
+    Stream 0 is a lamp's events, event n of lamp s from key n * LAMP_KEYS + s (birth in column
+    0, the length of the life in column 1); stream 1 is the rain's strikes, strike n from key
+    n. Where the older events fall among the newer depends on the moment, so a test tries a
+    few `split`s."""
 
-    def deal(seed: int, keys: ArrayLike, count: int, stream: int = 0) -> NDArray[np.float64]:
+    def __init__(self, split: int, *, lives: bool = False) -> None:
+        self.split, self.lives = split, lives
+        self.asked = set[int]()
+
+    def __call__(
+        self, seed: int, keys: ArrayLike, count: int, stream: ArrayLike = 0
+    ) -> NDArray[np.float64]:
+        self.asked.update(np.unique(stream).tolist())
         u = draws(seed, keys, count, stream)
-        if len(u) and stream in (0, 1):
+        one = int(stream) if np.ndim(stream) == 0 else None  # type: ignore[arg-type]
+        if len(u) and one in (0, 1):
             n = np.asarray(keys, dtype=np.int64)
-            n = n // LAMP_KEYS if stream == 0 else n
-            u[:, 0] = np.where(n < (n.min() + n.max() + split) // 2, LATE, 0.0)  # late, or early
-            if lives and stream == 0:
+            n = n // LAMP_KEYS if one == 0 else n
+            u[:, 0] = np.where(n < (n.min() + n.max() + self.split) // 2, LATE, 0.0)  # late, early
+            if self.lives and one == 0:
                 u[:, 1] = LATE  # the longest life
         return u
 
-    return deal
+
+def dealt(split: int, *, lives: bool = False) -> Dealt:
+    return Dealt(split, lives=lives)
 
 
 def worst_crowd(
@@ -57,17 +68,25 @@ def worst_crowd(
     lives: bool = False,
 ) -> tuple[int, int]:
     """Run `effect` on a row of bulbs a metre apart (map_home.bulbs) for `seconds`, with the
-    draws `module` makes dealt the worst way: how many bulbs ever have a particle near them,
-    and the most one has at once. Particles an effect makes before step() cuts them to the
-    cap; those over a metre wide (the rain's strikes) are left out."""
+    worst hand dealt to the draws of its lamps' events (particle_tools.Streams.alive) and to
+    those `module` makes itself, if it makes any (the rain's strikes): how many bulbs ever have
+    a particle near them, and the most one has at once. Particles an effect makes before step()
+    cuts them to the cap; those over a metre wide (the rain's strikes) are left out.
+
+    Fails if the events were never dealt their hand: a crowd that is not the worst proves
+    nothing, and a draw moved to another module would otherwise go unforged without a word."""
     ground, seen, most = Ground.of(leds), set[int](), 0
     effect.place(leds)
     for split in range(SPLITS):
-        monkeypatch.setattr(module, "draws", dealt(split, lives=lives))
+        hand = dealt(split, lives=lives)
+        monkeypatch.setattr(particle_tools, "draws", hand)
+        if hasattr(module, "draws"):
+            monkeypatch.setattr(module, "draws", hand)
         for t in np.linspace(500.0, 500.0 + seconds, 200):
             made = effect.positions(render_ctx(t=float(t)), ground)
             near = np.rint(made.pos[made.radius < 1.0, 0]).astype(np.int64)
             counts = np.bincount(near, minlength=1)
             most = max(most, int(counts.max()))
             seen.update(np.flatnonzero(counts).tolist())
+        assert 0 in hand.asked, "the lamps' events were never drawn through the forged draws()"
     return len(seen), most

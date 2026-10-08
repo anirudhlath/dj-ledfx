@@ -323,5 +323,5 @@ def test_however_the_draws_fall_rain_never_passes_the_cap_on_a_crowded_home(
     room = MAX_PARTICLES - 2  # the lightning's: two strikes can flash at once at 30 a minute
     assert served == min(lamps, room)
     each = room // served  # the rest of the cap, shared out in whole drops
-    assert each - 1 <= most <= each  # a lamp comes within one of its share, and never past it
+    assert most == each  # the worst hand fills a lamp's share, and never past it
     assert served * most + 2 <= MAX_PARTICLES

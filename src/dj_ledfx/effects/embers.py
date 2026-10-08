@@ -21,7 +21,7 @@ import numpy as np
 
 from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.effects.particle_tools import LAMP_KEYS, draws, lamp_streams, recent, swarm
+from dj_ledfx.effects.particle_tools import lamp_streams, swarm
 from dj_ledfx.effects.particles import MAX_PARTICLES, ParamParticles
 
 if TYPE_CHECKING:
@@ -33,7 +33,6 @@ CLIMB_OVER_M = 0.3  # an ember dies this far over its lamp's top (or at the ceil
 WOBBLE_M = 0.06  # how far it wanders from its LED as it climbs
 WOBBLE_S = 2.0  # once round in this long
 LIFE_SPREAD = 0.5  # an ember lives its rise time, give or take a quarter
-LONGEST = 1.0 + LIFE_SPREAD / 2.0  # the longest life, in rise times
 FLICKER_HZ = 7.0
 CATCH_S = 0.15  # it brightens over this as it catches
 
@@ -80,18 +79,11 @@ class Embers(ParamParticles):
         lamps = ground.lamps
         rise = float(values["rise_s"])
         streams = lamp_streams(
-            self._seed, lamps.count, float(values["per_lamp"]), LONGEST, MAX_PARTICLES
+            self._seed, lamps.count, float(values["per_lamp"]), LIFE_SPREAD, MAX_PARTICLES
         )
-        every = rise / streams.rate  # one ember leaves each lamp this often
-        n = recent(ctx.t, every, rise * LONGEST)
-        event, lamp = streams.events(n)  # ember n of lamp s draws from key n * LAMP_KEYS + s
-        u = draws(self._seed, event * LAMP_KEYS + lamp, 5)
-        born = streams.born(event, lamp, u[:, 0]) * every
-        age = ctx.t - born
-        share = age / (rise * (1.0 - LIFE_SPREAD / 2.0 + LIFE_SPREAD * u[:, 1]))
-        alive = np.flatnonzero((age >= 0.0) & (share < 1.0))
-        alive = alive[np.argsort(born[alive], kind="stable")]  # oldest first
-        lamp, u, age, share = lamp[alive], u[alive], age[alive], share[alive]
+        # Each ember draws its birth, its life, its wobble and flicker phases and its LED.
+        now = streams.alive(self._seed, ctx.t, rise, 5)
+        lamp, u, age, share = now.lamp, now.u, now.age, now.share
         wobble = 2.0 * math.pi * (u[:, 2] + age / WOBBLE_S)
         foot = ground.foot(lamp, u[:, 4])
         # The climb ends over the lamp's top or at the ceiling, but never short of the lamp.

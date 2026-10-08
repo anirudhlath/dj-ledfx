@@ -22,6 +22,7 @@ from dj_ledfx.effects.particle_tools import (
     WINDOW_MIN,
     Ground,
     Particles,
+    Streams,
     arc,
     around,
     draws,
@@ -321,7 +322,7 @@ def test_things_spread_over_every_stop_before_any_takes_two() -> None:
 
 def test_a_home_with_room_for_every_event_gets_the_rate_it_asked_for() -> None:
     for lamps, rate in ((19, 10.0), (100, 3.0), (1, 100.0)):  # 3 * 1.25 + 1 < 5 for a hundred
-        streams = lamp_streams(1, lamps, rate, 1.25, 500)
+        streams = lamp_streams(1, lamps, rate, 0.5, 500)
         assert streams.lamp.tolist() == list(range(lamps))
         assert streams.rate == rate and streams.window == 1.0
         assert not streams.start.any()  # births anywhere in their stretches, as ever
@@ -334,8 +335,9 @@ def test_a_home_with_room_for_every_event_gets_the_rate_it_asked_for() -> None:
 def test_a_crowded_home_gets_a_lower_rate_for_every_lamp_that_keeps_to_the_room() -> None:
     for lamps in (60, 100, 101, 167, 250, 251, 499, 500, 501, 700):
         for rate in (0.5, 3.0, 10.0):
-            for longest in (1.0, 1.25):
-                streams = lamp_streams(3, lamps, rate, longest, 500)
+            for spread in (0.0, 0.5):
+                longest = 1.0 + spread / 2.0  # a life is its usual one give or take half of this
+                streams = lamp_streams(3, lamps, rate, spread, 500)
                 served = min(lamps, 500)
                 assert len(streams.lamp) == served
                 assert streams.rate <= rate and WINDOW_MIN <= streams.window <= 1.0
@@ -352,52 +354,98 @@ def test_a_crowded_home_gets_a_lower_rate_for_every_lamp_that_keeps_to_the_room(
 
 
 def test_a_rate_that_fits_in_a_narrower_window_keeps_its_rate_and_narrows_the_births() -> None:
-    streams = lamp_streams(1, 100, 3.5, 1.25, 500)  # 3.5 * 1.25 + 1 is over 5, + 0.6 is not
+    streams = lamp_streams(
+        1, 100, 3.5, 0.5, 500
+    )  # a life of up to 1.25: 3.5 * 1.25 + 1 is over 5, + 0.6 is not
     assert streams.rate == 3.5
     assert WINDOW_MIN < streams.window < 1.0
     assert math.ceil(1.25 * 3.5 + streams.window) == 5
-    wider = lamp_streams(1, 100, 3.4, 1.25, 500)  # a lower rate leaves a wider window
+    wider = lamp_streams(1, 100, 3.4, 0.5, 500)  # a lower rate leaves a wider window
     assert streams.window < wider.window <= 1.0
 
 
 def test_lamps_past_the_room_are_served_in_a_seeded_few_and_the_rest_make_nothing() -> None:
-    streams = lamp_streams(1, 700, 3.0, 1.25, 500)
+    streams = lamp_streams(1, 700, 3.0, 0.5, 500)
     assert len(streams.lamp) == 500 and len(set(streams.lamp.tolist())) == 500
     assert (np.diff(streams.lamp) > 0).all() and 0 <= streams.lamp.min() < streams.lamp.max() < 700
-    np.testing.assert_array_equal(streams.lamp, lamp_streams(1, 700, 3.0, 1.25, 500).lamp)
-    assert not np.array_equal(streams.lamp, lamp_streams(2, 700, 3.0, 1.25, 500).lamp)
-    fewer = lamp_streams(1, 700, 3.0, 1.25, 498).lamp  # the same shuffle, cut shorter
+    np.testing.assert_array_equal(streams.lamp, lamp_streams(1, 700, 3.0, 0.5, 500).lamp)
+    assert not np.array_equal(streams.lamp, lamp_streams(2, 700, 3.0, 0.5, 500).lamp)
+    fewer = lamp_streams(1, 700, 3.0, 0.5, 498).lamp  # the same shuffle, cut shorter
     assert set(fewer.tolist()) < set(streams.lamp.tolist())
     assert math.ceil(1.25 * streams.rate + streams.window) == 1  # one at a time, for each lamp
 
 
 def test_each_lamps_births_start_at_a_moment_of_their_own_in_the_stretch() -> None:
-    streams = lamp_streams(1, 100, 10.0, 1.25, 500)
+    streams = lamp_streams(1, 100, 10.0, 0.5, 500)
     start = streams.start[streams.lamp]
     assert (start >= 0.0).all() and (start < 1.0).all()
     assert np.ptp(start) > 0.9  # spread over the whole stretch, so the lamps are not in step
-    np.testing.assert_array_equal(start, lamp_streams(1, 100, 10.0, 1.25, 500).start[streams.lamp])
-    assert not np.array_equal(start, lamp_streams(2, 100, 10.0, 1.25, 500).start[streams.lamp])
+    np.testing.assert_array_equal(start, lamp_streams(1, 100, 10.0, 0.5, 500).start[streams.lamp])
+    assert not np.array_equal(start, lamp_streams(2, 100, 10.0, 0.5, 500).start[streams.lamp])
     event, lamp = streams.events(np.array([4]))
     born = streams.born(event, lamp, np.zeros(len(event)))
     np.testing.assert_allclose(born, 4.0 + start)
 
 
 def test_no_lamps_or_no_room_serve_no_lamp() -> None:
-    assert len(lamp_streams(1, 0, 3.0, 1.25, 500).lamp) == 0
-    assert len(lamp_streams(1, 10, 3.0, 1.25, 0).lamp) == 0
-    assert len(lamp_streams(1, 10, 3.0, 1.25, -4).lamp) == 0
-    event, lamp = lamp_streams(1, 10, 3.0, 1.25, 0).events(np.arange(5))
+    assert len(lamp_streams(1, 0, 3.0, 0.5, 500).lamp) == 0
+    assert len(lamp_streams(1, 10, 3.0, 0.5, 0).lamp) == 0
+    assert len(lamp_streams(1, 10, 3.0, 0.5, -4).lamp) == 0
+    event, lamp = lamp_streams(1, 10, 3.0, 0.5, 0).events(np.arange(5))
     assert len(event) == 0 and len(lamp) == 0
 
 
 def test_the_events_of_lamps_go_turn_by_turn_and_each_has_a_key_of_its_own() -> None:
-    event, lamp = lamp_streams(1, 4, 3.0, 1.25, 500).events(np.array([5, 6]))
+    event, lamp = lamp_streams(1, 4, 3.0, 0.5, 500).events(np.array([5, 6]))
     assert event.tolist() == [5, 5, 5, 5, 6, 6, 6, 6]
     assert lamp.tolist() == [0, 1, 2, 3, 0, 1, 2, 3]
-    event, lamp = lamp_streams(1, 700, 0.5, 1.25, 500).events(np.arange(-20, 20))
+    event, lamp = lamp_streams(1, 700, 0.5, 0.5, 500).events(np.arange(-20, 20))
     keys = event * LAMP_KEYS + lamp  # event n of lamp s draws from key n * LAMP_KEYS + s
     assert len(set(keys.tolist())) == len(keys)
+
+
+def _alive_the_long_way(
+    seed: int, streams: Streams, t: float, usual: float, spread: float, count: int
+) -> tuple[list[int], list[float]]:
+    """Every (lamp, birth) alive at t, from the rule alone: event n of lamp s is born at
+    (n + start + window * u) * every, from its own draws, and lives its usual life give or
+    take half the spread of it. Looks at far more events than can be alive."""
+    every, found = usual / streams.rate, []
+    for n in range(math.floor(t / every) - 40, math.floor(t / every) + 40):
+        for lamp in streams.lamp.tolist():
+            u = draws(seed, [n * LAMP_KEYS + lamp], count)[0]
+            born = (n + streams.start[lamp] + streams.window * u[0]) * every
+            if born <= t < born + usual * (1.0 - spread / 2.0 + spread * u[1]):
+                found.append((lamp, float(born)))
+    found.sort()
+    return [lamp for lamp, _ in found], [born for _, born in found]
+
+
+@pytest.mark.parametrize("spread", [0.0, 0.5])
+@pytest.mark.parametrize("lamps", [3, 40])
+def test_the_events_alive_are_those_born_and_not_yet_over_oldest_first(
+    lamps: int, spread: float
+) -> None:
+    streams = lamp_streams(1, lamps, 3.0, spread, 500)
+    for t in (500.0, 503.3, 517.77, 1e6 + 0.25):
+        now = streams.alive(1, t, 4.0, 5)
+
+        lamp, born = _alive_the_long_way(1, streams, t, 4.0, spread, 5)
+        by_lamp = np.lexsort((now.born, now.lamp))  # the same events, lamp by lamp
+        assert now.lamp[by_lamp].tolist() == lamp
+        np.testing.assert_allclose(now.born[by_lamp], born, rtol=1e-12)
+        assert (np.diff(now.born) >= 0.0).all()  # oldest first
+        np.testing.assert_allclose(now.age, t - now.born)
+        assert (now.age >= 0.0).all() and (now.share >= 0.0).all() and (now.share < 1.0).all()
+        assert now.u.shape == (len(now.lamp), 5)
+        assert (now.u >= 0.0).all() and (now.u < 1.0).all()
+        if spread == 0.0:  # every life the usual one
+            np.testing.assert_array_equal(now.share, now.age / 4.0)
+
+
+def test_events_alive_make_nothing_without_lamps_to_make_them() -> None:
+    now = lamp_streams(1, 10, 3.0, 0.5, 0).alive(1, 500.0, 4.0, 5)
+    assert len(now.lamp) == 0 and now.u.shape == (0, 5) and len(now.born) == 0
 
 
 def test_each_light_is_a_stop_at_its_middle_with_its_lowest_and_highest_led() -> None:

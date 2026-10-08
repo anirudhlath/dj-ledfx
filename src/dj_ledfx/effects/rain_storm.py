@@ -23,7 +23,6 @@ import numpy as np
 from dj_ledfx.effects.color import palette_at, palette_float
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.effects.particle_tools import (
-    LAMP_KEYS,
     NO_PARTICLES,
     draws,
     joined,
@@ -46,7 +45,7 @@ UNDER_M = 0.15  # and runs out this far under its bottom, or at the floor if tha
 JITTER_M = 0.05  # how far from its LED a drop runs
 EDGE = 0.1  # a drop fades in over this share of its run, and out over the last
 FLASH_S = 0.6  # a strike is over in this long
-LONGEST = 1.0  # a drop's longest run, in fall times: every drop takes fall_s
+LIFE_SPREAD = 0.0  # every drop takes fall_s: none of it given or taken
 
 
 def flash(age: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -133,17 +132,11 @@ class RainStorm(ParamParticles):
         fall = float(values["fall_s"])
         room = MAX_PARTICLES - flashes_at_once(float(values["strikes_per_min"]))
         streams = lamp_streams(
-            self._seed, lamps.count, float(values["drops_per_lamp"]), LONGEST, room
+            self._seed, lamps.count, float(values["drops_per_lamp"]), LIFE_SPREAD, room
         )
-        every = fall / streams.rate  # a drop starts down each lamp this often
-        n = recent(ctx.t, every, fall)
-        event, lamp = streams.events(n)  # drop n of lamp s draws from key n * LAMP_KEYS + s
-        u = draws(self._seed, event * LAMP_KEYS + lamp, 4)
-        born = streams.born(event, lamp, u[:, 0]) * every
-        share = (ctx.t - born) / fall  # 0 over the lamp's top, 1 under its bottom
-        alive = np.flatnonzero((share >= 0.0) & (share < 1.0))
-        alive = alive[np.argsort(born[alive], kind="stable")]  # oldest first
-        lamp, u, share = lamp[alive], u[alive], share[alive]
+        # Each drop draws its birth, the side of its LED it runs on, its colour and its LED.
+        now = streams.alive(self._seed, ctx.t, fall, 4)
+        lamp, u, share = now.lamp, now.u, now.share
         # A run stops at the ceiling and the floor, but never short of its own lamp.
         top = np.minimum(lamps.high[lamp] + OVER_M, ground.ceiling_for(lamp).astype(np.float32))
         bottom = np.maximum(lamps.low[lamp] - UNDER_M, ground.floor_for(lamp).astype(np.float32))
