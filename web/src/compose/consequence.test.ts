@@ -110,7 +110,8 @@ describe('the consequence line', () => {
     expect(text(said.short)).toBe(waitingText('music'))
   })
 
-  it("says only the first input a look waits for, in the chips' order", () => {
+  // The model puts the inputs in the chips' order (model.test.ts); the line says the first it's given.
+  it("says only the first input it's given", () => {
     const said = consequence(sources(hero, 'living', 'spectrum', { missing: ['music', 'home-assistant'] }))
     expect(text(said.short)).toBe(waitingText('music'))
     expect(text(said.parts)).not.toContain(waitingText('home-assistant'))
@@ -131,6 +132,18 @@ describe('lights by name', () => {
     expect(lightsPhrase(['l0', 'l1', 'l2'], lights)).toBe('the Alphas and the Beta')
     expect(lightsPhrase(['l3', 'l4'], lights)).toBe('the Boxes')
     expect(lightsPhrase(['l0', 'l2'], lights)).toBe('the Alpha 1 and the Beta')
+  })
+
+  it('fold a name ending in a consonant and y into its -ies plural, and one ending in a vowel and y into -s', () => {
+    const rooms = named('Pantry 1', 'Pantry 2', 'Bay 1', 'Bay 2')
+    expect(lightsPhrase(['l0', 'l1'], rooms)).toBe('the Pantries')
+    expect(lightsPhrase(['l2', 'l3'], rooms)).toBe('the Bays')
+  })
+
+  it("name the lights of a name that's plural already one by one, whatever its case", () => {
+    const strings = named('Fairy lights 1', 'Fairy lights 2', 'FAIRY LIGHTS 1', 'FAIRY LIGHTS 2')
+    expect(lightsPhrase(['l0', 'l1'], strings)).toBe('the Fairy lights 1 and the Fairy lights 2')
+    expect(lightsPhrase(['l2', 'l3'], strings)).toBe('the FAIRY LIGHTS 1 and the FAIRY LIGHTS 2')
   })
 
   it('say how many when there are more than three names', () => {

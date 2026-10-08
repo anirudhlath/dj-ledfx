@@ -35,6 +35,11 @@ describe('the zone the composer puts a look on', () => {
     expect(chosenZone([...hero.zones].reverse(), null, null, undefined)?.kind).toBe('home')
   })
 
+  it("is the list's first zone when nothing is named and none is the whole home", () => {
+    const rooms = hero.zones.filter((each) => each.kind !== 'home')
+    expect(chosenZone(rooms, null, null, undefined)?.id).toBe(rooms[0].id)
+  })
+
   // §8.2: "Home looks (whole-home scope) lock the zone to Whole home."
   it('is the whole home for a home look, whatever was asked', () => {
     expect(chosenZone(hero.zones, 'living', 'kitchen', look('homesunset'))?.kind).toBe('home')
@@ -116,6 +121,18 @@ describe('the inputs a look would wait for', () => {
     expect(missingInputs(look('goodnight'), musicGone)).toEqual([])
     expect(missingInputs(look('goodnight'), { ...hero.inputs, homeAssistant: { ...homeAssistant, state: 'stale' } })).toEqual([])
   })
+
+  // §6.3's chip order, whichever order the look lists what it needs in.
+  it("come in the chips' order: the music, then Home Assistant", () => {
+    const { music, homeAssistant } = hero.inputs
+    const bothGone = {
+      ...hero.inputs,
+      music: { ...music, state: 'disconnected' as const },
+      homeAssistant: { ...homeAssistant, state: 'disconnected' as const },
+    }
+    const needsBoth: Look = { ...look('goodnight'), needs: ['home-assistant', 'music'] }
+    expect(missingInputs(needsBoth, bothGone)).toEqual(['music', 'home-assistant'])
+  })
 })
 
 describe('the looks the composer shows', () => {
@@ -163,6 +180,26 @@ describe('the transitions', () => {
   it('say a length to a tenth of a second, as the cards do', () => {
     const own = { ...look('embers'), transition: { kind: 'spread' as const, durationS: 2.46 } }
     expect(transitionChoices(own).find((choice) => choice.key === 'spread:2.46')?.label).toBe('Spread · 2.5 s')
+  })
+
+  // A look's own length that the cards say as an offered one ("3 s" for 2.96 s) is that choice, not a second
+  // choice in the same words.
+  it("never read alike, wherever a look's own length falls", () => {
+    for (const durationS of [2.96, 3.0000000000000004, 3, 2.5]) {
+      const own = { ...look('embers'), transition: { kind: 'wipe' as const, durationS } }
+      const choices = transitionChoices(own)
+      expect(new Set(choices.map((choice) => choice.label)).size).toBe(choices.length)
+      expect(choices.map((choice) => choice.key)).toContain(transitionKey(lookTransition(own)))
+    }
+  })
+
+  it("make a look's own length the offered choice it reads as, and send that", () => {
+    for (const durationS of [2.96, 3.0000000000000004]) {
+      const own = { ...look('embers'), transition: { kind: 'wipe' as const, durationS } }
+      expect(transitionKey(lookTransition(own))).toBe('wipe:3')
+      expect(transitionChoices(own)).toHaveLength(13)
+      expect(transitionChoices(own).find((choice) => choice.key === 'wipe:3')?.transition).toEqual({ kind: 'wipe', durationS: 3 })
+    }
   })
 
   it('say no length for a cut, or for a transition that has none', () => {

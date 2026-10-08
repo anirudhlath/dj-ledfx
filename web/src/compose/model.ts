@@ -25,6 +25,7 @@ export const locksToHome = (look: Look | undefined): boolean => look?.scope === 
 /**
  * The zone the composer puts the look on (F4 ruling 9): the whole home for a home look; else the zone the
  * URL names (the room clicked), else the last one used, else the whole home. A zone that's gone is unnamed.
+ * Where the list has no whole home, the last resort is its first zone (an empty list has none).
  */
 export function chosenZone(zones: readonly Zone[], asked: Id | null, remembered: Id | null, look: Look | undefined): Zone | undefined {
   const home = zones.find((zone) => zone.kind === 'home')
@@ -115,17 +116,32 @@ function choiceOf({ kind, durationS }: Transition): TransitionChoice {
   return { key: `${kind}:${length ?? 0}`, label: transitionLabel(kind, length), transition: { kind, durationS: length ?? 0 } }
 }
 
+/** A cut, then each kind at each of those lengths. */
+const OFFERED: readonly TransitionChoice[] = [
+  CUT,
+  ...KINDS.flatMap((kind) => TRANSITION_SECONDS.map((durationS) => ({ kind, durationS }))),
+].map(choiceOf)
+
 /**
- * §8.2: "Cut, Fade, Wipe, Spread, Dissolve + duration; default the look's own". A look's own transition,
- * when it's none of these, is offered too, after its kind's others.
+ * The choice a transition is: the offered one that reads the same, else its own. A length reads to a tenth
+ * of a second, as the cards say it, so a look's own 2.96 s is the offered "3 s", not a second choice in the
+ * same words.
  */
-export function transitionChoices(look: Look | undefined): TransitionChoice[] {
-  const own = choiceOf(lookTransition(look))
-  const offered = [CUT, ...KINDS.flatMap((kind) => TRANSITION_SECONDS.map((durationS) => ({ kind, durationS })))].map(choiceOf)
-  if (offered.some((choice) => choice.key === own.key)) return offered
-  const after = offered.findLastIndex((choice) => choice.transition.kind === own.transition.kind)
-  return [...offered.slice(0, after + 1), own, ...offered.slice(after + 1)]
+function choiceFor(transition: Transition): TransitionChoice {
+  const own = choiceOf(transition)
+  return OFFERED.find((choice) => choice.label === own.label) ?? own
 }
 
-/** The choice a transition is, by its key. */
-export const transitionKey = (transition: Transition): string => choiceOf(transition).key
+/**
+ * §8.2: "Cut, Fade, Wipe, Spread, Dissolve + duration; default the look's own". A look's own transition,
+ * when it reads as none of these, is offered too, after its kind's others.
+ */
+export function transitionChoices(look: Look | undefined): TransitionChoice[] {
+  const own = choiceFor(lookTransition(look))
+  if (OFFERED.includes(own)) return [...OFFERED]
+  const after = OFFERED.findLastIndex((choice) => choice.transition.kind === own.transition.kind)
+  return [...OFFERED.slice(0, after + 1), own, ...OFFERED.slice(after + 1)]
+}
+
+/** The key of the choice a transition is: the select's value, and always one that its look's choices hold. */
+export const transitionKey = (transition: Transition): string => choiceFor(transition).key

@@ -56,11 +56,21 @@ const unique = (names: readonly string[]) => [...new Set(names)]
 
 /** A light named with a number: "<name> 2". */
 const NUMBERED = /^(.*\S)\s+\d+$/
-const plural = (word: string) => (/(s|x|z|ch|sh)$/i.test(word) ? `${word}es` : `${word}s`)
+
+/** "Box" is "Boxes", "Pantry" is "Pantries", "Bay" is "Bays". */
+function plural(word: string): string {
+  if (/(x|z|ch|sh)$/i.test(word)) return `${word}es`
+  if (/[^aeiou]y$/i.test(word)) return `${word.slice(0, -1)}ies`
+  return `${word}s`
+}
+
+/** A name that's plural already ("Fairy lights") has no plural to fold into: its lights are named one by one. */
+const foldable = (stem: string) => !/s$/i.test(stem)
 
 /**
  * The lights by name, each "the <name>" (F4 ruling 14). Numbered lights of one name fold into its plural when
- * every light of that name in the home is there ("the <name>s"), and more than three names say how many.
+ * every light of that name in the home is there ("the <name>s"), unless the name is plural already, and more
+ * than three names say how many.
  */
 export function lightsPhrase(ids: readonly Id[], lights: ReadonlyMap<Id, Pick<Light, 'id' | 'name'>>): string {
   const stem = (name: string) => NUMBERED.exec(name)?.[1] ?? null
@@ -71,7 +81,7 @@ export function lightsPhrase(ids: readonly Id[], lights: ReadonlyMap<Id, Pick<Li
     const name = lights.get(id)?.name ?? id
     const base = stem(name)
     const siblings = base === null ? [] : [...lights.values()].filter((light) => stem(light.name) === base)
-    if (base !== null && siblings.length > 1 && siblings.every((light) => chosen.has(light.id))) {
+    if (base !== null && foldable(base) && siblings.length > 1 && siblings.every((light) => chosen.has(light.id))) {
       if (!folded.has(base)) phrases.push(`the ${plural(base)}`)
       folded.add(base)
     } else {
