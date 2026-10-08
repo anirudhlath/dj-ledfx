@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from conftest import render_ctx
 from map_home import ROW, bulbs, leds_at, lights_at
-from stray_lamps import STRAYS, run_heights, stays_in_band, unpassed
+from stray_lamps import STRAYS, moves, run_frames, stays_in_band, unpassed
 
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particles import MAX_PARTICLES, drawn
@@ -121,7 +121,8 @@ def test_flakes_are_as_big_as_the_setting_says() -> None:
 @pytest.mark.parametrize("where", STRAYS)
 def test_snow_falls_past_every_led_of_a_lamp_outside_the_floor_and_ceiling(where: str) -> None:
     leds = STRAYS[where]
-    z = run_heights(_snow(), leds)
-    assert np.ptp(z) > 0.1  # falling, not stuck in place
+    frames = run_frames(_snow(), leds)
+    z = np.concatenate(frames)
+    assert moves(frames)  # falling from frame to frame, not just spread over heights
     assert unpassed(z, leds) == []  # past the lamp's whole length
     assert stays_in_band(z, leds)  # from the ceiling or the lamp's top to the floor or its foot

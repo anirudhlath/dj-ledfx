@@ -7,7 +7,15 @@ import numpy as np
 import pytest
 from conftest import tempo_ctx
 from map_home import bulbs, lights_at, upright
-from stray_lamps import STRAYS, on_the_beat, run_heights, stays_in_band, unpassed
+from stray_lamps import (
+    STRAYS,
+    moves,
+    on_the_beat,
+    run_frames,
+    run_heights,
+    stays_in_band,
+    unpassed,
+)
 
 from dj_ledfx.effects import beat_bursts as bursts_module
 from dj_ledfx.effects import particle_tools
@@ -16,32 +24,33 @@ from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import Ground, Lamps
 from dj_ledfx.effects.particles import MAX_PARTICLES, drawn
 
-TV = np.array([2.0, 0.2, 1.0], dtype=np.float32)
+ANCHOR_ID = "anchor-a"
+ANCHOR = np.array([2.0, 0.2, 1.0], dtype=np.float32)
 
 
 def _room() -> LedSet:
-    """Four upright lamps round a 4 x 4 m room, with a TV anchor on its north wall."""
+    """Four upright lamps round a 4 x 4 m room, with an anchor on its north wall."""
     corners = (upright(0.5, 0.5), upright(3.5, 0.5), upright(3.5, 3.5), upright(0.5, 3.5))
-    return lights_at(*corners, anchors={"tv": TV})
+    return lights_at(*corners, anchors={ANCHOR_ID: ANCHOR})
 
 
 def _bursts(**settings: object) -> BeatBursts:
-    bursts = BeatBursts(anchor="tv", **settings)
+    bursts = BeatBursts(anchor=ANCHOR_ID, **settings)
     bursts.reseed(1)
     return bursts
 
 
-def _at_the_tv(bursts: BeatBursts) -> int:
-    return int((np.linalg.norm(bursts.particles.pos - TV, axis=1) < 1e-5).sum())
+def _at_the_anchor(bursts: BeatBursts) -> int:
+    return int((np.linalg.norm(bursts.particles.pos - ANCHOR, axis=1) < 1e-5).sum())
 
 
 def test_every_beat_fires_a_burst_from_the_anchor_and_the_downbeat_a_bigger_one() -> None:
     room = _room()
     bursts = _bursts(per_beat=12, downbeat=2.5)
     drawn(bursts, tempo_ctx(2001.0), room)  # beat 2001: the bar's second
-    assert _at_the_tv(bursts) == 12
+    assert _at_the_anchor(bursts) == 12
     drawn(bursts, tempo_ctx(2004.0), room)  # beat 2004: a downbeat
-    assert _at_the_tv(bursts) == 30
+    assert _at_the_anchor(bursts) == 30
     assert [bursts.burst_size(beat) for beat in range(2000, 2005)] == [30, 12, 12, 12, 30]
 
 
@@ -117,8 +126,8 @@ def test_a_particle_flies_out_fast_and_slows_to_land_arrive_of_the_way_through_i
     landed = newest(2001.0 + ARRIVE * 2.0)  # a fade of 2 beats: it lands 0.8 of a beat in
     np.testing.assert_array_equal(newest(2001.95), landed)  # and stays where it landed
     half_way = newest(2001.0 + ARRIVE)  # half of that: 3/4 of the way there, slowing
-    np.testing.assert_allclose(half_way - TV, 0.75 * (landed - TV), atol=1e-5)
-    np.testing.assert_allclose(newest(2001.0), np.repeat([TV], 12, axis=0), atol=1e-5)
+    np.testing.assert_allclose(half_way - ANCHOR, 0.75 * (landed - ANCHOR), atol=1e-5)
+    np.testing.assert_allclose(newest(2001.0), np.repeat([ANCHOR], 12, axis=0), atol=1e-5)
 
 
 def test_a_bursts_colour_is_the_palettes_colour_for_its_beat_round_and_round() -> None:
@@ -179,8 +188,9 @@ def test_a_burst_effect_has_at_most_per_beat_times_downbeat_over_fade_beats_aliv
 @pytest.mark.parametrize("where", STRAYS)
 def test_bursts_land_on_every_led_of_a_lamp_outside_the_floor_and_ceiling(where: str) -> None:
     leds = STRAYS[where]
-    z = run_heights(_bursts(), leds, moment=on_the_beat)
-    assert np.ptp(z) > 0.1  # moving, not stuck in place
+    frames = run_frames(_bursts(), leds, moment=on_the_beat)
+    z = np.concatenate(frames)
+    assert moves(frames)  # flying out from frame to frame, not just spread over heights
     assert unpassed(z, leds) == []  # landing along the lamp's whole length
     assert stays_in_band(z, leds)  # the scatter round an LED stops at the floor and the ceiling
 

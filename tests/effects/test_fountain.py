@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from conftest import tempo_ctx
 from map_home import bulbs, lights_at, upright
-from stray_lamps import STRAYS, on_the_beat, run_heights, stays_in_band, unpassed
+from stray_lamps import STRAYS, moves, on_the_beat, run_frames, stays_in_band, unpassed
 
 from dj_ledfx.effects import fountain as fountain_module
 from dj_ledfx.effects import particle_tools
@@ -15,17 +15,18 @@ from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import F64, Ground, Particles
 from dj_ledfx.effects.particles import MAX_PARTICLES, drawn
 
-TABLE = np.array([2.0, 2.0, 0.45], dtype=np.float32)
+ANCHOR_ID = "anchor-a"
+ANCHOR = np.array([2.0, 2.0, 0.45], dtype=np.float32)
 
 
 def _room() -> LedSet:
-    """Four upright lamps round a 4 x 4 m room, with a coffee table in its middle."""
+    """Four upright lamps round a 4 x 4 m room, with an anchor in its middle, 0.45 m up."""
     corners = (upright(0.5, 0.5), upright(3.5, 0.5), upright(3.5, 3.5), upright(0.5, 3.5))
-    return lights_at(*corners, anchors={"coffee": TABLE})
+    return lights_at(*corners, anchors={ANCHOR_ID: ANCHOR})
 
 
 def _fountain(**settings: object) -> Fountain:
-    fountain = Fountain(anchor="coffee", **settings)
+    fountain = Fountain(anchor=ANCHOR_ID, **settings)
     fountain.reseed(1)
     return fountain
 
@@ -43,16 +44,16 @@ def _spray(fountain: Fountain, seconds: float = 4.0) -> np.ndarray:
 def test_the_spray_rises_to_its_height_and_never_falls_under_the_floor() -> None:
     where = _spray(_fountain(burst=0, height_m=1.2))
     assert where[:, 2].min() >= 0.0
-    assert 0.85**2 * 1.2 < where[:, 2].max() - TABLE[2] <= 1.2 + 1e-4
+    assert 0.85**2 * 1.2 < where[:, 2].max() - ANCHOR[2] <= 1.2 + 1e-4
 
 
 def test_the_spray_comes_down_within_its_spread() -> None:
     where = _spray(_fountain(burst=0, spread_m=1.5))
-    above = where[where[:, 2] >= TABLE[2]]  # before a drop falls past the table
-    away = np.linalg.norm(above[:, :2] - TABLE[:2], axis=1)
+    above = where[where[:, 2] >= ANCHOR[2]]  # before a drop falls past the anchor
+    away = np.linalg.norm(above[:, :2] - ANCHOR[:2], axis=1)
     assert away.max() <= 1.5 + 1e-4
     assert away.max() > 1.0
-    np.testing.assert_allclose(where[:, :2].mean(axis=0), TABLE[:2], atol=0.3)
+    np.testing.assert_allclose(where[:, :2].mean(axis=0), ANCHOR[:2], atol=0.3)
 
 
 def test_every_beat_fires_a_burst_of_drops() -> None:
@@ -78,7 +79,7 @@ def test_a_bursts_drops_land_on_leds_on_the_next_beat() -> None:
     gaps = np.linalg.norm(pos[:, None, :] - room.pos[None, :, :], axis=2).min(axis=1)
     assert (gaps < 1e-4).sum() == 8  # beat 2000's burst, on its LEDs
     # Oldest first: the spray drops thrown since beat 2000's burst come before beat 2001's.
-    np.testing.assert_allclose(pos[-8:], np.repeat([TABLE], 8, axis=0), atol=1e-5)  # 2001's
+    np.testing.assert_allclose(pos[-8:], np.repeat([ANCHOR], 8, axis=0), atol=1e-5)  # 2001's
 
 
 def test_a_bursts_drops_go_to_every_lamp_and_to_leds_all_along_them() -> None:
@@ -100,8 +101,12 @@ def test_a_bursts_drops_go_to_every_lamp_and_to_leds_all_along_them() -> None:
 def test_the_spray_and_the_bursts_are_listed_together_oldest_first(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Each drop is listed by when it was thrown: the spray's in seconds, a burst's on its beat
+    (worked out here from the beat count and the tempo, at 90 BPM, where a beat is not the half
+    second it is at 120)."""
     room = _room()
-    fountain = _fountain(rate=30.0, burst=16)
+    bpm, size, rate = 90.0, 16, 30.0
+    fountain = _fountain(rate=rate, burst=size)
     seen: list[tuple[tuple[Particles, F64], ...]] = []
 
     def merging(*parts: tuple[Particles, F64]) -> Particles:
@@ -111,17 +116,32 @@ def test_the_spray_and_the_bursts_are_listed_together_oldest_first(
     monkeypatch.setattr(fountain_module, "in_birth_order", merging)
     mixed = 0
     for step in range(120):
-        ctx = tempo_ctx(2000.0 + step / 15)
+        beats = 2000.0 + step / 10
+        ctx = tempo_ctx(beats, bpm=bpm)
         drawn(fountain, ctx, room)
-        (spray, sprayed), (bursts, burst) = seen[-1]
+        (spray, sprayed), (bursts, thrown) = seen[-1]
+        # Beat j's burst is in the air for a beat and a half from the beat: the last whole
+        # beat's, and the one before's while it is not yet that old.
+        in_the_air = [j for j in (math.floor(beats) - 1, math.floor(beats)) if beats - j < 1.5]
+        expected = np.repeat([ctx.t - (beats - j) * 60.0 / bpm for j in in_the_air], size)
+        np.testing.assert_allclose(thrown, expected, rtol=0.0, atol=1e-9)
         assert ((ctx.t - sprayed >= 0.0) & (ctx.t - sprayed < 2.0)).all()  # seconds, in the air
-        assert ((ctx.t - burst >= 0.0) & (ctx.t - burst < 0.75)).all()  # a beat and a half at 120
-        order = np.argsort(np.concatenate([sprayed, burst]), kind="stable")
-        expected = particle_tools.joined(spray, bursts).pick(order)
-        np.testing.assert_array_equal(fountain.particles.pos, expected.pos)
+        assert len(np.unique(np.floor(sprayed * rate))) == len(sprayed)  # one in each 1 / rate s
+        order = np.argsort(np.concatenate([sprayed, expected]), kind="stable")
+        merged = particle_tools.joined(spray, bursts).pick(order)
+        np.testing.assert_array_equal(fountain.particles.pos, merged.pos)
         kinds = order < len(sprayed)
         mixed += int(np.count_nonzero(np.diff(kinds.astype(int))) > 1)  # not all of one kind first
     assert mixed > 100
+
+
+def test_the_spray_is_timed_in_seconds_whatever_the_tempo() -> None:
+    room = _room()
+    slow, fast = _fountain(burst=0), _fountain(burst=0)
+    drawn(slow, tempo_ctx(1503.0, bpm=90.0), room)  # 1002 s in
+    drawn(fast, tempo_ctx(2004.0, bpm=120.0), room)  # 1002 s in
+    assert slow.particles.count > 20
+    np.testing.assert_array_equal(slow.particles.pos, fast.particles.pos)
 
 
 def test_a_burst_fades_over_the_half_beat_after_it_lands() -> None:
@@ -177,7 +197,7 @@ def test_the_spray_lands_evenly_over_its_disc_not_bunched_at_its_middle() -> Non
         drawn(fountain, tempo_ctx(2000.0 + step / 15), room)
         glow = fountain.particles.colour[:, 0].astype(np.float64)
         falling = (glow > 0.02) & (glow < 0.98)
-        away = np.linalg.norm(fountain.particles.pos[falling, :2] - TABLE[:2], axis=1)
+        away = np.linalg.norm(fountain.particles.pos[falling, :2] - ANCHOR[:2], axis=1)
         shares.append(away / (1.5 - glow[falling]) / 2.0)
     landing = np.concatenate(shares)
     assert len(landing) > 5000 and landing.max() <= 1.0 + 1e-4
@@ -209,8 +229,9 @@ def test_a_fountains_bursts_reach_every_led_of_a_lamp_outside_the_floor_and_ceil
     leds = STRAYS[where]
     fountain = Fountain()
     fountain.reseed(1)
-    z = run_heights(fountain, leds, moment=on_the_beat)
-    assert np.ptp(z) > 0.1  # moving, not stuck in place
+    frames = run_frames(fountain, leds, moment=on_the_beat)
+    z = np.concatenate(frames)
+    assert moves(frames)  # thrown from frame to frame, not just spread over heights
     assert unpassed(z, leds) == []  # thrown to the lamp's whole length
     assert stays_in_band(z, leds)  # the spray and the throws stop at the ceiling and the floor
 

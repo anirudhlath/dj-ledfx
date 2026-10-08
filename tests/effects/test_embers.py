@@ -7,7 +7,7 @@ import pytest
 from conftest import render_ctx
 from crowds import worst_crowd
 from map_home import ROW, bulbs, leds_at, lights_at, upright
-from stray_lamps import STRAYS, run_heights, stays_in_band, unpassed
+from stray_lamps import STRAYS, moves, run_frames, stays_in_band, unpassed
 
 from dj_ledfx.effects import embers as embers_module
 from dj_ledfx.effects.embers import CLIMB_OVER_M, WOBBLE_M, Embers
@@ -152,8 +152,9 @@ def test_an_ember_brightens_as_it_catches() -> None:
 @pytest.mark.parametrize("where", STRAYS)
 def test_embers_climb_every_led_of_a_lamp_outside_the_floor_and_ceiling(where: str) -> None:
     leds = STRAYS[where]
-    z = run_heights(_embers(), leds)
-    assert np.ptp(z) > 0.1  # climbing, not stuck in place
+    frames = run_frames(_embers(), leds)
+    z = np.concatenate(frames)
+    assert moves(frames)  # climbing from frame to frame, not just spread over heights
     assert unpassed(z, leds) == []  # up the lamp's whole length
     assert stays_in_band(z, leds)  # and the overhang still stops at the floor and the ceiling
 

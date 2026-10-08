@@ -6,7 +6,15 @@ import numpy as np
 import pytest
 from conftest import tempo_ctx
 from map_home import ROW, bulbs, leds_at, lights_at, upright
-from stray_lamps import STRAYS, on_the_beat, run_heights, stays_in_band, unpassed
+from stray_lamps import (
+    STRAYS,
+    moves,
+    on_the_beat,
+    run_frames,
+    run_heights,
+    stays_in_band,
+    unpassed,
+)
 
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import Ground
@@ -159,8 +167,9 @@ def test_the_particles_take_the_lamps_in_turn() -> None:
 @pytest.mark.parametrize("where", STRAYS)
 def test_the_rise_passes_every_led_of_a_lamp_outside_the_floor_and_ceiling(where: str) -> None:
     leds = STRAYS[where]
-    z = run_heights(_vortex(), leds, moment=on_the_beat)
-    assert np.ptp(z) > 0.1  # moving, not stuck in place
+    frames = run_frames(_vortex(), leds, moment=on_the_beat)
+    z = np.concatenate(frames)
+    assert moves(frames)  # rising and turning from frame to frame, not just spread over heights
     assert unpassed(z, leds) == []  # up past the lamp's whole length
     assert stays_in_band(z, leds)  # and no further than the floor, the ceiling and the lamp
 

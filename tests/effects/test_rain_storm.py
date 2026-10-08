@@ -8,7 +8,7 @@ from conftest import render_ctx
 from crowds import SPLITS, dealt, worst_crowd
 from map_home import ROW, bulbs, leds_at, lights_at, upright
 from numpy.typing import NDArray
-from stray_lamps import STRAYS, stays_in_band, unpassed
+from stray_lamps import STRAYS, moves, run_frames, run_heights, stays_in_band, unpassed
 
 from dj_ledfx.effects import rain_storm as rain_module
 from dj_ledfx.effects.context import RenderContext
@@ -192,16 +192,10 @@ def test_strikes_land_at_random_over_the_zone_at_half_the_ceilings_height() -> N
     assert np.std(np.diff(sorted(seen.values()))) > 0.4  # at moments of their own, not on a beat
 
 
-def _heights(leds: LedSet, seconds: float = 30.0) -> NDArray[np.float32]:
+def _heights(leds: LedSet, seconds: float = 30.0) -> NDArray[np.float64]:
     """The heights of every drop of a storm without lightning over `seconds`, seen every 0.05 s
     (a drop runs under 2 m a second, so the lowest seen is within 0.1 m of where it ends)."""
-    storm = _storm(strikes_per_min=0.0)
-    storm.place(leds)
-    seen = []
-    for t in np.arange(500.0, 500.0 + seconds, 0.05):
-        storm.step(render_ctx(t=float(t)))
-        seen.append(storm.particles.pos[:, 2])
-    return np.concatenate(seen)
+    return run_heights(_storm(strikes_per_min=0.0), leds, seconds)
 
 
 def test_a_lamp_standing_high_enough_still_runs_its_drops_under_its_lowest_led() -> None:
@@ -226,10 +220,11 @@ def test_a_drop_never_starts_over_the_ceiling() -> None:
 @pytest.mark.parametrize("where", STRAYS)
 def test_drops_run_down_every_led_of_a_lamp_outside_the_floor_and_ceiling(where: str) -> None:
     leds = STRAYS[where]
-    z = _heights(leds)
-    assert np.ptp(z) > 0.1  # running, not stuck in place
-    assert unpassed(z.astype(np.float64), leds) == []  # down the lamp's whole length
-    assert stays_in_band(z.astype(np.float64), leds)  # the overhang still stops at the ends
+    frames = run_frames(_storm(strikes_per_min=0.0), leds)
+    z = np.concatenate(frames)
+    assert moves(frames)  # running from frame to frame, not just spread over heights
+    assert unpassed(z, leds) == []  # down the lamp's whole length
+    assert stays_in_band(z, leds)  # the overhang still stops at the ends
 
 
 def test_a_lamp_with_no_map_takes_its_drops_down_to_the_lowest_led_of_the_zone() -> None:

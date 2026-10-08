@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from conftest import render_ctx
 from map_home import ROW, leds_at, lights_at, upright
-from stray_lamps import STRAYS, run_heights, stays_in_band, unpassed
+from stray_lamps import STRAYS, moves, run_frames, stays_in_band, unpassed
 
 from dj_ledfx.effects.fireflies import DRIFT_REACH_M, GLOW_LOW, RANGE_M, Fireflies
 from dj_ledfx.effects.ledset import LedSet
@@ -125,7 +125,8 @@ def test_fireflies_wander_over_every_led_of_a_lamp_outside_the_floor_and_ceiling
     where: str,
 ) -> None:
     leds = STRAYS[where]
-    z = run_heights(_flies(count=12), leds)
-    assert np.ptp(z) > 0.1  # wandering, not stuck in place
+    frames = run_frames(_flies(count=12), leds)
+    z = np.concatenate(frames)
+    assert moves(frames)  # wandering from frame to frame, not just spread over heights
     assert unpassed(z, leds) == []  # over the lamp's whole length
     assert stays_in_band(z, leds)

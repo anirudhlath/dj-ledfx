@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from conftest import render_ctx
 from map_home import lights_at, upright
-from stray_lamps import STRAYS, run_heights, stays_in_band
+from stray_lamps import STRAYS, moves, run_frames, stays_in_band
 
 from dj_ledfx.effects import particle_tools
 from dj_ledfx.effects import spotlights as spotlights_module
@@ -157,8 +157,9 @@ def test_another_seed_tours_the_lamps_in_another_order() -> None:
 @pytest.mark.parametrize("where", STRAYS)
 def test_spotlights_move_along_a_lamp_outside_the_floor_and_ceiling(where: str) -> None:
     leds = STRAYS[where]
-    z = run_heights(_spots(count=3), leds)
-    assert np.ptp(z) > 0.1  # moving from one of its LEDs to another
+    frames = run_frames(_spots(count=3), leds)
+    z = np.concatenate(frames)
+    assert moves(frames)  # moving from one of its LEDs to another, frame by frame
     lamp = leds.pos[:, 2]
     assert lamp.min() - 1e-5 <= z.min() and z.max() <= lamp.max() + 1e-5  # on the lamp itself
     assert stays_in_band(z, leds)
