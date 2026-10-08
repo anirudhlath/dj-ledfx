@@ -31,7 +31,7 @@ import numpy as np
 from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.field_tools import anchor_or_centre
 from dj_ledfx.effects.params import EffectParam, anchor_param
-from dj_ledfx.effects.particle_tools import arc, draws, in_birth_order, recent, swarm
+from dj_ledfx.effects.particle_tools import arc, draws, fired, in_birth_order, recent, swarm
 from dj_ledfx.effects.particles import MAX_PARTICLES, ParamParticles
 
 if TYPE_CHECKING:
@@ -125,7 +125,8 @@ class Fountain(ParamParticles):
         every = 1.0 / min(float(values["rate"]), (room - 2) / longest)
         n = recent(ctx.t, every, longest)
         u = draws(self._seed, n, 4)
-        age = ctx.t - (n + u[:, 0]) * every
+        born = (n + u[:, 0]) * every
+        age = ctx.t - born
         speed = up * (0.85 + 0.15 * u[:, 1])  # up, m/s
         flight = 2.0 * speed / GRAVITY  # up and back down to the anchor's height
         out = float(values["spread_m"]) * np.sqrt(u[:, 3]) / flight  # m/s
@@ -142,7 +143,7 @@ class Fountain(ParamParticles):
         )
         glow = np.clip(1.5 - age[kept] / flight[kept], 0.0, 1.0)  # fades as it falls past
         colour = palette_at(self._palette, u[kept, 1]) * glow[:, None].astype(np.float32)
-        return swarm(pos, colour, float(values["size"])), (n[kept] + u[kept, 0]) * every
+        return swarm(pos, colour, float(values["size"])), born[kept]
 
     def _bursts(
         self, ctx: RenderContext, ground: Ground, origin: NDArray[np.float64]
@@ -151,10 +152,9 @@ class Fountain(ParamParticles):
         thrown, in seconds at the tempo of the moment."""
         values = self._values
         size, beats = int(values["burst"]), ctx.beats
-        fired = recent(beats, 1.0, FLIGHT_BEATS + REST_BEATS)
-        fired = fired[(fired <= beats) & (beats - fired < FLIGHT_BEATS + REST_BEATS)]
-        beat = np.repeat(fired, size)
-        u = draws(self._seed, beat * BEAT_KEYS + np.tile(np.arange(size), len(fired)), 3, stream=1)
+        alive = fired(beats, FLIGHT_BEATS + REST_BEATS)
+        beat = np.repeat(alive, size)
+        u = draws(self._seed, beat * BEAT_KEYS + np.tile(np.arange(size), len(alive)), 3, stream=1)
         lamp = ground.lamps.pick(u[:, 0])
         landing = ground.on(lamp, u[:, 2])
         since = beats - beat.astype(np.float64)  # beats since the burst was thrown
@@ -162,7 +162,7 @@ class Fountain(ParamParticles):
         rise = float(values["height_m"]) * BURST_UP * (0.8 + 0.4 * u[:, 1])
         pos = arc(origin, landing, np.minimum(share, 1.0), rise)
         # The throw stops at the ceiling and the floor, but never short of the lamp's own LEDs.
-        pos[:, 2] = np.clip(pos[:, 2], ground.floor_for(lamp), ground.ceiling_for(lamp))
+        pos[:, 2] = ground.within(lamp, pos[:, 2])
         glow = np.clip(1.0 - (share - 1.0) * FLIGHT_BEATS / REST_BEATS, 0.0, 1.0)
         colour = palette_at(self._palette, u[:, 1]) * glow[:, None].astype(np.float32)
         thrown = ctx.t - since * 60.0 / ctx.bpm

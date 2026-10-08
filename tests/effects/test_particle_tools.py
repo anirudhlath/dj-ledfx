@@ -26,6 +26,7 @@ from dj_ledfx.effects.particle_tools import (
     arc,
     around,
     draws,
+    fired,
     in_birth_order,
     joined,
     lamp_streams,
@@ -238,6 +239,33 @@ def test_recent_events_hold_every_event_alive_now() -> None:
                 if (n + u) * every <= now < (n + u) * every + life:
                     assert n in events
         assert len(events) <= life / every + 3
+
+
+def test_fired_names_the_beats_whose_bursts_are_in_the_air_oldest_first() -> None:
+    assert fired(7.0, 1.5).tolist() == [6, 7]  # a burst is in the air from its beat on
+    assert fired(7.5, 1.5).tolist() == [7]  # and gone fade beats after it
+    assert fired(7.49, 1.5).tolist() == [6, 7]
+    assert fired(7.0, 1.0).tolist() == [7]
+    assert fired(7.0, 4.0).tolist() == [4, 5, 6, 7]
+    assert fired(0.0, 0.25).tolist() == [0]
+    assert fired(7.0, 1.5).dtype == np.int64
+
+
+def test_fired_holds_exactly_the_beats_that_are_not_yet_gone_and_not_still_to_come() -> None:
+    generator = np.random.default_rng(5)
+    nows = np.concatenate(
+        [
+            generator.uniform(0.0, 2000.0, 300),
+            np.arange(1000.0, 1010.0, 0.25),  # on the beat and on its quarters
+            np.nextafter(np.arange(1000.0, 1006.0), -np.inf),  # a hair before a beat
+        ]
+    )
+    for now in nows:
+        for life in (0.25, 0.5, 1.0, 1.5, 2.0, 3.75, 4.0):
+            expected = [
+                j for j in range(math.floor(now) - 6, math.floor(now) + 3) if 0 <= now - j < life
+            ]
+            assert fired(float(now), life).tolist() == expected
 
 
 def test_wanderers_stay_in_their_box_and_move_smoothly() -> None:
@@ -556,6 +584,36 @@ def test_a_lamp_with_no_map_is_never_outside_the_floor_and_ceiling() -> None:
     ground = Ground.of(lights_at(upright(1.0, 1.0, -1.0, -0.5), upright(3.0, 1.0), ceiling=None))
     np.testing.assert_allclose(ground.floor_for([0, 1]), [ground.floor] * 2)
     np.testing.assert_allclose(ground.ceiling_for([0, 1]), [ground.ceiling] * 2)
+
+
+def test_a_height_held_within_a_lamps_band_stops_at_its_floor_and_ceiling() -> None:
+    ground = Ground.of(OUTSIDE)
+    stops = [0, 1, 2, 3, 4]
+
+    np.testing.assert_array_equal(ground.within(stops, [-9.0] * 5), ground.floor_for(stops))
+    np.testing.assert_array_equal(ground.within(stops, [9.0] * 5), ground.ceiling_for(stops))
+    np.testing.assert_allclose(
+        ground.within(stops, [-9.0] * 5), [-1.0, 0.0, 0.0, -0.9, 0.0], atol=1e-6
+    )
+    np.testing.assert_allclose(
+        ground.within(stops, [9.0] * 5), [3.0, 3.5, 3.0, 3.0, 3.5], atol=1e-6
+    )
+    assert ground.within(stops, [0.5] * 5).dtype == np.float64
+
+
+def test_a_height_inside_a_lamps_band_is_left_exactly_as_it_is() -> None:
+    ground = Ground.of(OUTSIDE)
+    stops = np.array([0, 1, 2, 3, 4] * 20)
+    z = np.random.default_rng(3).uniform(ground.floor_for(stops), ground.ceiling_for(stops))
+    np.testing.assert_array_equal(ground.within(stops, z), z)
+
+
+def test_a_height_is_held_to_the_band_of_the_lamp_it_goes_with_not_the_zones() -> None:
+    ground = Ground.of(OUTSIDE)
+    # 3.4 m is over the zone's ceiling and inside the band of lamp 1 (3.2-3.5 m), which stands
+    # over it; -0.5 m is under the floor and inside lamp 0's, which stands under it.
+    held = ground.within([1, 2, 0, 2], [3.4, 3.4, -0.5, -0.5])
+    np.testing.assert_allclose(held, [3.4, 3.0, -0.5, 0.0], atol=1e-6)
 
 
 # Float32 stores 2.45 and 2.7 a little over (2.4500000477, 2.7000000477) and 0.7 a little under

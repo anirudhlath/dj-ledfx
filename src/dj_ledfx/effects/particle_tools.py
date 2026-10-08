@@ -137,6 +137,14 @@ def recent(now: float, every: float, life: float) -> NDArray[np.int64]:
     return np.arange(first, math.floor(now / every) + 1, dtype=np.int64)
 
 
+def fired(beats: float, life: float) -> NDArray[np.int64]:
+    """The whole beats whose bursts are in the air at `beats`, oldest first: beat j is, from
+    the beat itself (0 <= beats - j) until `life` beats on (beats - j < life)."""
+    first = recent(beats, 1.0, life)
+    alive: NDArray[np.int64] = first[beats - first < life]  # recent() stops at the last beat
+    return alive
+
+
 WANDER_DRAWS = 12  # the random numbers a wanderer takes
 
 
@@ -478,6 +486,15 @@ class Ground:
             high > np.float32(self.ceiling), high.astype(np.float64), self.ceiling
         )
         return ceiling
+
+    def within(self, stop: ArrayLike, z: ArrayLike) -> F64:
+        """The heights z (one for each stop) held between the floor and the ceiling of the
+        stop's lamp (floor_for, ceiling_for): what goes to a lamp stops at the floor and the
+        ceiling, but never short of the lamp's own LEDs."""
+        held: F64 = np.clip(
+            np.asarray(z, dtype=np.float64), self.floor_for(stop), self.ceiling_for(stop)
+        )
+        return held
 
     def box(
         self, margin: float = 0.0, around: ArrayLike | None = None, stops: ArrayLike | None = None

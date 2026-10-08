@@ -26,7 +26,7 @@ import numpy as np
 
 from dj_ledfx.effects.field_tools import anchor_or_centre
 from dj_ledfx.effects.params import EffectParam, anchor_param
-from dj_ledfx.effects.particle_tools import draws, recent, swarm
+from dj_ledfx.effects.particle_tools import draws, fired, swarm
 from dj_ledfx.effects.particles import ParamParticles
 from dj_ledfx.tempo.model import BEATS_PER_BAR
 
@@ -104,10 +104,9 @@ class BeatBursts(ParamParticles):
         values = self._values
         fade = float(values["fade_beats"])
         beats = ctx.beats
-        fired = recent(beats, 1.0, fade)
-        fired = fired[(fired <= beats) & (beats - fired < fade)]  # in the air: 0 <= age < fade
-        sizes = self._sizes(fired)
-        beat = np.repeat(fired, sizes)
+        alive = fired(beats, fade)
+        sizes = self._sizes(alive)
+        beat = np.repeat(alive, sizes)
         k = np.arange(len(beat)) - np.repeat(np.cumsum(sizes) - sizes, sizes)  # 0, 1, … in a burst
         u = draws(self._seed, beat * BEAT_KEYS + k, 5)
         lamp = ground.lamps.pick(u[:, 0])
@@ -120,7 +119,7 @@ class BeatBursts(ParamParticles):
         )
         # The scatter is an overhang: it stops at the floor and the ceiling, but never short
         # of the lamp's own LEDs.
-        landing[:, 2] = np.clip(landing[:, 2], ground.floor_for(lamp), ground.ceiling_for(lamp))
+        landing[:, 2] = ground.within(lamp, landing[:, 2])
         age = (beats - beat) / fade  # 0 on the beat, 1 faded
         way = 1.0 - (1.0 - np.minimum(age / ARRIVE, 1.0)) ** 2  # fast out, slowing to land
         origin = anchor_or_centre(ground.leds, str(values["anchor"])).astype(np.float64)
