@@ -9,11 +9,14 @@ moving over all of its LEDs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
-from conftest import render_ctx
+from conftest import render_ctx, tempo_ctx
 from map_home import lights_at, upright
 from numpy.typing import NDArray
 
+from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import Ground
 from dj_ledfx.effects.particles import ParticleEffect
@@ -37,14 +40,25 @@ STRAYS: dict[str, LedSet] = {
 }
 
 
+def on_the_beat(t: float) -> RenderContext:
+    """The moment `t` seconds in, with the beat counted at a steady 120 BPM: for the looks
+    that move with the beat count, which render_ctx's frozen beat would leave standing."""
+    return tempo_ctx(2.0 * t)
+
+
 def run_heights(
-    effect: ParticleEffect, leds: LedSet, seconds: float = 30.0, step: float = 0.05
+    effect: ParticleEffect,
+    leds: LedSet,
+    seconds: float = 30.0,
+    step: float = 0.05,
+    moment: Callable[[float], RenderContext] = lambda t: render_ctx(t=t),
 ) -> NDArray[np.float64]:
-    """The height of every particle the effect makes over `seconds`, seen every `step`."""
+    """The height of every particle the effect makes over `seconds`, seen every `step`, at
+    the moments `moment` makes of the time (render_ctx's, or on_the_beat's)."""
     effect.place(leds)
     seen = []
     for t in np.arange(500.0, 500.0 + seconds, step):
-        effect.step(render_ctx(t=float(t)))
+        effect.step(moment(float(t)))
         seen.append(effect.particles.pos[:, 2].astype(np.float64))
     return np.concatenate(seen)
 
