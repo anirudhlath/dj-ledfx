@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useEffect } from 'react'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Id } from '@/api/contract'
 import { lookName } from '@/api/mocks/fixtures'
@@ -207,5 +208,34 @@ describe('ZonePicker (§6.3)', () => {
     expect(scrolled).toHaveLength(1)
     update({ running: [] })
     expect(scrolled).toHaveLength(1)
+  })
+
+  // The row moves before the paint. A composer opened on a zone that isn't first would otherwise paint the row at
+  // its start and jump on the next frame, and a later choice would invert its chip a frame before the row moves.
+  // A layout effect runs in the commit, ahead of any effect that waits for the paint: one in an earlier sibling is
+  // the witness, and it must find the scroll already made.
+  it("scrolls the phone's row in the commit, before the effects that wait for the paint", () => {
+    const scrolled = watchScrolling()
+    const seen: number[] = []
+    function AfterPaint() {
+      useEffect(() => {
+        seen.push(scrolled.length)
+      })
+      return null
+    }
+    const props: ZonePickerProps = { zones: hero.zones, running: hero.running, selected: 'bedroom', locked: false, onSelect: vi.fn(), variant: 'phone' }
+    const { rerender } = render(
+      <>
+        <AfterPaint />
+        <ZonePicker {...props} />
+      </>,
+    )
+    rerender(
+      <>
+        <AfterPaint />
+        <ZonePicker {...props} selected="kitchen" />
+      </>,
+    )
+    expect(seen).toEqual([1, 2])
   })
 })

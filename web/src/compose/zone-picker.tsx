@@ -15,7 +15,7 @@
 // (touch-target). The phone's row scrolls, which clips on both axes, so it pads by the reach of a focus ring
 // (tokens.css's outline and offset) and pulls back by as much, moving nothing; scroll-px-1 keeps a button
 // snapped where it sits.
-import { useEffect, useId, useRef } from 'react'
+import { useId, useLayoutEffect, useRef } from 'react'
 import type { Id, RunningZone, Zone } from '@/api/contract'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
@@ -38,7 +38,10 @@ export function ZonePicker({ zones, running, selected, locked, onSelect, variant
   const chosen = useRef<HTMLButtonElement>(null)
   const opened = useRef(false)
   const phone = variant === 'phone'
-  useEffect(() => {
+  // A layout effect, so the row moves in the commit that chooses a zone, before the paint (as collapse.ts and the
+  // swatch do): the composer mounts in a navigation, a transition, and an effect could run after the frame that
+  // shows the sheet, with the row at its start and a later choice's chip inverted a frame before the row moved.
+  useLayoutEffect(() => {
     if (!phone) return
     chosen.current?.scrollIntoView?.({ block: 'nearest', inline: opened.current ? 'nearest' : 'start' })
     opened.current = true
