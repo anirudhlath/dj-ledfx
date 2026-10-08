@@ -20,7 +20,6 @@ from dj_ledfx.effects.particle_tools import (
     WANDER_DRAWS,
     Ground,
     Particles,
-    _densely,
     arc,
     around,
     draws,
@@ -88,8 +87,31 @@ def test_a_radius_is_never_below_the_floor() -> None:
     assert np.isfinite(lit(Ground.of(leds_at(ROW)), particles)).all()
 
 
-# Spec §4.1: past about 2k LEDs, particles switch to a spatial grid. It must light the
-# LEDs as the dense sum would, particles outside the frame and of every size included.
+# Plan ruling 4 cuts a particle off at REACH, where it adds under half an 8-bit step, so the sum
+# must be right to half a step too. The dense sum works square distances out as |a|² + |b|² -
+# 2a·b round the frame's centre, small differences of big numbers: in float32 they were off by
+# several steps for a small particle on an LED, a layer's transform having moved the LEDs far
+# from the centre.
+def test_small_particles_on_leds_far_from_the_centre_are_lit_to_within_half_a_step() -> None:
+    points = np.random.default_rng(3).uniform((0.0, 0.0, 0.0), (15.0, 15.0, 3.0), (200, 3))
+    strip = [(8.0 + 0.025 * i, 12.0, 2.0) for i in range(100)]  # 40 LEDs a metre
+    leds = lights_at([tuple(point) for point in points], strip)
+    moved = leds.moved(leds.pos.astype(np.float64) + [4.0, 0.0, 0.0])  # the frame stays
+    ground = Ground.of(moved)
+    assert moved.count < GRID_FROM_LEDS  # the dense sum
+    stops = np.array([0] * 150 + [1] * 20)  # 150 particles on the scattered LEDs, 20 on the strip
+    rng = np.random.default_rng(11)
+    particles = swarm(ground.on(stops, rng.uniform(0.0, 1.0, len(stops))), [0.6, 0.6, 0.6], 0.03)
+
+    exact = _exactly(moved, particles)
+
+    assert ((exact > 0.0) & (exact < 0.6)).any(axis=1).sum() > 20  # the strip's LEDs part-lit
+    np.testing.assert_allclose(lit(ground, particles), exact, atol=0.5 / 255)
+
+
+# Spec §4.1: on a big zone (GRID_FROM_LEDS LEDs or more), particles light by a spatial grid.
+# It must light the LEDs as the dense sum would, particles outside the frame and of every size
+# included.
 def test_the_grid_lights_the_leds_as_every_led_against_every_particle_does() -> None:
     ground = Ground.of(_scattered(GRID_FROM_LEDS + 500, seed=1))
     rng = np.random.default_rng(2)
@@ -100,11 +122,9 @@ def test_the_grid_lights_the_leds_as_every_led_against_every_particle_does() -> 
     )
 
     by_grid = lit(ground, particles)
-    dense = np.zeros_like(by_grid)
-    _densely(ground, particles, dense)
 
     assert by_grid.any()
-    np.testing.assert_allclose(by_grid, np.minimum(dense, 1.0), atol=1e-4)
+    np.testing.assert_allclose(by_grid, _exactly(ground.leds, particles), atol=1e-4)
 
 
 def test_the_grid_lights_a_few_far_larger_particles_as_the_dense_sum_does() -> None:
@@ -114,10 +134,7 @@ def test_the_grid_lights_a_few_far_larger_particles_as_the_dense_sum_does() -> N
     large = swarm(rng.uniform(0.0, 15.0, (3, 3)), rng.uniform(0.0, 1.0, (3, 3)), [2.0, 2.5, 3.0])
     particles = joined(small, large)
 
-    dense = np.zeros((ground.leds.count, 3), dtype=np.float32)
-    _densely(ground, particles, dense)
-
-    np.testing.assert_allclose(lit(ground, particles), np.minimum(dense, 1.0), atol=1e-4)
+    np.testing.assert_allclose(lit(ground, particles), _exactly(ground.leds, particles), atol=1e-4)
 
 
 # A layer's mirror or transform moves its LEDs and keeps the zone's frame (LedSet.moved), so
@@ -137,15 +154,32 @@ def test_the_grid_lights_leds_moved_below_the_frame_as_the_exact_sum_does() -> N
 
     assert (moved.pos < ground.low).any(axis=0).all()  # LEDs below the frame, on every axis
     assert by_grid.any()
-    # Against the float64 sum, not _densely's: that one is float32, and its distances are
-    # worked out from the frame's centre, so this far out it's off by about 1e-4 itself.
     np.testing.assert_allclose(by_grid, _exactly(moved, particles), atol=1e-4)
+
+
+# Spec §8: a look that produces NaN is crashed. A particle with no place or size makes every LED
+# NaN in the dense sum (below GRID_FROM_LEDS), so it must in the grid's too. Left to the grid, a
+# NaN place is cast to some cell with a warning and lights nothing, and a NaN size raises.
+@pytest.mark.filterwarnings("error")
+@pytest.mark.parametrize("flaw", ["place", "size"])
+def test_a_particle_with_no_place_or_size_makes_every_led_nan_on_either_path(flaw: str) -> None:
+    rng = np.random.default_rng(8)
+    where, radius = rng.uniform(0.0, 15.0, (50, 3)), np.full(50, 0.25)
+    if flaw == "place":
+        where[17, 0] = np.nan
+    else:
+        radius[17] = np.nan
+    particles = swarm(where, rng.uniform(0.0, 1.0, (50, 3)), radius)
+
+    for count in (GRID_FROM_LEDS - 1, GRID_FROM_LEDS):  # the dense sum, and the grid
+        assert np.isnan(lit(Ground.of(_scattered(count, seed=9)), particles)).all()
 
 
 def test_a_ground_keeps_a_few_grids_and_reuses_one_for_close_sizes() -> None:
     ground = Ground.of(_scattered(100, seed=3))
 
-    assert ground.grid(0.9) is ground.grid(0.95)  # one size in √2 steps: 2^(1/2) m
+    assert ground.grid(0.9) is ground.grid(0.95)  # sizes go up in √2 steps: both want 1 m
+    assert ground.grid(0.9).size == 1.0
     for size in np.linspace(0.05, 20.0, 40):
         ground.grid(float(size))
     assert len(ground._grids) <= 8
@@ -265,13 +299,13 @@ def test_a_foot_is_under_an_led_at_its_lamps_lowest() -> None:
 
 def test_lights_at_one_spot_make_one_stop() -> None:
     near = SAME_STOP_M * 0.5
-    parts = [[(2.0, 2.0, 0.8)], [(2.0 + near, 2.0, 0.9)], [(2.0, 2.0, 1.1)], [(6.0, 2.0, 1.0)]]
+    parts = [[(2.0, 2.0, 0.8)], [(2.0 + near, 2.0, 0.9)], [(2.0, 2.0, 1.05)], [(6.0, 2.0, 1.0)]]
 
     lamps = lamps_of(lights_at(*parts))
 
     assert lamps.count == 2  # a device's parts share its placement: one stop
     np.testing.assert_allclose(lamps.low, [0.8, 1.0])
-    np.testing.assert_allclose(lamps.high, [1.1, 1.0])
+    np.testing.assert_allclose(lamps.high, [1.05, 1.0])
     assert lamps.members.tolist() == [0, 1, 2, 3] and lamps.starts.tolist() == [0, 3, 4]
 
 
@@ -317,6 +351,13 @@ def test_newest_keeps_the_last_particles() -> None:
     assert particles.newest(9) is particles
 
 
+def test_newest_of_none_is_no_particles() -> None:
+    particles = swarm(np.arange(15.0).reshape(5, 3), [1.0, 1.0, 1.0], 0.2)
+
+    for count in (0, -1, -9):  # a slice from -0 is everything, and from -1 all but the first
+        assert particles.newest(count) is NO_PARTICLES
+
+
 def test_joined_keeps_each_swarm_in_order_and_pick_keeps_the_marked() -> None:
     first = swarm([[0.0, 0.0, 0.0]], [1.0, 0.0, 0.0], 0.1)
     second = swarm([[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], [0.0, 1.0, 0.0], [0.2, 0.3])
@@ -329,16 +370,34 @@ def test_joined_keeps_each_swarm_in_order_and_pick_keeps_the_marked() -> None:
     np.testing.assert_array_equal(picked.colour, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
 
 
-# Spec §4.1's budget past 2k LEDs: 500 particles of a usual size on 10k LEDs, by the grid.
-@pytest.mark.perf
-def test_500_particles_light_10k_leds_in_the_frame_budget() -> None:
-    ground = Ground.of(_scattered(10_000, seed=6))
-    rng = np.random.default_rng(7)
-    particles = swarm(rng.uniform(0.0, 15.0, (500, 3)), rng.uniform(0.0, 1.0, (500, 3)), 0.2)
-    lit(ground, particles)  # the grid is made once for each size
+def _median_seconds(ground: Ground, particles: Particles) -> float:
+    lit(ground, particles)  # a grid is made once for each size
     durations = []
     for _ in range(60):
         started = time.perf_counter()
         lit(ground, particles)
         durations.append(time.perf_counter() - started)
-    assert statistics.median(durations) < FRAME_BUDGET_S
+    return statistics.median(durations)
+
+
+# Spec §5.3: a transition renders two looks in one frame, so each has half of §4.1's 5 ms. The
+# dense sum costs most on the most LEDs it lights, just under GRID_FROM_LEDS.
+@pytest.mark.perf
+def test_500_particles_light_the_most_leds_the_dense_sum_does_in_half_the_frame_budget() -> None:
+    ground = Ground.of(_scattered(GRID_FROM_LEDS - 1, seed=6))
+    rng = np.random.default_rng(7)
+    particles = swarm(rng.uniform(0.0, 15.0, (500, 3)), rng.uniform(0.0, 1.0, (500, 3)), 0.25)
+
+    assert _median_seconds(ground, particles) < FRAME_BUDGET_S / 2
+
+
+# Spec §4.1's 5 ms on a big zone: 500 particles of radius 0.2 m on 10k LEDs, by the grid (1.5 ms
+# measured). The budget holds for that radius only: the grid's cells are REACH radii wide, so
+# 500 particles of 0.6 m on 10k LEDs take 8 to 11 ms. Documented, not mended.
+@pytest.mark.perf
+def test_500_particles_light_10k_leds_in_the_frame_budget() -> None:
+    ground = Ground.of(_scattered(10_000, seed=6))
+    rng = np.random.default_rng(7)
+    particles = swarm(rng.uniform(0.0, 15.0, (500, 3)), rng.uniform(0.0, 1.0, (500, 3)), 0.2)
+
+    assert _median_seconds(ground, particles) < FRAME_BUDGET_S

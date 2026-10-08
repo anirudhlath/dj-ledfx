@@ -4,8 +4,8 @@ they're drawn from, the zone's lamps, and how particles light LEDs. Pure numpy.
 A particle lights each LED by a Gaussian falloff with its distance, out to REACH radii,
 and the LEDs add up what reaches them. Below GRID_FROM_LEDS LEDs every LED is measured
 against every particle; from it on (spec §4.1: "Past about 2k LEDs, particles switch to a
-spatial grid") only the LEDs in the grid cells around each particle are, with the same
-colours.
+spatial grid", and measured, the grid is no dearer from 600: see GRID_FROM_LEDS) only the
+LEDs in the grid cells around each particle are, with the same colours.
 """
 
 from __future__ import annotations
@@ -26,7 +26,12 @@ F32 = NDArray[np.float32]
 F64 = NDArray[np.float64]
 
 REACH = 2.5  # a particle lights nothing past this many radii: under half an 8-bit step
-GRID_FROM_LEDS = 2000  # from this many LEDs on, lit() looks only near each particle
+# From this many LEDs on, lit() looks only near each particle. The spec says "about 2k" (§4.1).
+# Measured with 500 particles, the grid costs no more than the dense sum from 600 LEDs (0.7 ms
+# against 0.9 for radii of 0.2 m, 1.1 against 1.1 for 0.6 m), and the dense sum keeps growing
+# with the LEDs: 2.7 ms at 1800, the half of §4.1's 5 ms that each look of a transition gets
+# (§5.3: both are rendered), and 4.4 ms at 3000.
+GRID_FROM_LEDS = 600
 SAME_STOP_M = 0.3  # lights whose middles are this close make one stop
 CEILING_OVER_M = 0.5  # with no map, the ceiling is this far over the highest LED
 MIN_RADIUS_M = 0.01  # a particle's light falls off over at least this
@@ -54,7 +59,9 @@ class Particles:
         return int(self.pos.shape[0])
 
     def newest(self, count: int) -> Particles:
-        """The `count` newest: the last ones."""
+        """The `count` newest: the last ones; none for a count of 0 or less."""
+        if count <= 0:
+            return NO_PARTICLES
         if self.count <= count:
             return self
         return Particles(self.pos[-count:], self.colour[-count:], self.radius[-count:])
@@ -355,9 +362,10 @@ class Ground:
         return low, high
 
     @cached_property
-    def _from_centre(self) -> tuple[F32, F32]:
-        """Each LED's place from the frame's centre, and its square length."""
-        pos: F32 = (self.leds.pos - self.centre).astype(np.float32)
+    def _from_centre(self) -> tuple[F64, F64]:
+        """Each LED's place from the frame's centre, and its square length, in float64: _densely
+        takes small differences of these."""
+        pos: F64 = self.leds.pos.astype(np.float64) - self.centre.astype(np.float64)
         return pos, np.einsum("ij,ij->i", pos, pos)
 
     def grid(self, size: float) -> _Grid:
@@ -385,12 +393,22 @@ class Ground:
 def lit(ground: Ground, particles: Particles) -> FloatRGB:
     """Each LED's light from the particles (spec §5.1: "Particles light LEDs by distance
     falloff"): the sum of each particle's colour times exp(-(d / r)²), d its distance from
-    the LED and r its radius, out to REACH radii, and at most 1. A new float32 array."""
+    the LED and r its radius, out to REACH radii, and at most 1. A new float32 array.
+
+    Measured on one core, 500 particles take 0.9 ms on 599 LEDs (the dense sum) and 1.5 ms on
+    10k LEDs when their radius is 0.2 m (the grid): inside spec §4.1's 5 ms. The grid's cells
+    are REACH radii wide, so a larger radius gathers more LEDs for each particle: 500 of
+    0.6 m on 10k LEDs take 8 to 11 ms (the allocator's page faults decide), over it. That is
+    documented, not mended.
+
+    A particle with a NaN or infinite place or size sends the frame the dense way whatever the
+    LED count, so a NaN reaches the frame (spec §8: a look that produces NaN is crashed) and no
+    grid cell is made of it."""
     count = ground.leds.count
     out = np.zeros((count, 3), dtype=np.float32)
     if count == 0 or particles.count == 0:
         return out
-    if count < GRID_FROM_LEDS:
+    if count < GRID_FROM_LEDS or not _finite(particles):
         _densely(ground, particles, out)
     else:  # the grid's cells fit the usual sizes; the few far larger light every LED anyway
         large = particles.radius > np.float32(2.0) * np.median(particles.radius)
@@ -402,15 +420,30 @@ def lit(ground: Ground, particles: Particles) -> FloatRGB:
     return out
 
 
+def _finite(particles: Particles) -> bool:
+    """Whether every particle's place and size are finite numbers: the grid files each particle
+    by them, and a NaN or an infinity has no cell."""
+    return bool(np.isfinite(particles.pos).all() and np.isfinite(particles.radius).all())
+
+
 def _densely(ground: Ground, particles: Particles, out: FloatRGB) -> None:
-    """Every LED against every particle, as one matrix product."""
+    """Every LED against every particle, as one matrix product. The square distances are
+    |a|² + |b|² - 2a·b from the frame's centre, worked out in float64: in float32 that loses
+    the small ones (a particle on an LED, far from the centre) by several 8-bit steps.
+
+    An array with an entry for each LED and particle is megabytes, and a new one for every
+    step took three times as long as working in place, so the steps work in place."""
     pos, square = ground._from_centre
-    at = (particles.pos - ground.centre).astype(np.float32)
-    gap = square[:, None] + np.einsum("ij,ij->i", at, at)[None, :] - 2.0 * (pos @ at.T)
-    np.maximum(gap, np.float32(0.0), out=gap)  # (N, P) square distances
-    reach = particles.radius * particles.radius
-    weight = np.exp(-gap / reach)
-    weight[gap > np.float32(REACH * REACH) * reach] = 0.0
+    at = particles.pos.astype(np.float64) - ground.centre.astype(np.float64)
+    gap = pos @ (-2.0 * at).T  # (N, P): -2a·b
+    gap += square[:, None]
+    gap += np.einsum("ij,ij->i", at, at)
+    exponent = np.empty(gap.shape, dtype=np.float32)  # float32 is plenty from here
+    np.maximum(gap, 0.0, out=exponent, casting="same_kind")
+    exponent *= np.float32(-1.0) / (particles.radius * particles.radius)  # -(d / r)²
+    past = exponent < np.float32(-REACH * REACH)
+    weight = np.exp(exponent, out=exponent)
+    weight[past] = 0.0
     out += (weight @ particles.colour).astype(np.float32)
 
 
