@@ -414,8 +414,9 @@ class Ground:
     LEDs, their lamps, the zone's frame (the set's bounds, which a layer's view keeps), its
     floor and its ceiling. The floor is the map's (height 0) and the ceiling the map's
     under a map; with none, the lowest LED and CEILING_OVER_M over the highest. A lamp the
-    map (or a layer's transform) puts outside them has a floor and a ceiling of its own
-    (floor_for, ceiling_for): what moves along a lamp takes in all of its LEDs."""
+    map (or a layer's transform) puts outside them, as far as float32 (which the LEDs are held
+    in) can tell, has a floor and a ceiling of its own (floor_for, ceiling_for): what moves
+    along a lamp takes in all of its LEDs."""
 
     leds: LedSet
     lamps: Lamps
@@ -460,16 +461,22 @@ class Ground:
     def floor_for(self, stop: ArrayLike) -> F64:
         """The lowest a thing goes at each stop's lamp: the floor, or the lamp's own lowest
         LED where the map (or a layer's transform) puts the lamp under it. What runs past a
-        lamp stops at the floor, but never short of the lamp."""
-        low = self.lamps.low[np.asarray(stop, dtype=np.intp)].astype(np.float64)
-        floor: F64 = np.minimum(self.floor, low)
+        lamp stops at the floor, but never short of the lamp. Under it is decided in float32,
+        as the LEDs are held: a lamp whose lowest LED is at the floor (0.7, which float32 holds
+        a little under) keeps the floor itself, to the last bit."""
+        low = self.lamps.low[np.asarray(stop, dtype=np.intp)]
+        floor: F64 = np.where(low < np.float32(self.floor), low.astype(np.float64), self.floor)
         return floor
 
     def ceiling_for(self, stop: ArrayLike) -> F64:
         """The highest a thing goes at each stop's lamp: the ceiling, or the lamp's own
-        highest LED where the map (or a layer's transform) puts the lamp over it."""
-        high = self.lamps.high[np.asarray(stop, dtype=np.intp)].astype(np.float64)
-        ceiling: F64 = np.maximum(self.ceiling, high)
+        highest LED where the map (or a layer's transform) puts the lamp over it. Over it is
+        decided in float32, as the LEDs are held: a lamp whose highest LED is at the ceiling
+        (2.45, which float32 holds a little over) keeps the ceiling itself, to the last bit."""
+        high = self.lamps.high[np.asarray(stop, dtype=np.intp)]
+        ceiling: F64 = np.where(
+            high > np.float32(self.ceiling), high.astype(np.float64), self.ceiling
+        )
         return ceiling
 
     def box(
@@ -477,8 +484,11 @@ class Ground:
     ) -> tuple[F64, F64]:
         """Where particles that roam stay: the zone's frame `margin` metres wider each way,
         or `margin` each way round each point (shape (3,) or (P, 3)), between the floor and
-        the ceiling. Round points that are LEDs of lamps (`stops`, a lamp for each point), a
-        box takes in the whole lamp where it stands outside them (floor_for, ceiling_for)."""
+        the ceiling. Round points that are LEDs of lamps (`stops`, a lamp for each point, so
+        it needs `around`, the points), a box takes in the whole lamp where it stands outside
+        them (floor_for, ceiling_for)."""
+        if stops is not None and around is None:
+            raise ValueError("box() takes stops only with around, the points they go with")
         if around is None:
             low, high = self.low.astype(np.float64), self.high.astype(np.float64)
         else:

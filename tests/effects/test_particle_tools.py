@@ -558,6 +558,51 @@ def test_a_lamp_with_no_map_is_never_outside_the_floor_and_ceiling() -> None:
     np.testing.assert_allclose(ground.ceiling_for([0, 1]), [ground.ceiling] * 2)
 
 
+# Float32 stores 2.45 and 2.7 a little over (2.4500000477, 2.7000000477) and 0.7 a little under
+# (0.69999999), and the LEDs are held in float32. A lamp with an LED exactly at one of these is
+# no further out than float32 can tell, so it keeps the zone's own floor or ceiling, to the bit.
+@pytest.mark.parametrize("ceiling", [2.45, 2.7])
+def test_a_lamp_whose_top_led_is_at_the_ceiling_keeps_the_zones_ceiling_to_the_last_bit(
+    ceiling: float,
+) -> None:
+    leds = lights_at([(1.0, 1.0, 0.7), (1.0, 1.0, ceiling)], ceiling=ceiling)
+    ground = Ground.of(leds)
+
+    assert float(ground.lamps.high[0]) > ceiling  # the LED is held a little over the ceiling
+    assert float(ground.ceiling_for([0])[0]) == ceiling
+    _, high = ground.box(0.5, around=[[1.0, 1.0, ceiling]], stops=[0])
+    assert float(high[0, 2]) == ceiling
+
+
+def test_a_lamp_whose_lowest_led_is_at_the_floor_keeps_the_zones_floor_to_the_last_bit() -> None:
+    floor = 0.7  # a map's floor is 0 and a zone with none takes a float32 LED's, so set by hand
+    leds = lights_at([(1.0, 1.0, floor), (1.0, 1.0, 1.4)])
+    ground = Ground(leds, lamps_of(leds), floor, 3.0)
+
+    assert float(ground.lamps.low[0]) < floor  # the LED is held a little under the floor
+    assert float(ground.floor_for([0])[0]) == floor
+    low, _ = ground.box(0.5, around=[[1.0, 1.0, floor]], stops=[0])
+    assert float(low[0, 2]) == floor
+
+
+@pytest.mark.parametrize("ceiling", [2.45, 2.7])
+def test_a_lamp_one_float32_step_past_the_ceiling_or_the_floor_is_outside_it(
+    ceiling: float,
+) -> None:
+    over = float(np.nextafter(np.float32(ceiling), np.float32(np.inf)))
+    ground = Ground.of(lights_at([(1.0, 1.0, 0.7), (1.0, 1.0, over)], ceiling=ceiling))
+    assert float(ground.ceiling_for([0])[0]) == over
+
+    under = float(np.nextafter(np.float32(0.7), np.float32(-np.inf)))
+    leds = lights_at([(1.0, 1.0, under), (1.0, 1.0, 1.4)])
+    assert float(Ground(leds, lamps_of(leds), 0.7, 3.0).floor_for([0])[0]) == under
+
+
+def test_a_box_takes_in_lamps_only_round_points_it_is_given() -> None:
+    with pytest.raises(ValueError, match="stops.*around"):
+        Ground.of(OUTSIDE).box(1.0, stops=[0, 1])
+
+
 def test_a_box_round_a_lamps_led_takes_in_the_lamp_where_it_stands_outside_the_band() -> None:
     ground = Ground.of(OUTSIDE)
     stops = [0, 1, 2, 3, 4]

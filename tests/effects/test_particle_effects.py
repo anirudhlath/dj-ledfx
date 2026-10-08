@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import pytest
 from conftest import tempo_ctx
-from map_home import bulbs, leds_at, seeded_ledset
+from map_home import bulbs, leds_at, lights_at, seeded_ledset, upright
 
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.ledset import LedSet
@@ -142,6 +142,42 @@ def test_a_zone_with_no_leds_draws_nothing(kind: str) -> None:
     effect = _effect(kind)
     frame = drawn(effect, tempo_ctx(START), leds_at([]))
     assert frame.shape == (0, 3) and effect.particles.count == 0
+
+
+# Ceilings float32 stores a little over (2.45 as 2.4500000477): a lamp with its top LED exactly
+# there is inside the band, so it is drawn as the zone's own floor and ceiling draw it.
+@pytest.mark.parametrize("ceiling", [2.45, 2.7])
+@pytest.mark.parametrize("kind", PARTICLE_KINDS)
+def test_lamps_inside_the_band_are_drawn_with_the_zones_own_floor_and_ceiling(
+    monkeypatch: pytest.MonkeyPatch, kind: str, ceiling: float
+) -> None:
+    leds = lights_at(
+        upright(1.0, 1.0, 0.7, ceiling),
+        upright(2.0, 1.0, 0.1, ceiling),
+        upright(3.0, 1.0, 0.3, 1.4),
+        ceiling=ceiling,
+    )
+
+    def run() -> list[tuple[Any, ...]]:
+        effect = _effect(kind, **_largest(kind))
+        seen = []
+        for step in range(40):
+            drawn(effect, tempo_ctx(START + step * 0.7), leds)
+            seen.append((effect.particles.pos, effect.particles.colour, effect.particles.radius))
+        return seen
+
+    def zones_floor(self: Ground, stop: Any) -> Any:
+        return np.full(np.shape(stop), self.floor)
+
+    def zones_ceiling(self: Ground, stop: Any) -> Any:
+        return np.full(np.shape(stop), self.ceiling)
+
+    lamp_by_lamp = run()
+    monkeypatch.setattr(Ground, "floor_for", zones_floor)
+    monkeypatch.setattr(Ground, "ceiling_for", zones_ceiling)
+    for ours, zones in zip(lamp_by_lamp, run(), strict=True):
+        for a, b in zip(ours, zones, strict=True):
+            np.testing.assert_array_equal(a, b)
 
 
 @pytest.mark.parametrize("home", HOMES)

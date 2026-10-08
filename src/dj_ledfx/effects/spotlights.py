@@ -3,8 +3,8 @@
 Each spotlight rests on a lamp for hold_s, on an LED of it (any of its LEDs, its own each
 visit), then glides to the next over move_s, on a tour of its own (particle_tools.tour):
 every lamp once a round in a shuffled order, never the same lamp twice in a row. The
-spotlights start their steps at even shares of a step apart, so no two set off together (with
-a short rest and a long glide, most of them are on the move at any moment).
+spotlights start their steps at even shares of a step apart, so no two set off together (and
+with a rest shorter than the glide, each is on the move most of the time).
 """
 
 from __future__ import annotations
