@@ -31,10 +31,9 @@ export function startDataLayer(options: { openSocket?: OpenSocket; url?: string 
     frames,
     beatClock,
     openSocket: options.openSocket,
-    onResync: () => {
-      void resync(queryClient)
-      previewSession.resume()
-    },
+    onResync: () => void resync(queryClient),
+    // The server forgets a preview with the link, and a deep link can open the composer before the link is up.
+    onLive: () => previewSession.resume(),
   })
   client.start()
   return client

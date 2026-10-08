@@ -282,4 +282,28 @@ describe('the preview', () => {
     expect(ask).not.toHaveBeenCalled()
     expect(subscribeFrames).not.toHaveBeenCalled()
   })
+
+  // Review focus 4: a deep link opens the composer before the link has ever been up, and the first connect resumes it too.
+  it('asks for a preview that failed before the link was ever up when the link first comes up', async () => {
+    const { sockets, open } = fakeSockets()
+    startDataLayer({ openSocket: open, url: 'ws://test/ws' })
+    const ask = vi
+      .spyOn(api, 'startPreview')
+      .mockRejectedValueOnce(new ApiError(0, 'Failed to fetch', '/api/preview'))
+      .mockResolvedValueOnce(started('p1'))
+    previewSession.show('living', 'embers')
+    await vi.waitFor(() => expect(previewSession.snapshot().status).toBe('failed'))
+
+    sockets[0].open()
+    sockets[0].say({ channel: 'transport', state: 'playing' })
+    await vi.waitFor(() => expect(previewSession.snapshot().status).toBe('on'))
+    expect(ask).toHaveBeenCalledTimes(2)
+    expect(ask).toHaveBeenLastCalledWith({ zoneId: 'living', lookId: 'embers' })
+    expect(previewSession.snapshot()).toMatchObject({ zoneId: 'living', lookId: 'embers', showing: 'living' })
+    // The socket subscribed to the live stream alone as it opened, and watches the preview's once the link is up.
+    expect(sockets[0].sent.filter((command) => command.action === 'subscribe_frames')).toMatchObject([
+      { streams: ['live'] },
+      { streams: ['live', 'preview'] },
+    ])
+  })
 })
