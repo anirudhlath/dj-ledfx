@@ -22,7 +22,9 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.ledset import LedSet
     from dj_ledfx.types import FloatRGB
 
-MAX_PARTICLES = 500  # spec §5.1: "capped at about 500"; step() keeps the newest
+# Spec §5.1: "capped at about 500". Each effect keeps to it itself, so that every particle lives
+# out its life; step() keeps the newest of the particles of one that doesn't.
+MAX_PARTICLES = 500
 
 
 class ParticleEffect(Effect):

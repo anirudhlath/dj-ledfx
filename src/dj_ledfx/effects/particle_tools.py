@@ -1,5 +1,6 @@
 """What particle effects share (spec §5.1): the particles of a moment, the random numbers
-they're drawn from, the zone's lamps, and how particles light LEDs. Pure numpy.
+they're drawn from, the zone's lamps, how an effect that makes particles lamp by lamp keeps to
+the cap, and how particles light LEDs. Pure numpy.
 
 A particle lights each LED by a Gaussian falloff with its distance, out to REACH radii,
 and the LEDs add up what reaches them. Below GRID_FROM_LEDS LEDs every LED is measured
@@ -34,6 +35,8 @@ REACH = 2.5  # a particle lights nothing past this many radii: under half an 8-b
 GRID_FROM_LEDS = 600
 SAME_STOP_M = 0.3  # lights whose middles are this close make one stop
 CEILING_OVER_M = 0.5  # with no map, the ceiling is this far over the highest LED
+WINDOW_MIN = 0.25  # a lamp's events are born in this share of their stretches at the least
+ROOM_MARGIN = 0.01  # of an event, left over in a lamp's share of the room: no count tips over
 MIN_RADIUS_M = 0.01  # a particle's light falls off over at least this
 _GRID_SIZES = 8  # the grids a Ground keeps, one per cell size
 
@@ -120,7 +123,8 @@ def draws(seed: int, keys: ArrayLike, count: int, stream: int = 0) -> F64:
 
 def recent(now: float, every: float, life: float) -> NDArray[np.int64]:
     """The events that may be alive at `now`: event n comes at (n + u) * every, u from 0 to
-    1, and lives `life`. In seconds or in beats alike."""
+    2 (a lamp's events come up to a stretch late: Streams.born), and lives `life`. In seconds
+    or in beats alike."""
     first = math.floor((now - life) / every) - 1
     return np.arange(first, math.floor(now / every) + 1, dtype=np.int64)
 
@@ -183,6 +187,62 @@ def spread_over(seed: int, count: int, stops: int) -> NDArray[np.intp]:
     before any twice, in an order the seed picks."""
     taken: NDArray[np.intp] = shuffled(seed, 0, 0, stops)[np.arange(count) % stops]
     return taken
+
+
+LAMP_KEYS = 65536  # event n of lamp s draws from key n * LAMP_KEYS + s
+STARTS = 900  # the stream the lamps' starts are drawn from
+
+
+@dataclass(frozen=True, eq=False, slots=True)
+class Streams:
+    """The events (embers climbing, drops running) that lamps make, from lamp_streams."""
+
+    lamp: NDArray[np.intp]  # the lamps that make events, in order
+    rate: float  # events to a usual life, for each of them
+    window: float  # the share of its stretch that an event is born in
+    start: F64  # (lamps,): where in its stretch each lamp's window starts, as a share of it
+
+    def events(self, n: NDArray[np.int64]) -> tuple[NDArray[np.int64], NDArray[np.intp]]:
+        """Events n of every lamp that makes them, n by n: each event's n, and its lamp."""
+        return np.repeat(n, len(self.lamp)), np.tile(self.lamp, len(n))
+
+    def born(self, event: NDArray[np.int64], lamp: NDArray[np.intp], u: F64) -> F64:
+        """When each event is born, in stretches: event + start + window * u, u its own draw."""
+        born: F64 = event + self.start[lamp] + self.window * u
+        return born
+
+
+def lamp_streams(seed: int, lamps: int, rate: float, longest: float, room: int) -> Streams:
+    """How `lamps` lamps make events (embers, drops) so that no more than `room` are alive at
+    once, however many lamps there are and however the draws fall.
+
+    Each lamp makes one event in each stretch of `every` seconds, `rate` events to a usual
+    life: event n is born at (n + start + window * u) * every, u from 0 to 1 its own draw, and
+    lives `longest` usual lives at the most. Born anywhere in their stretches (window 1, start
+    0, as recent() has them), a lamp's events can come to ceil(longest * rate + 1) alive at
+    once; born in a `window` of them, ceil(longest * rate + window). The lamps share the room
+    in whole events, `room // served` each, and a rate that fits that is left as it was, with
+    the window narrowed as far as WINDOW_MIN to make it fit; past that the rate comes down.
+    Both are the same for every lamp, and each lamp's window starts at a place of its own in
+    the stretch, so the lamps are not in step. ROOM_MARGIN keeps a rounding from tipping a
+    count that comes out even. With more lamps than room, a seeded `room` of them make events
+    (as snow gives its flakes to as many lamps as it has) and the others make none."""
+    served = min(lamps, room)
+    if served <= 0:
+        return Streams(np.zeros(0, np.intp), rate, 1.0, np.zeros(max(lamps, 0)))
+    slack = room // served - ROOM_MARGIN  # what a lamp's longest count must stay under
+    window = min(1.0, slack - longest * rate)
+    if window < WINDOW_MIN:
+        window, rate = WINDOW_MIN, (slack - WINDOW_MIN) / longest
+    lamp = (
+        np.arange(lamps, dtype=np.intp)
+        if lamps <= room
+        else np.sort(spread_over(seed, room, lamps))
+    )
+    start = np.zeros(lamps)
+    if window < 1.0:
+        start[lamp] = draws(seed, lamp, 1, stream=STARTS)[:, 0]
+    return Streams(lamp, rate, window, start)
 
 
 @dataclass(frozen=True, eq=False, slots=True)

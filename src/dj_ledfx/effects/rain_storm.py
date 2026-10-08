@@ -1,11 +1,15 @@
 """Rain storm's particles (looks.json "rain"): drops and lightning.
 
-Drops run down each lamp from just over its top to just under its bottom, a few at a time,
-each past an LED of its own (Ground.on), so rain runs along a long light's length. A strike
-comes once in each stretch of 60 / strikes_per_min seconds, at a random moment and a random
-spot over the zone's floor at half the ceiling's height: one particle as wide as
-strike_reach, so each lamp lights by its distance from the strike. It flashes, dims, and
-flickers once more.
+Drops run down each lamp from just over its top to just under its bottom (the ceiling and
+the floor stop them), a few at a time, each past an LED of its own (Ground.on), so rain runs
+along a long light's length. A strike comes once in each stretch of 60 / strikes_per_min
+seconds, at a random moment and a random spot over the zone's floor at half the ceiling's
+height: one particle as wide as strike_reach, so each lamp lights by its distance from the
+strike. It flashes, dims, and flickers once more.
+
+A home with so many lamps that the drops would pass MAX_PARTICLES, with the lightning's room
+kept, makes fewer of them (lamp_streams): every lamp's rate comes down together, so that none
+is ever cut mid-life.
 """
 
 from __future__ import annotations
@@ -17,8 +21,16 @@ import numpy as np
 
 from dj_ledfx.effects.color import palette_at, palette_float
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.effects.particle_tools import NO_PARTICLES, draws, joined, recent, swarm
-from dj_ledfx.effects.particles import ParamParticles
+from dj_ledfx.effects.particle_tools import (
+    LAMP_KEYS,
+    NO_PARTICLES,
+    draws,
+    joined,
+    lamp_streams,
+    recent,
+    swarm,
+)
+from dj_ledfx.effects.particles import MAX_PARTICLES, ParamParticles
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -28,12 +40,12 @@ if TYPE_CHECKING:
 
 RAIN_PALETTE = ("#2850ff", "#78b4ff", "#c8e6ff")
 LIGHTNING = "#e6eeff"
-OVER_M = 0.25  # a drop starts this far over its lamp's top
-UNDER_M = 0.15  # and runs out this far under its bottom
+OVER_M = 0.25  # a drop starts this far over its lamp's top, or at the ceiling
+UNDER_M = 0.15  # and runs out this far under its bottom, or at the floor
 JITTER_M = 0.05  # how far from its LED a drop runs
 EDGE = 0.1  # a drop fades in over this share of its run, and out over the last
 FLASH_S = 0.6  # a strike is over in this long
-LAMP_KEYS = 65536  # drop n of lamp s draws from key n * LAMP_KEYS + s
+LONGEST = 1.0  # a drop's longest run, in fall times: every drop takes fall_s
 
 
 def flash(age: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -42,6 +54,14 @@ def flash(age: NDArray[np.float64]) -> NDArray[np.float64]:
         -(((age - 0.25) / 0.06) ** 2)
     )
     return np.minimum(envelope, 1.0)
+
+
+def flashes_at_once(per_min: float) -> int:
+    """The most strikes that can flash at once, however their moments fall: one is born in
+    each stretch of 60 / per_min seconds, and flashes for FLASH_S. None, for no strikes."""
+    if per_min <= 0.0:
+        return 0
+    return math.ceil(FLASH_S * per_min / 60.0) + 1
 
 
 class RainStorm(ParamParticles):
@@ -110,16 +130,22 @@ class RainStorm(ParamParticles):
         values = self._values
         lamps = ground.lamps
         fall = float(values["fall_s"])
-        every = fall / float(values["drops_per_lamp"])  # a drop starts down each lamp this often
+        room = MAX_PARTICLES - flashes_at_once(float(values["strikes_per_min"]))
+        streams = lamp_streams(
+            self._seed, lamps.count, float(values["drops_per_lamp"]), LONGEST, room
+        )
+        every = fall / streams.rate  # a drop starts down each lamp this often
         n = recent(ctx.t, every, fall)
-        lamp = np.tile(np.arange(lamps.count), len(n))
-        u = draws(self._seed, np.repeat(n, lamps.count) * LAMP_KEYS + lamp, 4)
-        born = (np.repeat(n, lamps.count) + u[:, 0]) * every
+        event, lamp = streams.events(n)  # drop n of lamp s draws from key n * LAMP_KEYS + s
+        u = draws(self._seed, event * LAMP_KEYS + lamp, 4)
+        born = streams.born(event, lamp, u[:, 0]) * every
         share = (ctx.t - born) / fall  # 0 over the lamp's top, 1 under its bottom
         alive = np.flatnonzero((share >= 0.0) & (share < 1.0))
         alive = alive[np.argsort(born[alive], kind="stable")]  # oldest first
         lamp, u, share = lamp[alive], u[alive], share[alive]
-        top, bottom = lamps.high[lamp] + OVER_M, lamps.low[lamp] - UNDER_M
+        # A run stops at the ceiling and the floor; a lamp outside them keeps its own extent.
+        top = np.maximum(np.minimum(lamps.high[lamp] + OVER_M, ground.ceiling), lamps.low[lamp])
+        bottom = np.minimum(np.maximum(lamps.low[lamp] - UNDER_M, ground.floor), top)
         side = 2.0 * math.pi * u[:, 1]
         past = ground.on(lamp, u[:, 3])
         pos = np.stack(

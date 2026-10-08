@@ -3,12 +3,15 @@ from __future__ import annotations
 import itertools
 
 import numpy as np
+import pytest
 from conftest import render_ctx
-from map_home import ROW, leds_at, lights_at, upright
+from crowds import worst_crowd
+from map_home import ROW, bulbs, leds_at, lights_at, upright
 
+from dj_ledfx.effects import embers as embers_module
 from dj_ledfx.effects.embers import CLIMB_OVER_M, WOBBLE_M, Embers
-from dj_ledfx.effects.particle_tools import lamps_of
-from dj_ledfx.effects.particles import drawn
+from dj_ledfx.effects.particle_tools import Ground, lamps_of
+from dj_ledfx.effects.particles import MAX_PARTICLES, drawn
 
 # Two upright lamps from 0.1 to 1.4 m and a short one on a table from 0.8 to 1.2 m.
 LAMPS = lights_at(upright(1.0, 1.0), upright(5.0, 1.0), upright(3.0, 4.0, 0.8, 1.2))
@@ -151,3 +154,92 @@ def test_an_ember_does_not_sink_when_its_lamp_is_over_the_ceiling() -> None:
     for t in _moments(5.0):
         drawn(embers, render_ctx(t=t), over)
         assert (embers.particles.pos[:, 2] >= 3.2 - 1e-5).all()
+
+
+def test_an_ember_climbing_a_lamp_near_the_ceiling_ends_at_the_ceiling() -> None:
+    near = lights_at(upright(1.0, 1.0), ceiling=1.5)  # 0.3 m over the lamp's top is 1.7 m
+    embers = _embers()
+    highest = 0.0
+    for t in _moments(30.0):
+        drawn(embers, render_ctx(t=t), near)
+        highest = max(highest, float(embers.particles.pos[:, 2].max()))
+    assert 1.5 - 0.03 < highest <= 1.5 + 1e-5  # they climb right up to it, and no further
+
+
+def test_embers_on_a_home_with_room_for_them_keep_the_rate_they_were_given() -> None:
+    home = bulbs(19)  # up to 19 * (10 * 1.25 + 1) = 256 at once, well under the cap
+    embers = _embers(per_lamp=10.0)
+    embers.place(home)
+    counts = []
+    for t in np.arange(500.0, 560.0, 0.5):
+        embers.step(render_ctx(t=float(t)))
+        counts.append(embers.particles.count)
+    assert 19 * 10.0 * 0.9 < np.mean(counts) < 19 * 10.0 * 1.1
+
+
+def test_embers_on_a_crowded_home_at_the_default_rate_are_not_thinned() -> None:
+    home = bulbs(100)  # 5 each at the most, and 3 * 1.25 + 1 is under that
+    embers = _embers()
+    embers.place(home)
+    counts = []
+    for t in np.arange(500.0, 560.0, 0.5):
+        embers.step(render_ctx(t=float(t)))
+        counts.append(embers.particles.count)
+    assert 100 * 3.0 * 0.9 < np.mean(counts) < 100 * 3.0 * 1.1
+
+
+@pytest.mark.parametrize("rise", [1.0, 4.0, 15.0])
+@pytest.mark.parametrize("lamps", [100, 167, 300, 700])
+def test_embers_keep_to_the_cap_on_a_crowded_home_and_none_is_cut(lamps: int, rise: float) -> None:
+    crowd = bulbs(lamps)
+    ground, embers = Ground.of(crowd), _embers(per_lamp=10.0, rise_s=rise)
+    embers.place(crowd)
+    counts = []
+    for t in np.arange(500.0, 500.0 + 8 * rise, rise / 13):
+        ctx = render_ctx(t=float(t))
+        embers.step(ctx)
+        made = embers.positions(ctx, ground)
+        assert made.count <= MAX_PARTICLES
+        assert embers.particles.count == made.count  # step() cut none, mid-life or otherwise
+        counts.append(made.count)
+    served = min(lamps, MAX_PARTICLES)
+    assert np.mean(counts) > 0.5 * served * (MAX_PARTICLES // served)  # not thinned to nothing
+
+
+@pytest.mark.parametrize("lamps", [100, 700])
+def test_a_crowded_home_shares_its_embers_evenly_between_the_lamps_it_serves(lamps: int) -> None:
+    crowd = bulbs(lamps)
+    embers = _embers(per_lamp=10.0, rise_s=4.0)
+    embers.place(crowd)
+    ground = Ground.of(crowd)
+    seen = np.zeros(lamps)
+    moments = np.arange(500.0, 620.0, 0.5)
+    for t in moments:
+        made = embers.positions(render_ctx(t=float(t)), ground)
+        seen += np.bincount(np.rint(made.pos[:, 0]).astype(np.int64), minlength=lamps)
+    served = seen > 0
+    assert served.sum() == min(lamps, MAX_PARTICLES)  # a few lamps when there are too many
+    mean = seen[served] / len(moments)
+    assert (mean > 0.75 * mean.mean()).all() and (mean < 1.25 * mean.mean()).all()
+
+
+def test_the_lamps_of_a_crowded_home_are_not_in_step_so_its_embers_do_not_breathe() -> None:
+    crowd = bulbs(700)  # one ember at a time at the most, born in a quarter of each stretch
+    ground, embers = Ground.of(crowd), _embers(per_lamp=10.0, rise_s=4.0)
+    counts = [
+        embers.positions(render_ctx(t=float(t)), ground).count
+        for t in np.arange(500.0, 560.0, 0.1)
+    ]
+    assert np.std(counts) < 0.08 * np.mean(counts)  # 4%, where lamps in step breathe by 18%
+
+
+@pytest.mark.parametrize("lamps", [100, 167, 300, 700])
+def test_however_the_draws_fall_embers_never_pass_the_cap_on_a_crowded_home(
+    monkeypatch: pytest.MonkeyPatch, lamps: int
+) -> None:
+    embers = _embers(per_lamp=10.0, rise_s=4.0)
+    served, most = worst_crowd(monkeypatch, embers_module, embers, bulbs(lamps), 40.0, lives=True)
+    assert served == min(lamps, MAX_PARTICLES)
+    each = MAX_PARTICLES // served  # the cap, shared out in whole embers
+    assert each - 1 <= most <= each  # a lamp comes within one of its share, and never past it
+    assert served * most <= MAX_PARTICLES

@@ -6,6 +6,9 @@ a time, each under an LED of its own (Ground.foot), so a long light smoulders al
 length; each climbs to just over the lamp's top as it dies: hot and bright as it catches,
 dimmer and redder as it climbs, flickering all the way. Ember n of lamp s comes from draws()
 of its key alone, so an ember is where it is whenever it's drawn.
+
+A home with so many lamps that the embers would pass MAX_PARTICLES makes fewer of them
+(lamp_streams): every lamp's rate comes down together, so that none is ever cut mid-life.
 """
 
 from __future__ import annotations
@@ -17,8 +20,8 @@ import numpy as np
 
 from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.effects.particle_tools import draws, recent, swarm
-from dj_ledfx.effects.particles import ParamParticles
+from dj_ledfx.effects.particle_tools import LAMP_KEYS, draws, lamp_streams, recent, swarm
+from dj_ledfx.effects.particles import MAX_PARTICLES, ParamParticles
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -29,9 +32,9 @@ CLIMB_OVER_M = 0.3  # an ember dies this far over its lamp's top (or at the ceil
 WOBBLE_M = 0.06  # how far it wanders from its LED as it climbs
 WOBBLE_S = 2.0  # once round in this long
 LIFE_SPREAD = 0.5  # an ember lives its rise time, give or take a quarter
+LONGEST = 1.0 + LIFE_SPREAD / 2.0  # the longest life, in rise times
 FLICKER_HZ = 7.0
 CATCH_S = 0.15  # it brightens over this as it catches
-LAMP_KEYS = 65536  # ember n of lamp s draws from key n * LAMP_KEYS + s
 
 
 class Embers(ParamParticles):
@@ -75,11 +78,14 @@ class Embers(ParamParticles):
         values = self._values
         lamps = ground.lamps
         rise = float(values["rise_s"])
-        every = rise / float(values["per_lamp"])  # one ember leaves each lamp this often
-        n = recent(ctx.t, every, rise * (1.0 + LIFE_SPREAD / 2.0))
-        lamp = np.tile(np.arange(lamps.count), len(n))
-        u = draws(self._seed, np.repeat(n, lamps.count) * LAMP_KEYS + lamp, 5)
-        born = (np.repeat(n, lamps.count) + u[:, 0]) * every
+        streams = lamp_streams(
+            self._seed, lamps.count, float(values["per_lamp"]), LONGEST, MAX_PARTICLES
+        )
+        every = rise / streams.rate  # one ember leaves each lamp this often
+        n = recent(ctx.t, every, rise * LONGEST)
+        event, lamp = streams.events(n)  # ember n of lamp s draws from key n * LAMP_KEYS + s
+        u = draws(self._seed, event * LAMP_KEYS + lamp, 5)
+        born = streams.born(event, lamp, u[:, 0]) * every
         age = ctx.t - born
         share = age / (rise * (1.0 - LIFE_SPREAD / 2.0 + LIFE_SPREAD * u[:, 1]))
         alive = np.flatnonzero((age >= 0.0) & (share < 1.0))

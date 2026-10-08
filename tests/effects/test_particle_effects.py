@@ -28,10 +28,11 @@ PARTICLE_KINDS = sorted(
 )
 START = 2000.0  # beats: 1000 s into a steady 120 BPM
 # The zones the largest settings run on: this home, and one with so many lamps that an effect
-# making particles for each lamp goes past the cap unless it keeps to it (snow's asks for 800).
+# making particles for each lamp goes past the cap unless it keeps to it (at their largest
+# settings snow asks for 2000 there, embers for 1000 and rain for 800).
 HOMES: dict[str, Callable[[], LedSet]] = {
     "this home": seeded_ledset,
-    "forty bulbs": lambda: bulbs(40),
+    "a hundred bulbs": lambda: bulbs(100),
 }
 
 
@@ -52,9 +53,13 @@ def _largest(kind: str) -> dict[str, Any]:
 
 
 def _keeps_to_the_cap(effect: ParamParticles, ctx: RenderContext, ground: Ground) -> None:
-    """What the effect makes itself, before `step` cuts it to the cap (the cut hides a miss)."""
+    """What the effect makes itself, before `step` cuts it to the cap (the cut hides a miss),
+    and that the cut took none: a particle cut is one cut mid-life, as the effect lets each
+    live its life out."""
     if ground.lamps.count:  # no lamps, no particles
-        assert effect.positions(ctx, ground).count <= MAX_PARTICLES
+        made = effect.positions(ctx, ground)
+        assert made.count <= MAX_PARTICLES
+        assert effect.particles.count == made.count
 
 
 def _frames(effect: ParamParticles, leds: LedSet, count: int = 120) -> list[FloatRGB]:
@@ -144,6 +149,23 @@ def test_a_zone_with_no_leds_draws_nothing(kind: str) -> None:
 def test_the_largest_settings_keep_to_the_particle_cap(kind: str, home: str) -> None:
     leds = HOMES[home]()
     _good(_frames(_effect(kind, **_largest(kind)), leds, count=30), leds)
+
+
+@pytest.mark.parametrize("home", HOMES)
+@pytest.mark.parametrize("kind", PARTICLE_KINDS)
+def test_the_largest_settings_cut_no_particle_mid_life_however_long_they_run(
+    kind: str, home: str
+) -> None:
+    """An ember lives 19 s at the longest; this runs 105 s, in steps no life divides."""
+    leds = HOMES[home]()
+    ground = Ground.of(leds)
+    for seed in (1, 2):
+        effect = _effect(kind, seed=seed, **_largest(kind))
+        effect.place(leds)
+        for step in range(150):
+            ctx = tempo_ctx(START + step * 1.4)
+            effect.step(ctx)
+            _keeps_to_the_cap(effect, ctx, ground)
 
 
 # Spec §9's benchmark: every particle effect at its largest settings, on this home's LEDs.
