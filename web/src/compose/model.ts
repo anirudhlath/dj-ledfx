@@ -6,6 +6,15 @@ import type { Id, InputKind, Inputs, Look, RunningZone, Transition, Zone } from 
 import { newestFirst } from '@/stage/show'
 import { chipsFor, transitionLabel } from '@/zones/zone-view'
 
+/** The composer's URL (spec §4.3, F4 ruling 9): /live/put, with ?zone= and ?look= as chosen. */
+export function composerPath(zoneId: Id | null, lookId: Id | null = null): string {
+  const params = new URLSearchParams()
+  if (zoneId !== null) params.set('zone', zoneId)
+  if (lookId !== null) params.set('look', lookId)
+  const query = params.toString()
+  return query === '' ? '/live/put' : `/live/put?${query}`
+}
+
 /** §8.2's category chips: Starred, then the looks' own categories. */
 export type Category = 'starred' | Look['category']
 

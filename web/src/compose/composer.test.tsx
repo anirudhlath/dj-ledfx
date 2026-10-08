@@ -1,0 +1,661 @@
+import { act, fireEvent, screen, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Id } from '@/api/contract'
+import { previewSession } from '@/api/live'
+import { lookName } from '@/api/mocks/fixtures'
+import type { MockServer, MockServerOptions } from '@/api/mocks/mock-server'
+import { api, ApiError } from '@/api/rest'
+import { renderApp } from '@/test/app'
+import { HERO_NOW, restOn, startMockDataLayer } from '@/test/live'
+import { resizeObserved } from '@/test/resize'
+import { heroPose, loadedStage, MAIN_STAGE } from '@/test/stage'
+import { setViewportWidth } from '@/test/viewport'
+import { projectPoint } from '@/stage/camera'
+import { lastZone } from './last-zone'
+
+// jsdom has no WebGL: src/test/stage.ts's stand-in takes the canvas's place, and the rest of the stage is real.
+vi.mock('@/stage/webgl', () => import('@/test/stage').then((stage) => stage.webglMock()))
+vi.mock('@/stage/stage-canvas', (importOriginal) => import('@/test/stage').then((stage) => stage.canvasMock(importOriginal)))
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(HERO_NOW)
+  // The last zone used is this browser's (F4 ruling 9): each test starts without one.
+  localStorage.clear()
+})
+
+/** Time for the in-memory socket and the stubbed fetch, which answer in microtasks between the timers. */
+const settle = (ms = 1000) => act(() => vi.advanceTimersByTimeAsync(ms))
+
+/** The app at `path` on the hero's mock server (or another scenario), REST and socket alike, settled. */
+async function openApp(path: string, options: MockServerOptions = {}) {
+  const server = startMockDataLayer(options)
+  restOn(server)
+  const router = renderApp(path)
+  await settle()
+  return { server, router }
+}
+
+const composer = () => screen.getByRole('complementary', { name: 'Put a look on' })
+const title = () => within(composer()).getByRole('heading', { level: 2 })
+const tile = (id: Id) => composer().querySelector<HTMLElement>(`[data-look="${id}"]`)!
+const tilesShown = () => [...composer().querySelectorAll<HTMLElement>('[data-look]')].map((each) => each.dataset.look)
+const consequenceLine = () => composer().querySelector('[data-consequence]')!
+const startButton = (look?: Id) => within(composer()).getByRole('button', { name: look === undefined ? 'Start' : `Start ${lookName(look)}` })
+const zoneName = (server: MockServer, id: Id) => server.state.zones.find((zone) => zone.id === id)!.name
+/** A mouse press as a browser sends one: Base UI's list picks an option as the button comes up. */
+function press(element: HTMLElement) {
+  fireEvent.pointerDown(element, { pointerType: 'mouse', button: 0 })
+  fireEvent.mouseDown(element, { button: 0 })
+  fireEvent.pointerUp(element, { pointerType: 'mouse', button: 0 })
+  fireEvent.mouseUp(element, { button: 0 })
+  fireEvent.click(element, { button: 0 })
+}
+const previewCard = () => document.querySelector('[data-preview-card]')
+/** From here each preview request waits for the test to let it go: the choices come faster than the answers. */
+function holdPreviews() {
+  const real = api.startPreview.bind(api)
+  const waiting: (() => void)[] = []
+  vi.spyOn(api, 'startPreview').mockImplementation(
+    (body) => new Promise((resolve, reject) => waiting.push(() => void real(body).then(resolve, reject))),
+  )
+  return waiting
+}
+/**
+ * What the consequence line says in the commit that chooses another look or zone: the effect that asks for its preview comes after it,
+ * so the preview state is still the last choice's, and the line must say nothing of that. One entry for each preview asked for.
+ */
+function lineAtEachChoice() {
+  const show = previewSession.show.bind(previewSession)
+  const seen: (string | null)[] = []
+  vi.spyOn(previewSession, 'show').mockImplementation((zoneId, lookId) => {
+    seen.push(consequenceLine().textContent)
+    show(zoneId, lookId)
+  })
+  return seen
+}
+/** A zone's chip in Where, by the zone's name (a chip's name runs on into its note). */
+const chip = (name: string) =>
+  within(screen.getByRole('group', { name: 'Where' }))
+    .getAllByRole('button')
+    .find((button) => button.firstChild?.textContent === name)!
+
+describe('Put a look on (§8.2)', () => {
+  // §13.1 F4's exit check: "Start a look in ≤ 3 clicks from Live; lights unchanged until Start (mock asserts)".
+  it('starts a look in three clicks from Live, and leaves the lights alone until Start', async () => {
+    const { server, router } = await openApp('/next/live')
+    const running = structuredClone(server.state.running)
+    const lights = structuredClone(server.state.lights)
+    const home = server.state.zones.find((zone) => zone.kind === 'home')!
+    // The whole home runs a home look, so the composer opens on the home looks (F4 ruling 10).
+    const look = server.state.looks.find((each) => each.category === 'home' && each.id !== 'homesunset')!
+
+    fireEvent.click(screen.getByRole('link', { name: 'Put a look on' }))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    expect(screen.queryByRole('complementary', { name: 'Running' })).not.toBeInTheDocument()
+    expect(title()).toHaveTextContent(`Put a look on ${home.name}`)
+
+    fireEvent.click(tile(look.id))
+    await settle()
+    expect(previewSession.snapshot()).toMatchObject({ status: 'on', zoneId: home.id, lookId: look.id })
+    expect(server.state.running).toEqual(running)
+    expect(server.state.lights).toEqual(lights)
+
+    fireEvent.click(startButton(look.id))
+    await settle()
+    expect(server.state.running.find((zone) => zone.zoneId === home.id)?.lookId).toBe(look.id)
+    expect(router.state.location.pathname).toBe('/next/live')
+    expect(screen.getByRole('status')).toHaveTextContent(`Started ${look.name} on ${home.name}.`)
+    expect(previewSession.snapshot().status).toBe('idle')
+  })
+
+  // §4.3: the zone and the look are the URL's, changed in place, so Back leaves the composer whole.
+  it('keeps the zone and the look in its URL, previews the look on the stage, and says what Start would do', async () => {
+    const { server, router } = await openApp('/next/live/put?zone=living')
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    const living = zoneName(server, 'living')
+    expect(title()).toHaveTextContent(`Put a look on ${living}`)
+    expect(document.querySelector('[data-outline]')).toHaveAttribute('data-outline', 'living')
+
+    fireEvent.click(tile('embers'))
+    await settle()
+    expect(router.state.location.search).toBe('?zone=living&look=embers')
+    expect(router.state.historyAction).toBe('REPLACE')
+    expect(tile('embers')).toHaveAttribute('aria-pressed', 'true')
+    expect(document.querySelector('[data-preview-card]')).toHaveTextContent(`${lookName('embers')} on ${living}.`)
+    expect(consequenceLine()).toHaveTextContent(new RegExp(`^Takes over the ${living} from ${lookName('fireflies')}\\. `))
+    expect(startButton('embers')).toBeEnabled()
+
+    // A room's chip chooses its zone, keeping the look.
+    const kitchen = zoneName(server, 'kitchen')
+    fireEvent.click(chip(kitchen))
+    await settle()
+    expect(router.state.location.search).toBe('?zone=kitchen&look=embers')
+    expect(router.state.historyAction).toBe('REPLACE')
+    expect(title()).toHaveTextContent(`Put a look on ${kitchen}`)
+    expect(consequenceLine()).toHaveTextContent(new RegExp(`^Takes over the ${kitchen} from ${lookName('homesunset')}\\.`))
+
+    // Start remembers the zone: the composer opens on it next time.
+    fireEvent.click(startButton('embers'))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    fireEvent.click(screen.getByRole('link', { name: 'Put a look on' }))
+    await settle()
+    expect(title()).toHaveTextContent(`Put a look on ${kitchen}`)
+    // Live's own hook, which the stage reads, outlived the first session: it must choose the new last zone too.
+    expect(document.querySelector('[data-outline]')).toHaveAttribute('data-outline', 'kitchen')
+  })
+
+  // ZonePicker calls onSelect for the chip already chosen: that's no choice, so nothing is asked for and the URL stays.
+  it('ignores a click on the zone already chosen', async () => {
+    const ask = vi.spyOn(api, 'startPreview')
+    const { server, router } = await openApp('/next/live/put?look=embers')
+    const home = server.state.zones.find((zone) => zone.kind === 'home')!
+    expect(title()).toHaveTextContent(`Put a look on ${home.name}`)
+    expect(router.state.historyAction).toBe('POP')
+    const asked = ask.mock.calls.length
+
+    fireEvent.click(chip(home.name))
+    await settle()
+    expect(router.state.historyAction).toBe('POP')
+    expect(router.state.location.search).toBe('?look=embers')
+    expect(ask).toHaveBeenCalledTimes(asked)
+  })
+
+  it('holds Start until a look is chosen, and on a zone with no lights', async () => {
+    const ask = vi.spyOn(api, 'startPreview')
+    const { server, router } = await openApp('/next/live/put?zone=living')
+    expect(consequenceLine()).toHaveTextContent('Choose a look to see it on the stage first.')
+    expect(startButton()).toBeDisabled()
+
+    await act(() => router.navigate('/live/put?zone=counter&look=embers', { replace: true }))
+    await settle()
+    expect(consequenceLine()).toHaveTextContent(`The ${zoneName(server, 'counter')} has no lights.`)
+    expect(startButton('embers')).toBeDisabled()
+    expect(ask).not.toHaveBeenCalled()
+  })
+
+  // §8.2: "Home looks (whole-home scope) lock the zone to Whole home."
+  it('locks the zone to the whole home for a home look', async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=goodnight')
+    const home = server.state.zones.find((zone) => zone.kind === 'home')!
+    expect(title()).toHaveTextContent(`Put a look on ${home.name}`)
+    expect(chip(home.name)).toBeEnabled()
+    expect(chip(zoneName(server, 'living'))).toBeDisabled()
+    expect(previewSession.snapshot()).toMatchObject({ zoneId: home.id, lookId: 'goodnight' })
+  })
+
+  // F4 ruling 10: a search spans every category; a category's chip clears it.
+  it('searches every category, and a category clears the search', async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=embers')
+    const categories = screen.getByRole('group', { name: 'Categories' })
+    expect(within(categories).getByRole('button', { name: 'Ambient' })).toHaveAttribute('aria-pressed', 'true')
+    const search = within(composer()).getByRole('searchbox', { name: 'Search looks' })
+    expect(search).toHaveAttribute('placeholder', `Search ${server.state.looks.length} looks`)
+
+    fireEvent.change(search, { target: { value: lookName('comets') } })
+    expect(tilesShown()).toEqual(['comets'])
+    expect(within(categories).queryByRole('button', { pressed: true })).not.toBeInTheDocument()
+    fireEvent.change(search, { target: { value: 'zzzz' } })
+    expect(composer()).toHaveTextContent('No looks match “zzzz”.')
+    // Esc clears a search first, and the composer stays.
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(search).toHaveValue('')
+    expect(composer()).toBeInTheDocument()
+
+    fireEvent.change(search, { target: { value: 'zzzz' } })
+    fireEvent.click(within(categories).getByRole('button', { name: 'Tempo' }))
+    expect(search).toHaveValue('')
+    expect(tilesShown()).toEqual(server.state.looks.filter((each) => each.category === 'tempo').map((each) => each.id))
+    fireEvent.click(within(categories).getByRole('button', { name: 'Starred' }))
+    expect(composer()).toHaveTextContent('No starred looks yet.')
+  })
+
+  // F4 ruling 12.
+  it('opens on L, chooses on the arrows, starts on Enter and closes on Esc', async () => {
+    const { server, router } = await openApp('/next/live')
+    // Not while typing, and not with a modifier: Ctrl+L is the browser's.
+    const typing = document.body.appendChild(document.createElement('input'))
+    fireEvent.keyDown(typing, { key: 'l' })
+    fireEvent.keyDown(document.body, { key: 'l', ctrlKey: true })
+    typing.remove()
+    expect(router.state.location.pathname).toBe('/next/live')
+
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    // The focus is on the first look; the grid has two looks a row.
+    const shown = tilesShown()
+    expect(document.activeElement).toBe(tile(shown[0]!))
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
+    expect(router.state.location.search).toBe(`?look=${shown[1]}`)
+    expect(document.activeElement).toBe(tile(shown[1]!))
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(tile(shown[3]!))
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' })
+    expect(router.state.location.search).toBe(`?look=${shown[1]}`)
+    await settle()
+
+    fireEvent.keyDown(document.activeElement!, { key: 'Enter' })
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    const home = server.state.zones.find((zone) => zone.kind === 'home')!
+    expect(server.state.running.find((zone) => zone.zoneId === home.id)?.lookId).toBe(shown[1])
+
+    // Esc closes it from anywhere on the page: Where's chips sit on the stage, outside the panel.
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    fireEvent.keyDown(chip(home.name), { key: 'Escape' })
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+  })
+
+  it('says why Start failed, and stays open', async () => {
+    vi.spyOn(api, 'start').mockRejectedValue(new ApiError(503, 'The engine is busy', '/api/zones/living/start'))
+    const { router } = await openApp('/next/live/put?zone=living&look=embers')
+    fireEvent.click(startButton('embers'))
+    await settle()
+    expect(screen.getByRole('status')).toHaveTextContent(`Couldn't start ${lookName('embers')}. The engine is busy`)
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    expect(startButton('embers')).toBeEnabled()
+  })
+
+  // F4 ruling 3: the engine refuses a whole-home look until M6 (the mock plays one, so a refusal stands in).
+  it('says why the preview was refused, and leaves Start to try', async () => {
+    vi.spyOn(api, 'startPreview').mockRejectedValue(new ApiError(400, 'Home looks (whole-home scope) arrive in M6', '/api/preview'))
+    await openApp('/next/live/put?look=goodnight')
+    expect(consequenceLine()).toHaveTextContent(`Couldn't preview ${lookName('goodnight')}. Home looks (whole-home scope) arrive in M6`)
+    expect(startButton('goodnight')).toBeEnabled()
+  })
+
+  // F4 ruling 11: the look's own transition unless another is chosen, and it's sent with Start.
+  it('starts with the transition chosen', async () => {
+    const start = vi.spyOn(api, 'start')
+    await openApp('/next/live/put?zone=living&look=embers')
+    const transition = within(composer()).getByRole('combobox', { name: 'Transition' })
+    expect(transition).toHaveTextContent('Cut')
+    fireEvent.click(transition)
+    await settle(100)
+    press(screen.getByRole('option', { name: 'Fade · 3 s' }))
+    await settle(100)
+    expect(transition).toHaveTextContent('Fade · 3 s')
+    fireEvent.click(startButton('embers'))
+    await settle()
+    expect(start).toHaveBeenCalledWith('living', { lookId: 'embers', transition: { kind: 'fade', durationS: 3 } })
+  })
+
+  // Review focus 1: choices outrun the server. The stage and the consequence line follow the look chosen last, and
+  // never an answer that came late: a look's answer lands after the next look was chosen, and says nothing.
+  it('follows the look chosen last, and never an answer that came late', async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=embers')
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    const living = zoneName(server, 'living')
+    const category = (name: string) => within(screen.getByRole('group', { name: 'Categories' })).getByRole('button', { name })
+    const card = previewCard
+    const waiting = holdPreviews()
+
+    // A firmware look, which says what its lights will run once its answer lands, then a look that says nothing of the kind.
+    fireEvent.click(category('Firmware'))
+    fireEvent.click(tile('firmware'))
+    await settle(100)
+    fireEvent.click(category('Ambient'))
+    fireEvent.click(tile('rain'))
+    await settle(100)
+    expect(waiting).toHaveLength(1)
+    expect(card()).toHaveTextContent(`${lookName('rain')} on ${living}.`)
+
+    // The first look's answer comes late: the server plays it now, and the stage still follows the look chosen last.
+    waiting.shift()!()
+    await settle(100)
+    expect(waiting).toHaveLength(1)
+    expect(card()).toHaveTextContent(`${lookName('rain')} on ${living}.`)
+    expect(card()).not.toHaveTextContent(lookName('firmware'))
+    expect(consequenceLine()).not.toHaveTextContent(/will (run|get)/)
+
+    waiting.shift()!()
+    await settle(100)
+    expect(previewSession.snapshot()).toMatchObject({ status: 'on', zoneId: 'living', lookId: 'rain' })
+    expect(card()).toHaveTextContent(`${lookName('rain')} on ${living}.`)
+    expect(consequenceLine()).not.toHaveTextContent(/will (run|get)/)
+  })
+
+  // Review focus 3: Back leaves the composer as Cancel does, and the preview ends with it.
+  it('ends the preview when Back leaves', async () => {
+    const stop = vi.spyOn(api, 'stopPreview')
+    const { router } = await openApp('/next/live')
+    await act(() => router.navigate('/live/put?zone=living&look=embers'))
+    await settle()
+    expect(previewSession.snapshot()).toMatchObject({ status: 'on', zoneId: 'living', lookId: 'embers' })
+    await act(() => router.navigate(-1))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect(previewSession.snapshot().status).toBe('idle')
+  })
+
+  // Review focus 5: the transition's list opens outside the panel; an Esc there closes the list alone.
+  it('closes only the transition list on an Esc in it', async () => {
+    const { router } = await openApp('/next/live/put?zone=living&look=embers')
+    const transition = within(composer()).getByRole('combobox', { name: 'Transition' })
+    fireEvent.click(transition)
+    await settle(100)
+    expect(screen.getByRole('listbox')).toContainElement(document.activeElement as HTMLElement)
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    await settle(100)
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+
+    fireEvent.keyDown(transition, { key: 'Escape' })
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+  })
+
+  // CLAUDE.md: a control drawn under --touch-min keeps its face and grows its hit area (touch-target). The categories' row
+  // clips, so it pads, and is pulled back by as much, to leave room for a chip's focus ring and that area. jsdom has no
+  // layout, so these are the classes; that the area reaches 44 px and the ring stays whole is for a browser to see.
+  it('grows the hit areas of the controls drawn under the touch minimum', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const panel = within(composer())
+    const categories = panel.getByRole('group', { name: 'Categories' })
+    const chips = within(categories).getAllByRole('button')
+    expect(chips.length).toBeGreaterThan(1)
+    for (const each of [...chips, panel.getByRole('button', { name: 'Close' }), panel.getByRole('combobox', { name: 'Transition' })]) {
+      expect(each).toHaveClass('touch-target')
+    }
+    expect(categories).toHaveClass('overflow-hidden', '-mx-1', '-my-2', 'px-1', 'py-2')
+  })
+})
+
+// What the brief's tests above leave to the wiring: the stage's mode, the keys' edges, the grid's edges, the inputs, and the narrow layout.
+describe('Put a look on: its stage, keys, grid and layout', () => {
+  // F4 ruling 16: the stage is Live's own until the composer asks for it, and Live's again once it closes; the page is Live to the shell.
+  it("draws Live's own stage until the composer opens and after it closes, and is Live to the shell", async () => {
+    const { router } = await openApp('/next/live')
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    expect(document.querySelector('[data-outline]')).toBeNull()
+    expect(previewCard()).toBeNull()
+
+    await act(() => router.navigate('/live/put?zone=living&look=embers'))
+    await settle()
+    expect(document.querySelector('[data-outline]')).toHaveAttribute('data-outline', 'living')
+    expect(document.title).toBe('Live · dj-ledfx')
+    expect(screen.getByRole('banner')).toHaveTextContent('Wed 23 Sep · 19:14')
+
+    fireEvent.click(within(composer()).getByRole('button', { name: 'Cancel' }))
+    await settle()
+    expect(document.querySelector('[data-outline]')).toBeNull()
+    expect(previewCard()).toBeNull()
+  })
+
+  // A card the pointer is over goes with the Running panel when the composer takes its place: no pointer-leave comes, and the stage
+  // must not outline that zone once Live is back.
+  it('outlines no zone for a card the pointer was over when the composer opened', async () => {
+    const { server } = await openApp('/next/live')
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    fireEvent.pointerOver(screen.getByRole('article', { name: new RegExp(`^${zoneName(server, 'living')}`) }))
+    expect(document.querySelector('[data-outline]')).toHaveAttribute('data-outline', 'living')
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await settle()
+    expect(document.querySelector('[data-outline]')).toBeNull()
+  })
+
+  // §6.3: "Clicking a room on the stage selects the same zone": the composer's look goes with the click.
+  it("chooses a room's zone from the stage, keeping the look the composer has", async () => {
+    const { server, router } = await openApp('/next/live/put?zone=living&look=embers')
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    const room = server.state.home.rooms.find((each) => each.hasLights && each.id !== 'living')!
+    const [x, y] = projectPoint(heroPose(), [...room.labelAt, 0])
+    fireEvent.click(screen.getByTestId('stage-canvas').parentElement!, { clientX: x, clientY: y })
+    await settle()
+    expect(router.state.location.search).toBe(`?zone=${room.id}&look=embers`)
+  })
+
+  // The stage draws a zone from the preview stream only once the server has answered for that zone: until then nothing is said to be
+  // previewed there, rather than a look that isn't on the screen.
+  it('says nothing is previewed on a zone until the server has answered for it', async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=embers')
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    expect(previewCard()).toHaveTextContent(`${lookName('embers')} on ${zoneName(server, 'living')}.`)
+    const waiting = holdPreviews()
+    fireEvent.click(chip(zoneName(server, 'kitchen')))
+    await settle(100)
+    expect(waiting).toHaveLength(1)
+    expect(previewCard()).toBeNull()
+    waiting.shift()!()
+    await settle(100)
+    expect(previewCard()).toHaveTextContent(`${lookName('embers')} on ${zoneName(server, 'kitchen')}.`)
+  })
+
+  // The firmware look's answer says which lights run what; the commit that chooses another look, or another zone, still holds that answer.
+  it("says nothing of the last look's firmware plan as the next look is chosen", async () => {
+    await openApp('/next/live/put?zone=living&look=firmware')
+    expect(consequenceLine()).toHaveTextContent(/will (run|get)/)
+    fireEvent.click(within(screen.getByRole('group', { name: 'Categories' })).getByRole('button', { name: 'Ambient' }))
+    const seen = lineAtEachChoice()
+    fireEvent.click(tile('rain'))
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).not.toMatch(/will (run|get)/)
+  })
+
+  it("says nothing of the last zone's firmware plan as the next zone is chosen", async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=firmware')
+    expect(consequenceLine()).toHaveTextContent(/will (run|get)/)
+    const seen = lineAtEachChoice()
+    fireEvent.click(chip(zoneName(server, 'kitchen')))
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).not.toMatch(/will (run|get)/)
+  })
+
+  it("says nothing of the last choice's refusal as the zone is chosen", async () => {
+    vi.spyOn(api, 'startPreview').mockRejectedValue(new ApiError(400, 'No preview today', '/api/preview'))
+    const { server } = await openApp('/next/live/put?zone=living&look=embers')
+    expect(consequenceLine()).toHaveTextContent(`Couldn't preview ${lookName('embers')}. No preview today`)
+    const seen = lineAtEachChoice()
+    fireEvent.click(chip(zoneName(server, 'kitchen')))
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).not.toContain("Couldn't preview")
+  })
+
+  // F4 ruling 4: what runs on each zone is its chip's note, and the look running on the zone chosen is marked on its tile.
+  it('shows what runs on each zone and which look runs here, and sets look names in serif', async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=embers')
+    expect(chip(zoneName(server, 'living'))).toHaveTextContent(lookName('fireflies'))
+    expect(tile('fireflies')).toHaveAccessibleName(/running here/)
+    expect([...consequenceLine().querySelectorAll('.font-serif')].map((each) => each.textContent)).toContain(lookName('fireflies'))
+  })
+
+  // §8.2 and F4 ruling 8: the lights a firmware look will run it on are named once its preview has answered.
+  it('names the lights that will run a firmware look, once its preview has answered', async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=firmware')
+    const living = server.state.zones.find((zone) => zone.id === 'living')!
+    const names = server.state.lights.filter((light) => living.lights.includes(light.id)).map((light) => light.name)
+    expect(consequenceLine()).toHaveTextContent(/will (run|get)/)
+    expect(names.some((name) => consequenceLine().textContent!.includes(name))).toBe(true)
+  })
+
+  // F4 ruling 8: a look that waits for an input says so on its tile and in the consequence line, as the inputs the server sends say it.
+  it('says what a look waits for, as the server\'s inputs say it, and leaves Start to try', async () => {
+    await openApp('/next/live/put?look=goodnight', { scenario: 'inputs-down' })
+    expect(tile('goodnight')).toHaveAccessibleName(/Needs Home Assistant/)
+    expect(consequenceLine()).toHaveTextContent('Waiting for Home Assistant')
+    expect(startButton('goodnight')).toBeEnabled()
+  })
+
+  // F4 ruling 11: a transition is chosen for the look it was chosen for.
+  it("doesn't carry a transition chosen for one look over to the next", async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const transition = within(composer()).getByRole('combobox', { name: 'Transition' })
+    fireEvent.click(transition)
+    await settle(100)
+    press(screen.getByRole('option', { name: 'Fade · 3 s' }))
+    await settle(100)
+    expect(transition).toHaveTextContent('Fade · 3 s')
+    fireEvent.click(tile('rain'))
+    await settle()
+    expect(transition).not.toHaveTextContent('Fade · 3 s')
+  })
+
+  // The last zone is the one a look was started on, not the one a start was tried on.
+  it('remembers a zone only once a look has been started on it', async () => {
+    vi.spyOn(api, 'start').mockRejectedValue(new ApiError(503, 'The engine is busy', '/api/zones/living/start'))
+    await openApp('/next/live/put?zone=living&look=embers')
+    fireEvent.click(startButton('embers'))
+    await settle()
+    expect(lastZone()).toBeNull()
+  })
+
+  // §8.2: Cancel, Close, Esc and Start all go back to Live in place, so Back from Live leaves it; L opens the composer as a step of its own.
+  it.each([
+    ['Cancel', () => fireEvent.click(within(composer()).getByRole('button', { name: 'Cancel' }))],
+    ['Close', () => fireEvent.click(within(composer()).getByRole('button', { name: 'Close' }))],
+    ['Esc', () => expect(fireEvent.keyDown(document.body, { key: 'Escape' })).toBe(false)],
+    ['Start', () => fireEvent.click(within(composer()).getByRole('button', { name: /^Start / }))],
+  ])('goes back to Live in place on %s', async (_, close) => {
+    const { router } = await openApp('/next/live')
+    expect(fireEvent.keyDown(document.body, { key: 'L' })).toBe(false)
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    expect(router.state.historyAction).toBe('PUSH')
+    fireEvent.click(tile(tilesShown()[0]!))
+    await settle()
+    close()
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    expect(router.state.historyAction).toBe('REPLACE')
+  })
+
+  // §8.2 "L opens the composer from Live": on Live alone, in either case, and not while typing, or with the modifiers that are the browser's.
+  // Esc and L are the page's, but mean nothing where they aren't asked for.
+  it('opens on L from Live alone, and takes no L or Esc where they mean nothing', async () => {
+    const { router } = await openApp('/next/live/zones/kitchen')
+    const where = () => router.state.location.pathname
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await settle()
+    expect(where()).toBe('/next/live/zones/kitchen')
+    const fields = ['input', 'textarea', 'select', 'div'].map((tag) => document.body.appendChild(document.createElement(tag)))
+    // jsdom has no isContentEditable.
+    Object.defineProperty(fields[3]!, 'isContentEditable', { value: true })
+    for (const field of fields) fireEvent.keyDown(field, { key: 'l' })
+    fields.forEach((field) => field.remove())
+    for (const modifier of ['ctrlKey', 'altKey', 'metaKey']) fireEvent.keyDown(document.body, { key: 'l', [modifier]: true })
+    expect(where()).toBe('/next/live/zones/kitchen')
+
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    expect(where()).toBe('/next/live/put')
+    // Open, an L is no one's: the choice stays.
+    fireEvent.click(tile(tilesShown()[1]!))
+    await settle()
+    const chosen = router.state.location.search
+    expect(chosen).toMatch(/^\?look=/)
+    fireEvent.keyDown(tile(tilesShown()[1]!), { key: 'l' })
+    await settle()
+    expect(router.state.location.search).toBe(chosen)
+  })
+
+  // Ruling 12: the grid has two looks a row, so Left and Right move by one and Up and Down by two, clamped to the grid's ends, and the
+  // keys are the grid's alone: the page doesn't scroll under them. Enter on a look that isn't the one chosen starts nothing.
+  it('moves over the grid by the arrows, stops at its edges, and starts only on the look chosen', async () => {
+    const start = vi.spyOn(api, 'start')
+    const { router } = await openApp('/next/live/put?zone=living&look=embers')
+    const shown = tilesShown() as Id[]
+    const last = shown.length - 1
+    const chosen = () => new URLSearchParams(router.state.location.search).get('look')
+    const arrow = (from: Id, key: string) => fireEvent.keyDown(tile(from), { key })
+
+    expect(shown.indexOf('embers')).toBe(2)
+    expect(arrow('embers', 'ArrowLeft')).toBe(false)
+    expect(chosen()).toBe(shown[1])
+    arrow(shown[1]!, 'ArrowUp')
+    expect(chosen()).toBe(shown[0])
+    arrow(shown[0]!, 'ArrowLeft')
+    arrow(shown[0]!, 'ArrowUp')
+    expect(chosen()).toBe(shown[0])
+    arrow(shown[last - 1]!, 'ArrowDown')
+    expect(chosen()).toBe(shown[last])
+    arrow(shown[last]!, 'ArrowRight')
+    arrow(shown[last]!, 'ArrowDown')
+    expect(chosen()).toBe(shown[last])
+
+    expect(fireEvent.keyDown(tile(shown[0]!), { key: 'Enter' })).toBe(true)
+    expect(start).not.toHaveBeenCalled()
+    expect(fireEvent.keyDown(tile(shown[last]!), { key: 'Enter' })).toBe(false)
+    expect(start).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts once, however often Start is asked for while it is on its way', async () => {
+    const start = vi.spyOn(api, 'start').mockImplementation(() => new Promise<never>(() => {}))
+    await openApp('/next/live/put?zone=living&look=embers')
+    fireEvent.keyDown(tile('embers'), { key: 'Enter' })
+    fireEvent.keyDown(tile('embers'), { key: 'Enter' })
+    expect(start).toHaveBeenCalledTimes(1)
+    expect(startButton('embers')).toBeDisabled()
+  })
+
+  it('starts nothing on Enter where Start is held', async () => {
+    const start = vi.spyOn(api, 'start')
+    await openApp('/next/live/put?zone=counter&look=embers')
+    expect(startButton('embers')).toBeDisabled()
+    fireEvent.keyDown(tile('embers'), { key: 'Enter' })
+    await settle()
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  // The focus is on the look chosen as the composer opens, which is the grid's one tab stop, and typing in the search keeps it there.
+  it('puts the focus on the look chosen as it opens, and keeps it in the search while that is typed in', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    expect(document.activeElement).toBe(tile('embers'))
+    expect([...composer().querySelectorAll<HTMLElement>('[data-look]')].filter((each) => each.tabIndex === 0)).toEqual([tile('embers')])
+    const search = within(composer()).getByRole('searchbox', { name: 'Search looks' })
+    search.focus()
+    fireEvent.change(search, { target: { value: lookName('comets') } })
+    expect(tilesShown()).toEqual(['comets'])
+    expect(document.activeElement).toBe(search)
+  })
+
+  // Review focus 5: an Esc in a search with nothing in it is the page's, and a search of spaces is no search.
+  it('closes on an Esc in a search with nothing in it, and counts spaces as no search', async () => {
+    const { router } = await openApp('/next/live/put?zone=living&look=embers')
+    const search = within(composer()).getByRole('searchbox', { name: 'Search looks' })
+    fireEvent.change(search, { target: { value: '   ' } })
+    expect(within(screen.getByRole('group', { name: 'Categories' })).getByRole('button', { name: 'Ambient' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.change(search, { target: { value: '' } })
+    fireEvent.keyDown(search, { key: 'Escape' })
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+  })
+
+  // §4.4: between 768 and 1199 px the panel lies over the stage's right side, and the composer lies there in its place, with Where
+  // stopping short of it; the button that brings a hidden Running panel back isn't drawn beside the composer.
+  it('between 768 and 1199 px, lays the composer over the stage in the panel\'s place', async () => {
+    setViewportWidth(1000)
+    await openApp('/next/live')
+    expect(screen.getByRole('complementary', { name: 'Running' })).toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    expect(composer()).toHaveClass('absolute')
+    expect(screen.queryByRole('complementary', { name: 'Running' })).not.toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Where' }).parentElement!.style.right).toBe('calc(var(--live-panel-w) + 1.25rem)')
+
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Running' }))
+    await settle(100)
+    expect(screen.getByRole('button', { name: 'Running' })).toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    expect(screen.queryByRole('button', { name: 'Running' })).not.toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await settle()
+    expect(screen.getByRole('button', { name: 'Running' })).toBeInTheDocument()
+  })
+})

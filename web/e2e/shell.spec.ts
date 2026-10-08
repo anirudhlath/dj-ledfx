@@ -67,6 +67,9 @@ function outsideSafeArea(page: Page, insets: Insets): Promise<string[]> {
     const crossed: string[] = []
     for (const landmark of document.querySelectorAll('nav, header, main')) {
       const box = landmark.getBoundingClientRect()
+      // A landmark hidden until it has focus (the stage's room links, sr-only) is drawn nowhere: its 1 px box
+      // sits a pixel outside its place, so once the stage has loaded it would cross the screen's left edge.
+      if (box.width <= 1 && box.height <= 1) continue
       const name = landmark.tagName.toLowerCase()
       if (box.left < insets.left) crossed.push(`${name} left`)
       if (box.top < insets.top) crossed.push(`${name} top`)

@@ -1,14 +1,18 @@
 // Live (§8.1, §8.10): the stage, and beside it the Running panel. The stage's code loads on demand,
 // keeping three.js out of the first load (§14); its place keeps the stage's background meanwhile, and
 // its REST reads start at once rather than when its code arrives. /live/zones/:zoneId is Live with that
-// zone's card outlined (F3 decision 23). Between 768 and 1199 px the panel lies over the stage's right
-// side and can hide (§4.4, F3 decision 22).
+// zone's card outlined (F3 decision 23); /live/put is Live with the composer in the panel's place and the
+// stage in `compose` mode (§8.2), which `L` opens and Esc closes. Between 768 and 1199 px the panel lies
+// over the stage's right side and can hide (§4.4, F3 decision 22); the composer lies there too.
 import { usePrefetchQuery } from '@tanstack/react-query'
 import { lazy, Suspense, useState, type CSSProperties } from 'react'
-import { useParams } from 'react-router'
+import { useMatch, useParams } from 'react-router'
 import type { Id } from '@/api/contract'
 import { queries } from '@/api/queries'
 import { usePreviewOnly } from '@/chrome/hooks'
+import { ComposerPanel, ComposerWhere } from '@/compose/composer-panel'
+import { useStageCompose } from '@/compose/use-composer'
+import { useComposerKeys } from '@/compose/use-composer-keys'
 import { Button } from '@/design/button'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
@@ -34,6 +38,9 @@ export function LivePage() {
   usePrefetchQuery(queries.zones())
   usePrefetchQuery(queries.looks())
   const { zoneId } = useParams()
+  const composing = useMatch('/live/put') !== null
+  const compose = useStageCompose(composing)
+  useComposerKeys(composing)
   const phone = useIsPhone()
   const narrow = useMediaQuery(NARROW_QUERY)
   const previewOnly = usePreviewOnly() === true
@@ -45,9 +52,20 @@ export function LivePage() {
     setNamed(zoneId)
     if (zoneId !== undefined && panel === 'hidden') setPanel('open')
   }
+  const [wasComposing, setWasComposing] = useState(composing)
+  if (composing !== wasComposing) {
+    // The composer takes the Running panel's place, so no card stays under the pointer.
+    setWasComposing(composing)
+    setHovered(null)
+  }
   const stage = (
     <Suspense fallback={<StagePending />}>
-      <Stage variant={phone ? 'phone' : 'desktop'} outlined={phone ? null : (hovered ?? zoneId ?? null)} focus={phone ? (zoneId ?? null) : null} />
+      <Stage
+        variant={phone ? 'phone' : 'desktop'}
+        outlined={phone ? null : (hovered ?? zoneId ?? null)}
+        focus={phone ? (zoneId ?? null) : null}
+        compose={compose}
+      />
     </Suspense>
   )
   if (phone) {
@@ -67,12 +85,16 @@ export function LivePage() {
         style={previewOnly ? ({ '--stage-top-shift': `${PREVIEW_LABEL_FOOT_PX}px` } as CSSProperties) : undefined}
       >
         {stage}
+        {composing && <ComposerWhere style={narrow ? { right: 'calc(var(--live-panel-w) + 1.25rem)' } : undefined} />}
         {previewOnly && <PreviewOnlyLabel />}
         <ReconnectingCard variant="desktop" />
         <EmptyHome variant="desktop" />
       </div>
-      {!narrow && <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} />}
-      {narrow && panel !== 'hidden' && (
+      {composing && (
+        <ComposerPanel className={narrow ? 'absolute inset-y-0 right-0 z-20 w-(--live-panel-w) shadow-pop' : 'w-(--live-panel-w) shrink-0'} />
+      )}
+      {!composing && !narrow && <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} />}
+      {!composing && narrow && panel !== 'hidden' && (
         <RunningPanel
           selected={zoneId}
           className="absolute inset-y-0 right-0 z-20 w-(--live-panel-w) shadow-pop"
@@ -81,7 +103,7 @@ export function LivePage() {
           focusHide={panel === 'reopened'}
         />
       )}
-      {narrow && panel === 'hidden' && (
+      {!composing && narrow && panel === 'hidden' && (
         <Button icon="left" autoFocus className="absolute top-1/2 right-4 z-20 -translate-y-1/2 shadow-pop" onClick={() => setPanel('reopened')}>
           Running
         </Button>

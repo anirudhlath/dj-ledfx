@@ -6,6 +6,7 @@ import { HERO_NOW } from '@/test/live'
 import {
   CATEGORIES,
   chosenZone,
+  composerPath,
   lookInputs,
   lookLabel,
   looksShown,
@@ -22,6 +23,15 @@ import {
 const hero = buildScenario('hero', HERO_NOW)
 const zone = (id: string) => hero.zones.find((candidate) => candidate.id === id)!
 const look = (id: string) => hero.looks.find((candidate) => candidate.id === id)!
+
+describe("the composer's URL", () => {
+  it('names the zone and the look chosen, each only when there is one', () => {
+    expect(composerPath(null)).toBe('/live/put')
+    expect(composerPath('living')).toBe('/live/put?zone=living')
+    expect(composerPath('living', 'embers')).toBe('/live/put?zone=living&look=embers')
+    expect(composerPath(null, 'embers')).toBe('/live/put?look=embers')
+  })
+})
 
 describe('the zone the composer puts a look on', () => {
   it("is the URL's, else the last one used, else the whole home", () => {
