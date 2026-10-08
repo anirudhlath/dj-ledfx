@@ -106,15 +106,16 @@ def _mix(x: NDArray[np.uint64]) -> NDArray[np.uint64]:
     return mixed
 
 
-def draws(seed: int, keys: ArrayLike, count: int, stream: int = 0) -> F64:
+def draws(seed: int, keys: ArrayLike, count: int, stream: ArrayLike = 0) -> F64:
     """`count` random numbers from 0 to 1 (1 left out) for each key, shape (keys, count),
     from the seed, the stream and the key alone: a key is an event (a particle, a beat's
     burst), so the same seed and key give the same numbers however the frames fall, and an
-    effect gives each kind of event its own stream. ParamSettings._rng's counter-based
-    twin, for many particles at once."""
+    effect gives each kind of event its own stream (one for all the keys, or one for each of
+    them). ParamSettings._rng's counter-based twin, for many particles at once."""
     k = np.asarray(keys, dtype=np.int64).astype(np.uint64).reshape(-1, 1)
     j = np.arange(1, count + 1, dtype=np.uint64).reshape(1, -1)
-    base = np.uint64((seed + stream * _STREAMS) % 2**64)
+    s = np.asarray(stream, dtype=np.int64).astype(np.uint64).reshape(-1, 1)
+    base = np.uint64(seed % 2**64) + s * np.uint64(_STREAMS)  # (seed + stream * _STREAMS) % 2**64
     first = _mix(k * _GOLDEN + base)
     bits = _mix(first + j * _GOLDEN)
     values: F64 = (bits >> np.uint64(11)).astype(np.float64) * 2.0**-53
@@ -160,25 +161,33 @@ def arc(start: ArrayLike, end: ArrayLike, share: ArrayLike, rise: ArrayLike) -> 
 TOURS = 1000  # tour k draws from stream TOURS + k
 
 
-def tour(seed: int, key: int, step: int, stops: int) -> int:
-    """The stop tour `key` is at on its step `step`, of `stops` stops (at least one): each
-    round of `stops` steps visits every stop once, in an order of its own, and a tour never
-    stays on one stop two steps running (with two stops it goes to and fro, with one it
-    stays)."""
-    if stops < 3:
-        return step % stops
-    round_, place = divmod(step, stops)
-    order = shuffled(seed, key, round_, stops)
-    if place < 2 and order[0] == shuffled(seed, key, round_ - 1, stops)[-1]:
-        order[[0, 1]] = order[[1, 0]]
-    return int(order[place])
-
-
-def shuffled(seed: int, key: int, round_: int, stops: int) -> NDArray[np.intp]:
-    """Round `round_` of tour `key`: the stops in the order its random numbers put them."""
-    order: NDArray[np.intp] = np.argsort(
-        draws(seed, [round_], stops, stream=TOURS + key)[0], kind="stable"
+def tour(seed: int, key: ArrayLike, step: ArrayLike, stops: int) -> NDArray[np.intp]:
+    """The stop each tour `key` is at on its step `step` (as many as the two broadcast to),
+    of `stops` stops (at least one): each round of `stops` steps visits every stop once, in
+    an order of its own, and a tour never stays on one stop two steps running (with two
+    stops it goes to and fro, with one it stays)."""
+    keys, steps = np.broadcast_arrays(
+        np.asarray(key, dtype=np.int64), np.asarray(step, dtype=np.int64)
     )
+    if stops < 3:
+        return np.asarray(steps % stops, dtype=np.intp)
+    round_, place = np.divmod(steps, stops)
+    order = shuffled(seed, keys, round_, stops)
+    last = shuffled(seed, keys, round_ - 1, stops)[..., -1]
+    # A round that would open on the stop the one before closed on swaps its first two stops.
+    place = np.where((place < 2) & (order[..., 0] == last), 1 - place, place)
+    at: NDArray[np.intp] = np.take_along_axis(order, place[..., None], axis=-1)[..., 0]
+    return at
+
+
+def shuffled(seed: int, key: ArrayLike, round_: ArrayLike, stops: int) -> NDArray[np.intp]:
+    """Round `round_` of tour `key`: the stops in the order its random numbers put them, a
+    row of `stops` for each key and round (as many as the two broadcast to)."""
+    keys, rounds = np.broadcast_arrays(
+        np.asarray(key, dtype=np.int64), np.asarray(round_, dtype=np.int64)
+    )
+    u = draws(seed, rounds.ravel(), stops, stream=TOURS + keys.ravel())
+    order: NDArray[np.intp] = np.argsort(u, axis=1, kind="stable").reshape(*keys.shape, stops)
     return order
 
 

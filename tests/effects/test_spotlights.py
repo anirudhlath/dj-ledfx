@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 import pytest
 from conftest import render_ctx
 from map_home import lights_at, upright
 from stray_lamps import STRAYS, run_heights, stays_in_band
 
+from dj_ledfx.effects import spotlights as spotlights_module
+from dj_ledfx.effects.particle_tools import Ground
 from dj_ledfx.effects.particles import drawn
 from dj_ledfx.effects.spotlights import Spotlights
 
@@ -140,3 +145,24 @@ def test_spotlights_move_along_a_lamp_outside_the_floor_and_ceiling(where: str) 
     lamp = leds.pos[:, 2]
     assert lamp.min() - 1e-5 <= z.min() and z.max() <= lamp.max() + 1e-5  # on the lamp itself
     assert stays_in_band(z, leds)
+
+
+def test_every_spotlight_is_worked_out_at_once_not_one_after_another(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, int] = {}
+
+    def counted(name: str, original: Callable[..., Any]) -> Callable[..., Any]:
+        def call(*args: Any, **kwargs: Any) -> Any:
+            calls[name] = calls.get(name, 0) + 1
+            return original(*args, **kwargs)
+
+        return call
+
+    monkeypatch.setattr(spotlights_module, "tour", counted("tour", spotlights_module.tour))
+    monkeypatch.setattr(spotlights_module, "draws", counted("draws", spotlights_module.draws))
+    monkeypatch.setattr(Ground, "on", counted("on", Ground.on))
+
+    drawn(_spots(count=6), render_ctx(t=500.0), FIVE)
+
+    assert calls == {"tour": 1, "draws": 1, "on": 1}

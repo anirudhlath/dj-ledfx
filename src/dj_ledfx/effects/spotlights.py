@@ -3,12 +3,12 @@
 Each spotlight rests on a lamp for hold_s, on an LED of it (any of its LEDs, its own each
 visit), then glides to the next over move_s, on a tour of its own (particle_tools.tour):
 every lamp once a round in a shuffled order, never the same lamp twice in a row. The
-spotlights set off at even shares of a step apart, so they're never all on the move at once.
+spotlights start their steps at even shares of a step apart, so no two set off together (with
+a short rest and a long glide, most of them are on the move at any moment).
 """
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -64,19 +64,18 @@ class Spotlights(ParamParticles):
 
     def positions(self, ctx: RenderContext, ground: Ground) -> Particles:
         values = self._values
-        lamps = ground.lamps
         count = int(values["count"])
         hold, move = float(values["hold_s"]), float(values["move_s"])
         rest = hold / (hold + move)  # the share of each step spent resting
-        pos = np.zeros((count, 3))
-        for spot in range(count):
-            clock = ctx.t / (hold + move) + spot / count
-            step = math.floor(clock)
-            part = clock - step
-            stops = [tour(self._seed, spot, visit, lamps.count) for visit in (step, step + 1)]
-            spots = draws(self._seed, [step, step + 1], 1, stream=1 + spot)[:, 0]
-            here, there = ground.on(stops, spots)
-            glide = ease_in_out(max(0.0, (part - rest) / (1.0 - rest)))
-            pos[spot] = here + (there - here) * glide
+        spot = np.arange(count)
+        clock = ctx.t / (hold + move) + spot / count
+        step = np.floor(clock).astype(np.int64)
+        part = clock - step
+        visits = np.stack([step, step + 1], axis=1)  # the lamp it rests on, then the next
+        stops = tour(self._seed, spot[:, None], visits, ground.lamps.count)
+        picks = draws(self._seed, visits.ravel(), 1, stream=np.repeat(1 + spot, 2))[:, 0]
+        here, there = np.moveaxis(ground.on(stops, picks.reshape(count, 2)), 1, 0)
+        glide = ease_in_out(np.maximum(0.0, (part - rest) / (1.0 - rest)))
+        pos = here + (there - here) * glide[:, None]
         colour = self._palette[np.arange(count) % len(self._palette)]
         return swarm(pos, colour, float(values["size"]))

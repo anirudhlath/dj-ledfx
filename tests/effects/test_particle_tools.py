@@ -205,6 +205,28 @@ def test_each_stream_draws_its_own_numbers() -> None:
     np.testing.assert_array_equal(draws(7, [1, 2], 3, stream=1), draws(7, [1, 2], 3, stream=1))
 
 
+def test_draws_can_take_a_stream_for_each_key() -> None:
+    keys, streams = [5, 6, 7, 8], [0, 1, 1, 2]
+
+    many = draws(7, keys, 3, stream=streams)
+
+    assert many.shape == (4, 3)
+    for row, key, stream in zip(many, keys, streams, strict=True):
+        np.testing.assert_array_equal(row, draws(7, [key], 3, stream=stream)[0])
+    np.testing.assert_array_equal(draws(7, keys, 3, stream=1), draws(7, keys, 3, stream=[1] * 4))
+
+
+def test_draws_of_a_stream_are_what_they_always_were() -> None:
+    np.testing.assert_array_equal(
+        draws(7, [1, 2, 3], 2, stream=1),
+        [
+            [0.22172666191306756, 0.8886931675725617],
+            [0.16618549382196712, 0.871793020180068],
+            [0.6273586135114076, 0.9094659210531775],
+        ],
+    )
+
+
 def test_recent_events_hold_every_event_alive_now() -> None:
     every, life = 0.5, 1.2
     for now in (0.0, 3.1, 10.3, 1e6 + 0.25):
@@ -255,14 +277,38 @@ def test_an_arc_goes_from_start_to_end_rising_half_way() -> None:
 
 def test_a_tour_visits_every_stop_each_round_and_never_stays() -> None:
     for stops in (3, 5, 11):
-        visits = [tour(1, 0, step, stops) for step in range(-stops, 12 * stops)]
-        assert all(a != b for a, b in zip(visits, visits[1:], strict=False))
+        visits = tour(1, 0, np.arange(-stops, 12 * stops), stops)
+        assert (visits[:-1] != visits[1:]).all()
         for start in range(0, len(visits), stops):
-            assert sorted(visits[start : start + stops]) == list(range(stops))
-    assert [tour(1, 0, step, 2) for step in range(4)] == [0, 1, 0, 1]
-    assert {tour(1, 0, step, 1) for step in range(4)} == {0}
-    tours = [[tour(1, key, step, 5) for step in range(10)] for key in range(3)]
+            assert sorted(visits[start : start + stops].tolist()) == list(range(stops))
+    assert tour(1, 0, np.arange(4), 2).tolist() == [0, 1, 0, 1]
+    assert tour(1, 0, np.arange(4), 1).tolist() == [0, 0, 0, 0]
+    tours = [tour(1, key, np.arange(10), 5).tolist() for key in range(3)]
     assert tours[0] != tours[1] != tours[2]  # each tour its own
+
+
+def test_a_tour_goes_where_it_always_went() -> None:
+    """Pinned from tour() when it took one key and one step at a time: the spotlights'
+    routes must not change."""
+    assert tour(1, 0, np.arange(15), 5).tolist() == [2, 0, 3, 1, 4, 0, 4, 1, 2, 3, 4, 3, 2, 0, 1]
+    assert tour(1, 2, np.arange(-3, 9), 3).tolist() == [2, 1, 0, 1, 0, 2, 1, 2, 0, 1, 2, 0]
+    assert tour(7, 1, np.arange(20, 42), 11).tolist() == [
+        3, 6, 3, 7, 5, 9, 0, 6, 1, 8, 2, 10, 4, 0, 6, 9, 7, 8, 1, 2, 3, 5,
+    ]  # fmt: skip
+    assert tour(3, 5, np.arange(-4, 12), 4).tolist() == [
+        1, 3, 2, 0, 1, 3, 0, 2, 3, 2, 1, 0, 2, 0, 1, 3,
+    ]  # fmt: skip
+
+
+def test_tours_and_steps_broadcast_together() -> None:
+    keys, steps = np.array([[0], [3], [4]]), np.array([[0, 1, 2, 7]])
+
+    together = tour(1, keys, steps, 5)
+
+    assert together.shape == (3, 4)
+    for row, key in zip(together, keys[:, 0], strict=True):
+        assert row.tolist() == tour(1, int(key), steps[0], 5).tolist()
+    assert tour(1, 0, 3, 5).shape == ()  # one tour at one step is one stop
 
 
 def test_things_spread_over_every_stop_before_any_takes_two() -> None:
