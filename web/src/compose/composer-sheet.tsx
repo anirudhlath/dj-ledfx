@@ -21,6 +21,7 @@ import { Select } from '@/design/select'
 import { ConsequenceText } from './consequence-text'
 import { LookRow, ROW_HEIGHT } from './look-row'
 import { CATEGORIES } from './model'
+import { revealKeyboardFocus } from './reveal-focus'
 import { useComposerView, type LookSteps } from './use-composer-view'
 import { ZonePicker } from './zone-picker'
 
@@ -49,8 +50,9 @@ export function ComposerSheet({ className }: { className?: string }) {
           </div>
           <div className="flex flex-col gap-2 px-4 pt-3.5">
             <span className="label-caps text-text-3">What</span>
-            {/* The chips are drawn smaller than --touch-min; the row's padding keeps their grown hit areas and focus rings in it. */}
-            <div role="group" aria-label="Categories" className="-m-1 flex scroll-px-1 gap-1.5 overflow-x-auto p-1">
+            {/* The chips are drawn smaller than --touch-min; the row's padding keeps their grown hit areas and focus rings in it, and a
+                chip the keyboard focuses is scrolled wholly in (revealKeyboardFocus). */}
+            <div role="group" aria-label="Categories" className="-m-1 flex scroll-px-1 gap-1.5 overflow-x-auto p-1" onFocus={revealKeyboardFocus}>
               {CATEGORIES.map(({ id, label }) => (
                 <button
                   key={id}

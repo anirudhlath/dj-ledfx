@@ -12,6 +12,7 @@ import { Select } from '@/design/select'
 import { ConsequenceText } from './consequence-text'
 import { LookTile } from './look-tile'
 import { CATEGORIES } from './model'
+import { revealKeyboardFocus } from './reveal-focus'
 import { useComposeChoice, useRunning } from './use-composer'
 import { useComposerView, type LookSteps } from './use-composer-view'
 import { ZonePicker } from './zone-picker'
@@ -78,13 +79,15 @@ export function ComposerPanel({ className }: { className?: string }) {
             </label>
             {/* The row clips, as drawn: its last chip is cut at the panel's edge, as in the render. That would cut a focused chip's ring
                 (2 px and its 2 px offset, tokens.css) and the hit area touch-target grows, so it pads by their reach on its left, top
-                and bottom and pulls back by as much, moving nothing (as ZonePicker's phone row does); scroll-px-1 leaves a chip the
-                browser scrolls to focus that room too. Nothing but that scroll moves a clipped row, and no wheel or touch undoes it, so
-                it goes back to its start when focus leaves. */}
+                and bottom and pulls back by as much, moving nothing (as ZonePicker's phone row does), and pads its end by it too, so the
+                last chip can be scrolled in with its ring whole; scroll-px-1 leaves a chip that is scrolled to that room too. A chip the
+                keyboard focuses is scrolled in (revealKeyboardFocus), as the browser leaves a chip that is mostly in view cut. Nothing
+                but that scroll moves a clipped row, and no wheel or touch undoes it, so it goes back to its start when focus leaves. */}
             <div
               role="group"
               aria-label="Categories"
-              className="-my-2 -ml-1 flex scroll-px-1 gap-1.5 overflow-hidden py-2 pl-1"
+              className="-my-2 -ml-1 flex scroll-px-1 gap-1.5 overflow-hidden py-2 pr-1 pl-1"
+              onFocus={revealKeyboardFocus}
               onBlur={(event) => {
                 if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.scrollLeft = 0
               }}

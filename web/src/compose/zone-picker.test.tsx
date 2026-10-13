@@ -8,7 +8,7 @@ import { buildScenario } from '@/api/mocks/scenarios'
 import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import { payload } from '@/test/icons'
 import { HERO_NOW } from '@/test/live'
-import { watchScrolling } from '@/test/scroll'
+import { focusByKeyboard, focusVisibleAs, watchScrolling } from '@/test/scroll'
 import { ZonePicker, type ZonePickerProps } from './zone-picker'
 
 const hero = buildScenario('hero', HERO_NOW)
@@ -177,9 +177,24 @@ describe('ZonePicker (§6.3)', () => {
 
   it('never scrolls the desktop chips', () => {
     const scrolled = watchScrolling()
-    const { choose } = pick({ selected: 'bedroom' })
+    const { choose, chip } = pick({ selected: 'bedroom' })
     choose('kitchen')
+    focusByKeyboard(chip('living'))
     expect(scrolled).toEqual([])
+  })
+
+  // Chromium leaves a button that is 32 px or more in view where it is, which cuts the ring the row clips (measured: the row's buttons
+  // part-way along a Tab through it). The button the keyboard focuses is scrolled in, with the room its ring needs (scroll-px-1 and the
+  // row's padding); one a touch focuses is not, as it moves nothing under the finger.
+  it("scrolls a phone button wholly into the row when the keyboard focuses it, and not when a touch does", () => {
+    const scrolled = watchScrolling()
+    const { chip } = pick({ variant: 'phone', selected: 'bedroom' })
+    const opened = scrolled.length
+    focusVisibleAs(chip('kitchen'), false)
+    chip('kitchen').focus()
+    expect(scrolled).toHaveLength(opened)
+    focusByKeyboard(chip('living'))
+    expect(scrolled.slice(opened)).toEqual([[chip('living'), { block: 'nearest', inline: 'nearest' }]])
   })
 
   // A push from the server changes the notes every few seconds; the row stays where the owner scrolled it.

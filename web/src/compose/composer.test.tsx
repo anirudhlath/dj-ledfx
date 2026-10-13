@@ -9,6 +9,7 @@ import { LIVE_SPEC } from '@/design/live-numbers'
 import { renderApp } from '@/test/app'
 import { HERO_NOW, pushFrame, restOn, startMockDataLayer } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
+import { focusByKeyboard, focusVisibleAs, watchScrolling } from '@/test/scroll'
 import { drawn, heroPose, loadedStage, MAIN_STAGE } from '@/test/stage'
 import { setViewportWidth } from '@/test/viewport'
 import { projectPoint } from '@/stage/camera'
@@ -374,6 +375,21 @@ describe('Put a look on (§8.2)', () => {
     expect(categories.scrollLeft).toBe(0)
   })
 
+  // Chromium leaves a chip that is 32 px or more in view where it is, which cuts the ring the row clips (measured: the last chip, by 45 px at
+  // 1440 x 900). The chip the keyboard focuses is scrolled in, with the room its ring needs (the row's end padding and scroll-px-1); a press on
+  // a cut chip moves nothing under the pointer.
+  it('scrolls a category chip wholly into the row when the keyboard focuses it, and not when a press does', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const chips = within(screen.getByRole('group', { name: 'Categories' })).getAllByRole('button')
+    const last = chips[chips.length - 1]!
+    const scrolled = watchScrolling()
+    focusVisibleAs(chips[0]!, false)
+    act(() => chips[0]!.focus())
+    expect(scrolled).toEqual([])
+    act(() => focusByKeyboard(last))
+    expect(scrolled).toEqual([[last, { block: 'nearest', inline: 'nearest' }]])
+  })
+
   // F4 ruling 12.
   it('opens on L, chooses on the arrows, starts on Enter and closes on Esc', async () => {
     const { server, router } = await openApp('/next/live')
@@ -593,8 +609,8 @@ describe('Put a look on (§8.2)', () => {
     for (const each of [...chips, face, panel.getByRole('button', { name: 'Close' }), panel.getByRole('combobox', { name: 'Transition' })]) {
       expect(each).toHaveClass('touch-target')
     }
-    expect(categories).toHaveClass('overflow-hidden', '-ml-1', '-my-2', 'pl-1', 'py-2', 'scroll-px-1')
-    expect(categories).not.toHaveClass('-mx-1', 'px-1')
+    expect(categories).toHaveClass('overflow-hidden', '-ml-1', '-my-2', 'pl-1', 'pr-1', 'py-2', 'scroll-px-1')
+    expect(categories).not.toHaveClass('-mx-1', '-mr-1', 'px-1')
   })
 })
 
@@ -1417,6 +1433,20 @@ describe('Put a look on, on the phone (§8.10)', () => {
     expect(chips.length).toBeGreaterThan(1)
     for (const each of [...chips, within(sheet()).getByRole('combobox', { name: 'Transition' })]) expect(each).toHaveClass('touch-target')
     expect(categories).toHaveClass('overflow-x-auto', '-m-1', 'p-1', 'scroll-px-1')
+  })
+
+  // As on the desktop: Chromium leaves a chip that is mostly in view where it is, which cuts its ring. The chip the keyboard focuses is
+  // scrolled in; one a touch focuses is not.
+  it('scrolls a category chip wholly into the row when the keyboard focuses it, and not when a touch does', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const chips = within(within(sheet()).getByRole('group', { name: 'Categories' })).getAllByRole('button')
+    const last = chips[chips.length - 1]!
+    const scrolled = watchScrolling()
+    focusVisibleAs(chips[0]!, false)
+    act(() => chips[0]!.focus())
+    expect(scrolled).toEqual([])
+    act(() => focusByKeyboard(last))
+    expect(scrolled).toEqual([[last, { block: 'nearest', inline: 'nearest' }]])
   })
 
   // Phone-PutLookOn: the stage keeps Phone-Live's box and the sheet fills the screen under it, over the stage's foot (F4 ruling 16). The

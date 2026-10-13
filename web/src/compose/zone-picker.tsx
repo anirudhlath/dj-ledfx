@@ -14,13 +14,15 @@
 // drawn. The desktop chips are under --touch-min, so they keep their face and grow their hit area
 // (touch-target). The phone's row scrolls, which clips on both axes, so it pads by the reach of a focus ring
 // (tokens.css's outline and offset) and pulls back by as much, moving nothing; scroll-px-1 keeps a button
-// snapped where it sits.
+// snapped where it sits. A button the keyboard focuses is scrolled wholly in (revealKeyboardFocus), as the
+// browser leaves one that is mostly in view, and so its ring, cut.
 import { useId, useLayoutEffect, useRef } from 'react'
 import type { Id, RunningZone, Zone } from '@/api/contract'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import { runningOn, zoneNote } from './model'
+import { revealKeyboardFocus } from './reveal-focus'
 
 export interface ZonePickerProps {
   zones: readonly Zone[]
@@ -83,7 +85,12 @@ export function ZonePicker({ zones, running, selected, locked, onSelect, variant
         <span id={label} className="label-caps text-text-3">
           Where
         </span>
-        <div role="group" aria-labelledby={label} className="-m-1 flex snap-x snap-proximity scroll-px-1 gap-2 overflow-x-auto p-1">
+        <div
+          role="group"
+          aria-labelledby={label}
+          className="-m-1 flex snap-x snap-proximity scroll-px-1 gap-2 overflow-x-auto p-1"
+          onFocus={revealKeyboardFocus}
+        >
           {chips}
         </div>
       </div>

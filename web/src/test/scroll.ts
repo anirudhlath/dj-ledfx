@@ -15,3 +15,18 @@ export function watchScrolling(): Scroll[] {
   onTestFinished(() => void (Element.prototype.scrollIntoView = original))
   return scrolled
 }
+
+/**
+ * From here `element` answers `:focus-visible`, which the focus ring is drawn for and the app asks about, as the test says: jsdom's
+ * answer is a guess from what was focused before it, and a keyboard's focus is visible where a press's is not.
+ */
+export function focusVisibleAs(element: HTMLElement, visible: boolean) {
+  const matches = element.matches.bind(element)
+  element.matches = (selector: string) => (selector === ':focus-visible' ? visible : matches(selector))
+}
+
+/** Focuses `element` as the keyboard does: with its focus ring drawn. */
+export function focusByKeyboard(element: HTMLElement) {
+  focusVisibleAs(element, true)
+  element.focus()
+}
