@@ -780,6 +780,49 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     expect(router.state.location.pathname).toBe('/next/settings')
   })
 
+  // A second exit asked for before the first has left (a double click on Cancel or Close, Esc and then Cancel) is the same exit: another
+  // step back would leave Live too. A browser's step back comes later, so the two are asked of the composer still on the page; here
+  // they go in one act, before React has drawn the memory router's step.
+  const ASKED_TWICE = EXITS.filter(([name]) => name !== 'Start').flatMap(([first, one]) =>
+    EXITS.filter(([name]) => name !== 'Start').map(([second, two]) => [first, second, one, two] as const),
+  )
+  it.each(ASKED_TWICE)('steps out of the composer once when %s is followed by %s before it has left', async (_first, _second, one, two) => {
+    const { router } = await openApp('/next/settings')
+    await act(() => router.navigate('/live'))
+    await settle()
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    act(() => {
+      one()
+      two()
+    })
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    expect(router.state.historyAction).toBe('POP')
+    await act(() => router.navigate(-1))
+    expect(router.state.location.pathname).toBe('/next/settings')
+  })
+
+  // What holds a second exit back lasts until the composer has been left: stepping forward into the same entry, it can be left again.
+  it('can be left again once stepped forward into the entry it was left from', async () => {
+    const { router } = await openApp('/next/settings')
+    await act(() => router.navigate('/live'))
+    await settle()
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    fireEvent.click(within(composer()).getByRole('button', { name: 'Cancel' }))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    await act(() => router.navigate(1))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    expect(router.state.historyAction).toBe('POP')
+    fireEvent.click(within(composer()).getByRole('button', { name: 'Cancel' }))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+  })
+
   // A composer with no step into it (a deep link, or a reload of one) has nothing to step back to: Live replaces it.
   it.each(EXITS)('replaces a composer opened by a link with Live on %s', async (_, exit) => {
     const { router } = await openApp('/next/live/put?zone=living&look=embers')
