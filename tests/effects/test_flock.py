@@ -355,6 +355,17 @@ def _heights_over(flock: Flock, leds: LedSet) -> np.ndarray:
     )
 
 
+def _round_its_led(flock: Flock, leds: LedSet, led: np.ndarray) -> None:
+    """Just come to its lamp, on the downbeat, the flock is still gathered round the LED: its
+    middle seen from above is the LED, and no bird is farther from the LED than the flock's
+    0.8 m spread with the 0.4 m its farthest bird goes up or down, which is as far as it is
+    moved in from an edge."""
+    pos, _ = _places(flock, leds, 2000.0)
+    apart = pos - led
+    assert np.abs(apart[:, :2].mean(axis=0)).max() < 0.15
+    assert np.linalg.norm(apart, axis=1).max() <= 0.8 + 0.4 + 1e-5
+
+
 @pytest.mark.parametrize("where", ENDS)
 def test_a_flock_gathered_with_no_room_on_a_side_has_no_sheet_of_birds_along_that_edge(
     monkeypatch: pytest.MonkeyPatch, where: str
@@ -365,11 +376,14 @@ def test_a_flock_gathered_with_no_room_on_a_side_has_no_sheet_of_birds_along_tha
     _on_the_end_of_its_lamp(monkeypatch, end)
     ground = Ground.of(leds)
     low, high = float(ground.floor_for(0)), float(ground.ceiling_for(0))
-    z = _heights_over(_flock(count=200), leds)
+    flock = _flock(count=200)
+    z = _heights_over(flock, leds)
     assert z.min() >= low - 1e-9 and z.max() <= high + 1e-9  # in the band
     edge = low if end == "lowest" else high
     assert np.mean(np.abs(z - edge) < 0.01) < 0.01  # no sheet at the edge's height
     assert np.abs(z - edge).min() < 0.1  # and it comes down to the floor, up to the ceiling
+    z_led = leds.pos[:, 2].argmin() if end == "lowest" else leds.pos[:, 2].argmax()
+    _round_its_led(flock, leds, leds.pos[z_led].astype(np.float64))
 
 
 def test_a_lone_bulb_with_no_map_fills_its_half_metre_band_with_no_sheet_at_its_own_height() -> (
@@ -378,10 +392,12 @@ def test_a_lone_bulb_with_no_map_fills_its_half_metre_band_with_no_sheet_at_its_
     """With no map the band over a lone bulb is the half metre from it up, less high than the
     flock (half of which was held at the bulb's height, in every frame)."""
     leds = lights_at([(1.0, 1.0, 1.0)], ceiling=None)
-    z = _heights_over(_flock(count=200), leds)
+    flock = _flock(count=200)
+    z = _heights_over(flock, leds)
     assert z.min() >= 1.0 - 1e-6 and z.max() <= 1.5 + 1e-6
     assert np.mean(np.abs(z - 1.0) < 0.01) < 0.01 and np.mean(np.abs(z - 1.5) < 0.01) < 0.01
     assert z.min() < 1.05 and z.max() > 1.45  # birds all through the band
+    _round_its_led(flock, leds, leds.pos[0].astype(np.float64))
 
 
 def test_between_a_lamp_in_the_band_and_one_over_the_ceiling_the_flock_stays_between_them() -> (
