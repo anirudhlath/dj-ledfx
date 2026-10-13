@@ -150,6 +150,18 @@ export function openingCategory(look: Look | undefined, here: Look | undefined):
   return look?.category ?? here?.category ?? 'ambient'
 }
 
+/**
+ * Where an arrow key that steps `step` looks on from look `index` of `count` lands, or -1 where it goes nowhere (F4 ruling 12). A step of
+ * more than one is a row: Up on the top row and Down on the last row stay put, and only a Down into a last row shorter than the one it
+ * leaves lands on that row's last look. A step of one is the next look, or none past the ends.
+ */
+export function steppedTo(index: number, step: number, count: number): number {
+  const target = index + step
+  if (index < 0 || target < 0) return -1
+  if (target < count) return target
+  return step > 1 && Math.floor(index / step) < Math.floor((count - 1) / step) ? count - 1 : -1
+}
+
 /** The lengths every kind but a cut is offered at (F4 ruling 11). */
 export const TRANSITION_SECONDS = [1, 3, 5] as const
 

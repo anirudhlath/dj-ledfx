@@ -11,7 +11,7 @@ import { resizeObserved } from '@/test/resize'
 import { heroPose, loadedStage, MAIN_STAGE } from '@/test/stage'
 import { setViewportWidth } from '@/test/viewport'
 import { projectPoint } from '@/stage/camera'
-import { lastZone } from './last-zone'
+import { lastZone, rememberZone } from './last-zone'
 
 // jsdom has no WebGL: src/test/stage.ts's stand-in takes the canvas's place, and the rest of the stage is real.
 vi.mock('@/stage/webgl', () => import('@/test/stage').then((stage) => stage.webglMock()))
@@ -220,6 +220,52 @@ describe('Put a look on (§8.2)', () => {
     expect(consequenceLine()).toHaveTextContent(`The ${zoneName(server, 'counter')} has no lights.`)
     expect(startButton('embers')).toBeDisabled()
     expect(ask).not.toHaveBeenCalled()
+  })
+
+  // A link can name a zone or a look the server hasn't got (one deleted since). The zone falls back as a missing ?zone= does, the last one
+  // started on, else the whole home; and a choice made in place doesn't carry the stale id on.
+  it('falls back to the whole home for a zone the server has not got, and a pick writes a URL without it', async () => {
+    const { server, router } = await openApp('/next/live/put?zone=gone&look=embers')
+    const home = server.state.zones.find((zone) => zone.kind === 'home')!
+    expect(title()).toHaveTextContent(`Put a look on ${home.name}`)
+    expect(chip(home.name)).toHaveAttribute('aria-pressed', 'true')
+    expect(previewSession.snapshot()).toMatchObject({ zoneId: home.id, lookId: 'embers' })
+    fireEvent.click(tile('rain'))
+    await settle()
+    expect(router.state.location.search).toBe('?look=rain')
+  })
+
+  it('falls back to the last zone started on for a zone the server has not got', async () => {
+    rememberZone('kitchen')
+    const { server } = await openApp('/next/live/put?zone=gone&look=embers')
+    expect(title()).toHaveTextContent(`Put a look on ${zoneName(server, 'kitchen')}`)
+    expect(previewSession.snapshot()).toMatchObject({ zoneId: 'kitchen', lookId: 'embers' })
+  })
+
+  it('draws no preview for a look the server has not got and holds Start, and a choice writes a URL without it', async () => {
+    const ask = vi.spyOn(api, 'startPreview')
+    const start = vi.spyOn(api, 'start')
+    const { server, router } = await openApp('/next/live/put?zone=living&look=gone')
+    expect(title()).toHaveTextContent(`Put a look on ${zoneName(server, 'living')}`)
+    expect(ask).not.toHaveBeenCalled()
+    expect(previewSession.snapshot().status).toBe('idle')
+    expect(consequenceLine()).toHaveTextContent('Choose a look to see it on the stage first.')
+    expect(startButton()).toBeDisabled()
+    expect(tilesShown().filter((id) => tile(id as Id).getAttribute('aria-pressed') === 'true')).toEqual([])
+    // Enter on a look that isn't chosen only chooses it.
+    fireEvent.keyDown(tile('rain'), { key: 'Enter' })
+    expect(start).not.toHaveBeenCalled()
+
+    fireEvent.click(chip(zoneName(server, 'kitchen')))
+    await settle()
+    expect(router.state.location.search).toBe('?zone=kitchen')
+    // The kitchen runs a home look, so the grid opens on the home looks.
+    fireEvent.click(category('Ambient'))
+    fireEvent.click(tile('rain'))
+    await settle()
+    expect(router.state.location.search).toBe('?zone=kitchen&look=rain')
+    expect(ask).toHaveBeenCalledTimes(1)
+    expect(startButton('rain')).toBeEnabled()
   })
 
   // §8.2: "Home looks (whole-home scope) lock the zone to Whole home."
@@ -574,10 +620,16 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
   })
 
   // F4 ruling 4: what runs on each zone is its chip's note, and the look running on the zone chosen is marked on its tile.
-  it('shows what runs on each zone and which look runs here, and sets look names in serif', async () => {
+  it('shows what runs on each zone, and which look runs on the zone chosen', async () => {
     const { server } = await openApp('/next/live/put?zone=living&look=embers')
     expect(chip(zoneName(server, 'living'))).toHaveTextContent(lookName('fireflies'))
     expect(tile('fireflies')).toHaveAccessibleName(/running here/)
+    expect(consequenceLine()).toHaveTextContent(`from ${lookName('fireflies')}`)
+  })
+
+  // A class check, for what the render draws: Live-PutLookOn sets a look's name in serif. Task 10's e2e looks at the pixels.
+  it("sets the look's name in the consequence line with the serif class", async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
     expect([...consequenceLine().querySelectorAll('.font-serif')].map((each) => each.textContent)).toContain(lookName('fireflies'))
   })
 
@@ -770,8 +822,9 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     expect(router.state.location.search).toBe(chosen)
   })
 
-  // Ruling 12: the grid has two looks a row, so Left and Right move by one and Up and Down by two, clamped to the grid's ends, and the
-  // keys are the grid's alone: the page doesn't scroll under them. Enter on a look that isn't the one chosen starts nothing.
+  // Ruling 12: the grid has two looks a row, so Left and Right move by one and Up and Down by a row, and the keys are the grid's alone: the
+  // page doesn't scroll under them. Up and Down that would leave the grid stay where they are, but for a Down into a last row that is one
+  // look short, which lands on its look. Enter on a look that isn't the one chosen starts nothing.
   it('moves over the grid by the arrows, stops at its edges, and starts only on the look chosen', async () => {
     const start = vi.spyOn(api, 'start')
     const { router } = await openApp('/next/live/put?zone=living&look=embers')
@@ -783,11 +836,15 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     expect(shown.indexOf('embers')).toBe(2)
     expect(arrow('embers', 'ArrowLeft')).toBe(false)
     expect(chosen()).toBe(shown[1])
-    arrow(shown[1]!, 'ArrowUp')
+    // Up on the top row's right look stays there, and is still the grid's key.
+    expect(arrow(shown[1]!, 'ArrowUp')).toBe(false)
+    expect(chosen()).toBe(shown[1])
+    arrow(shown[1]!, 'ArrowLeft')
     expect(chosen()).toBe(shown[0])
     arrow(shown[0]!, 'ArrowLeft')
     arrow(shown[0]!, 'ArrowUp')
     expect(chosen()).toBe(shown[0])
+    expect(last % 2).toBe(0)
     arrow(shown[last - 1]!, 'ArrowDown')
     expect(chosen()).toBe(shown[last])
     arrow(shown[last]!, 'ArrowRight')
@@ -798,6 +855,28 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     expect(start).not.toHaveBeenCalled()
     expect(fireEvent.keyDown(tile(shown[last]!), { key: 'Enter' })).toBe(false)
     expect(start).toHaveBeenCalledTimes(1)
+  })
+
+  // Ruling 12, "by a row": where the last row is full there is no row below it, and a Down on its left look stays there rather than step to its right.
+  it('keeps an Up or Down that would leave a grid whose rows are all full where it is', async () => {
+    const { router } = await openApp('/next/live/put?zone=living&look=embers')
+    fireEvent.click(category('Audio'))
+    const shown = tilesShown() as Id[]
+    expect(shown).toHaveLength(4)
+    const chosen = () => new URLSearchParams(router.state.location.search).get('look')
+    const arrow = (from: Id, key: string) => fireEvent.keyDown(tile(from), { key })
+    fireEvent.click(tile(shown[2]!))
+    await settle()
+    arrow(shown[2]!, 'ArrowDown')
+    expect(chosen()).toBe(shown[2])
+    fireEvent.click(tile(shown[1]!))
+    await settle()
+    arrow(shown[1]!, 'ArrowUp')
+    expect(chosen()).toBe(shown[1])
+    arrow(shown[1]!, 'ArrowDown')
+    expect(chosen()).toBe(shown[3])
+    arrow(shown[3]!, 'ArrowUp')
+    expect(chosen()).toBe(shown[1])
   })
 
   it('starts once, however often Start is asked for while it is on its way', async () => {

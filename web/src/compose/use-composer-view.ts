@@ -11,6 +11,7 @@ import {
   lookTransition,
   openingCategory,
   runningOn,
+  steppedTo,
   transitionChoices,
   transitionKey,
   type Category,
@@ -88,9 +89,8 @@ export function useComposerView(steps: LookSteps, list: RefObject<HTMLElement | 
     const step = steps[event.key]
     if (step === undefined) return
     event.preventDefault()
-    const index = shown.findIndex((each) => each.id === id)
-    const next = shown[Math.min(Math.max(index + step, 0), shown.length - 1)]
-    if (next === undefined || next.id === id) return
+    const next = shown[steppedTo(shown.findIndex((each) => each.id === id), step, shown.length)]
+    if (next === undefined) return
     composer.pick(next.id)
     lookElement(list.current, next.id)?.focus()
   }

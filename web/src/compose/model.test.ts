@@ -18,6 +18,7 @@ import {
   openingCategory,
   rowNote,
   runningOn,
+  steppedTo,
   transitionChoices,
   transitionKey,
   zoneNote,
@@ -181,6 +182,28 @@ describe('the looks the composer shows', () => {
 
   it('come in §8.2\'s categories', () => {
     expect(CATEGORIES.map((category) => category.label)).toEqual(['Starred', 'Ambient', 'Tempo', 'Audio', 'Home', 'Firmware'])
+  })
+})
+
+// F4 ruling 12: the arrows move through the looks "by a row" (two across in the panel, one in a list).
+describe('where an arrow key steps among the looks', () => {
+  // Five looks in two columns: 0 1 / 2 3 / 4, the last row one short.
+  it('moves a row up or down, and a look along', () => {
+    expect([steppedTo(3, -2, 5), steppedTo(1, 2, 5), steppedTo(0, 2, 5), steppedTo(2, 1, 5), steppedTo(2, -1, 5)]).toEqual([1, 3, 2, 3, 1])
+  })
+
+  it('stays put where Up or Down would leave the grid, whichever tile of the row it is', () => {
+    expect([steppedTo(0, -2, 5), steppedTo(1, -2, 5), steppedTo(4, 2, 5)]).toEqual([-1, -1, -1])
+    // A full last row: Down on either of its tiles leaves too.
+    expect([steppedTo(4, 2, 6), steppedTo(5, 2, 6)]).toEqual([-1, -1])
+  })
+
+  it('lands on the last look where Down goes into a last row that is shorter', () => {
+    expect([steppedTo(3, 2, 5), steppedTo(2, 2, 5)]).toEqual([4, 4])
+  })
+
+  it('goes nowhere past either end of a list, or from a look that is not in it', () => {
+    expect([steppedTo(0, -1, 3), steppedTo(2, 1, 3), steppedTo(2, 1, 1), steppedTo(-1, 1, 3), steppedTo(-1, 2, 5)]).toEqual([-1, -1, -1, -1, -1])
   })
 })
 

@@ -49,6 +49,10 @@ function useRememberedZone(composing: boolean): Id | null {
   return remembered
 }
 
+/** The id a choice made in place carries into the next URL: one the server has, and any before it has answered. A stale link's is dropped. */
+const carried = (id: Id | null, known: readonly { id: Id }[] | undefined): Id | null =>
+  known === undefined || known.some((each) => each.id === id) ? id : null
+
 /** `composing` is false for an instance that Live keeps while the composer is shut; the panel's and Where's exist only while it's open. */
 export function useComposeChoice(composing = true): ComposeChoice {
   const zones = useQuery(queries.zones()).data
@@ -63,6 +67,8 @@ export function useComposeChoice(composing = true): ComposeChoice {
   const look = lookId === null ? undefined : looks?.find((each) => each.id === lookId)
   const zone = zones === undefined ? undefined : chosenZone(zones, asked, remembered, look)
   const locked = locksToHome(look)
+  const keptZone = carried(asked, zones)
+  const keptLook = carried(lookId, looks)
   return {
     zones,
     looks,
@@ -72,9 +78,9 @@ export function useComposeChoice(composing = true): ComposeChoice {
     choose: (zoneId) => {
       // The chips are disabled under a home look, which locks the zone to the whole home, and a room on the stage isn't: it changes nothing.
       if (locked || zoneId === zone?.id) return
-      navigate(composerPath(zoneId, lookId), { replace: true, state })
+      navigate(composerPath(zoneId, keptLook), { replace: true, state })
     },
-    pick: (next) => navigate(composerPath(asked, next), { replace: true, state }),
+    pick: (next) => navigate(composerPath(keptZone, next), { replace: true, state }),
   }
 }
 
