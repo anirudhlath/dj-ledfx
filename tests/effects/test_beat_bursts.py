@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
-
 import numpy as np
 import pytest
-from conftest import tempo_ctx
+from conftest import CallCounts, tempo_ctx
 from map_home import bulbs, lights_at, upright
 from stray_lamps import (
     STRAYS,
@@ -19,7 +16,6 @@ from stray_lamps import (
 )
 
 from dj_ledfx.effects import beat_bursts as bursts_module
-from dj_ledfx.effects import particle_tools
 from dj_ledfx.effects.beat_bursts import ARRIVE, SCATTER_M, BeatBursts
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import Ground, Lamps
@@ -230,21 +226,12 @@ def test_the_scatter_round_an_led_stops_at_the_floor_and_the_ceiling() -> None:
 
 
 def test_every_burst_is_worked_out_at_once_however_many_are_in_the_air(
-    monkeypatch: pytest.MonkeyPatch,
+    call_counts: CallCounts,
 ) -> None:
-    calls: dict[str, int] = {}
-
-    def counted(name: str, original: Callable[..., Any]) -> Callable[..., Any]:
-        def call(*args: Any, **kwargs: Any) -> Any:
-            calls[name] = calls.get(name, 0) + 1
-            return original(*args, **kwargs)
-
-        return call
-
-    monkeypatch.setattr(bursts_module, "draws", counted("draws", particle_tools.draws))
-    monkeypatch.setattr(Ground, "on", counted("on", Ground.on))
-    monkeypatch.setattr(Lamps, "pick", counted("pick", Lamps.pick))
+    call_counts.spy(bursts_module, "draws")
+    call_counts.spy(Ground, "on")
+    call_counts.spy(Lamps, "pick")
 
     drawn(_bursts(fade_beats=4.0), tempo_ctx(2003.5), _room())  # four bursts in the air
 
-    assert calls == {"draws": 1, "pick": 1, "on": 1}
+    assert call_counts.calls == {"draws": 1, "pick": 1, "on": 1}

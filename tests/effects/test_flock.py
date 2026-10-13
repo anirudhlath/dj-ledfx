@@ -6,12 +6,11 @@ from typing import Any
 
 import numpy as np
 import pytest
-from conftest import tempo_ctx
-from map_home import bulbs, lights_at, seeded_ledset, upright
+from conftest import CallCounts, tempo_ctx
+from map_home import HOMES, lights_at, upright
 from stray_lamps import STRAYS, moves, on_the_beat, run_frames, stays_in_band, unpassed
 
 from dj_ledfx.effects import flock as flock_module
-from dj_ledfx.effects import particle_tools
 from dj_ledfx.effects.flock import Flock, scattered
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import Ground, draws
@@ -65,11 +64,7 @@ def test_the_flock_moves_on_the_beat_at_any_tempo() -> None:
         np.testing.assert_array_equal(slow.particles.pos, fast.particles.pos)
 
 
-HOMES: dict[str, Callable[[], LedSet]] = {
-    "this home": seeded_ledset,
-    "a hundred bulbs": lambda: bulbs(100),
-    "four lamps": lambda: ROOM,
-}
+ZONES: dict[str, Callable[[], LedSet]] = {**HOMES, "four lamps": lambda: ROOM}
 FLAT = 0.5  # a flock is this much flatter than it is wide (the design of the look is in the code)
 
 
@@ -347,9 +342,9 @@ def test_a_birds_colour_does_not_go_with_where_it_is_in_the_flock() -> None:
     assert shade.min() < 0.1 and shade.max() > 0.9  # birds all along the palette
 
 
-@pytest.mark.parametrize("home", HOMES)
+@pytest.mark.parametrize("home", ZONES)
 def test_the_count_is_the_count_setting_whatever_the_lamps(home: str) -> None:
-    ground = Ground.of(HOMES[home]())
+    ground = Ground.of(ZONES[home]())
     for count in (5, 40, 200):
         made = _flock(count=count).positions(tempo_ctx(2003.3), ground)
         assert made.count == count <= MAX_PARTICLES
@@ -365,21 +360,12 @@ def test_the_settings_reach_the_birds() -> None:
     assert colour[:, 0].min() < 0.1 and colour[:, 0].max() > 0.9  # birds all along it
 
 
-def test_every_bird_is_worked_out_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: dict[str, int] = {}
-
-    def counted(name: str, original: Callable[..., Any]) -> Callable[..., Any]:
-        def call(*args: Any, **kwargs: Any) -> Any:
-            calls[name] = calls.get(name, 0) + 1
-            return original(*args, **kwargs)
-
-        return call
-
-    monkeypatch.setattr(flock_module, "tour", counted("tour", particle_tools.tour))
-    monkeypatch.setattr(flock_module, "draws", counted("draws", particle_tools.draws))
-    monkeypatch.setattr(Ground, "on", counted("on", Ground.on))
+def test_every_bird_is_worked_out_at_once(call_counts: CallCounts) -> None:
+    call_counts.spy(flock_module, "tour")
+    call_counts.spy(flock_module, "draws")
+    call_counts.spy(Ground, "on")
 
     for count in (5, 200):  # however many birds
-        calls.clear()
+        call_counts.calls.clear()
         drawn(_flock(count=count), tempo_ctx(2003.3), ROOM)
-        assert calls == {"tour": 1, "draws": 2, "on": 1}
+        assert call_counts.calls == {"tour": 1, "draws": 2, "on": 1}

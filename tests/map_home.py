@@ -247,3 +247,12 @@ def seeded_ledset() -> LedSet:
         for light in seeded_zone_lights()
     ]
     return build_ledset(sources, seeded_space())
+
+
+# The zones the particle effects are run on at their largest: this home, and one with so many
+# lamps that an effect making particles for each lamp goes past the cap unless it keeps to it
+# (at their largest settings snow asks for 2000 there, embers for 1000 and rain for 800).
+HOMES: dict[str, Callable[[], LedSet]] = {
+    "this home": seeded_ledset,
+    "a hundred bulbs": lambda: bulbs(100),
+}

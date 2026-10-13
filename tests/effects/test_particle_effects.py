@@ -6,14 +6,13 @@ from __future__ import annotations
 
 import statistics
 import time
-from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
 import numpy as np
 import pytest
 from conftest import tempo_ctx
-from map_home import bulbs, leds_at, lights_at, seeded_ledset, upright
+from map_home import HOMES, leds_at, lights_at, seeded_ledset, upright
 
 from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.ledset import LedSet
@@ -27,13 +26,6 @@ PARTICLE_KINDS = sorted(
     name for name, cls in get_effect_classes().items() if issubclass(cls, ParticleEffect)
 )
 START = 2000.0  # beats: 1000 s into a steady 120 BPM
-# The zones the largest settings run on: this home, and one with so many lamps that an effect
-# making particles for each lamp goes past the cap unless it keeps to it (at their largest
-# settings snow asks for 2000 there, embers for 1000 and rain for 800).
-HOMES: dict[str, Callable[[], LedSet]] = {
-    "this home": seeded_ledset,
-    "a hundred bulbs": lambda: bulbs(100),
-}
 
 
 def _effect(kind: str, seed: int = 1, **settings: Any) -> ParamParticles:

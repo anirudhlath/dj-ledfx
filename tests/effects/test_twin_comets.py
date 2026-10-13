@@ -6,11 +6,10 @@ from typing import Any
 
 import numpy as np
 import pytest
-from conftest import tempo_ctx
-from map_home import bulbs, lights_at, seeded_ledset, upright
+from conftest import CallCounts, tempo_ctx
+from map_home import HOMES, lights_at, upright
 from stray_lamps import STRAYS, moves, on_the_beat, run_frames, stays_in_band, unpassed
 
-from dj_ledfx.effects import particle_tools
 from dj_ledfx.effects import twin_comets as comets_module
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import Ground, Particles
@@ -70,11 +69,7 @@ def test_a_tail_trails_where_its_comet_was_fading_and_shrinking() -> None:
 
 # Two bulbs 40 m apart, a metre up, under the 3 m ceiling: a hop between them would rise 10 m.
 FAR = lights_at([(0.0, 0.0, 1.0)], [(40.0, 0.0, 1.0)])
-HOMES: dict[str, Callable[[], LedSet]] = {
-    "this home": seeded_ledset,
-    "a hundred bulbs": lambda: bulbs(100),
-    "four lamps": lambda: ROOM,
-}
+ZONES: dict[str, Callable[[], LedSet]] = {**HOMES, "four lamps": lambda: ROOM}
 
 
 def _at(comets: TwinComets, room: LedSet, beats: list[float], comet: int = 0) -> np.ndarray:
@@ -278,31 +273,20 @@ def test_comets_land_along_the_whole_length_of_a_lamp_outside_the_floor_and_ceil
     assert stays_in_band(z, leds)  # and the hops stay under the lamp's ceiling
 
 
-@pytest.mark.parametrize("home", HOMES)
+@pytest.mark.parametrize("home", ZONES)
 def test_the_count_is_a_head_and_a_tail_for_each_comet_whatever_the_lamps(home: str) -> None:
-    ground = Ground.of(HOMES[home]())
+    ground = Ground.of(ZONES[home]())
     for tail in (0, 8, 30):
         made = _comets(tail=tail).positions(tempo_ctx(2003.3), ground)
         assert made.count == 2 * (tail + 1) <= MAX_PARTICLES
 
 
-def test_both_comets_and_all_their_tails_are_worked_out_at_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: dict[str, int] = {}
-
-    def counted(name: str, original: Callable[..., Any]) -> Callable[..., Any]:
-        def call(*args: Any, **kwargs: Any) -> Any:
-            calls[name] = calls.get(name, 0) + 1
-            return original(*args, **kwargs)
-
-        return call
-
-    monkeypatch.setattr(comets_module, "draws", counted("draws", particle_tools.draws))
-    monkeypatch.setattr(comets_module, "around", counted("around", particle_tools.around))
-    monkeypatch.setattr(Ground, "on", counted("on", Ground.on))
+def test_both_comets_and_all_their_tails_are_worked_out_at_once(call_counts: CallCounts) -> None:
+    call_counts.spy(comets_module, "draws")
+    call_counts.spy(comets_module, "around")
+    call_counts.spy(Ground, "on")
 
     for tail in (0, 30):  # however long the tails
-        calls.clear()
+        call_counts.calls.clear()
         drawn(_comets(tail=tail), tempo_ctx(2003.3), ROOM)
-        assert calls == {"draws": 2, "around": 1, "on": 1}
+        assert call_counts.calls == {"draws": 2, "around": 1, "on": 1}

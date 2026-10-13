@@ -5,12 +5,11 @@ from typing import Any
 
 import numpy as np
 import pytest
-from conftest import tempo_ctx
-from map_home import ROW, bulbs, lights_at, seeded_ledset, upright
+from conftest import CallCounts, tempo_ctx
+from map_home import HOMES, ROW, lights_at, upright
 from stray_lamps import STRAYS, moves, on_the_beat, run_frames, stays_in_band
 
 from dj_ledfx.effects import bouncing_ball as ball_module
-from dj_ledfx.effects import particle_tools
 from dj_ledfx.effects.bouncing_ball import BouncingBall
 from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.ledset import LedSet
@@ -73,11 +72,7 @@ def test_the_ball_takes_the_next_colour_at_each_bounce() -> None:
         np.testing.assert_allclose(ball.particles.colour[0], palette_float(palette)[beat % 3])
 
 
-HOMES: dict[str, Callable[[], LedSet]] = {
-    "this home": seeded_ledset,
-    "a hundred bulbs": lambda: bulbs(100),
-    "four lamps": lambda: ROOM,
-}
+ZONES: dict[str, Callable[[], LedSet]] = {**HOMES, "four lamps": lambda: ROOM}
 
 
 def _where(ball: BouncingBall, room: LedSet, beats: float, bpm: float = 120.0) -> np.ndarray:
@@ -199,9 +194,9 @@ def test_with_two_lamps_the_ball_goes_to_and_fro_and_with_one_it_stays_over_it()
         np.testing.assert_allclose(_where(ball, one, beats)[:2], [2.0, 2.0], atol=1e-6)
 
 
-@pytest.mark.parametrize("home", HOMES)
+@pytest.mark.parametrize("home", ZONES)
 def test_the_ball_is_one_particle_whatever_the_lamps(home: str) -> None:
-    made = _ball().positions(tempo_ctx(2003.3), Ground.of(HOMES[home]()))
+    made = _ball().positions(tempo_ctx(2003.3), Ground.of(ZONES[home]()))
     assert made.count == 1 <= MAX_PARTICLES
 
 
@@ -211,20 +206,11 @@ def test_the_ball_is_as_big_as_the_setting_says() -> None:
     np.testing.assert_allclose(ball.particles.radius, 0.9)
 
 
-def test_both_ends_of_a_bounce_are_worked_out_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: dict[str, int] = {}
-
-    def counted(name: str, original: Callable[..., Any]) -> Callable[..., Any]:
-        def call(*args: Any, **kwargs: Any) -> Any:
-            calls[name] = calls.get(name, 0) + 1
-            return original(*args, **kwargs)
-
-        return call
-
-    monkeypatch.setattr(ball_module, "tour", counted("tour", particle_tools.tour))
-    monkeypatch.setattr(ball_module, "draws", counted("draws", particle_tools.draws))
-    monkeypatch.setattr(Ground, "foot", counted("foot", Ground.foot))
+def test_both_ends_of_a_bounce_are_worked_out_at_once(call_counts: CallCounts) -> None:
+    call_counts.spy(ball_module, "tour")
+    call_counts.spy(ball_module, "draws")
+    call_counts.spy(Ground, "foot")
 
     drawn(_ball(), tempo_ctx(2003.3), ROOM)
 
-    assert calls == {"tour": 1, "draws": 1, "foot": 1}
+    assert call_counts.calls == {"tour": 1, "draws": 1, "foot": 1}
