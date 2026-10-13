@@ -11,7 +11,7 @@
 // and every look and Start can be reached. <main> never scrolls. The two rows that scroll on their own
 // (the chips, the looks) pad by the reach of a focus ring (tokens.css's outline and offset, 4 px) and pull
 // back by as much, so a ring is never cut at the row's edge and nothing moves; ZonePicker's row does too.
-import { useRef } from 'react'
+import { useId, useRef } from 'react'
 import { Button } from '@/design/button'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
@@ -28,14 +28,15 @@ const ROW_STEPS: LookSteps = { ArrowUp: -1, ArrowDown: 1 }
 
 export function ComposerSheet({ className }: { className?: string }) {
   const rows = useRef<HTMLDivElement>(null)
+  const title = useId()
   const view = useComposerView(ROW_STEPS, rows)
   const { zones, looks, zone, look, running, consequence: said } = view
 
   return (
-    <section aria-label="Put a look on" className={cx('flex flex-col overflow-y-auto rounded-t-sheet border-t border-line bg-panel', className)}>
+    <section aria-labelledby={title} className={cx('flex flex-col overflow-y-auto rounded-t-sheet border-t border-line bg-panel', className)}>
       <Grabber className="mt-2" />
       <div className="flex items-center justify-between px-4 pt-2">
-        <h1 className="text-title font-semibold">Put a look on</h1>
+        <h1 id={title} className="text-title font-semibold">Put a look on</h1>
         <button type="button" aria-label="Close" className="inline-flex size-11 shrink-0 items-center justify-center text-text-2" onClick={view.close}>
           <Icon name="x" size={20} />
         </button>

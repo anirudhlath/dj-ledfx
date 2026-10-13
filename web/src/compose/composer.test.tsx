@@ -1248,11 +1248,21 @@ describe('Put a look on, on the phone (§8.10)', () => {
     expect(sheet().closest('main')).toBe(screen.getByRole('main'))
   })
 
-  // The short consequence beside the transition, as F4 ruling 14 words it; a long refusal is said whole, as there is no other place for it.
-  it("says the short consequence, not the desktop's sentences, and holds Start where there is nothing to start", async () => {
+  // The short consequence beside the transition, as F4 ruling 14 words it: "Takes over from <look>", the look's name in serif.
+  it("says the short consequence, not the desktop's sentences", async () => {
     await openApp('/next/live/put?zone=living&look=firmware')
-    expect(sheet().querySelector('[data-consequence]')).toHaveTextContent(/^Takes over from Fireflies$/)
+    expect(sheet().querySelector('[data-consequence]')).toHaveTextContent(new RegExp(`^Takes over from ${lookName('fireflies')}$`))
     expect(sheet().querySelector('[data-consequence] .font-serif')).toHaveTextContent(lookName('fireflies'))
+  })
+
+  // Review focus 2, on the phone: the consequence line is the one place a refusal can be said, so it says the server's words whole, however
+  // long they are, and Start stays to try (and to say its own failure).
+  it('says why the preview was refused, whole however long it is, and leaves Start to try', async () => {
+    const detail = 'The engine cannot take another preview just now, because the one before it has not finished and the lights have not settled, so ask again in a moment'
+    vi.spyOn(api, 'startPreview').mockRejectedValue(new ApiError(400, detail, '/api/preview'))
+    await openApp('/next/live/put?look=goodnight')
+    expect(sheet().querySelector('[data-consequence]')?.textContent).toBe(`Couldn't preview ${lookName('goodnight')}. ${detail}`)
+    expect(within(sheet()).getByRole('button', { name: new RegExp(`^Start ${lookName('goodnight')}`) })).toBeEnabled()
   })
 
   it.each([
@@ -1434,8 +1444,22 @@ describe('Put a look on, on the phone (§8.10)', () => {
     expect(row('embers')).toHaveClass('p-2', 'border')
   })
 
+  it("names the sheet from its heading, the screen's one title", async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const heading = within(sheet()).getByRole('heading', { level: 1 })
+    expect(heading.id).not.toBe('')
+    expect(sheet()).toHaveAttribute('aria-labelledby', heading.id)
+    expect(sheet()).not.toHaveAttribute('aria-label')
+  })
+
   it("lets Live's page grow past <main> again once the sheet has gone", async () => {
-    await openApp('/next/live')
-    expect(screen.getByRole('link', { name: 'Put a look on' }).closest('.min-h-full')).not.toBeNull()
+    await openApp('/next/live/put?zone=living&look=embers')
+    const page = sheet().parentElement!
+    expect(page).toHaveClass('h-full')
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(screen.queryByRole('region', { name: 'Put a look on' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Put a look on' }).closest('.min-h-full')).toBe(page)
+    expect(page).not.toHaveClass('h-full')
   })
 })

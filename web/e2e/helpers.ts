@@ -11,7 +11,9 @@ export async function open(page: Page, path: string, ready?: Locator): Promise<v
   await page.goto(path)
   // The mock build renders once MSW's worker is up (app/boot.tsx), so the chrome comes first, then its fonts.
   const attention = page.getByRole('banner').getByRole('button', { name: /needs? attention$|^All good$/ })
-  await expect(ready ?? attention.or(page.getByRole('group', { name: 'Looks' })).first()).toBeVisible()
+  // The phone's composer is a region of that name; the desktop's is an aside with a Looks group of its own, which must not stand in for the button.
+  const sheet = page.getByRole('region', { name: 'Put a look on' }).getByRole('group', { name: 'Looks' })
+  await expect(ready ?? attention.or(sheet).first()).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
 }
 
