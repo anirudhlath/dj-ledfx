@@ -107,6 +107,14 @@ const chip = (name: string) =>
   within(screen.getByRole('group', { name: 'Where' }))
     .getAllByRole('button')
     .find((button) => button.firstChild?.textContent === name)!
+const category = (name: string) => within(screen.getByRole('group', { name: 'Categories' })).getByRole('button', { name })
+/** §8.2's four ways out of the composer, each as the click or the key that makes it. */
+const EXITS = [
+  ['Cancel', () => fireEvent.click(within(composer()).getByRole('button', { name: 'Cancel' }))],
+  ['Close', () => fireEvent.click(within(composer()).getByRole('button', { name: 'Close' }))],
+  ['Esc', () => expect(fireEvent.keyDown(document.body, { key: 'Escape' })).toBe(false)],
+  ['Start', () => fireEvent.click(within(composer()).getByRole('button', { name: /^Start / }))],
+] as const
 
 describe('Put a look on (§8.2)', () => {
   // §13.1 F4's exit check: "Start a look in ≤ 3 clicks from Live; lights unchanged until Start (mock asserts)".
@@ -354,7 +362,6 @@ describe('Put a look on (§8.2)', () => {
     await loadedStage()
     act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
     const living = zoneName(server, 'living')
-    const category = (name: string) => within(screen.getByRole('group', { name: 'Categories' })).getByRole('button', { name })
     const card = previewCard
     const waiting = holdPreviews()
 
@@ -605,24 +612,124 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     expect(lastZone()).toBeNull()
   })
 
-  // §8.2: Cancel, Close, Esc and Start all go back to Live in place, so Back from Live leaves it; L opens the composer as a step of its own.
-  it.each([
-    ['Cancel', () => fireEvent.click(within(composer()).getByRole('button', { name: 'Cancel' }))],
-    ['Close', () => fireEvent.click(within(composer()).getByRole('button', { name: 'Close' }))],
-    ['Esc', () => expect(fireEvent.keyDown(document.body, { key: 'Escape' })).toBe(false)],
-    ['Start', () => fireEvent.click(within(composer()).getByRole('button', { name: /^Start / }))],
-  ])('goes back to Live in place on %s', async (_, close) => {
-    const { router } = await openApp('/next/live')
+  // §8.2: Cancel, Close, Esc and Start all end the composer the same way. One that was stepped into (pushed from Live, its entry marked, as
+  // the choices made in place keep it) is stepped back out of, so Back from Live goes where it went before the composer: replacing the
+  // entry with Live left Live in the history twice.
+  it.each(EXITS)('steps back out of the composer on %s, so Back from Live leaves it', async (_, exit) => {
+    const { server, router } = await openApp('/next/settings')
+    await act(() => router.navigate('/live'))
+    await settle()
     expect(fireEvent.keyDown(document.body, { key: 'L' })).toBe(false)
     await settle()
     expect(router.state.location.pathname).toBe('/next/live/put')
     expect(router.state.historyAction).toBe('PUSH')
-    fireEvent.click(tile(tilesShown()[0]!))
+    // Choices made in place, a zone's chip and a look's tile, keep the entry the composer was stepped into.
+    fireEvent.click(chip(zoneName(server, 'kitchen')))
+    fireEvent.click(category('Ambient'))
+    fireEvent.click(tile('embers'))
     await settle()
-    close()
+    expect(router.state.location.search).toBe('?zone=kitchen&look=embers')
+    expect(router.state.historyAction).toBe('REPLACE')
+    exit()
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    expect(router.state.historyAction).toBe('POP')
+    await act(() => router.navigate(-1))
+    expect(router.state.location.pathname).toBe('/next/settings')
+  })
+
+  // A composer with no step into it (a deep link, or a reload of one) has nothing to step back to: Live replaces it.
+  it.each(EXITS)('replaces a composer opened by a link with Live on %s', async (_, exit) => {
+    const { router } = await openApp('/next/live/put?zone=living&look=embers')
+    exit()
     await settle()
     expect(router.state.location.pathname).toBe('/next/live')
     expect(router.state.historyAction).toBe('REPLACE')
+  })
+
+  // Every way in is a step into the composer, from the page it was opened from, which Cancel goes back to: L, the Running panel's
+  // link, a room on the stage (clicked, or by its link, which a keyboard reaches) and a zone card's menu.
+  it.each([
+    ['L', async () => fireEvent.keyDown(document.body, { key: 'l' })],
+    ["the Running panel's link", async () => fireEvent.click(screen.getByRole('link', { name: 'Put a look on' }))],
+    [
+      'a room on the stage',
+      async (server: MockServer) => {
+        await loadedStage()
+        act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+        clickRoom(server.state.home.rooms.find((each) => each.hasLights)!)
+      },
+    ],
+    [
+      "a room's link on the stage",
+      async (server: MockServer) => {
+        await loadedStage()
+        const room = server.state.home.rooms.find((each) => each.hasLights)!
+        fireEvent.click(within(screen.getByRole('navigation', { name: 'Rooms' })).getByRole('link', { name: `Put a look on ${room.name}` }))
+      },
+    ],
+    [
+      "a zone card's menu",
+      async (server: MockServer) => {
+        press(screen.getByRole('button', { name: `More for ${zoneName(server, 'living')}` }))
+        await settle(100)
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Change look' }))
+      },
+    ],
+  ])('opens on %s as a step that Cancel steps back out of', async (_, open) => {
+    const { server, router } = await openApp('/next/settings')
+    await act(() => router.navigate('/live'))
+    await settle()
+    await open(server)
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    expect(router.state.historyAction).toBe('PUSH')
+    fireEvent.click(within(composer()).getByRole('button', { name: 'Cancel' }))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    expect(router.state.historyAction).toBe('POP')
+    await act(() => router.navigate(-1))
+    expect(router.state.location.pathname).toBe('/next/settings')
+  })
+
+  // The focus was inside the composer, which goes: the Running panel that comes back takes it on its link to the composer, where it
+  // would otherwise fall to the page.
+  it.each(EXITS)('puts the focus on the Running panel\'s Put a look on after %s', async (_, exit) => {
+    await openApp('/next/live')
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    fireEvent.click(tile(tilesShown()[0]!))
+    await settle()
+    expect(composer()).toContainElement(document.activeElement as HTMLElement)
+    exit()
+    await settle()
+    expect(screen.getByRole('link', { name: 'Put a look on' })).toHaveFocus()
+  })
+
+  // The focus goes back to that link as the composer closes, and not otherwise.
+  it('leaves the focus alone as Live opens', async () => {
+    await openApp('/next/live')
+    expect(screen.getByRole('link', { name: 'Put a look on' })).not.toHaveFocus()
+  })
+
+  // The page's L is no one's while a dialog is open: Stop all?'s keys are its own.
+  it('takes no L while a dialog is open on Live', async () => {
+    const { router } = await openApp('/next/live')
+    fireEvent.click(screen.getByRole('button', { name: 'Stop all' }))
+    await settle(100)
+    const dialog = screen.getByRole('alertdialog', { name: 'Stop all?' })
+    expect(dialog).toContainElement(document.activeElement as HTMLElement)
+    expect(fireEvent.keyDown(document.activeElement!, { key: 'l' })).toBe(true)
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+
+    // With the dialog closed, an L opens the composer as it does anywhere on Live.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await settle(100)
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
   })
 
   // §8.2 "L opens the composer from Live": on Live alone, in either case, and not while typing, or with the modifiers that are the browser's.
@@ -741,6 +848,8 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
 
     fireEvent.keyDown(document.body, { key: 'Escape' })
     await settle()
+    // The panel that comes back over the stage takes the focus on its link, as the wide layout's does.
+    expect(screen.getByRole('link', { name: 'Put a look on' })).toHaveFocus()
     fireEvent.click(screen.getByRole('button', { name: 'Hide Running' }))
     await settle(100)
     expect(screen.getByRole('button', { name: 'Running' })).toBeInTheDocument()

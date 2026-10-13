@@ -6,6 +6,9 @@ import { HERO_NOW } from '@/test/live'
 import {
   CATEGORIES,
   chosenZone,
+  COMPOSER_ENTRY,
+  composerEntered,
+  composerLink,
   composerPath,
   lookInputs,
   lookLabel,
@@ -30,6 +33,14 @@ describe("the composer's URL", () => {
     expect(composerPath('living')).toBe('/live/put?zone=living')
     expect(composerPath('living', 'embers')).toBe('/live/put?zone=living&look=embers')
     expect(composerPath(null, 'embers')).toBe('/live/put?look=embers')
+  })
+
+  // F4 ruling 13, as amended: a push into the composer carries a marker in its history state, and nothing else is taken for one.
+  it('is opened by a link that carries the entry marker, which nothing else is taken for', () => {
+    expect(composerLink('living', 'embers')).toEqual({ to: '/live/put?zone=living&look=embers', state: COMPOSER_ENTRY })
+    expect(composerLink().to).toBe('/live/put')
+    expect(composerEntered(composerLink().state)).toBe(true)
+    for (const other of [undefined, null, 'entered', 7, {}, { composer: 'left' }]) expect(composerEntered(other)).toBe(false)
   })
 })
 

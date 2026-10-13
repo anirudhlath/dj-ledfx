@@ -2,7 +2,7 @@
 // three.js and React Three Fiber arrive in a chunk of their own (§14: the first load's budget
 // excludes three.js).
 import type { Id, Room } from '@/api/contract'
-import { composerPath } from '@/compose/model'
+import { COMPOSER_ENTRY, composerPath } from '@/compose/model'
 import { StagePending } from './stage-pending'
 import type { StageVariant } from './behaviour'
 import { StageView, type StageCompose } from './stage-view'
@@ -24,5 +24,16 @@ export interface StageProps {
 export default function Stage({ variant, outlined = null, focus = null, compose = null }: StageProps) {
   const data = useStageData()
   if (data === null) return <StagePending />
-  return <StageView data={data} variant={variant} route="live" roomTo={composerFor} outlined={outlined} focus={focus} compose={compose} />
+  return (
+    <StageView
+      data={data}
+      variant={variant}
+      route="live"
+      roomTo={composerFor}
+      roomState={COMPOSER_ENTRY}
+      outlined={outlined}
+      focus={focus}
+      compose={compose}
+    />
+  )
 }

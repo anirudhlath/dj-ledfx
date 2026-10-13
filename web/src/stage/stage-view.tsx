@@ -68,6 +68,8 @@ export interface StageViewProps {
   route: string
   /** Where a click on a room goes on Live: its zone's composer (§8.1). In the composer a room is chosen as a zone instead (`compose`). */
   roomTo: (room: Room) => string
+  /** The history state a click or a link on a room carries to that page. */
+  roomState?: unknown
   /** The zone to outline: the card under the pointer, or the one /live/zones/:zoneId names (F3 decision 23). */
   outlined?: Id | null
   /** §7.6 focus: framed on this zone, the other zones' lights hidden, a soft vignette (Zone detail). */
@@ -76,7 +78,7 @@ export interface StageViewProps {
   compose?: StageCompose | null
 }
 
-export function StageView({ data, variant, route, roomTo, outlined = null, focus = null, compose = null }: StageViewProps) {
+export function StageView({ data, variant, route, roomTo, roomState, outlined = null, focus = null, compose = null }: StageViewProps) {
   const { home, lights, states, running, zoneNames, zones, sun, frozen } = data
   const [ref, size] = useElementSize<HTMLElement>()
   const [stored, store] = useStageView(route)
@@ -181,7 +183,7 @@ export function StageView({ data, variant, route, roomTo, outlined = null, focus
       const { room } = under(event)
       if (room === null) return
       if (behaviour.roomClick === 'choose' && compose !== null) compose.choose(room.id)
-      else navigate(roomTo(room))
+      else navigate(roomTo(room), { state: roomState })
     },
   }
 
@@ -252,7 +254,7 @@ export function StageView({ data, variant, route, roomTo, outlined = null, focus
               stage={pose}
             />
           )}
-          <RoomLinks rooms={home.rooms} to={roomTo} />
+          <RoomLinks rooms={home.rooms} to={roomTo} state={roomState} />
         </>
       )}
     </section>

@@ -2,10 +2,10 @@
 // spec §4.3), changed in place, so Back leaves the composer whole; the zone falls back to the last one
 // used, then the whole home, and a home look locks it to the whole home. useComposeChoice() is what the
 // stage needs too; useComposer() is the panel's and the phone's sheet's, and holds the preview while
-// either is mounted. Start, Cancel and Close go back to Live, which ends the preview.
+// either is mounted. Start, Cancel and Close go back to Live (use-close-composer.ts), which ends the preview.
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
+import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import { failureText, startLook } from '@/api/actions'
 import type { Id, Inputs, Light, Look, RunningZone, Transition, Zone } from '@/api/contract'
 import { useLive, useLiveBy } from '@/api/live-store'
@@ -17,6 +17,7 @@ import type { StageCompose } from '@/stage/stage-view'
 import { consequence, type Consequence } from './consequence'
 import { lastZone, rememberZone } from './last-zone'
 import { chosenZone, composerPath, locksToHome, missingInputs, type MissingInput } from './model'
+import { useCloseComposer } from './use-close-composer'
 
 export interface ComposeChoice {
   zones: readonly Zone[] | undefined
@@ -54,6 +55,8 @@ export function useComposeChoice(composing = true): ComposeChoice {
   const looks = useQuery(queries.looks()).data
   const [params] = useSearchParams()
   const navigate = useNavigate()
+  // A choice made in place replaces the entry and keeps its state (COMPOSER_ENTRY, if it has it).
+  const { state } = useLocation()
   const remembered = useRememberedZone(composing)
   const asked = params.get('zone')
   const lookId = params.get('look')
@@ -69,9 +72,9 @@ export function useComposeChoice(composing = true): ComposeChoice {
     choose: (zoneId) => {
       // The chips are disabled under a home look, which locks the zone to the whole home, and a room on the stage isn't: it changes nothing.
       if (locked || zoneId === zone?.id) return
-      navigate(composerPath(zoneId, lookId), { replace: true })
+      navigate(composerPath(zoneId, lookId), { replace: true, state })
     },
-    pick: (next) => navigate(composerPath(asked, next), { replace: true }),
+    pick: (next) => navigate(composerPath(asked, next), { replace: true, state }),
   }
 }
 
@@ -123,7 +126,7 @@ export function useComposer(): Composer {
   )
   // A zone with no lights has nothing to preview: the engine would refuse it.
   const preview = usePreview(zone !== undefined && zone.lights.length > 0 ? zone.id : null, look?.id ?? null)
-  const navigate = useNavigate()
+  const close = useCloseComposer()
   const announce = useAnnounce()
   const [starting, setStarting] = useState(false)
   const names = useMemo(() => new Map<Id, Light>((lights ?? []).map((light) => [light.id, light])), [lights])
@@ -142,7 +145,6 @@ export function useComposer(): Composer {
           missing: look === undefined ? [] : missing(look),
           refused: answered && preview.status === 'failed' && look !== undefined ? failureText(`preview ${look.name}`, preview.error) : null,
         })
-  const close = () => navigate('/live', { replace: true })
   const start = (transition: Transition) => {
     if (zone === undefined || look === undefined || starting) return
     setStarting(true)

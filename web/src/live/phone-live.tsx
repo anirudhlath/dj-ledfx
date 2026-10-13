@@ -7,6 +7,7 @@ import { useMemo } from 'react'
 import type { Overlay } from '@/api/contract'
 import { useLive } from '@/api/live-store'
 import { useConnectionStatus, usePreviewOnly } from '@/chrome/hooks'
+import { composerLink } from '@/compose/model'
 import { ButtonLink } from '@/design/button'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useNow } from '@/lib/use-now'
@@ -68,7 +69,7 @@ export function PhoneRunning() {
       </div>
       {!frozen && (
         <div className="sticky bottom-0 z-20 mt-auto bg-linear-to-t from-bg from-60% to-bg/0 px-4 pt-7 pb-3">
-          <ButtonLink variant="primary" size="cta" icon="plus" to="/live/put" className="w-full">
+          <ButtonLink variant="primary" size="cta" icon="plus" {...composerLink()} className="w-full">
             Put a look on
           </ButtonLink>
         </div>

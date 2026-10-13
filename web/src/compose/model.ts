@@ -15,6 +15,22 @@ export function composerPath(zoneId: Id | null, lookId: Id | null = null): strin
   return query === '' ? '/live/put' : `/live/put?${query}`
 }
 
+/**
+ * What every push into the composer carries as its history state (F4 ruling 13, as amended): the entry was stepped into from the page
+ * before it, so leaving the composer steps back out of it (Back then goes where it went before). An entry without it, a deep link or a
+ * reload of one, has no step to go back to, so leaving replaces it with Live. The choices made in place keep the state they find.
+ */
+export const COMPOSER_ENTRY = { composer: 'entered' } as const
+
+/** Whether a history entry's state is COMPOSER_ENTRY. */
+export const composerEntered = (state: unknown): boolean =>
+  typeof state === 'object' && state !== null && 'composer' in state && state.composer === COMPOSER_ENTRY.composer
+
+/** The `to` and `state` of a link, or a push, that opens the composer (on a zone and a look, as given). */
+export function composerLink(zoneId: Id | null = null, lookId: Id | null = null): { to: string; state: typeof COMPOSER_ENTRY } {
+  return { to: composerPath(zoneId, lookId), state: COMPOSER_ENTRY }
+}
+
 /** §8.2's category chips: Starred, then the looks' own categories. */
 export type Category = 'starred' | Look['category']
 

@@ -3,11 +3,12 @@
 // fit (decision 2), and the footer's Put a look on. Nothing running is §9.4's. The zone /live/zones/:zoneId
 // names is outlined, collapses last and scrolls into view (decision 23). It reads the live store a slice at
 // a time; the frames reach only the swatches. Look and layout: Main.html's and State-Nothing-Running.html's.
-import { Fragment, useEffect, useMemo } from 'react'
+import { Fragment, useEffect, useMemo, type Ref } from 'react'
 import { failureText, stopAll } from '@/api/actions'
 import type { Id, Overlay } from '@/api/contract'
 import { useLive } from '@/api/live-store'
 import { useConnectionStatus, usePreviewOnly } from '@/chrome/hooks'
+import { composerLink } from '@/compose/model'
 import { useAnnounce } from '@/design/announce'
 import { Button, ButtonLink, IconButton } from '@/design/button'
 import { ConfirmDialog } from '@/design/confirm-dialog'
@@ -39,9 +40,11 @@ export interface RunningPanelProps {
   focusHide?: boolean
   /** The zone of the card or row under the pointer or the focus; null when it leaves (§8.1). */
   onZoneHover?: (zoneId: Id | null) => void
+  /** The footer's Put a look on link, which Live gives the focus back when the composer it opened closes. */
+  putRef?: Ref<HTMLAnchorElement>
 }
 
-export function RunningPanel({ selected, className, onHide, focusHide = false, onZoneHover }: RunningPanelProps) {
+export function RunningPanel({ selected, className, onHide, focusHide = false, onZoneHover, putRef }: RunningPanelProps) {
   const world = useZoneWorld()
   const running = useLive((state) => state.running?.zones ?? null)
   const overlays = useLive((state) => state.running?.overlays ?? NO_OVERLAYS)
@@ -155,7 +158,7 @@ export function RunningPanel({ selected, className, onHide, focusHide = false, o
           </div>
         </div>
         <div className="flex flex-col gap-2.5 border-t border-line-soft px-5 pt-4 pb-5" {...still}>
-          <ButtonLink variant="primary" size="lg" icon="plus" to="/live/put" className="w-full">
+          <ButtonLink ref={putRef} variant="primary" size="lg" icon="plus" {...composerLink()} className="w-full">
             Put a look on
           </ButtonLink>
           {/* The collapse's first step drops it: Main.png's cards fit only without it. */}

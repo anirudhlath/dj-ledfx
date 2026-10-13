@@ -51,9 +51,9 @@ export function MenuItem({ icon, onClick, children }: { icon?: IconName; onClick
 }
 
 /** An item that goes to `to` in the app. The menu closes on the way (`closeOnClick`; LinkItem's default is false). */
-export function MenuLinkItem({ icon, to, children }: { icon?: IconName; to: string; children: ReactNode }) {
+export function MenuLinkItem({ icon, to, state, children }: { icon?: IconName; to: string; state?: unknown; children: ReactNode }) {
   return (
-    <BaseMenu.LinkItem closeOnClick render={<Link to={to} />} className={ITEM}>
+    <BaseMenu.LinkItem closeOnClick render={<Link to={to} state={state} />} className={ITEM}>
       {icon && <Icon name={icon} size={15} />}
       {children}
     </BaseMenu.LinkItem>

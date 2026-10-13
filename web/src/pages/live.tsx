@@ -5,7 +5,7 @@
 // stage in `compose` mode (§8.2), which `L` opens and Esc closes. Between 768 and 1199 px the panel lies
 // over the stage's right side and can hide (§4.4, F3 decision 22); the composer lies there too.
 import { usePrefetchQuery } from '@tanstack/react-query'
-import { lazy, Suspense, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useMatch, useParams } from 'react-router'
 import type { Id } from '@/api/contract'
 import { queries } from '@/api/queries'
@@ -58,6 +58,14 @@ export function LivePage() {
     setWasComposing(composing)
     setHovered(null)
   }
+  // The focus was in the composer, which goes with it: the Running panel that returns gives it to the link that opens the composer, where it
+  // would otherwise fall to the page.
+  const put = useRef<HTMLAnchorElement>(null)
+  const wasOpen = useRef(composing)
+  useEffect(() => {
+    if (wasOpen.current && !composing) put.current?.focus()
+    wasOpen.current = composing
+  }, [composing])
   const stage = (
     <Suspense fallback={<StagePending />}>
       <Stage
@@ -93,7 +101,9 @@ export function LivePage() {
       {composing && (
         <ComposerPanel className={narrow ? 'absolute inset-y-0 right-0 z-20 w-(--live-panel-w) shadow-pop' : 'w-(--live-panel-w) shrink-0'} />
       )}
-      {!composing && !narrow && <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} />}
+      {!composing && !narrow && (
+        <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} putRef={put} />
+      )}
       {!composing && narrow && panel !== 'hidden' && (
         <RunningPanel
           selected={zoneId}
@@ -101,6 +111,7 @@ export function LivePage() {
           onHide={() => setPanel('hidden')}
           onZoneHover={setHovered}
           focusHide={panel === 'reopened'}
+          putRef={put}
         />
       )}
       {!composing && narrow && panel === 'hidden' && (

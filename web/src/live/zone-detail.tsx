@@ -10,6 +10,7 @@ import type { Id, Look, RunningZone } from '@/api/contract'
 import { useLive } from '@/api/live-store'
 import { queries } from '@/api/queries'
 import { useConnectionStatus } from '@/chrome/hooks'
+import { composerLink } from '@/compose/model'
 import { Button, ButtonLink } from '@/design/button'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
@@ -83,7 +84,7 @@ function RunningDetail({ running, view, look }: { running: RunningZone; view: Zo
         </div>
       )}
       <div className="grid grid-cols-3 gap-2">
-        <ButtonLink size="lg" icon="looks" to={`/live/put?zone=${encodeURIComponent(running.zoneId)}`} className={TALL}>
+        <ButtonLink size="lg" icon="looks" {...composerLink(running.zoneId)} className={TALL}>
           Change
         </ButtonLink>
         <ButtonLink size="lg" icon="sliders" to={`/looks/${encodeURIComponent(running.lookId)}`} className={TALL}>
@@ -115,7 +116,7 @@ function NotRunning({ zoneId, name }: { zoneId: Id; name: string }) {
     <div className="flex flex-col gap-3">
       <h2 className="font-serif text-[32px] leading-none">Nothing running</h2>
       <p className="text-size-control leading-[1.45] text-text-2">{name} has no look of its own.</p>
-      <ButtonLink variant="primary" size="cta" icon="plus" to={`/live/put?zone=${encodeURIComponent(zoneId)}`}>
+      <ButtonLink variant="primary" size="cta" icon="plus" {...composerLink(zoneId)}>
         Put a look on
       </ButtonLink>
     </div>

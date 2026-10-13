@@ -2,6 +2,7 @@
 // look's editor (F8's), Change look the composer on this zone, and Show lights the map (F7's; F3
 // decision 25). The face is Main.html's: 28 px, chip radius, text-3, grown to the touch minimum.
 import type { Id } from '@/api/contract'
+import { composerLink } from '@/compose/model'
 import { Icon } from '@/design/icon'
 import { Menu, MenuItem, MenuLinkItem } from '@/design/menu'
 
@@ -28,7 +29,7 @@ export function ZoneMenu({ zoneId, zoneName, lookId, onRestart }: ZoneMenuProps)
       }
     >
       <MenuLinkItem to={`/looks/${encodeURIComponent(lookId)}`}>Edit look</MenuLinkItem>
-      <MenuLinkItem to={`/live/put?zone=${encodeURIComponent(zoneId)}`}>Change look</MenuLinkItem>
+      <MenuLinkItem {...composerLink(zoneId)}>Change look</MenuLinkItem>
       <MenuItem onClick={onRestart}>Restart</MenuItem>
       <MenuLinkItem to={`/map/${encodeURIComponent(zoneId)}`}>Show lights on the map</MenuLinkItem>
     </Menu>
