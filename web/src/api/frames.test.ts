@@ -111,6 +111,35 @@ describe('FrameStore', () => {
     expect(frames.version).toBe(2)
   })
 
+  // The preview session holds the stream while the server may be playing a look that was chosen over (preview.ts).
+  it('keeps no preview frame while they are held, the last staying as it was, and takes them again when they are let in', () => {
+    decodeFrame(encodeFrame(2, 'tube', 1, rgb(1, 1, 1), 'preview'), 2, frames, 0)
+    frames.holdPreview(true)
+    expect(frames.previewHeld).toBe(true)
+    const version = frames.version
+    // One for a light with a frame, one for a light with none yet, and a bigger one: none is kept, none moves the version.
+    expect(decodeFrame(encodeFrame(2, 'tube', 2, rgb(2, 2, 2), 'preview'), 2, frames, 1)).toBe(true)
+    expect(decodeFrame(encodeFrame(2, 'rope', 1, rgb(3, 3, 3), 'preview'), 2, frames, 1)).toBe(true)
+    expect(decodeFrame(encodeFrame(2, 'tube', 3, rgb(4, 4, 4, 4, 4, 4), 'preview'), 2, frames, 1)).toBe(true)
+    expect(frames.get('tube', 'preview')).toEqual({ rgb: rgb(1, 1, 1), seq: 1, count: 1, at: 0, recent: 1 })
+    expect(frames.preview.has('rope')).toBe(false)
+    expect(frames.version).toBe(version)
+
+    frames.holdPreview(false)
+    expect(frames.previewHeld).toBe(false)
+    decodeFrame(encodeFrame(2, 'tube', 2, rgb(2, 2, 2), 'preview'), 2, frames, 2)
+    expect(frames.get('tube', 'preview')).toMatchObject({ rgb: rgb(2, 2, 2), seq: 2 })
+  })
+
+  it("holds the preview's frames alone, and still counts a malformed one", () => {
+    frames.holdPreview(true)
+    decodeFrame(encodeFrame(2, 'tube', 1, rgb(9, 9, 9), 'live'), 2, frames, 0)
+    expect(frames.get('tube')?.rgb).toEqual(rgb(9, 9, 9))
+    // Four bytes of colour is not whole LEDs, and a held stream is still one the server must get right.
+    expect(decodeFrame(encodeFrame(2, 'tube', 2, rgb(1, 2, 3, 4), 'preview'), 2, frames, 0)).toBe(false)
+    expect(frames.malformed).toBe(1)
+  })
+
   it('remembers when the last frame arrived, on the wall clock', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 8, 23, 19, 14, 32))
@@ -144,8 +173,9 @@ describe('FrameStore', () => {
     decodeFrame(encodeFrame(2, 'rope', 1, rgb(0, 0, 0)), 2, frames, 0)
     decodeFrame(encodeFrame(2, 'tube', 1, rgb(0, 0, 0), 'preview'), 2, frames, 0)
     frames.reject()
+    frames.holdPreview(true)
     frames.clear()
-    expect(frames).toMatchObject({ version: 0, lastFrameAt: null, malformed: 0 })
+    expect(frames).toMatchObject({ version: 0, lastFrameAt: null, malformed: 0, previewHeld: false })
     expect(frames.live.size + frames.preview.size).toBe(0)
   })
 })

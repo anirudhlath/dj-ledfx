@@ -157,6 +157,145 @@ describe('the preview', () => {
     await vi.waitFor(() => expect(preview.snapshot()).toMatchObject({ status: 'on', zoneId: 'kitchen' }))
   })
 
+  // The server plays the look of each answer, so the answer to a choice already replaced shows its look on the stage for a round trip, its
+  // frames sometimes ahead of the answer. From the replacement until the choice made last is answered the zone keeps the last frame it drew.
+  it("holds a zone's last frame from the choice that replaces one on its way until that choice is answered", async () => {
+    const { preview, store } = session()
+    const second = held<PreviewStarted>()
+    const third = held<PreviewStarted>()
+    const ask = vi.spyOn(api, 'startPreview').mockResolvedValueOnce(started('p1')).mockReturnValueOnce(second.promise).mockReturnValueOnce(third.promise)
+    const light = (seq: number, value: number) => pushFrame('a-light', seq, [value, value, value], { store, stream: 'preview' })
+    const kept = () => store.get('a-light', 'preview')!.rgb[0]
+    preview.show('living', 'embers')
+    await vi.waitFor(() => expect(preview.snapshot().status).toBe('on'))
+    light(1, 10)
+
+    // The next look is asked for, and nothing is chosen over yet: the frames of the look before flow until the server plays it.
+    preview.show('living', 'aurora')
+    light(2, 20)
+    expect(kept()).toBe(20)
+    expect(store.previewHeld).toBe(false)
+
+    // Another is chosen before that is answered: whatever the server plays now is not the choice, and the zone keeps what it drew.
+    preview.show('living', 'lava')
+    expect(preview.snapshot()).toMatchObject({ status: 'starting', zoneId: 'living', lookId: 'lava', showing: 'living' })
+    expect(store.previewHeld).toBe(true)
+    light(3, 30)
+    expect(kept()).toBe(20)
+
+    // The answer comes late, and the server plays that look: its frames are not kept either, and the choice made last is asked for.
+    second.resolve(started('p2'))
+    await vi.waitFor(() => expect(ask).toHaveBeenCalledTimes(3))
+    light(4, 40)
+    expect(kept()).toBe(20)
+    expect(preview.snapshot()).toMatchObject({ status: 'starting', lookId: 'lava', showing: 'living' })
+    expect(store.previewHeld).toBe(true)
+
+    third.resolve(started('p3'))
+    await vi.waitFor(() => expect(preview.snapshot().status).toBe('on'))
+    expect(store.previewHeld).toBe(false)
+    light(5, 50)
+    expect(kept()).toBe(50)
+  })
+
+  // A zone not drawn from the preview stream yet has no frame to hold: it starts from none, and the look chosen over leaves none.
+  it('keeps a replaced choice out of a zone that is not drawn from the preview stream yet', async () => {
+    const { preview, store } = session()
+    const first = held<PreviewStarted>()
+    const second = held<PreviewStarted>()
+    vi.spyOn(api, 'startPreview').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const light = (seq: number) => pushFrame('a-light', seq, [seq, seq, seq], { store, stream: 'preview' })
+    preview.show('living', 'embers')
+    // The server may have played it already: this is the look wanted, and kept, for now.
+    light(1)
+    expect(store.preview.size).toBe(1)
+
+    preview.show('living', 'aurora')
+    expect(preview.snapshot()).toMatchObject({ status: 'starting', lookId: 'aurora', showing: null })
+    expect(store.preview.size).toBe(0)
+    light(2)
+    expect(store.preview.size).toBe(0)
+
+    first.resolve(started('p1'))
+    await vi.waitFor(() => expect(api.startPreview).toHaveBeenCalledTimes(2))
+    light(3)
+    expect(store.preview.size).toBe(0)
+
+    second.resolve(started('p2'))
+    await vi.waitFor(() => expect(preview.snapshot().status).toBe('on'))
+    light(4)
+    expect(store.get('a-light', 'preview')?.seq).toBe(4)
+  })
+
+  // A choice stopped and made again while its own request is on its way (an effect that runs twice does it) is the one that request answers.
+  it('holds nothing for a choice made again while its own request is on its way', async () => {
+    const { preview, store } = session()
+    const first = held<PreviewStarted>()
+    vi.spyOn(api, 'startPreview').mockReturnValueOnce(first.promise)
+    preview.show('living', 'embers')
+    preview.stop()
+    preview.show('living', 'embers')
+    expect(store.previewHeld).toBe(false)
+    pushFrame('a-light', 1, [1, 2, 3], { store, stream: 'preview' })
+    expect(store.preview.size).toBe(1)
+
+    first.resolve(started('p1'))
+    await vi.waitFor(() => expect(preview.snapshot().status).toBe('on'))
+    expect(api.startPreview).toHaveBeenCalledTimes(1)
+    expect(store.previewHeld).toBe(false)
+  })
+
+  it('lets the frames in again when the choice made last is refused', async () => {
+    const { preview, store } = session()
+    const first = held<PreviewStarted>()
+    const second = held<PreviewStarted>()
+    const ask = vi.spyOn(api, 'startPreview').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    preview.show('living', 'embers')
+    preview.show('living', 'aurora')
+    first.resolve(started('p1'))
+    await vi.waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
+    expect(store.previewHeld).toBe(true)
+
+    second.reject(new ApiError(400, 'No preview today', '/api/preview'))
+    await vi.waitFor(() => expect(preview.snapshot().status).toBe('failed'))
+    expect(store.previewHeld).toBe(false)
+  })
+
+  it('lets the frames in on the answer to a choice that was chosen back while its request was on its way', async () => {
+    const { preview, store } = session()
+    const first = held<PreviewStarted>()
+    const ask = vi.spyOn(api, 'startPreview').mockReturnValueOnce(first.promise)
+    preview.show('living', 'embers')
+    preview.show('living', 'aurora')
+    preview.show('living', 'embers')
+    expect(store.previewHeld).toBe(true)
+
+    first.resolve(started('p1'))
+    await vi.waitFor(() => expect(preview.snapshot().status).toBe('on'))
+    expect(preview.snapshot()).toMatchObject({ zoneId: 'living', lookId: 'embers', showing: 'living' })
+    expect(ask).toHaveBeenCalledTimes(1)
+    expect(store.previewHeld).toBe(false)
+  })
+
+  it('holds nothing once the preview is stopped, with a request on its way or not, or reset', async () => {
+    const { preview, store } = session()
+    const first = held<PreviewStarted>()
+    vi.spyOn(api, 'startPreview').mockReturnValueOnce(first.promise)
+    preview.show('living', 'embers')
+    preview.show('living', 'aurora')
+    preview.stop()
+    first.resolve(started('p1'))
+    await vi.waitFor(() => expect(api.stopPreview).toHaveBeenCalledWith('p1'))
+    expect(store.previewHeld).toBe(false)
+
+    vi.spyOn(api, 'startPreview').mockReturnValueOnce(held<PreviewStarted>().promise)
+    preview.show('living', 'embers')
+    preview.show('living', 'aurora')
+    expect(store.previewHeld).toBe(true)
+    preview.reset()
+    expect(store.previewHeld).toBe(false)
+  })
+
   // Review focus 4: the engine ends a preview nobody watched for 10 s, and a restarted server holds none.
   it('asks for the preview again when the link comes back', async () => {
     vi.useFakeTimers()

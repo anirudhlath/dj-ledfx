@@ -1,14 +1,14 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Id, Room } from '@/api/contract'
-import { previewSession } from '@/api/live'
+import { frames, previewSession } from '@/api/live'
 import { lookName } from '@/api/mocks/fixtures'
 import type { MockServer, MockServerOptions } from '@/api/mocks/mock-server'
 import { api, ApiError } from '@/api/rest'
 import { renderApp } from '@/test/app'
-import { HERO_NOW, restOn, startMockDataLayer } from '@/test/live'
+import { HERO_NOW, pushFrame, restOn, startMockDataLayer } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
-import { heroPose, loadedStage, MAIN_STAGE } from '@/test/stage'
+import { drawn, heroPose, loadedStage, MAIN_STAGE } from '@/test/stage'
 import { setViewportWidth } from '@/test/viewport'
 import { projectPoint } from '@/stage/camera'
 import { lastZone, rememberZone } from './last-zone'
@@ -89,6 +89,20 @@ function holdPreviews() {
   )
   return waiting
 }
+/** What the stage draws a light as, in its first glow: the entries and the frame store written into the canvas's arrays, as the light layer does. */
+function glowOf(lightId: Id): number[] {
+  const { entries, writer } = drawn.props!
+  writer.setEntries(entries)
+  writer.write(frames)
+  let glow = 0
+  for (const entry of entries) {
+    if (entry.body.lightId === lightId) return [...writer.glowColours.slice(glow * 3, glow * 3 + 3)].map((value) => +value.toFixed(3))
+    glow += entry.body.samples.length
+  }
+  throw new Error(`The stage draws no ${lightId}`)
+}
+/** The stream the stage draws a light from. */
+const streamOf = (lightId: Id) => drawn.props!.entries.find((entry) => entry.body.lightId === lightId)!.stream
 /** From here a Start waits for the test to answer it, and the composer can be left before it is: returns what answers it. */
 function holdStart() {
   const real = api.start.bind(api)
@@ -443,6 +457,73 @@ describe('Put a look on (§8.2)', () => {
     expect(previewSession.snapshot()).toMatchObject({ status: 'on', zoneId: 'living', lookId: 'rain' })
     expect(card()).toHaveTextContent(`${lookName('rain')} on ${living}.`)
     expect(consequenceLine()).not.toHaveTextContent(/will (run|get)/)
+  })
+
+  // RF1: choices outrun the server too, and it plays the look of an answer that comes late, its frames on the preview stream for a round trip and
+  // sometimes ahead of the answer. The zone keeps the last frame it drew until the look chosen last is answered, then draws that look.
+  it("holds the last frame a zone drew while a look chosen over is answered, and draws the look chosen last once it is", async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=embers')
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    const living = server.state.zones.find((zone) => zone.id === 'living')!
+    const light = drawn.props!.entries.find((entry) => living.lights.includes(entry.body.lightId))!.body.lightId
+    const stored = () => frames.get(light, 'preview')!.seq
+    const waiting = holdPreviews()
+
+    // Two looks chosen before the server has answered the first.
+    fireEvent.click(tile('rain'))
+    fireEvent.click(tile('snow'))
+    await settle(100)
+    expect(waiting).toHaveLength(1)
+    const held = { seq: stored(), glow: glowOf(light) }
+    expect(streamOf(light)).toBe('preview')
+
+    // The first look's frames come ahead of its answer, and then its answer comes: the server plays it, and the stage keeps the frame it had.
+    pushFrame(light, 9_000_000, [255, 0, 0], { stream: 'preview' })
+    expect(glowOf(light)).toEqual(held.glow)
+    waiting.shift()!()
+    await settle(200)
+    expect(waiting).toHaveLength(1)
+    expect(stored()).toBe(held.seq)
+    expect(glowOf(light)).toEqual(held.glow)
+    expect(streamOf(light)).toBe('preview')
+    expect(previewSession.snapshot()).toMatchObject({ status: 'starting', lookId: 'snow', showing: 'living' })
+
+    // The look chosen last is answered, and its frames are drawn.
+    waiting.shift()!()
+    await settle(200)
+    expect(previewSession.snapshot()).toMatchObject({ status: 'on', lookId: 'snow', showing: 'living' })
+    expect(stored()).toBeGreaterThan(held.seq)
+    pushFrame(light, 9_000_001, [0, 0, 255], { stream: 'preview' })
+    expect(glowOf(light)).toEqual([0, 0, 1])
+  })
+
+  it('draws nothing of a look chosen over on a zone that was not previewed yet', async () => {
+    const { server } = await openApp('/next/live/put?zone=living')
+    await loadedStage()
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    const living = server.state.zones.find((zone) => zone.id === 'living')!
+    const light = drawn.props!.entries.find((entry) => living.lights.includes(entry.body.lightId))!.body.lightId
+    const waiting = holdPreviews()
+
+    fireEvent.click(tile('rain'))
+    fireEvent.click(tile('snow'))
+    await settle(100)
+    // Nothing is previewed on the zone yet, so it is drawn from the live stream, and the preview stream has none of its own.
+    expect(streamOf(light)).toBe('live')
+    pushFrame(light, 9_000_000, [255, 0, 0], { stream: 'preview' })
+    waiting.shift()!()
+    await settle(200)
+    expect(waiting).toHaveLength(1)
+    expect(frames.get(light, 'preview')).toBeUndefined()
+    expect(streamOf(light)).toBe('live')
+
+    waiting.shift()!()
+    await settle(200)
+    expect(previewSession.snapshot()).toMatchObject({ status: 'on', lookId: 'snow', showing: 'living' })
+    expect(streamOf(light)).toBe('preview')
+    pushFrame(light, 9_000_001, [0, 0, 255], { stream: 'preview' })
+    expect(glowOf(light)).toEqual([0, 0, 1])
   })
 
   // Review focus 3: Back leaves the composer as Cancel does, and the preview ends with it.

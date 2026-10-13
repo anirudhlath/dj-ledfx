@@ -1,9 +1,12 @@
 // The composer's preview (spec §8.2, §12.3): the look on the stage only, while the lights stay as they
 // are. The server holds one preview at a time and a new one replaces it, so the session asks for one
 // at a time: a choice made while a request is on its way is asked for when that one is answered, and
-// the server's last preview is always the last one chosen. The preview stream is watched while one is
-// open (engine M2 ends a preview nobody watches, its Spec Ruling 9), and asked for again when the link
-// comes back. Components read it through usePreview() (use-preview.ts).
+// the server's last preview is always the last one chosen. The server plays the look of each answer, so
+// the answer to a choice already replaced would show its look on the stage for a round trip: from the
+// replacement until the choice made last is answered, the preview stream's frames are held (the zone keeps
+// the last it drew). The preview stream is watched while one is open (engine M2 ends a preview nobody
+// watches, its Spec Ruling 9), and asked for again when the link comes back. Components read it through
+// usePreview() (use-preview.ts).
 import type { Id, PreviewLight } from './contract'
 import type { FrameStore } from './frames'
 import type { LiveClient } from './live-client'
@@ -22,7 +25,8 @@ export interface PreviewState {
   readonly error: unknown
   /**
    * The zone whose lights the stage draws from the preview stream: its preview is on, or the next look
-   * on it is on its way (the last one's frames flow until the server replaces it). Null otherwise.
+   * on it is on its way (the last one's frames flow until the server replaces it, and once a look was chosen
+   * over, the last frame drawn is held until the choice made last is answered). Null otherwise.
    */
   readonly showing: Id | null
 }
@@ -70,9 +74,15 @@ export class PreviewSession {
     const choice = { zoneId, lookId }
     if (same(this.wanted, choice)) return
     this.wanted = choice
-    if (this.state.showing !== null && this.state.showing !== zoneId) this.frames.clearPreview()
+    // A request for another choice is on its way, and the server plays that look when it lands, its frames sometimes ahead of the answer:
+    // they're a replaced choice's, and aren't kept until this one is answered. A zone drawn from the preview stream already keeps the last
+    // frame it drew; another zone, or one not drawn yet, starts from none.
+    const replaces = this.asking && !same(this.asked, choice)
+    const within = this.state.showing === zoneId
+    if (!within && (this.state.showing !== null || replaces)) this.frames.clearPreview()
+    if (replaces) this.frames.holdPreview(true)
     this.watch(true)
-    this.set({ ...PREVIEW_IDLE, status: 'starting', zoneId, lookId, showing: this.state.showing === zoneId ? zoneId : null })
+    this.set({ ...PREVIEW_IDLE, status: 'starting', zoneId, lookId, showing: within ? zoneId : null })
     if (!this.asking) void this.ask()
   }
 
@@ -107,6 +117,7 @@ export class PreviewSession {
     this.asking = false
     this.previewId = null
     this.watching = false
+    this.frames.holdPreview(false)
     this.set(PREVIEW_IDLE)
   }
 
@@ -120,7 +131,11 @@ export class PreviewSession {
         const started = await api.startPreview(choice)
         if (generation !== this.generation) return
         this.previewId = started.previewId
-        if (same(this.wanted, choice)) this.set({ ...PREVIEW_IDLE, status: 'on', ...choice, lights: started.lights, showing: choice.zoneId })
+        if (same(this.wanted, choice)) {
+          // The choice made last is answered: the preview stream is its own, and its frames are kept.
+          this.frames.holdPreview(false)
+          this.set({ ...PREVIEW_IDLE, status: 'on', ...choice, lights: started.lights, showing: choice.zoneId })
+        }
       } catch (error) {
         if (generation !== this.generation) return
         // A resume() since this request went out cleared `asked`: the link it went out on may be the one that dropped, so its
@@ -145,6 +160,7 @@ export class PreviewSession {
     // A preview already gone (it ended unwatched, or the server restarted) has nothing left to end.
     if (id !== null) void api.stopPreview(id).catch(() => undefined)
     this.frames.clearPreview()
+    this.frames.holdPreview(false)
     this.watch(false)
   }
 
