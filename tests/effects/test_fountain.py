@@ -65,6 +65,24 @@ def _watched(
     return seen
 
 
+def _burst_drops(
+    monkeypatch: pytest.MonkeyPatch, leds: LedSet, frames: int = 192, **settings: object
+) -> tuple[np.ndarray, np.ndarray]:
+    """Every drop of the bursts over a run seen sixteen times a beat (12 beats): where it is
+    (N, 3), and the beats since it was thrown (N,), so that a test can set aside a drop's first
+    instant, when it is at the anchor whatever its arc."""
+    fountain = _fountain(**settings)
+    seen = _watched(monkeypatch)
+    places, since = [], []
+    for step in range(frames):
+        ctx = tempo_ctx(2000.0 + step / 16)
+        drawn(fountain, ctx, leds)
+        drops, thrown = seen[-1][1]  # the bursts' part of the merge
+        places.append(drops.pos.astype(np.float64))
+        since.append((ctx.t - thrown) * ctx.bpm / 60.0)
+    return np.concatenate(places), np.concatenate(since)
+
+
 def test_the_spray_rises_to_its_height_and_never_falls_under_the_floor() -> None:
     where = _spray(_fountain(burst=0, height_m=1.2))
     assert where[:, 2].min() >= 0.0
@@ -417,6 +435,95 @@ def test_a_fountains_bursts_from_the_middle_of_a_zone_keep_to_the_band_of_their_
     west = where[where[:, 0] < 2.0 - 1e-3]  # left the middle, for the lamp in the band
     assert len(west) > 1000
     assert west[:, 2].max() <= 3.0 + 1e-5
+
+
+AT_THE_EDGE = 1e-6  # a drop this near the ceiling or the floor is held there by the clip
+
+
+@pytest.mark.parametrize(
+    ("anchor_z", "edge"),
+    [(3.2, 3.0), (4.0, 3.0), (-1.0, 0.0), (-3.0, 0.0)],
+    ids=["20 cm over the ceiling", "a metre over", "a metre under the floor", "3 m under"],
+)
+def test_a_burst_from_an_anchor_outside_the_band_leaves_the_edge_at_once_not_along_it(
+    monkeypatch: pytest.MonkeyPatch, anchor_z: float, edge: float
+) -> None:
+    """The anchor is outside the band of the lamps the drops go to, so the clip shows it at the
+    edge: the arc starts there, not at the anchor, and leaves the edge at once instead of being
+    held along it. Once past its first instant, at the largest settings, no drop is held at
+    either edge: none is, where before 16% of the drops were from 20 cm over the ceiling, 32%
+    from a metre over, 4% from a metre under the floor and 12% from 3 m under. (The old cap on
+    the rise held 4% and 20% of them, from 20 cm and a metre over.)"""
+    room = _room(np.array([2.0, 2.0, anchor_z], dtype=np.float32))
+    places, since = _burst_drops(monkeypatch, room, rate=5.0, height_m=3.0, burst=60)
+    z = places[since > 1e-3, 2]  # past the first instant
+    assert len(z) > 5000
+    assert z.min() >= 0.0 and z.max() <= 3.0  # and in the band the whole way
+    assert np.mean(np.abs(z - edge) < AT_THE_EDGE) < 0.001  # none held at the edge it came from
+    other = 3.0 - edge
+    assert np.mean(np.abs(z - other) < AT_THE_EDGE) < 0.001  # and the fit holds none at the other
+
+
+@pytest.mark.parametrize(
+    ("anchor_z", "edge"),
+    [(3.2, 3.0), (4.0, 3.0), (40.0, 3.0), (-0.5, 0.0), (-1.0, 0.0)],
+    ids=["20 cm over", "a metre over", "far over", "half a metre under", "a metre under"],
+)
+def test_a_burst_from_an_anchor_outside_the_band_flies_as_one_from_the_nearest_edge(
+    monkeypatch: pytest.MonkeyPatch, anchor_z: float, edge: float
+) -> None:
+    """For its flight to a lamp, an anchor outside the lamp's band is at the nearest edge of it:
+    the drops fly exactly as they do from an anchor there."""
+    outside = _burst_drops(
+        monkeypatch, _room(np.array([2.0, 2.0, anchor_z], dtype=np.float32)), rate=5.0, burst=60
+    )
+    at_the_edge = _burst_drops(
+        monkeypatch, _room(np.array([2.0, 2.0, edge], dtype=np.float32)), rate=5.0, burst=60
+    )
+    np.testing.assert_array_equal(outside[0], at_the_edge[0])
+    np.testing.assert_array_equal(outside[1], at_the_edge[1])
+
+
+def test_a_burst_from_an_anchor_over_the_zone_starts_at_the_ceiling_of_each_lamp_it_goes_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The band is the lamp's own: from an anchor 4 m up, the drops that go west, to a lamp in the
+    zone's 3 m, start at 3 m, those that go east, to a lamp whose LEDs are 3.2 to 3.5 m up, at
+    3.5 m, and each leaves its ceiling at once (before, 49% of the west drops in the air were held
+    at 3 m and 84% of the east ones at 3.5 m). The east ones held at 3.5 m now (5%) are the
+    flights to the lamp's top LED, which is at its ceiling: they fly level."""
+    room = lights_at(
+        upright(1.0, 2.0),
+        upright(3.0, 2.0, 3.2, 3.5),
+        anchors={ANCHOR_ID: np.array([2.0, 2.0, 4.0], dtype=np.float32)},
+        ceiling=3.0,
+    )
+    places, since = _burst_drops(monkeypatch, room, rate=5.0, height_m=3.0, burst=60)
+    first = places[since == 0.0, 2]
+    assert len(first) > 300
+    assert set(np.unique(first)) == {np.float32(3.0), np.float32(3.5)}  # each at its lamp's own
+    flying = (since > 1e-3) & (since < 1.0 - 1e-6)
+    west, east = flying & (places[:, 0] < 2.0), flying & (places[:, 0] > 2.0)
+    assert west.sum() > 1000 and east.sum() > 1000
+    assert np.mean(places[west, 2] > 3.0 - AT_THE_EDGE) < 0.001
+    assert np.mean(places[east, 2] > 3.5 - AT_THE_EDGE) < 0.1  # 1 LED of 14 is at the ceiling
+    assert np.mean(places[east, 2] > 3.0 + AT_THE_EDGE) > 0.5  # over the zone's, under the lamp's
+
+
+@pytest.mark.parametrize(
+    ("anchor_z", "start"),
+    [(-1.0, 0.0), (0.0, 0.0), (0.45, 0.45), (2.9, 2.9), (3.0, 3.0), (4.0, 3.0)],
+    ids=["a metre under", "at the floor", "0.45 m", "2.9 m", "at the ceiling", "a metre over"],
+)
+def test_a_burst_starts_at_the_height_of_its_anchor_held_in_the_band(
+    monkeypatch: pytest.MonkeyPatch, anchor_z: float, start: float
+) -> None:
+    """In the band the anchor is where the burst starts; outside it, at the edge."""
+    room = _room(np.array([2.0, 2.0, anchor_z], dtype=np.float32))
+    places, since = _burst_drops(monkeypatch, room, frames=32, rate=5.0, burst=60)
+    first = places[since == 0.0, 2]
+    assert len(first) == 2 * 60  # the bursts of beats 2000 and 2001
+    np.testing.assert_array_equal(first, np.float32(start))
 
 
 def _drops_in_the_air(fountain: Fountain, leds: LedSet) -> list[int]:

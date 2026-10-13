@@ -16,8 +16,10 @@ the spray is thrown no higher than the room over the anchor (but LEAST_RISE_M at
 that a drop still has a flight to be timed by) and a burst rises no more than fits under its
 lamp's ceiling, the most an arc between its two ends can rise and keep its top at or under it
 (particle_tools.rise_under). The spread is the same however short the flight: a drop lands the
-spread away at the anchor's height. The clip to the band stays only as the backstop for an
-anchor outside it (Ground.within).
+spread away at the anchor's height. A burst from an anchor outside its lamp's band starts at
+the nearest edge of that band, where the clip would have shown it, so the arc leaves the edge
+at once instead of running along it (the spray's clip, at the ceiling, is its own). The clip
+(Ground.within) stays on the bursts only as the last backstop, for rounding at an edge.
 
 The count keeps to MAX_PARTICLES itself, so that step() never cuts a drop short: two beats'
 bursts are in the air at the most (BURSTS_ALIVE), and the spray has the rest of the room. A
@@ -179,11 +181,17 @@ class Fountain(ParamParticles):
         since = beats - beat.astype(np.float64)  # beats since the burst was thrown
         share = since / FLIGHT_BEATS  # 1: landed
         rise = float(values["height_m"]) * BURST_UP * (0.8 + 0.4 * u[:, 1])
+        # The throw starts at the anchor, but at the nearest edge of the lamp's band when the
+        # anchor is outside it (where the clip would show it anyway): the arc leaves the edge at
+        # once instead of running along it, and the flight keeps to the lamp's band all the way.
+        start = np.empty_like(landing)
+        start[:] = origin
+        start[:, 2] = ground.within(lamp, origin[2])
         # An arc rises no more than fits under the lamp's ceiling: its top is at most there.
-        fitted = rise_under(ground.ceiling_for(lamp), origin[2], landing[:, 2], rise)
-        pos = arc(origin, landing, np.minimum(share, 1.0), fitted)
-        # Only the backstop, for an anchor outside the lamp's band: the throw stops at the
-        # ceiling and the floor, but never short of the lamp's own LEDs.
+        fitted = rise_under(ground.ceiling_for(lamp), start[:, 2], landing[:, 2], rise)
+        pos = arc(start, landing, np.minimum(share, 1.0), fitted)
+        # The last backstop, for rounding at an edge: nothing is left to clip, since the arc starts
+        # in the lamp's band, ends on its LED and tops out at its ceiling.
         pos[:, 2] = ground.within(lamp, pos[:, 2])
         glow = np.clip(1.0 - (share - 1.0) * FLIGHT_BEATS / REST_BEATS, 0.0, 1.0)
         colour = palette_at(self._palette, u[:, 1]) * glow[:, None].astype(np.float32)
