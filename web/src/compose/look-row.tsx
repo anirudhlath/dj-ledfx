@@ -9,9 +9,20 @@
 import { useId } from 'react'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
+import { LIVE_SPEC } from '@/design/live-numbers'
 import { LookThumb } from '@/looks/look-thumb'
 import type { LookTileProps } from './look-tile'
 import { lookInputs, lookLabel, rowNote } from './model'
+
+// The row's box is the render's thumb inside the row's `p-2` and `border`: 8 px and 1 px on each side.
+const PADDING = 8
+const BORDER = 1
+
+/**
+ * One row's height, px (Phone-PutLookOn: 72, the 54 px thumb and twice the padding and border). The sheet's look list is never drawn
+ * shorter than one, so a screen too short for it scrolls the sheet, and not the list away.
+ */
+export const ROW_HEIGHT = LIVE_SPEC.phoneComposer.thumb.height + 2 * (PADDING + BORDER)
 
 export function LookRow({ look, selected, here, missing, tabbable, onSelect }: LookTileProps) {
   const note = rowNote(look, selected, here, missing)

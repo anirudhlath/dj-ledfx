@@ -6,8 +6,9 @@
 // aside (a focused task). Keyboard (F4 ruling 12): Up and Down move through the rows, previewing each,
 // and Enter starts the look previewed; the page's Esc closes it. Every way out is view.close (F4 ruling 13).
 // Sizes: the render's, from its HTML. The page gives the sheet the screen's height under the stage, so
-// only the look list, which takes what the rest leaves, scrolls; on a screen too short for the rest of
-// the sheet (under about 600 px) the sheet scrolls, and <main> never does. The two rows that scroll on their own
+// only the look list, which takes what the rest leaves, scrolls; but never less than one whole row, with its
+// padding on top (`box-content`), so a screen too short for that (under about 670 px) scrolls the sheet too,
+// and every look and Start can be reached. <main> never scrolls. The two rows that scroll on their own
 // (the chips, the looks) pad by the reach of a focus ring (tokens.css's outline and offset, 4 px) and pull
 // back by as much, so a ring is never cut at the row's edge and nothing moves; ZonePicker's row does too.
 import { useRef } from 'react'
@@ -17,7 +18,7 @@ import { Icon } from '@/design/icon'
 import { Grabber } from '@/design/overlays'
 import { Select } from '@/design/select'
 import { ConsequenceText } from './consequence-text'
-import { LookRow } from './look-row'
+import { LookRow, ROW_HEIGHT } from './look-row'
 import { CATEGORIES } from './model'
 import { useComposerView, type LookSteps } from './use-composer-view'
 import { ZonePicker } from './zone-picker'
@@ -68,7 +69,8 @@ export function ComposerSheet({ className }: { className?: string }) {
             ref={rows}
             role="group"
             aria-label="Looks"
-            className="flex min-h-0 grow scroll-py-1 flex-col gap-0.5 overflow-y-auto px-2 pt-2 pb-1"
+            className="box-content flex grow scroll-py-1 flex-col gap-0.5 overflow-y-auto px-2 pt-2 pb-1"
+            style={{ minHeight: ROW_HEIGHT }}
             onKeyDown={view.onListKey}
           >
             {view.shown.length === 0 ? (

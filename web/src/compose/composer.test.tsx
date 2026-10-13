@@ -13,6 +13,7 @@ import { drawn, heroPose, loadedStage, MAIN_STAGE } from '@/test/stage'
 import { setViewportWidth } from '@/test/viewport'
 import { projectPoint } from '@/stage/camera'
 import { lastZone, rememberZone } from './last-zone'
+import { ROW_HEIGHT } from './look-row'
 
 // jsdom has no WebGL: src/test/stage.ts's stand-in takes the canvas's place, and the rest of the stage is real.
 vi.mock('@/stage/webgl', () => import('@/test/stage').then((stage) => stage.webglMock()))
@@ -1409,13 +1410,28 @@ describe('Put a look on, on the phone (§8.10)', () => {
   })
 
   // Phone-PutLookOn: the stage keeps Phone-Live's box and the sheet fills the screen under it, over the stage's foot (F4 ruling 16). The
-  // page is <main>'s own height, so that only the list scrolls; where the screen is too short for the rest of the sheet, the sheet does.
+  // page is <main>'s own height, so that only the list scrolls; where the screen is too short for the rest of the sheet and a row of the
+  // list, the sheet does.
   it("fills the screen under the stage: the page is <main>'s height, and only the list, then the sheet, scrolls", async () => {
     await openApp('/next/live/put?zone=living&look=embers')
     expect(sheet().parentElement).toHaveClass('h-full')
     expect(sheet().parentElement).not.toHaveClass('min-h-full')
     expect(sheet()).toHaveClass('-mt-9', 'min-h-0', 'flex-1', 'overflow-y-auto')
-    expect(within(sheet()).getByRole('group', { name: 'Looks' })).toHaveClass('min-h-0', 'grow', 'overflow-y-auto')
+    expect(within(sheet()).getByRole('group', { name: 'Looks' })).toHaveClass('grow', 'overflow-y-auto')
+  })
+
+  // Task 9's review: the list takes what the rest of the sheet leaves, but never less than one whole row (and its own padding, on top: the
+  // list is `box-content`). The brief's `min-h-0` let it fall away on a short screen (375 x 667 in Safari showed no look at all); below the
+  // floor the sheet scrolls instead, so every look and Start can be reached. jsdom has no layout, so this pins the style, the box, the render's
+  // 72 px row and the padding and border it is computed from; Chromium's heights are in the report.
+  it('keeps the look list at least one whole row high, so a short screen scrolls the sheet rather than squeezing the list away', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const list = within(sheet()).getByRole('group', { name: 'Looks' })
+    expect(ROW_HEIGHT).toBe(72)
+    expect(list.style.minHeight).toBe(`${ROW_HEIGHT}px`)
+    expect(list).toHaveClass('box-content')
+    expect(list).not.toHaveClass('min-h-0')
+    expect(row('embers')).toHaveClass('p-2', 'border')
   })
 
   it("lets Live's page grow past <main> again once the sheet has gone", async () => {
