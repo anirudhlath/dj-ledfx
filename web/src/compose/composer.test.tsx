@@ -1064,7 +1064,7 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
   // §4.4: between 768 and 1199 px the panel lies over the stage's right side, and the composer lies there in its place, with Where
   // stopping short of it; the button that brings a hidden Running panel back isn't drawn beside the composer. jsdom has no layout, so
   // the position is the classes (Task 10's e2e measures it).
-  it("between 768 and 1199 px, puts the composer over the stage in the panel's place with the Where chips stopping short of it", async () => {
+  it("between 768 and 1199 px, sets the classes that lay the composer over the stage and stop the Where chips short of it", async () => {
     setViewportWidth(1000)
     await openApp('/next/live')
     expect(screen.getByRole('complementary', { name: 'Running' })).toBeInTheDocument()
