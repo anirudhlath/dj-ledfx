@@ -4,7 +4,8 @@
 // input on any tile, so the icons (13 px) and the signal line (11.5 px) take the sizes Looks.html's
 // LookCard draws its inputs at. The icons say nothing to a screen reader, and the label replaces what the
 // button holds, so the look's category and inputs (lookInputs()) are its description, in a visually hidden
-// span.
+// span, which the tile holds with `relative`: an absolutely positioned span with no positioned ancestor in its
+// grid escapes the grid's clip and stretches <main>'s scroll area.
 import { useId } from 'react'
 import type { Look } from '@/api/contract'
 import { cx } from '@/design/cx'
@@ -41,7 +42,7 @@ export function LookTile({ look, selected, here, missing, tabbable, onSelect }: 
       aria-describedby={inputs}
       data-look={look.id}
       tabIndex={tabbable ? 0 : -1}
-      className="flex min-w-0 flex-col gap-2 text-left"
+      className="relative flex min-w-0 flex-col gap-2 text-left"
       onClick={onSelect}
     >
       <LookThumb lookId={look.id} size="tile" className={selected ? 'border-[1.5px] border-text' : 'border-line'}>

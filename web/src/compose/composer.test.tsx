@@ -1153,6 +1153,15 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     expect(router.state.location.pathname).toBe('/next/live')
   })
 
+  // A tile's hidden description is `sr-only`, which is absolutely positioned: with no positioned ancestor inside the grid's scroller it
+  // escapes the scroller's clip and stretches <main>'s scroll area (measured: 83 px at 1440 x 900), so each tile holds its own with `relative`.
+  it("holds every hidden description in a positioned tile, so nothing in the grid reaches out to <main>'s scroll area", async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const hidden = composer().querySelectorAll('[data-look] .sr-only')
+    expect(hidden).toHaveLength(tilesShown().length)
+    for (const each of hidden) expect(each.closest('.relative')).toBe(each.closest('[data-look]'))
+  })
+
   // §4.4: between 768 and 1199 px the panel lies over the stage's right side, and the composer lies there in its place, with Where
   // stopping short of it; the button that brings a hidden Running panel back isn't drawn beside the composer. jsdom has no layout, so
   // the position is the classes (Task 10's e2e measures it).
