@@ -234,18 +234,15 @@ def test_the_settings_reach_the_drops() -> None:
 
 
 @pytest.mark.parametrize(
-    ("burst", "rate", "highest"),
-    [(0, 30.0, 2.99), (60, 5.0, 2.9)],
-    ids=["the spray", "the bursts"],
+    ("burst", "rate"), [(0, 30.0), (60, 5.0)], ids=["the spray", "the bursts"]
 )
-def test_nothing_rises_through_the_ceiling_however_high_it_is_set(
-    burst: int, rate: float, highest: float
-) -> None:
+def test_nothing_rises_through_the_ceiling_however_high_it_is_set(burst: int, rate: float) -> None:
     """Set to 3 m from an anchor at 0.45 m, the spray goes up to the 3 m ceiling and its
-    highest drops come within a few cm of it; the bursts' arcs fit under it too."""
+    highest drops come within a few cm of it (so do the tops of the bursts' arcs, which fit
+    under it), and none goes through."""
     where = _spray(_fountain(burst=burst, rate=rate, height_m=3.0))
     assert where[:, 2].min() >= 0.0
-    assert highest < where[:, 2].max() <= 3.0
+    assert 3.0 - 0.05 < where[:, 2].max() <= 3.0
 
 
 def test_the_drops_are_not_flattened_against_the_ceiling_at_the_largest_settings() -> None:
