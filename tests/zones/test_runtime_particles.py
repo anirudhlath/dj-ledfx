@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from conftest import builtin_look
+from map_home import upright
 from runtime_fakes import (
     DotParticles,
     FlatField,
@@ -21,6 +23,24 @@ pytestmark = pytest.mark.usefixtures("_fields")
 
 # One light of 9 LEDs, 0.5 m apart along x from 0 to 4 m, 1 m up.
 ROW_LIGHT = placed_light("row", *[(0.5 * i, 0.0, 1.0) for i in range(9)])
+# Lamps a-d: four upright lamps at the corners of a 4 x 4 m room.
+CORNERS = [
+    placed_light(f"lamp-{name}", *[(x, y, z) for x, y, z in upright(x, y)])
+    for name, (x, y) in zip("abcd", [(0.5, 0.5), (3.5, 0.5), (3.5, 3.5), (0.5, 3.5)], strict=True)
+]
+PARTICLE_LOOKS = [
+    "fireflies",
+    "embers",
+    "rain",
+    "snow",
+    "spotlights",
+    "bursts",
+    "vortex",
+    "comets",
+    "fountain",
+    "flock",
+    "ball",
+]
 
 
 def _lit(runtime: ZoneRuntime) -> list[int]:
@@ -132,3 +152,23 @@ def test_a_light_a_firmware_layer_cannot_run_shows_the_particle_layer() -> None:
     runtime = runtime_of(look_of(dot_layer(x=2.0), glow_layer()), [ROW_LIGHT])
     assert runtime.mode_of("row") == "streaming"  # a lamp can't run Glow: the dots play
     assert runtime.field_effect is None  # no classic effect to tune
+
+
+# Two beats at the internal clock's 120 BPM, a twelfth of a beat apart, then a jump ahead:
+# whatever phase the clock is at, some frame falls near a landing (a lone ball is dark while
+# it flies between two lamps).
+MOMENTS = [1000.0 + k / 24 for k in range(24)] + [1003.25]
+
+
+@pytest.mark.parametrize("look_id", PARTICLE_LOOKS)
+def test_a_twin_of_a_particle_look_draws_what_its_runtime_draws(look_id: str) -> None:
+    original = runtime_of(builtin_look(look_id), CORNERS)
+    twin = original.twin()
+
+    lit = False
+    for moment in MOMENTS:
+        original.tick(moment)
+        twin.tick(moment)
+        np.testing.assert_array_equal(latest(twin), latest(original))
+        lit = lit or bool(latest(original).any())
+    assert lit  # on the lamps

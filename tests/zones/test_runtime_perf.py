@@ -132,6 +132,19 @@ def test_a_zone_frame_mid_transition_renders_in_under_5_ms(kind: TransitionKind)
     assert new.fps_actual >= 59  # it never dropped to a lower frame rate
 
 
+# M5: particle looks count against the same budget mid-transition: two of the heaviest,
+# every modifier on, 4 s into the longest transition.
+def test_a_particle_look_mid_transition_from_another_renders_in_under_5_ms() -> None:
+    old, new = _heavy("rain"), _heavy("fountain")
+    new.begin_transition(Transition(kind="dissolve", duration_s=MAX_TRANSITION_S), [old])
+
+    durations = tick_times(new)
+
+    assert new.state == "transition"
+    assert statistics.median(durations) < FRAME_BUDGET_S
+    assert new.fps_actual >= 59
+
+
 # The most a zone renders at once: a start while its transition plays mixes three looks.
 def test_three_looks_mid_transition_render_in_under_5_ms() -> None:
     first, second, third = _heavy("aurora"), _heavy("lava"), _heavy("focus")
