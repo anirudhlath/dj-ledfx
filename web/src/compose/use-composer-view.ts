@@ -65,12 +65,16 @@ export function useComposerView(steps: LookSteps, list: RefObject<HTMLElement | 
   const tabbable = shown.find((each) => each.id === look?.id)?.id ?? shown[0]?.id
   const startChosen = () => composer.start(transitions.find((choice) => choice.key === key)?.transition ?? lookTransition(look))
 
+  // The look chosen takes the focus once, as the composer opens. Its tile is drawn once the zones have come as well as the looks, in either
+  // order, so this tries after every render until the tile is there, and is done only when it has the focus.
   const focused = useRef(false)
   useEffect(() => {
     if (focused.current || tabbable === undefined) return
+    const tile = lookElement(list.current, tabbable)
+    if (tile === undefined) return
+    tile.focus()
     focused.current = true
-    lookElement(list.current, tabbable)?.focus()
-  }, [list, tabbable])
+  })
 
   const onListKey = (event: KeyboardEvent<HTMLElement>) => {
     const id = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-look]')?.dataset.look : undefined

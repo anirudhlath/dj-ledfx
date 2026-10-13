@@ -4,7 +4,7 @@
 // stage needs too; useComposer() is the panel's and the phone's sheet's, and holds the preview while
 // either is mounted. Start, Cancel and Close go back to Live (use-close-composer.ts), which ends the preview.
 import { useQuery } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import { failureText, startLook } from '@/api/actions'
 import type { Id, Inputs, Light, Look, RunningZone, Transition, Zone } from '@/api/contract'
@@ -129,6 +129,14 @@ export function useComposer(): Composer {
   const close = useCloseComposer()
   const announce = useAnnounce()
   const [starting, setStarting] = useState(false)
+  // Whether this composer is still on the page: a Start's answer can come after it was left.
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
   const names = useMemo(() => new Map<Id, Light>((lights ?? []).map((light) => [light.id, light])), [lights])
 
   const missing = (each: Look) => missingInputs(each, inputs)
@@ -152,7 +160,9 @@ export function useComposer(): Composer {
       () => {
         rememberZone(zone.id)
         announce(`Started ${look.name} on ${zone.name}.`)
-        close()
+        // The look started wherever the user is by now, and that is said; only a composer still here goes back to Live. Closing one that is
+        // gone would step back from the page the user went to, or shut the composer opened since.
+        if (mounted.current) close()
       },
       (error: unknown) => {
         setStarting(false)

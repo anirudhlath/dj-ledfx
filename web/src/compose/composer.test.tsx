@@ -89,6 +89,15 @@ function holdPreviews() {
   )
   return waiting
 }
+/** From here a Start waits for the test to answer it, and the composer can be left before it is: returns what answers it. */
+function holdStart() {
+  const real = api.start.bind(api)
+  let answer = () => {}
+  vi.spyOn(api, 'start').mockImplementation(
+    (...request) => new Promise((resolve, reject) => (answer = () => void real(...request).then(resolve, reject))),
+  )
+  return () => answer()
+}
 /**
  * What the consequence line says in the commit that chooses another look or zone: the effect that asks for its preview comes after it,
  * so the preview state is still the last choice's, and the line must say nothing of that. One entry for each preview asked for.
@@ -800,6 +809,56 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     expect(startButton('embers')).toBeDisabled()
   })
 
+  // A Start's answer can come after the composer was left (the rail, Back): the look started, wherever the user is by now, and that is said
+  // and remembered. The composer that asked is gone, and closing it then would take the user back from the page they went to.
+  it.each([
+    ['the rail', (router: Awaited<ReturnType<typeof openApp>>['router']) => act(() => router.navigate('/inputs')), '/next/inputs'],
+    ['Back', (router: Awaited<ReturnType<typeof openApp>>['router']) => act(() => router.navigate(-1)), '/next/live'],
+  ])('says a Start answered after the composer was left by %s, and goes nowhere', async (_, leave, where) => {
+    const { server, router } = await openApp('/next/settings')
+    await act(() => router.navigate('/live'))
+    await settle()
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    fireEvent.click(category('Ambient'))
+    fireEvent.click(tile('embers'))
+    await settle()
+    const answer = holdStart()
+    fireEvent.click(startButton('embers'))
+    await leave(router)
+    await settle()
+    expect(router.state.location.pathname).toBe(where)
+    answer()
+    await settle()
+    expect(router.state.location.pathname).toBe(where)
+    const home = server.state.zones.find((zone) => zone.kind === 'home')!
+    expect(screen.getByRole('status')).toHaveTextContent(`Started ${lookName('embers')} on ${home.name}.`)
+    expect(server.state.running.find((zone) => zone.zoneId === home.id)?.lookId).toBe('embers')
+    expect(lastZone()).toBe(home.id)
+  })
+
+  // Esc and L make another composer, of its own, before the answer comes: it's that one's session, and the answer to the first's Start leaves it open.
+  it("doesn't close a composer opened after the one that asked for a Start", async () => {
+    const { router } = await openApp('/next/live')
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    fireEvent.click(category('Ambient'))
+    fireEvent.click(tile('embers'))
+    await settle()
+    const answer = holdStart()
+    fireEvent.click(startButton('embers'))
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await settle()
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    answer()
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    expect(composer()).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(`Started ${lookName('embers')}`)
+  })
+
   it('starts nothing on Enter where Start is held', async () => {
     const start = vi.spyOn(api, 'start')
     await openApp('/next/live/put?zone=counter&look=embers')
@@ -819,6 +878,15 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     fireEvent.change(search, { target: { value: lookName('comets') } })
     expect(tilesShown()).toEqual(['comets'])
     expect(document.activeElement).toBe(search)
+  })
+
+  // The grid is drawn once both the zones and the looks have come, in either order: the focus is for the look chosen whenever that is.
+  it('puts the focus on the look chosen when the looks come before the zones', async () => {
+    const { release } = await openApp('/next/live/put?look=embers', {}, ['/api/zones'])
+    expect(composer().querySelector('[data-look]')).toBeNull()
+    release('/api/zones')
+    await settle()
+    expect(document.activeElement).toBe(tile('embers'))
   })
 
   // Review focus 5: an Esc in a search with nothing in it is the page's, and a search of spaces is no search.
