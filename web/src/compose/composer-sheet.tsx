@@ -7,8 +7,9 @@
 // and Enter starts the look previewed; the page's Esc closes it. Every way out is view.close (F4 ruling 13).
 // Sizes: the render's, from its HTML. The page gives the sheet the screen's height under the stage, so
 // only the look list, which takes what the rest leaves, scrolls; but never less than one whole row, with its
-// padding on top (`box-content`), so a screen too short for that (under about 670 px) scrolls the sheet too,
-// and every look and Start can be reached. <main> never scrolls. The two rows that scroll on their own
+// padding on top (`box-content`), so a screen too short for that scrolls the sheet too, and every look and
+// Start can be reached. The stage keeps its aspect, so how short depends on the width: under about 670 px
+// at 390 wide, 660 at 375 and 700 at 430. <main> never scrolls. The two rows that scroll on their own
 // (the chips, the looks) pad by the reach of a focus ring (tokens.css's outline and offset, 4 px) and pull
 // back by as much, so a ring is never cut at the row's edge and nothing moves; ZonePicker's row does too.
 import { useId, useRef } from 'react'
