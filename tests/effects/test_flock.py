@@ -13,11 +13,10 @@ from stray_lamps import STRAYS, moves, on_the_beat, run_frames, stays_in_band, u
 
 from dj_ledfx.effects import flock as flock_module
 from dj_ledfx.effects.easing import ease_in_out
-from dj_ledfx.effects.flock import FLAT, MOVE_BARS, Flock, scattered
+from dj_ledfx.effects.flock import FLAT, MOVE_BEATS, Flock, scattered
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import Ground
 from dj_ledfx.effects.particles import MAX_PARTICLES, drawn
-from dj_ledfx.tempo.model import BEATS_PER_BAR
 
 # Four upright lamps at the corners of a 4 x 4 m room.
 ROOM = lights_at(upright(0.5, 0.5), upright(3.5, 0.5), upright(3.5, 3.5), upright(0.5, 3.5))
@@ -68,7 +67,6 @@ def test_the_flock_moves_on_the_beat_at_any_tempo() -> None:
 
 
 ZONES: dict[str, Callable[[], LedSet]] = {**HOMES, "four lamps": lambda: ROOM}
-MOVE_BEATS = BEATS_PER_BAR * MOVE_BARS  # the beats a flock takes from one lamp to the next
 LIFT = 20.0  # metres: a zone's roomy twin is this much higher, under a ceiling at 2 * LIFT
 
 
@@ -111,26 +109,23 @@ def _farthest(spread: float, scatter: float, beats: float) -> float:
     return FLAT * spread * scattered(beats % MOVE_BEATS, scatter)
 
 
-def _with_the_room(
-    free: np.ndarray, room_under: float, room_over: float, farthest: float
-) -> np.ndarray:
-    """The birds' heights from the middle of a flock whose farthest bird goes `farthest` up
-    or down, given their `free` heights and this much room over and under the middle: each
-    side's heights scaled to the room on it when that is less than the farthest."""
-    fit_up, fit_down = min(1.0, room_over / farthest), min(1.0, room_under / farthest)
-    return free * np.where(free > 0.0, fit_up, fit_down)
-
-
 def test_scattered_is_1_on_the_downbeat_its_scatter_at_the_peak_and_back_to_1_after() -> None:
     assert scattered(0.0, 3.0) == 1.0
     assert scattered(0.75, 3.0) == pytest.approx(3.0)
     assert scattered(0.75, 8.0) == pytest.approx(8.0)
     rising = [scattered(since, 3.0) for since in np.linspace(0.0, 0.75, 20)]
-    falling = [scattered(since, 3.0) for since in np.linspace(0.75, 8.0, 60)]
+    falling = [scattered(since, 3.0) for since in np.linspace(0.75, MOVE_BEATS, 60)]
     assert all(a < b for a, b in zip(rising, rising[1:], strict=False))
     assert all(a > b for a, b in zip(falling, falling[1:], strict=False))
-    assert scattered(8.0, 8.0) < 1.01  # the flock has gathered again by the next move
-    assert all(scattered(since, 1.0) == 1.0 for since in np.linspace(0.0, 8.0, 30))
+    assert all(scattered(since, 1.0) == 1.0 for since in np.linspace(0.0, MOVE_BEATS, 30))
+
+
+@pytest.mark.parametrize("scatter", [1.5, 3.0, 8.0])
+def test_scattered_is_exactly_1_again_when_the_next_move_opens(scatter: float) -> None:
+    """The next scatter opens where this one closes, not 0.5 % wide of it: a flock that is
+    scattered at the end of a move would jump back to its places on the downbeat."""
+    assert scattered(MOVE_BEATS, scatter) == 1.0
+    assert scattered(MOVE_BEATS - 1e-9, scatter) == pytest.approx(1.0, abs=1e-8)
 
 
 @pytest.mark.parametrize("bpm", [30.0, 120.0, 300.0])
@@ -209,34 +204,50 @@ def test_the_flock_moves_from_lamp_to_lamp_easing_in_and_out_over_two_bars() -> 
     np.testing.assert_allclose(shares, [0.0, 5.0 / 32.0, 0.5, 27.0 / 32.0, 1.0], atol=0.02)
 
 
-@pytest.mark.parametrize("room_over", [0.1, 0.4, 2.0])
-def test_the_flocks_height_is_scaled_to_the_room_over_it_when_there_is_less_than_it_needs(
-    room_over: float,
+@pytest.mark.parametrize(
+    ("height", "beats", "shift"),
+    [
+        (1.5, 2000.0, 0.0),  # room to spare both ways: round its LED, unmoved
+        (1.5, 2000.75, 0.0),  # … and at the scatter's peak, 1.2 m for its farthest bird
+        (0.45, 2000.0, 0.0),  # 0.45 m over the floor is room enough for 0.4 m
+        (0.1, 2000.0, 0.3),  # 0.3 m short of the 0.4 m under it: up by that, every bird
+        (0.0, 2000.0, 0.4),  # on the floor: up by all of it
+        (2.9, 2000.0, -0.3),
+        (3.0, 2000.0, -0.4),  # on the ceiling: down by all of it
+        (1.0, 2000.75, 0.2),  # a metre under it is 0.2 m short of the peak's 1.2 m
+        (0.1, 2000.75, 1.1),
+        (2.9, 2000.75, -1.1),
+    ],
+)
+def test_a_flock_short_of_room_on_a_side_moves_in_from_it_whole_instead_of_lying_along_it(
+    height: float, beats: float, shift: float
 ) -> None:
-    """A flock whose birds go up to `farthest` fits that to the room over its middle, the
-    birds above it in proportion, and leaves the side with room, and its width, as it is."""
+    """The farthest bird of this flock goes 0.4 m up or down (1.2 m at the scatter's peak). With
+    less room than that on a side the flock moves in from it by the shortfall, every bird by the
+    same, so it keeps its shape and is not flattened against the floor or the ceiling; where it
+    has the room it stays round its LED, unmoved."""
     flock = _flock(count=80, spread_m=0.8, scatter=3.0)
-    room = _bulb(5.0, ceiling=5.0 + room_over)  # 5 m of room under it
-    for beats in (2000.0, 2000.75, 2002.5, 2006.0):
-        pos, middle = _places(flock, room, beats)
-        free = _free(flock, room, beats) - middle
-        expected = _with_the_room(free[:, 2], 5.0, room_over, _farthest(0.8, 3.0, beats))
-        np.testing.assert_allclose(pos[:, :2] - middle[:2], free[:, :2], atol=1e-5)
-        np.testing.assert_allclose(pos[:, 2] - middle[2], expected, atol=1e-5)
+    room = _bulb(height)  # a 3 m ceiling over the floor
+    pos, _ = _places(flock, room, beats)
+    free = _free(flock, room, beats)
+    np.testing.assert_allclose(pos[:, :2], free[:, :2], atol=1e-5)
+    np.testing.assert_allclose(pos[:, 2] - free[:, 2], shift, atol=1e-5)
+    assert pos[:, 2].min() >= 0.0 and pos[:, 2].max() <= 3.0  # and in the room
 
 
-@pytest.mark.parametrize("room_under", [0.1, 0.4, 2.0])
-def test_the_flocks_height_is_scaled_to_the_room_under_it_when_there_is_less_than_it_needs(
-    room_under: float,
-) -> None:
+@pytest.mark.parametrize("beats", [2000.0, 2000.75, 2003.0])
+def test_a_band_less_high_than_the_flock_is_filled_by_it_scaled_to_fit(beats: float) -> None:
+    """A band of 0.5 m (a bulb 0.1 m up under a ceiling at 0.5 m) is less high than the flock,
+    0.8 m and more as it scatters. Then, and only then, the flock is scaled: about the band's
+    middle, so that its farthest bird would come just to the edges, the birds in proportion."""
     flock = _flock(count=80, spread_m=0.8, scatter=3.0)
-    room = _bulb(room_under, ceiling=10.0)  # 10 m of room over it
-    for beats in (2000.0, 2000.75, 2002.5, 2006.0):
-        pos, middle = _places(flock, room, beats)
-        free = _free(flock, room, beats) - middle
-        expected = _with_the_room(free[:, 2], room_under, 10.0, _farthest(0.8, 3.0, beats))
-        np.testing.assert_allclose(pos[:, :2] - middle[:2], free[:, :2], atol=1e-5)
-        np.testing.assert_allclose(pos[:, 2] - middle[2], expected, atol=1e-5)
+    room = _bulb(0.1, ceiling=0.5)
+    pos, middle = _places(flock, room, beats)
+    free = _free(flock, room, beats)
+    fit = 0.25 / _farthest(0.8, 3.0, beats)
+    np.testing.assert_allclose(pos[:, :2], free[:, :2], atol=1e-5)
+    np.testing.assert_allclose(pos[:, 2], 0.25 + fit * (free[:, 2] - middle[2]), atol=1e-5)
+    assert pos[:, 2].min() > 0.0 and pos[:, 2].max() < 0.5
 
 
 def _heights_at_the_largest(height: float) -> np.ndarray:
@@ -265,21 +276,41 @@ def test_a_flock_at_its_largest_spreads_through_the_room_instead_of_piling_up_on
     assert np.mean(z < 0.01) < 0.01 and np.mean(z > 2.99) < 0.01  # … but no sheet on either
 
 
-def test_the_flock_does_not_jump_at_the_downbeat_between_lamps_with_different_bands() -> None:
-    """Two lamps in the band and one under the floor: the flock's room under its middle
-    differs from one pair of lamps to the next, and it is the band of the lamp it is at
-    that counts at the downbeat, whichever lamp it came from and goes to."""
-    zone = lights_at(
+BAND_ZONES: dict[str, LedSet] = {
+    # two lamps in the band and one under the floor: a different band from one pair to the next
+    "one lamp under the floor": lights_at(
         upright(0.5, 0.5), upright(3.5, 0.5), upright(2.0, 3.5, -1.0, -0.5), ceiling=3.0
-    )
-    flock = _flock(count=200, scatter=1.0)
+    ),
+    # lamps whose ends are at the floor and at the ceiling: a flock gathered there is moved in
+    "lamps from the floor to the ceiling": lights_at(
+        upright(0.5, 0.5, 0.0, 1.4), upright(3.5, 0.5, 1.6, 3.0), upright(2.0, 3.5), ceiling=3.0
+    ),
+    # no map: a band of half a metre, less high than a flock, which is scaled to fit it
+    "bulbs with no map": lights_at(*[[(float(x), 0.0, 1.0)] for x in range(4)], ceiling=None),
+}
+SCATTERS: dict[str, dict[str, float]] = {
+    "no scatter": {"scatter": 1.0},
+    "the default": {"scatter": 3.0},
+    "the largest": {"scatter": 8.0, "spread_m": 3.0},
+}
+
+
+@pytest.mark.parametrize("settings", SCATTERS.values(), ids=list(SCATTERS))
+@pytest.mark.parametrize("where", BAND_ZONES)
+def test_the_flock_does_not_jump_at_the_downbeat_whatever_its_scatter_and_the_lamps_bands(
+    where: str, settings: dict[str, float]
+) -> None:
+    """At the downbeat the flock's middle, its band, its scatter and so the way it gives way to
+    the band all carry on from the move before: the flock comes to a lamp in the band of the lamp
+    it was leaving, scattered as it was, so no bird pops anywhere."""
+    flock = _flock(count=200, **settings)
     steps = []
     for move in range(2000 // 8, 2000 // 8 + 40):  # across 40 downbeats
-        beat = 8.0 * move
-        before, _ = _places(flock, zone, beat - 1e-6)
-        after, _ = _places(flock, zone, beat + 1e-6)
+        beat = float(MOVE_BEATS * move)
+        before, _ = _places(flock, BAND_ZONES[where], beat - 1e-9)
+        after, _ = _places(flock, BAND_ZONES[where], beat + 1e-9)
         steps.append(np.linalg.norm(after - before, axis=1).max())
-    assert max(steps) < 1e-3
+    assert max(steps) < 1e-5  # float32 rounding is within 1e-6; the old scatter popped 1e-3
 
 
 @pytest.mark.parametrize("where", STRAYS)
@@ -294,6 +325,65 @@ def test_the_flock_gathers_along_the_whole_length_of_a_lamp_outside_the_floor_an
     assert stays_in_band(z, leds)  # and no bird past the floor, the ceiling or the lamp
 
 
+def _on_the_end_of_its_lamp(monkeypatch: pytest.MonkeyPatch, end: str) -> None:
+    """Gather the flock on the lowest or the highest LED of each lamp it comes to (a lamp's
+    LEDs are listed from the bottom up)."""
+
+    def led(self: Ground, stop: Any, u: Any) -> Any:
+        stops = np.asarray(stop, dtype=np.intp)
+        which = self.lamps.starts[stops] if end == "lowest" else self.lamps.starts[stops + 1] - 1
+        return self.leds.pos[self.lamps.members[which]].astype(np.float64)
+
+    monkeypatch.setattr(Ground, "on", led)
+
+
+ENDS: dict[str, tuple[LedSet, str]] = {
+    "the lowest LED of a lamp with no map": (lights_at(upright(1.0, 1.0), ceiling=None), "lowest"),
+    "the lowest LED of a lamp under the floor": (STRAYS["under the floor"], "lowest"),
+    "the highest LED of a lamp up to the ceiling": (
+        lights_at(upright(1.0, 1.0, 1.6, 3.0), ceiling=3.0),
+        "highest",
+    ),
+    "the highest LED of a lamp over the ceiling": (STRAYS["over the ceiling"], "highest"),
+}
+
+
+def _heights_over(flock: Flock, leds: LedSet) -> np.ndarray:
+    """The heights of every bird, over a bar of the move, a quarter beat apart."""
+    return np.concatenate(
+        [_places(flock, leds, float(beats))[0][:, 2] for beats in np.arange(2000.0, 2008.0, 0.25)]
+    )
+
+
+@pytest.mark.parametrize("where", ENDS)
+def test_a_flock_gathered_with_no_room_on_a_side_has_no_sheet_of_birds_along_that_edge(
+    monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    """Nothing under the lowest LED of a band, or over its highest: the flock stands on that
+    edge or hangs from it, whole, and none of it is level with it (half of it was)."""
+    leds, end = ENDS[where]
+    _on_the_end_of_its_lamp(monkeypatch, end)
+    ground = Ground.of(leds)
+    low, high = float(ground.floor_for(0)), float(ground.ceiling_for(0))
+    z = _heights_over(_flock(count=200), leds)
+    assert z.min() >= low - 1e-9 and z.max() <= high + 1e-9  # in the band
+    edge = low if end == "lowest" else high
+    assert np.mean(np.abs(z - edge) < 0.01) < 0.01  # no sheet at the edge's height
+    assert np.abs(z - edge).min() < 0.1  # and it comes down to the floor, up to the ceiling
+
+
+def test_a_lone_bulb_with_no_map_fills_its_half_metre_band_with_no_sheet_at_its_own_height() -> (
+    None
+):
+    """With no map the band over a lone bulb is the half metre from it up, less high than the
+    flock (half of which was held at the bulb's height, in every frame)."""
+    leds = lights_at([(1.0, 1.0, 1.0)], ceiling=None)
+    z = _heights_over(_flock(count=200), leds)
+    assert z.min() >= 1.0 - 1e-6 and z.max() <= 1.5 + 1e-6
+    assert np.mean(np.abs(z - 1.0) < 0.01) < 0.01 and np.mean(np.abs(z - 1.5) < 0.01) < 0.01
+    assert z.min() < 1.05 and z.max() > 1.45  # birds all through the band
+
+
 def test_between_a_lamp_in_the_band_and_one_over_the_ceiling_the_flock_stays_between_them() -> (
     None
 ):
@@ -306,27 +396,27 @@ def test_between_a_lamp_in_the_band_and_one_over_the_ceiling_the_flock_stays_bet
 
 
 @pytest.mark.parametrize(
-    ("z_a", "z_b", "room_under", "room_over"),
+    ("z_a", "z_b", "shift"),
     [
-        (1.0, -0.6, 0.5, 2.8),  # a lamp in the band, one under the floor
-        (2.0, 3.6, 2.8, 0.5),  # a lamp in the band, one over the ceiling
+        (1.0, -0.6, 1.0),  # a lamp in the band, one under the floor: 0.5 m under the middle
+        (2.0, 3.6, -1.0),  # a lamp in the band, one over the ceiling: 0.5 m over the middle
     ],
 )
-def test_half_way_between_two_lamps_the_flock_has_the_room_of_the_band_half_way_between_theirs(
-    z_a: float, z_b: float, room_under: float, room_over: float
+def test_half_way_between_two_lamps_the_flock_gives_way_to_the_band_half_way_between_theirs(
+    z_a: float, z_b: float, shift: float
 ) -> None:
     """The band of the lamp it leaves is blended into that of the lamp it comes to by the
     share of the move done, as the flock's middle is: half-way, the band is half-way between
-    the two lamps' bands (a 3 m ceiling, and the floor, widened to each lamp's own LEDs)."""
+    the two lamps' bands (a 3 m ceiling, and the floor, widened to each lamp's own LEDs). This
+    flock's farthest bird goes 1.5 m, and there is 0.5 m of room on the one side: it moves
+    in from it by the 1 m it is short."""
     zone = lights_at([(1.0, 1.0, z_a)], [(3.0, 1.0, z_b)], ceiling=3.0)
     flock = _flock(count=200, spread_m=3.0, scatter=1.0)
     beats = 2000.0 + MOVE_BEATS / 2.0
     pos, _ = _places(flock, zone, beats)
-    middle = zone.pos.astype(np.float64).mean(axis=0)  # two single LEDs: half-way between them
-    free = _free(flock, zone, beats) - middle
-    expected = _with_the_room(free[:, 2], room_under, room_over, _farthest(3.0, 1.0, beats))
-    np.testing.assert_allclose(pos[:, :2] - middle[:2], free[:, :2], atol=1e-5)
-    np.testing.assert_allclose(pos[:, 2] - middle[2], expected, atol=1e-5)
+    free = _free(flock, zone, beats)
+    np.testing.assert_allclose(pos[:, :2], free[:, :2], atol=1e-5)
+    np.testing.assert_allclose(pos[:, 2] - free[:, 2], shift, atol=1e-5)
 
 
 @pytest.mark.parametrize(
@@ -339,50 +429,51 @@ def test_the_band_goes_from_the_lamp_the_flock_leaves_to_the_one_it_comes_to_eit
 ) -> None:
     """A lamp in the band and one under the floor, a flock a quarter of the way along a move
     between them, one way or the other: its room is that of a band a quarter of the way from
-    the band of the lamp it leaves to that of the lamp it comes to. Half-way can't tell the
-    way (above); a quarter of the way can."""
+    the band of the lamp it leaves to that of the lamp it comes to, so how far it is moved in
+    from the floor differs between the two (half-way can't tell the way (above); a quarter of
+    the way can). Its farthest bird goes 1.5 m."""
     zone = lights_at([(1.0, 1.0, 1.0)], [(3.0, 1.0, -0.6)], ceiling=3.0)
     flock = _flock(count=200, spread_m=3.0, scatter=1.0)
     start, _ = _places(flock, zone, MOVE_BEATS * trip)  # gathered on the lamp it leaves
     assert (start[:, 0].mean() < 2.0) == leaves_the_one_in_the_band
-    share = ease_in_out(0.25)  # a quarter of the move done, eased
-    if leaves_the_one_in_the_band:  # the middle from z = 1, the floor from 0, to -0.6 and -0.6
-        middle_z, room_under = 1.0 - 1.6 * share, 1.0 - share
-    else:  # from -0.6 and -0.6 to 1 and 0
-        middle_z, room_under = -0.6 + 1.6 * share, share
+    share = ease_in_out(0.25)  # a quarter of the move done, eased: 5/32
+    # The floor goes from 0 to -0.6 as the flock's middle goes from z = 1 to -0.6, or back.
+    room_under = 1.0 - share if leaves_the_one_in_the_band else share
     beats = MOVE_BEATS * trip + MOVE_BEATS / 4.0
     pos, _ = _places(flock, zone, beats)
     free = _free(flock, zone, beats)
-    expected = _with_the_room(
-        free[:, 2] - middle_z, room_under, 3.0 - middle_z, _farthest(3.0, 1.0, beats)
-    )
     np.testing.assert_allclose(pos[:, :2], free[:, :2], atol=1e-5)
-    np.testing.assert_allclose(pos[:, 2] - middle_z, expected, atol=1e-5)
+    np.testing.assert_allclose(pos[:, 2] - free[:, 2], 1.5 - room_under, atol=1e-5)
 
 
-@pytest.mark.parametrize("side", ["over", "under"])
-def test_a_band_with_no_room_on_a_side_of_the_middle_leaves_the_birds_that_way_at_its_height(
-    monkeypatch: pytest.MonkeyPatch, side: str
+@pytest.mark.parametrize(
+    ("low", "high"),
+    [(0.0, 0.1), (2.9, 3.0), (1.0, 1.0), (1.2, 1.0)],
+    ids=["over the band", "under the band", "no height", "less than none"],
+)
+def test_a_band_not_around_the_lamp_holds_every_bird_and_one_of_no_height_puts_them_at_one(
+    monkeypatch: pytest.MonkeyPatch, low: float, high: float
 ) -> None:
     """The backstop for a band that is not around the lamp, which Ground never gives: the
-    birds that go to the side without room stay level with the middle, not thrown to the
-    other, and the birds going the other way are as free as ever."""
+    flock is moved into the band all the same, and a band of no height (or less) puts every
+    bird at one height, with no bird flung out of it by a negative room."""
 
-    def level_with_nothing(self: Ground, stop: Any) -> Any:
-        return np.full(np.shape(stop), 0.1 if side == "over" else 2.9)
+    def floor_for(self: Ground, stop: Any) -> Any:
+        return np.full(np.shape(stop), low)
 
-    monkeypatch.setattr(
-        Ground, "ceiling_for" if side == "over" else "floor_for", level_with_nothing
-    )
+    def ceiling_for(self: Ground, stop: Any) -> Any:
+        return np.full(np.shape(stop), high)
+
+    monkeypatch.setattr(Ground, "floor_for", floor_for)
+    monkeypatch.setattr(Ground, "ceiling_for", ceiling_for)
     flock = _flock(count=80, spread_m=0.8, scatter=3.0)
-    room = _bulb(1.5)  # a ceiling at 0.1 m, or a floor at 2.9 m: no room on that side
     for beats in (2000.0, 2000.75, 2002.5, 2006.0):
-        pos, middle = _places(flock, room, beats)
-        free = _free(flock, room, beats) - middle
-        shut = free[:, 2] > 0.0 if side == "over" else free[:, 2] < 0.0
-        np.testing.assert_allclose(
-            pos[:, 2] - middle[2], np.where(shut, 0.0, free[:, 2]), atol=1e-5
-        )
+        pos, _ = _places(flock, _bulb(1.5), beats)  # the bulb is in none of these bands
+        assert np.isfinite(pos).all()
+        assert pos[:, 2].min() >= min(low, high) - 1e-9
+        assert pos[:, 2].max() <= max(low, high) + 1e-9
+        if high <= low:
+            assert np.ptp(pos[:, 2]) < 1e-9
 
 
 def test_a_birds_colour_does_not_go_with_where_it_is_in_the_flock() -> None:
@@ -420,9 +511,10 @@ def test_the_settings_reach_the_birds() -> None:
 def test_every_bird_is_worked_out_at_once(call_counts: CallCounts) -> None:
     call_counts.spy(flock_module, "tour")
     call_counts.spy(flock_module, "draws")
+    call_counts.spy(flock_module, "in_ball")
     call_counts.spy(Ground, "on")
 
     for count in (5, 200):  # however many birds
         call_counts.calls.clear()
         drawn(_flock(count=count), tempo_ctx(2003.3), ROOM)
-        assert call_counts.calls == {"tour": 1, "draws": 2, "on": 1}
+        assert call_counts.calls == {"tour": 1, "draws": 2, "in_ball": 1, "on": 1}

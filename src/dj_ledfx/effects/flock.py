@@ -5,19 +5,24 @@ to the next, easing in and out, so it gathers on each lamp in turn, round an LED
 of its LEDs, its own each visit). Each bird keeps its own place in the flock, within
 spread_m of its middle, and the whole flock turns about its middle once every SWIRL_BARS
 bars. On the downbeat of every other bar, as the flock comes to a lamp, the birds burst out
-to `scatter` times their places and gather again over the next few beats.
+to `scatter` times their places and gather again over the next few beats (`scattered`).
 
 Heights: the birds keep between the floor and the ceiling, widened to take in the lamp's own
 LEDs where the map (or a layer's transform) puts a lamp outside them (Ground.floor_for and
-ceiling_for). The flock is FLAT flatter than it is wide, and its height is fitted to the room
-over and under its middle rather than clipped to it: the farthest a bird can go up or down is
-scaled to the room on that side when it is more, so the birds spread through the room left
-instead of piling up on the ceiling or the floor, and a side with room is left as it is. With
-no room on a side (a band not around the lamp, which Ground never gives) the birds that go
-that way stay level with the middle. The band is the one between its two lamps' bands that
-the flock moves through with its middle, so it is its lamp's own band wherever the flock
-gathers and stays inside the union of the two on the way. A band that jumped at the downbeat
-from one pair of lamps to the next would pop the birds' height there.
+ceiling_for). The flock is FLAT flatter than it is wide, so the farthest a bird goes up or
+down from its middle is FLAT of the spread, scattered. It gives way to the band rather than
+being flattened against it (`_gives_way`): its vertical centre stays round its LED wherever
+the flock's height fits in the band round it, and where an edge is too near the whole flock
+moves in from that edge, by the shortfall and no more, so a flock gathered on the floor
+stands on it, and one on the ceiling hangs from it, with its shape kept and no sheet of birds
+level with the edge. Only a band less high than the flock's whole height scales it, about the
+band's middle, until its farthest bird comes just to the edges (so a lone bulb with no map,
+whose band is half a metre, has the flock fill that). The band is the one between its two
+lamps' bands that the flock moves through with its middle, so it is its lamp's own band
+wherever the flock gathers and stays inside the union of the two on the way. The flock's
+middle, the band and `scattered` (1 at both ends of a move) are continuous at the downbeat,
+and so the way the flock gives way is; a jump in any of them would pop the birds' heights
+there.
 
 The count is the `count` setting, at most 200 and so within MAX_PARTICLES, whatever the
 lamps: each bird is its own, and none is dealt out among the lamps.
@@ -33,7 +38,7 @@ import numpy as np
 from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.easing import ease_in_out
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.effects.particle_tools import draws, swarm, tour
+from dj_ledfx.effects.particle_tools import draws, in_ball, swarm, tour
 from dj_ledfx.effects.particles import ParamParticles
 from dj_ledfx.tempo.model import BEATS_PER_BAR
 
@@ -43,6 +48,7 @@ if TYPE_CHECKING:
 
 FLOCK_PALETTE = ("#fff0c8", "#ffb464", "#ff6482")
 MOVE_BARS = 2  # the flock takes this many bars from one lamp to the next
+MOVE_BEATS = BEATS_PER_BAR * MOVE_BARS
 SWIRL_BARS = 2.0  # it turns once in this many bars
 SCATTER_BEATS = 0.75  # a scatter is widest this many beats after its downbeat
 FLAT = 0.5  # a flock is this much flatter than it is wide
@@ -50,15 +56,28 @@ FLAT = 0.5  # a flock is this much flatter than it is wide
 
 def scattered(since: float, scatter: float) -> float:
     """How far out the birds are, as a share of their places, `since` beats after the
-    downbeat that scatters them: out to `scatter` at SCATTER_BEATS, then back."""
+    downbeat that scatters them: 1 on the downbeat, out to `scatter` at SCATTER_BEATS, then
+    back, and exactly 1 again at MOVE_BEATS, where the next move opens (a curve that merely
+    came near 1 there would pop the birds out by the difference on the downbeat)."""
     rise = since / SCATTER_BEATS
-    return 1.0 + (scatter - 1.0) * rise * math.exp(1.0 - rise)
+    last = math.exp(1.0 - MOVE_BEATS / SCATTER_BEATS)  # exp(1 - rise) when the move ends
+    bump = rise * (math.exp(1.0 - rise) - last) / (1.0 - last)
+    return 1.0 + (scatter - 1.0) * bump
 
 
-def _fit(room: float, farthest: float) -> float:
-    """The share of a height up to `farthest` that fits in `room` metres: all of it, or
-    the room over the farthest."""
-    return 1.0 if farthest <= room else room / farthest
+def _gives_way(middle: float, low: float, high: float, farthest: float) -> tuple[float, float]:
+    """Where a flock round `middle`, whose farthest bird goes `farthest` metres up or down,
+    puts its vertical centre, and the share of its heights it keeps, to stay between `low` and
+    `high`. It gives way to an edge instead of lying along it: where the band round `middle`
+    holds the flock's whole height its centre stays at `middle` (share 1), and where an edge is
+    nearer than `farthest` the centre moves in from it by the shortfall. Only a band less high
+    than the flock's whole height (twice `farthest`) scales it, to the share that brings its
+    farthest bird just to the edges, about the band's middle. A band of no height, or less
+    than none (which Ground never gives), puts every bird at one height."""
+    half = max(high - low, 0.0) / 2.0
+    fit = 1.0 if farthest <= half else half / farthest
+    reach = fit * farthest
+    return min(max(middle, low + reach), high - reach), fit
 
 
 class Flock(ParamParticles):
@@ -100,7 +119,7 @@ class Flock(ParamParticles):
 
     def positions(self, ctx: RenderContext, ground: Ground) -> Particles:
         values = self._values
-        trips = ctx.beats / (BEATS_PER_BAR * MOVE_BARS)
+        trips = ctx.beats / MOVE_BEATS
         trip = math.floor(trips)
         visits = np.array([trip, trip + 1])
         stops = tour(self._seed, 0, visits, ground.lamps.count)
@@ -112,26 +131,16 @@ class Flock(ParamParticles):
         low = floor[0] + (floor[1] - floor[0]) * share
         high = ceiling[0] + (ceiling[1] - ceiling[0]) * share
         u = draws(self._seed, np.arange(int(values["count"])), 4)
-        up = 2.0 * u[:, 0] - 1.0
-        flat = np.sqrt(1.0 - up * up)
-        heading = 2.0 * math.pi * u[:, 1] + 2.0 * math.pi * ctx.beats / (
-            BEATS_PER_BAR * SWIRL_BARS
-        )
         spread = float(values["spread_m"])
-        reach = spread * np.cbrt(u[:, 2])  # spread evenly through a ball
-        since = (trips - trip) * BEATS_PER_BAR * MOVE_BARS  # beats since it came to a lamp
+        since = (trips - trip) * MOVE_BEATS  # beats since it came to a lamp
         out_by = scattered(since, float(values["scatter"]))
-        out = reach * out_by
-        # A bird goes up or down FLAT of the way it goes out, but no farther than the room on
-        # its side: the farthest any bird goes is scaled to fit, the rest in proportion.
-        height = FLAT * out * up
-        farthest = FLAT * spread * out_by
-        height *= np.where(
-            height > 0.0,
-            _fit(max(high - middle[2], 0.0), farthest),
-            _fit(max(middle[2] - low, 0.0), farthest),
-        )
-        pos = middle + np.stack(
-            [out * flat * np.cos(heading), out * flat * np.sin(heading), height], axis=1
+        # The birds' places in a ball of spread_m, scattered, turning with the flock.
+        turn = u[:, 1] + ctx.beats / (BEATS_PER_BAR * SWIRL_BARS)
+        ball = in_ball(u[:, 0], turn, u[:, 2], spread * out_by)
+        # A bird goes up or down FLAT of the way it goes out; the flock gives way to the band.
+        centre, fit = _gives_way(float(middle[2]), float(low), float(high), FLAT * spread * out_by)
+        pos = np.stack(
+            [middle[0] + ball[:, 0], middle[1] + ball[:, 1], centre + fit * FLAT * ball[:, 2]],
+            axis=1,
         )
         return swarm(pos, palette_at(self._palette, u[:, 3]), float(values["size"]))
