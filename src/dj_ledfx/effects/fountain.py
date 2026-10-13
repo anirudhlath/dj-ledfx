@@ -13,10 +13,11 @@ is gone at the floor); a burst goes to a lamp, so it keeps that lamp's, widened 
 lamp's own LEDs where the map (or a layer's transform) puts the lamp outside the zone's
 (Ground.floor_for and ceiling_for). Arcs fit under the ceiling rather than flatten against it:
 the spray is thrown no higher than the room over the anchor (but LEAST_RISE_M at the least, so
-that a drop still has a flight to be timed by) and a burst rises no more than the room over the
-higher of its two ends, under its lamp's ceiling. The spread is the same however short the
-flight: a drop lands the spread away at the anchor's height. The clip to the band stays only as
-the backstop for an anchor outside it (Ground.within).
+that a drop still has a flight to be timed by) and a burst rises no more than fits under its
+lamp's ceiling, the most an arc between its two ends can rise and keep its top at or under it
+(particle_tools.rise_under). The spread is the same however short the flight: a drop lands the
+spread away at the anchor's height. The clip to the band stays only as the backstop for an
+anchor outside it (Ground.within).
 
 The count keeps to MAX_PARTICLES itself, so that step() never cuts a drop short: two beats'
 bursts are in the air at the most (BURSTS_ALIVE), and the spray has the rest of the room. A
@@ -37,7 +38,15 @@ import numpy as np
 from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.field_tools import anchor_or_centre
 from dj_ledfx.effects.params import EffectParam, anchor_param
-from dj_ledfx.effects.particle_tools import arc, draws, fired, in_birth_order, recent, swarm
+from dj_ledfx.effects.particle_tools import (
+    arc,
+    draws,
+    fired,
+    in_birth_order,
+    recent,
+    rise_under,
+    swarm,
+)
 from dj_ledfx.effects.particles import MAX_PARTICLES, ParamParticles
 
 if TYPE_CHECKING:
@@ -170,10 +179,9 @@ class Fountain(ParamParticles):
         since = beats - beat.astype(np.float64)  # beats since the burst was thrown
         share = since / FLIGHT_BEATS  # 1: landed
         rise = float(values["height_m"]) * BURST_UP * (0.8 + 0.4 * u[:, 1])
-        # An arc rises no more than the room over the higher of its ends, so it fits under the
-        # lamp's ceiling: its top is at most the higher end plus its rise.
-        over = np.maximum(ground.ceiling_for(lamp) - np.maximum(origin[2], landing[:, 2]), 0.0)
-        pos = arc(origin, landing, np.minimum(share, 1.0), np.minimum(rise, over))
+        # An arc rises no more than fits under the lamp's ceiling: its top is at most there.
+        fitted = rise_under(ground.ceiling_for(lamp), origin[2], landing[:, 2], rise)
+        pos = arc(origin, landing, np.minimum(share, 1.0), fitted)
         # Only the backstop, for an anchor outside the lamp's band: the throw stops at the
         # ceiling and the floor, but never short of the lamp's own LEDs.
         pos[:, 2] = ground.within(lamp, pos[:, 2])

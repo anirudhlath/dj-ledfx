@@ -47,13 +47,14 @@ def test_the_ball_lands_on_a_lamps_foot_on_every_beat_at_any_tempo(bpm: float) -
         assert sorted(feet[start : start + 4]) == [0, 1, 2, 3]
 
 
-def test_the_ball_bounces_height_m_up_between_beats() -> None:
-    ball = _ball(height_m=1.5)
+@pytest.mark.parametrize("height", [0.3, 1.5, 2.2])
+def test_the_ball_bounces_height_m_up_between_beats(height: float) -> None:
+    ball = _ball(height_m=height)
     feet = _landings(ball, range(2000, 2009))
     for beat, (here, there) in enumerate(zip(feet, feet[1:], strict=False), start=2000):
         drawn(ball, tempo_ctx(beat + 0.5), ROOM)
         half_way = (FEET[here, 2] + FEET[there, 2]) / 2.0
-        np.testing.assert_allclose(ball.particles.pos[0, 2], half_way + 1.5, atol=1e-5)
+        np.testing.assert_allclose(ball.particles.pos[0, 2], half_way + height, atol=1e-5)
 
 
 def test_the_ball_bounces_no_higher_than_the_ceiling() -> None:
@@ -73,6 +74,18 @@ def test_the_ball_takes_the_next_colour_at_each_bounce() -> None:
 
 
 ZONES: dict[str, Callable[[], LedSet]] = {**HOMES, "four lamps": lambda: ROOM}
+
+
+def _bounce(ball: BouncingBall, room: LedSet, beat: int, steps: int = 401) -> np.ndarray:
+    """Where the ball is along the bounce that leaves on this beat: `steps` places, from the
+    foot it leaves to the one it lands on."""
+    ground = Ground.of(room)
+    return np.array(
+        [
+            ball.positions(tempo_ctx(beat + along), ground).pos[0].astype(np.float64)
+            for along in np.linspace(0.0, 1.0, steps)
+        ]
+    )
 
 
 def _where(ball: BouncingBall, room: LedSet, beats: float, bpm: float = 120.0) -> np.ndarray:
@@ -109,17 +122,32 @@ def test_the_ball_follows_the_beat_count_not_the_tempo(bpm: float) -> None:
             np.testing.assert_array_equal(got, want)
 
 
-def test_the_bounce_rises_under_the_higher_ceiling_of_its_two_lamps_whichever_way_it_goes() -> (
-    None
-):
-    """One lamp is in the band (a 3 m ceiling over its foot at 2.9 m). The other has an LED at
-    3.4 m, which lifts its own ceiling to that (Ground.ceiling_for), and its foot at 1 m. A
-    bounce between them has the room under 3.4 m over its higher foot, 0.5 m, to and fro."""
+def test_a_bounce_rises_until_its_top_touches_the_higher_ceiling_of_its_two_lamps() -> None:
+    """One lamp is in the band (a 3 m ceiling over its foot at 2.9 m). The other has an LED
+    at 3.4 m, which lifts its own ceiling to that (Ground.ceiling_for), and its foot at 1 m.
+    Bouncing 1.5 m would take the ball through 3.4 m; it rises as far as it can under it
+    instead, to and fro: the top of its arc touches that ceiling."""
     room = lights_at([(0.5, 0.5, 2.9)], [(3.5, 0.5, 1.0), (3.5, 0.5, 3.4)])
     ball = _ball(height_m=1.5)
     for beat in range(2000, 2012):
-        middle = _where(ball, room, beat + 0.5)
-        assert middle[2] == pytest.approx((2.9 + 1.0) / 2.0 + 0.5, abs=1e-5)
+        bounce = _bounce(ball, room, beat)
+        assert bounce[:, 2].max() <= 3.4 + 1e-6
+        assert bounce[:, 2].max() == pytest.approx(3.4, abs=1e-4)
+        assert bounce[200, 2] - (2.9 + 1.0) / 2.0 > 1.0  # more than the 0.5 m over the higher foot
+
+
+def test_a_bounce_between_feet_near_the_top_of_the_band_still_arcs_under_the_ceiling() -> None:
+    """The room over the higher foot, 2.95 m up, is 5 cm, but there is more over the line
+    between the feet: the ball rises 0.67 m over it, the most that keeps its top at the 3 m
+    ceiling, to and fro; not the 5 cm, which would make the bounce a straight line."""
+    room = lights_at([(0.5, 0.5, 1.0)], [(3.5, 0.5, 2.95)], ceiling=3.0)
+    ball = _ball(height_m=1.5)
+    for beat in range(2000, 2012):
+        bounce = _bounce(ball, room, beat)
+        line = (bounce[0, 2] + bounce[-1, 2]) / 2.0
+        assert bounce[200, 2] - line == pytest.approx(0.6706, abs=1e-3)
+        assert bounce[:, 2].max() <= 3.0 + 1e-6
+        assert bounce[:, 2].max() == pytest.approx(3.0, abs=1e-4)
 
 
 def test_the_ball_rises_to_the_ceiling_and_no_higher_not_flat_along_it() -> None:
@@ -151,6 +179,19 @@ def test_a_bounce_with_no_room_under_the_ceiling_stays_on_the_line_between_its_f
         quarter = _where(ball, ROOM, beat + 0.25)
         there = _where(ball, ROOM, beat + 1.0)
         np.testing.assert_allclose(quarter, here + 0.25 * (there - here), atol=1e-5)
+
+
+def test_a_bounce_between_feet_at_a_ceiling_float32_holds_a_little_over_stays_on_the_line() -> (
+    None
+):
+    """2.45 is stored as 2.4500000477, so these feet are 5e-8 over the ceiling (which
+    Ground.ceiling_for keeps at 2.45: they are no further out than float32 can tell). The room
+    over them is a hair under nothing: it counts as nothing, not as a NaN."""
+    room = lights_at([(0.5, 0.5, 2.45)], [(3.5, 0.5, 2.45)], ceiling=2.45)
+    ball = _ball(height_m=1.5)
+    for beats in (2000.0, 2000.25, 2000.5, 2001.3, 2002.9):
+        where = _where(ball, room, beats)
+        assert np.isfinite(where).all() and where[2] == pytest.approx(2.45, abs=1e-6)
 
 
 @pytest.mark.parametrize("where", STRAYS)

@@ -18,7 +18,7 @@ from stray_lamps import (
 
 from dj_ledfx.effects import fountain as fountain_module
 from dj_ledfx.effects import particle_tools
-from dj_ledfx.effects.fountain import GRAVITY, Fountain
+from dj_ledfx.effects.fountain import BURST_UP, GRAVITY, Fountain
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import F64, Ground, Particles
 from dj_ledfx.effects.particles import MAX_PARTICLES, drawn
@@ -247,11 +247,15 @@ def test_nothing_rises_through_the_ceiling_however_high_it_is_set(burst: int, ra
 
 def test_the_drops_are_not_flattened_against_the_ceiling_at_the_largest_settings() -> None:
     """The arcs fit under the ceiling instead of running into it: not one drop sits at the
-    ceiling, and hardly any is within a centimetre of it (that is the top of an arc)."""
+    ceiling, and few are within a centimetre of it. That is the tops of the bursts' arcs,
+    which at these settings all rise as far as the ceiling lets them (rise_under): an arc
+    spends about 6% of its flight within a centimetre of its top, so 1.6% of all the drops
+    are there, against 0.05% of the spray's alone."""
     z = _spray(_fountain(rate=120.0, height_m=3.0, burst=60))[:, 2]
     assert z.max() <= 3.0
     assert np.mean(z >= 3.0) == 0.0
-    assert np.mean(z > 3.0 - 0.01) < 0.01
+    assert np.mean(z > 3.0 - 0.01) < 0.03
+    assert np.mean(_spray(_fountain(rate=120.0, height_m=3.0, burst=0))[:, 2] > 3.0 - 0.01) < 0.01
 
 
 def test_a_bursts_arcs_fit_under_the_ceiling_at_the_largest_settings(
@@ -267,6 +271,73 @@ def test_a_bursts_arcs_fit_under_the_ceiling_at_the_largest_settings(
     z = np.concatenate(heights)
     assert np.mean(z >= 3.0) == 0.0  # none against the ceiling
     assert 2.9 < z.max() < 3.0  # and they go well up to it
+
+
+def test_a_burst_from_an_anchor_near_the_ceiling_still_arcs_up_to_it_before_coming_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The anchor is 10 cm under the ceiling and the drops land on LEDs 0.1 to 1.4 m up, so the
+    room over the higher end is 10 cm. A burst rises as far as an arc between those can with
+    its top at the ceiling instead, 0.6 to 1 m over the line: it goes up from the anchor and
+    comes down on its LED, rather than falling most of the way straight."""
+    room = _room(np.array([2.0, 2.0, 2.9], dtype=np.float32))
+    fountain = _fountain(rate=5.0, height_m=3.0, burst=60)
+    seen = _watched(monkeypatch)
+    heights = []
+    for step in range(1200):  # every hundredth of a second, eight seconds
+        drawn(fountain, tempo_ctx(2000.0 + step / 75), room)
+        heights.append(seen[-1][1][0].pos[:, 2].astype(np.float64))
+    z = np.concatenate(heights)
+    assert z.max() <= 3.0
+    assert z.max() > 3.0 - 0.01  # up to the ceiling, not the anchor's 2.9
+
+
+def test_a_burst_rises_burst_up_times_the_height_when_there_is_room_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With 10 m of room the fit never binds: a burst's arc rises height_m x BURST_UP, give
+    or take a fifth, over the line between its ends, so no drop tops that over its higher end."""
+    corners = (upright(0.5, 0.5), upright(3.5, 0.5), upright(3.5, 3.5), upright(0.5, 3.5))
+    room = lights_at(*corners, anchors={ANCHOR_ID: ANCHOR}, ceiling=10.0)
+    fountain = _fountain(rate=5.0, height_m=0.5, burst=60)
+    seen = _watched(monkeypatch)
+    tops = []
+    for step in range(120):
+        drawn(fountain, tempo_ctx(2000.0 + step / 15), room)
+        tops.append(seen[-1][1][0].pos[:, 2].astype(np.float64))
+    z = np.concatenate(tops)
+    assert z.max() <= 1.4 + 0.5 * BURST_UP * 1.2 + 1e-4  # the highest LED, and the longest rise
+    assert z.max() > 1.4 + 0.5 * BURST_UP * 0.8 - 0.3  # and they do go up that far, a little less
+
+
+def test_a_burst_to_a_lamp_over_the_ceiling_rises_over_the_ceiling_under_that_lamps_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fit is under the ceiling of the lamp the burst goes to (ceiling_for): half-way, the
+    drops that go east, to a lamp whose LEDs are 3.2 to 3.5 m up, rise over the zone's 3 m
+    ceiling (those to its lower LEDs, 3.1 m up) and none over the lamp's 3.5; those that go
+    west, to a lamp in the band, are never over 3."""
+    room = lights_at(
+        upright(1.0, 2.0),
+        upright(3.0, 2.0, 3.2, 3.5),
+        anchors={ANCHOR_ID: ANCHOR},
+        ceiling=3.0,
+    )
+    fountain = _fountain(rate=5.0, height_m=3.0, burst=60)
+    seen = _watched(monkeypatch)
+    east, west = [], []
+    for beat in range(2000, 2010):
+        drawn(fountain, tempo_ctx(beat + 0.5), room)
+        drops = seen[-1][1][0].pos.astype(np.float64)
+        flying = (
+            np.linalg.norm(drops[:, None, :] - room.pos[None, :, :], axis=2).min(axis=1) > 0.05
+        )
+        east.append(drops[flying & (drops[:, 0] > 2.0), 2])
+        west.append(drops[flying & (drops[:, 0] < 2.0), 2])
+    east_z, west_z = np.concatenate(east), np.concatenate(west)
+    assert len(east_z) > 100 and len(west_z) > 100
+    assert 3.1 < east_z.max() <= 3.5 + 1e-6
+    assert west_z.max() <= 3.0 + 1e-6
 
 
 @pytest.mark.parametrize("anchor_z", [2.5, 2.9], ids=["half a metre", "10 cm"])

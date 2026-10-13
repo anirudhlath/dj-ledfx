@@ -77,6 +77,14 @@ def _at(comets: TwinComets, room: LedSet, beats: list[float], comet: int = 0) ->
     return comets.at(np.array(beats), comet, Ground.of(room))
 
 
+def _hop(
+    comets: TwinComets, room: LedSet, beat: int, comet: int = 0, steps: int = 401
+) -> np.ndarray:
+    """Where a comet is along the hop that leaves on this beat: `steps` places, from the lamp
+    it leaves to the one it lands on."""
+    return _at(comets, room, list(beat + np.linspace(0.0, 1.0, steps)), comet)
+
+
 def _same(a: Particles, b: Particles) -> None:
     for got, want in ((a.pos, b.pos), (a.colour, b.colour), (a.radius, b.radius)):
         np.testing.assert_array_equal(got, want)
@@ -218,21 +226,53 @@ def test_a_long_hop_rises_to_the_ceiling_and_no_higher_not_flat_along_it() -> No
     assert np.mean(z > 3.0 - 1e-3) < 0.2  # the top of each hop alone; flattened, three in four
 
 
-def test_a_hop_rises_under_the_higher_ceiling_of_its_two_lamps_whichever_way_it_goes() -> None:
-    """One lamp is in the band (a 3 m ceiling over its top LED at 2.9 m). The other has an
-    LED at 3.4 m, which lifts its own ceiling to that (Ground.ceiling_for), and an LED at
-    1 m. A hop between them has the room under 3.4 m over its higher end, going and coming
-    back, on whichever LED of the second lamp it lands."""
+def test_a_hop_rises_until_its_top_touches_the_higher_ceiling_of_its_two_lamps() -> None:
+    """One lamp is in the band (a 3 m ceiling over its bulb at 2.9 m). The other has an LED
+    at 3.4 m, which lifts its own ceiling to that (Ground.ceiling_for), and an LED at 1 m.
+    A hop between them, 40 m apart, would rise 10 m. It rises as far as it can under 3.4 m
+    instead, going and coming back and on whichever LED of the second lamp it lands: the
+    top of its arc touches that ceiling, and where the LED it lands on is at the ceiling it
+    still arcs, over the line to it."""
     room = lights_at([(0.0, 0.0, 2.9)], [(40.0, 0.0, 1.0), (40.0, 0.0, 3.4)])
     comets = _comets()
-    far_down = 0
+    landed_on = set()
     for comet in range(2):
         for beat in range(2000, 2040):
-            here, middle, there = _at(comets, room, [beat, beat + 0.5, beat + 1.0], comet)
-            rise = min(0.25 * np.linalg.norm(there - here), 3.4 - max(here[2], there[2]))
-            assert middle[2] == pytest.approx((here[2] + there[2]) / 2.0 + rise, abs=1e-5)
-            far_down += int(min(here[2], there[2]) < 1.5)  # 2.9 to 1: 0.5 m of rise, not 0.1
-    assert far_down > 20
+            hop = _hop(comets, room, beat, comet)
+            here, there = hop[0], hop[-1]
+            landed_on.add(round(float(there[2] if there[0] == 40.0 else here[2]), 1))
+            assert hop[:, 2].max() <= 3.4 + 1e-6
+            assert hop[:, 2].max() == pytest.approx(3.4, abs=1e-4)
+            assert hop[200, 2] - (here[2] + there[2]) / 2.0 > 0.1  # over the line half-way
+    assert landed_on == {1.0, 3.4}
+
+
+def test_a_hop_to_an_led_near_the_top_of_the_band_still_arcs_and_stays_under_the_ceiling() -> None:
+    """The room over the higher end, an LED 2.95 m up, is 5 cm, but there is more over the
+    line to it. The hop rises 0.67 m over that line, the most that keeps its top at the
+    3 m ceiling, going and coming back; not the 5 cm, which would make it a straight line."""
+    room = lights_at([(0.0, 0.0, 1.0)], [(40.0, 0.0, 2.95)], ceiling=3.0)
+    comets = _comets()
+    for comet in range(2):
+        for beat in range(2000, 2012):
+            hop = _hop(comets, room, beat, comet)
+            line = (hop[0, 2] + hop[-1, 2]) / 2.0
+            assert hop[200, 2] - line == pytest.approx(0.6706, abs=1e-3)
+            assert hop[:, 2].max() <= 3.0 + 1e-6
+            assert hop[:, 2].max() == pytest.approx(3.0, abs=1e-4)
+
+
+def test_a_hop_between_leds_at_a_ceiling_float32_holds_a_little_over_stays_on_the_line() -> None:
+    """2.45 is stored as 2.4500000477, so these LEDs are 5e-8 over the ceiling (which
+    Ground.ceiling_for keeps at 2.45: they are no further out than float32 can tell). The room
+    over them is a hair under nothing: it counts as nothing, not as a NaN."""
+    room = lights_at([(0.0, 0.0, 2.45)], [(40.0, 0.0, 2.45)], ceiling=2.45)
+    comets = _comets()
+    for comet in range(2):
+        for beat in range(2000, 2010):
+            hop = _hop(comets, room, beat, comet, steps=21)
+            assert np.isfinite(hop).all()
+            np.testing.assert_allclose(hop[:, 2], 2.45, atol=1e-6)
 
 
 def test_a_hop_starts_where_the_last_one_landed_between_lamps_with_different_bands() -> None:

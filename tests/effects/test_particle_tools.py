@@ -33,6 +33,7 @@ from dj_ledfx.effects.particle_tools import (
     lamps_of,
     lit,
     recent,
+    rise_under,
     spread_over,
     swarm,
     tour,
@@ -303,6 +304,70 @@ def test_an_arc_goes_from_start_to_end_rising_half_way() -> None:
     np.testing.assert_allclose(arc(start, end, [0.5], 0.5), [[1.0, 0.0, 1.5]])
     many = arc(start, end, np.linspace(0.0, 1.0, 5), 0.5)
     assert many.shape == (5, 3) and many[:, 2].max() == 1.5
+
+
+def _top_of(start: float, end: float, rise: float) -> float:
+    """The highest point of the arc from height `start` to height `end` that rises `rise`
+    over the line between them, found by looking along it."""
+    where = arc([0.0, 0.0, start], [1.0, 0.0, end], np.linspace(0.0, 1.0, 20001), rise)
+    return float(where[:, 2].max())
+
+
+ENDS = [
+    pytest.param(1.0, 1.0, id="level"),
+    pytest.param(0.1, 1.4, id="a climb"),
+    pytest.param(1.4, 0.1, id="a fall"),
+    pytest.param(1.0, 2.95, id="to an end near the ceiling"),
+    pytest.param(2.0, 3.0, id="to an end at the ceiling"),
+    pytest.param(3.0, 3.0, id="both at the ceiling"),
+    pytest.param(0.0, 0.0, id="on the floor"),
+]
+
+
+@pytest.mark.parametrize(("start", "end"), ENDS)
+def test_the_most_an_arc_can_rise_under_a_ceiling_is_where_its_top_touches_it(
+    start: float, end: float
+) -> None:
+    """The top of an arc is its higher end or an apex over the line: the most it can rise
+    keeps the top at the ceiling, to the last bit, and any more takes it through."""
+    most = float(rise_under(3.0, start, end, 100.0))
+    assert _top_of(start, end, most) == pytest.approx(3.0, abs=1e-6)
+    assert _top_of(start, end, most) <= 3.0 + 1e-9
+    assert _top_of(start, end, 1.05 * most + 0.01) > 3.0 + 1e-4
+
+
+@pytest.mark.parametrize(("start", "end"), ENDS)
+def test_an_arc_has_at_least_the_room_over_its_higher_end_to_rise_in(
+    start: float, end: float
+) -> None:
+    """The exact fit is never less than the room over the higher end (what an arc may rise
+    when it is held to that), and a rise that fits is left as it is."""
+    room = 3.0 - max(start, end)
+    assert float(rise_under(3.0, start, end, 100.0)) >= room - 1e-12
+    assert float(rise_under(3.0, start, end, room / 2.0)) == room / 2.0
+
+
+def test_an_arc_between_equal_ends_rises_the_room_over_them_and_a_climb_a_quarter_of_it() -> None:
+    assert float(rise_under(3.0, 1.0, 1.0, 100.0)) == pytest.approx(2.0)
+    assert float(rise_under(3.0, 0.0, 3.0, 100.0)) == pytest.approx(0.75)  # a quarter of the climb
+    assert float(rise_under(3.0, 1.0, 3.0, 0.5)) == 0.5  # a rise that fits stays
+
+
+def test_an_arc_with_no_room_does_not_rise_and_an_end_over_the_ceiling_is_at_it() -> None:
+    assert float(rise_under(1.0, 1.0, 1.0, 5.0)) == 0.0
+    assert float(rise_under(1.0, 2.0, 3.0, 5.0)) == 0.0  # both ends over it
+    # One over it counts as at it: the arc can rise a quarter of the way down from there.
+    assert float(rise_under(3.0, 1.0, 3.5, 5.0)) == pytest.approx(0.5)
+    assert float(rise_under(3.0, 3.5, 1.0, 5.0)) == pytest.approx(0.5)
+
+
+def test_rise_under_takes_a_ceiling_and_ends_for_each_arc_and_one_of_each_alike() -> None:
+    ceiling, start, end = np.array([3.0, 3.4, 3.0]), np.array([1.0, 2.9, 1.0]), 1.0
+    together = rise_under(ceiling, start, end, np.array([10.0, 10.0, 0.5]))
+    assert together.shape == (3,)
+    for place in range(3):
+        alone = rise_under(ceiling[place], start[place], end, [10.0, 10.0, 0.5][place])
+        assert together[place] == alone
 
 
 def test_a_tour_visits_every_stop_each_round_and_never_stays() -> None:

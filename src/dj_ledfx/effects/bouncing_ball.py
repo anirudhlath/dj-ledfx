@@ -6,14 +6,16 @@ of its LEDs, its own each beat), and bounces from there to the next lamp of its 
 in a row), height_m up over the beat, landing on it on the next beat. It takes the palette's
 next colour at each bounce.
 
-A bounce fits under the ceiling instead of flattening against it: it rises no higher than the
-room over the higher of its two feet, under the higher ceiling of its two lamps (Ground.
-ceiling_for, widened to take in a lamp the map or a layer's transform puts over the ceiling).
-That band is the same for a bounce whichever way it goes, and the bounce before and the bounce
-after share a foot, so the ball doesn't jump at the beat. The feet are in their lamps' bands
-and a bounce only rises over the line between them, so the floor never binds, and with no
-room at all (a ceiling under the feet, which ceiling_for never gives) the ball stays on the
-line between them, not under it.
+A bounce fits under the ceiling instead of flattening against it: it rises height_m, but no
+more than fits under the higher ceiling of its two lamps (Ground.ceiling_for, widened to take
+in a lamp the map or a layer's transform puts over the ceiling): the most an arc between its
+two feet can rise and keep its top at or under it (particle_tools.rise_under), so a bounce
+between feet near the top of the band still arcs. That ceiling is the same for a bounce
+whichever way it goes, and the bounce before and the bounce after share a foot, so the ball
+doesn't jump at the beat. The feet are in their lamps' bands and a bounce only rises over the
+line between them, so the floor never binds, and with no room at all (a ceiling under the
+feet, which ceiling_for never gives beyond float32 rounding) the ball stays on the line
+between them, not under it.
 
 The ball is one particle: the count is 1, whatever the lamps, within MAX_PARTICLES.
 """
@@ -26,7 +28,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.effects.particle_tools import arc, draws, swarm, tour
+from dj_ledfx.effects.particle_tools import arc, draws, rise_under, swarm, tour
 from dj_ledfx.effects.particles import ParamParticles
 
 if TYPE_CHECKING:
@@ -69,8 +71,9 @@ class BouncingBall(ParamParticles):
         stops = tour(self._seed, 0, bounces, ground.lamps.count)
         here, there = ground.foot(stops, draws(self._seed, bounces, 1, stream=1)[:, 0])
         # Under the higher ceiling of the bounce's two lamps, whichever way it goes.
-        room = float(ground.ceiling_for(stops).max()) - max(float(here[2]), float(there[2]))
-        height = max(min(float(values["height_m"]), room), 0.0)
+        height = rise_under(
+            ground.ceiling_for(stops).max(), here[2], there[2], float(values["height_m"])
+        )
         where = arc(here, there, [ctx.beats - beat], height)
         palette = self._palette
         return swarm(where, palette[beat % len(palette)], float(values["size"]))

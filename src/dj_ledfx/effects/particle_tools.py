@@ -173,6 +173,21 @@ def arc(start: ArrayLike, end: ArrayLike, share: ArrayLike, rise: ArrayLike) -> 
     return where
 
 
+def rise_under(ceiling: ArrayLike, start: ArrayLike, end: ArrayLike, rise: ArrayLike) -> F64:
+    """`rise`, held to the most an arc (above) between heights `start` and `end` can rise and
+    keep its top at or under `ceiling`: the exact fit, which is more than the room over the
+    higher end. An arc rising r over the line between ends a and b (d apart in height) tops
+    out at (a + b) / 2 + r + d² / 16r, or at its higher end when r is under |d| / 4, so the
+    most is (√(C - a) + √(C - b))² / 4: all of the room over equal ends, and a quarter of the
+    climb to an end at the ceiling. An end over the ceiling counts as at it, so no room is a
+    rise of nothing. Heights broadcast."""
+    top = np.asarray(ceiling, dtype=np.float64)
+    over_start = np.sqrt(np.maximum(top - np.asarray(start, dtype=np.float64), 0.0))
+    over_end = np.sqrt(np.maximum(top - np.asarray(end, dtype=np.float64), 0.0))
+    most: F64 = np.minimum(rise, np.square(over_start + over_end) / 4.0)
+    return most
+
+
 TOURS = 1000  # tour k draws from stream TOURS + k
 
 

@@ -155,6 +155,7 @@ def test_lamps_inside_the_band_are_drawn_with_the_zones_own_floor_and_ceiling(
         seen = []
         for step in range(40):
             drawn(effect, tempo_ctx(START + step * 0.7), leds)
+            assert np.isfinite(effect.particles.pos).all()  # a hair over a ceiling is no NaN
             seen.append((effect.particles.pos, effect.particles.colour, effect.particles.radius))
         return seen
 

@@ -6,14 +6,16 @@ and lands on it, on an LED of it (any of its LEDs, its own each visit), on the n
 They start on opposite sides of the loop, so they chase each other round it. Each trails a
 tail of fading, shrinking particles where it was over the last tail_beats.
 
-A hop rises HOP of the way it goes over the line between its two LEDs, but no higher than
-the room over the higher of them, under the higher ceiling of its two lamps (Ground.
-ceiling_for, widened to take in a lamp the map or a layer's transform puts over the
-ceiling): it fits under the ceiling instead of flattening against it. The line itself, and
-the hop above it, stay between the two LEDs, so the floor never binds, and with no room at
-all (a ceiling under the LEDs, which ceiling_for never gives) the hop stays on the line, not
-under it. Both lamps' band is the same for a hop whichever way it goes, and every hop starts
-where the one before landed, so a comet doesn't jump at the beat.
+A hop rises HOP of the way it goes over the line between its two LEDs, but no more than
+fits under the higher ceiling of its two lamps (Ground.ceiling_for, widened to take in a
+lamp the map or a layer's transform puts over the ceiling): the most an arc between them can
+rise and keep its top at or under it (particle_tools.rise_under). So it fits under the
+ceiling instead of flattening against it, and still arcs to an LED near the top of the band.
+The line itself, and the hop above it, stay between the two LEDs, so the floor never binds,
+and with no room at all (a ceiling under the LEDs, which ceiling_for never gives beyond
+float32 rounding) the hop stays on the line, not under it. Both lamps' band is the same for
+a hop whichever way it goes, and every hop starts where the one before landed, so a comet
+doesn't jump at the beat.
 
 Both comets and all their tails are worked out at once, as one array, and listed together
 oldest first (particle_tools.in_birth_order, by the beat each was left behind at): the tails'
@@ -30,7 +32,14 @@ import numpy as np
 
 from dj_ledfx.effects.easing import ease_in_out
 from dj_ledfx.effects.params import EffectParam
-from dj_ledfx.effects.particle_tools import arc, around, draws, in_birth_order, swarm
+from dj_ledfx.effects.particle_tools import (
+    arc,
+    around,
+    draws,
+    in_birth_order,
+    rise_under,
+    swarm,
+)
 from dj_ledfx.effects.particles import ParamParticles
 
 if TYPE_CHECKING:
@@ -99,8 +108,12 @@ class TwinComets(ParamParticles):
         spot = draws(self._seed, visit, 1, stream=np.broadcast_to(1 + which, visit.shape))
         here, there = ground.on(lamp, spot[:, 0].reshape(visit.shape))
         # Under the higher ceiling of the hop's two lamps, whichever way it goes.
-        room = ground.ceiling_for(lamp).max(axis=0) - np.maximum(here[..., 2], there[..., 2])
-        rise = np.minimum(HOP * np.linalg.norm(there - here, axis=-1), np.maximum(room, 0.0))
+        rise = rise_under(
+            ground.ceiling_for(lamp).max(axis=0),
+            here[..., 2],
+            there[..., 2],
+            HOP * np.linalg.norm(there - here, axis=-1),
+        )
         where = arc(
             here.reshape(-1, 3),
             there.reshape(-1, 3),
