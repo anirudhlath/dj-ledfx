@@ -1,4 +1,4 @@
-// What the e2e specs share: opening a page on the mock, and Live's stage.
+// What the e2e specs share: opening a page on the mock, Live's stage, and a notched screen.
 import { expect, type Locator, type Page } from '@playwright/test'
 
 /**
@@ -32,4 +32,12 @@ export async function openStage(page: Page, path = '/next/live'): Promise<Locato
   await open(page, path)
   await expect(stageCanvas(page)).toBeVisible()
   return stageOf(page)
+}
+
+export type Insets = { top: number; right: number; bottom: number; left: number }
+
+/** A notched screen: Chromium's safe-area override stands in for the phone's (viewport-fit=cover). */
+export async function notch(page: Page, insets: Insets): Promise<void> {
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets })
 }

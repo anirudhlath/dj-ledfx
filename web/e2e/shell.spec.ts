@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { open, stageCanvas } from './helpers'
+import { notch, open, stageCanvas, type Insets } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in Dallas (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -47,18 +47,11 @@ async function openStill(page: Page, path: string) {
   if (!isPhone(page)) await expect(page.getByRole('banner').getByText('60 fps')).toBeVisible({ timeout: 10_000 })
 }
 
-/** axe's findings for the page as it stands, one line per rule. */
-async function axeViolations(page: Page): Promise<string[]> {
-  const { violations } = await new AxeBuilder({ page }).analyze()
+/** axe's findings for the page as it stands, one line per rule, leaving out what `exclude` selects. */
+async function axeViolations(page: Page, exclude?: string): Promise<string[]> {
+  const builder = new AxeBuilder({ page })
+  const { violations } = await (exclude === undefined ? builder : builder.exclude(exclude)).analyze()
   return violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)
-}
-
-type Insets = { top: number; right: number; bottom: number; left: number }
-
-/** A notched screen: Chromium's safe-area override stands in for the phone's (viewport-fit=cover). */
-async function notch(page: Page, insets: Insets) {
-  const cdp = await page.context().newCDPSession(page)
-  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets })
 }
 
 /** Each landmark edge that crosses into a safe-area inset, as "<landmark> <edge>". */
@@ -121,7 +114,15 @@ for (const path of ROUTES) {
 
 // Decision 12: /system is there to run axe over every primitive. Base UI mounts an overlay's popup
 // only while it's open, so each one is opened before axe looks.
-const OVERLAYS: { name: string; path?: string; desktop?: boolean; open: (page: Page) => Promise<void>; popup: (page: Page) => Locator }[] = [
+const OVERLAYS: {
+  name: string
+  path?: string
+  desktop?: boolean
+  open: (page: Page) => Promise<void>
+  popup: (page: Page) => Locator
+  /** What axe leaves out, and the entry says why. */
+  exclude?: string
+}[] = [
   {
     name: 'Tooltip',
     open: (page) => page.getByRole('button', { name: 'Fit', exact: true }).hover(),
@@ -168,6 +169,16 @@ const OVERLAYS: { name: string; path?: string; desktop?: boolean; open: (page: P
     popup: (page) => page.getByRole('alertdialog', { name: 'Stop all?', exact: true }),
   },
   {
+    name: "composer's transition list",
+    path: '/next/live/put?zone=living&look=embers',
+    open: (page) => page.getByRole('combobox', { name: 'Transition', exact: true }).click(),
+    popup: (page) => page.getByRole('listbox'),
+    // Base UI's focus guards are tabbable and aria-hidden by design, and axe excuses them only while it
+    // takes the page for a modal one: a fixed layer at each of five points it samples. The list's
+    // backdrop has a hole over its trigger, and the phone's trigger sits on one of the points.
+    exclude: '[data-base-ui-focus-guard]',
+  },
+  {
     name: 'tempo source popover',
     path: '/next/live',
     desktop: true,
@@ -182,7 +193,7 @@ for (const overlay of OVERLAYS) {
     await open(page, overlay.path ?? '/next/system')
     await overlay.open(page)
     await expect(overlay.popup(page)).toBeVisible()
-    expect(await axeViolations(page)).toEqual([])
+    expect(await axeViolations(page, overlay.exclude)).toEqual([])
   })
 }
 
