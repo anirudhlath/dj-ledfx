@@ -84,7 +84,11 @@ export function useComposeChoice(composing = true): ComposeChoice {
   }
 }
 
-/** The look the preview stream draws on the composer's zone, by name: what the stage says it previews. */
+/**
+ * The look chosen last, by name, while the stage draws the composer's zone from the preview stream: what the stage says it previews. That's
+ * the choice, not the frames: until the server plays it the zone still shows the look before, or once one was chosen over, the last frame
+ * it drew (PreviewSession.show).
+ */
 function previewing(preview: PreviewState, zone: Zone, looks: readonly Look[] | undefined): string | null {
   if (preview.showing !== zone.id) return null
   return looks?.find((look) => look.id === preview.lookId)?.name ?? null
@@ -146,7 +150,8 @@ export function useComposer(): Composer {
   const names = useMemo(() => new Map<Id, Light>((lights ?? []).map((light) => [light.id, light])), [lights])
 
   const missing = (each: Look) => missingInputs(each, inputs)
-  const answered = preview.zoneId === zone?.id && preview.lookId === look?.id
+  // The preview state is for the choice made now, from the moment it was asked for: its status says how that went.
+  const forThisChoice = preview.zoneId === zone?.id && preview.lookId === look?.id
   const said =
     zone === undefined
       ? null
@@ -155,9 +160,9 @@ export function useComposer(): Composer {
           look,
           running,
           lights: names,
-          plan: answered && preview.status === 'on' ? preview.lights : null,
+          plan: forThisChoice && preview.status === 'on' ? preview.lights : null,
           missing: look === undefined ? [] : missing(look),
-          refused: answered && preview.status === 'failed' && look !== undefined ? failureText(`preview ${look.name}`, preview.error) : null,
+          refused: forThisChoice && preview.status === 'failed' && look !== undefined ? failureText(`preview ${look.name}`, preview.error) : null,
         })
   const start = (transition: Transition) => {
     if (zone === undefined || look === undefined || starting) return
