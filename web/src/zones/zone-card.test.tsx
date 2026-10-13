@@ -64,6 +64,16 @@ describe('ZoneCard', () => {
     expect(within(card).getByRole('progressbar', { name: 'Dissolve · 3 s' })).toHaveAttribute('aria-valuenow', '62')
   })
 
+  // The heading's "from" and "to" are `sr-only`, which is absolutely positioned: with no positioned ancestor inside the Running panel's
+  // scroller they escape its clip and stretch <main>'s scroll area (measured: 27 px at 1440 x 400), so the heading holds them with `relative`.
+  it("holds a transition heading's hidden words in the positioned heading, so they can't reach out of a scroller", () => {
+    const card = renderCard('transition', 'living')
+    const heading = within(card).getByRole('heading', { name: 'from Fireflies to Embers' })
+    const hidden = heading.querySelectorAll('.sr-only')
+    expect([...hidden].map((each) => each.textContent)).toEqual(['from', 'to'])
+    for (const each of hidden) expect(each.closest('.relative')).toBe(heading)
+  })
+
   // F3 decision 16: the server pushes a transition only as it starts, passes its midpoint and ends.
   it('moves a transition on by itself at its duration, and holds one with no duration', () => {
     vi.useFakeTimers()

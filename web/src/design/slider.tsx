@@ -13,13 +13,17 @@ export interface SliderProps {
   className?: string
 }
 
-/** §6.1 Slider: a real range input with a mono readout on the right. */
+/**
+ * §6.1 Slider: a real range input with a mono readout on the right. The root is `relative` for the label, which is `sr-only`, and so
+ * absolutely positioned: with no positioned ancestor inside a scroller it escapes the scroller's clip, and a Running panel that scrolls
+ * stretches <main>'s own scroll area by the label's place (measured: 27 to 39 px on a short screen).
+ */
 export function Slider({ label, value, onValueChange, min = 0, max = 100, step = 1, format = String, className }: SliderProps) {
   const id = useId()
   const text = format(value)
   const fill = { '--v': `${((value - min) / (max - min)) * 100}%` } as CSSProperties
   return (
-    <div className={cx('flex items-center gap-2.5', className)}>
+    <div className={cx('relative flex items-center gap-2.5', className)}>
       <label htmlFor={id} className="sr-only">
         {label}
       </label>
