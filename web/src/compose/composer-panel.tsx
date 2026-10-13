@@ -111,7 +111,9 @@ export function ComposerPanel({ className }: { className?: string }) {
               })}
             </div>
           </div>
-          <div className="min-h-0 grow overflow-y-auto px-5 pt-1 pb-4">
+          {/* scroll-py-1: a tile the browser scrolls to when the arrows move the focus lands with the room its focus ring needs (4 px, tokens.css),
+              which the scroller would clip at its edge. The phone's list does the same. */}
+          <div className="min-h-0 grow scroll-py-1 overflow-y-auto px-5 pt-1 pb-4">
             {view.shown.length === 0 ? (
               <p className="text-meta text-text-3">
                 {view.searching

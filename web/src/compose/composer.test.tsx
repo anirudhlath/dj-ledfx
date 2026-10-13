@@ -1179,6 +1179,14 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     for (const each of hidden) expect(each.closest('.relative')).toBe(each.closest('[data-look]'))
   })
 
+  // The grid scrolls, and the browser scrolls a tile the arrows focus to the scroller's edge, which cut its focus ring (measured: 3.5 px at the
+  // bottom edge, at 1440 x 900). scroll-py-1 leaves the ring's room, as the phone's list does; Task 10's e2e measures the rings.
+  it("leaves a tile that is scrolled to the room its focus ring needs, as the phone's list does", async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const scroller = within(composer()).getByRole('group', { name: 'Looks' }).parentElement
+    expect(scroller).toHaveClass('overflow-y-auto', 'scroll-py-1')
+  })
+
   // §4.4: between 768 and 1199 px the panel lies over the stage's right side, and the composer lies there in its place, with Where
   // stopping short of it; the button that brings a hidden Running panel back isn't drawn beside the composer. jsdom has no layout, so
   // the position is the classes (Task 10's e2e measures it).
