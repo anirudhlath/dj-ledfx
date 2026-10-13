@@ -24,8 +24,8 @@ const LIVE: PageMeta = {
 }
 /** Zone detail (Phone-Zone): the zone's name with Back to Live, and no context line or tempo strip. On desktop it's Live (F3 decision 23). */
 const ZONE: PageMeta = { title: LIVE.title, context: LIVE.context, PhoneTitle: ZoneTitle, phoneBack: '/live' }
-/** Put a look on (§8.2): Live, with the composer in the Running panel's place. */
-const PUT: PageMeta = { title: LIVE.title, context: LIVE.context }
+/** Put a look on (§8.2): Live, with the composer in the Running panel's place; on the phone, a focused task (Phone-PutLookOn). */
+const PUT: PageMeta = { title: LIVE.title, context: LIVE.context, focusedTask: true }
 const LOOKS: PageMeta = { title: 'Looks' }
 const MAP: PageMeta = {
   title: 'Map',

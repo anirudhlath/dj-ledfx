@@ -3,7 +3,9 @@
 // its REST reads start at once rather than when its code arrives. /live/zones/:zoneId is Live with that
 // zone's card outlined (F3 decision 23); /live/put is Live with the composer in the panel's place and the
 // stage in `compose` mode (§8.2), which `L` opens and Esc closes. Between 768 and 1199 px the panel lies
-// over the stage's right side and can hide (§4.4, F3 decision 22); the composer lies there too.
+// over the stage's right side and can hide (§4.4, F3 decision 22); the composer lies there too. On the
+// phone the composer is a sheet that fills the screen under the stage (§8.10, F4 ruling 16), the page's own
+// height so that <main> never scrolls, and every exit gives the focus to the phone's own link to it.
 import { usePrefetchQuery } from '@tanstack/react-query'
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useMatch, useParams } from 'react-router'
@@ -11,10 +13,12 @@ import type { Id } from '@/api/contract'
 import { queries } from '@/api/queries'
 import { usePreviewOnly } from '@/chrome/hooks'
 import { ComposerPanel, ComposerWhere } from '@/compose/composer-panel'
+import { ComposerSheet } from '@/compose/composer-sheet'
 import { COMPOSER_ROUTE } from '@/compose/model'
 import { useStageCompose } from '@/compose/use-composer'
 import { useComposerKeys } from '@/compose/use-composer-keys'
 import { Button } from '@/design/button'
+import { cx } from '@/design/cx'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
 import { EmptyHome } from '@/live/empty-home'
@@ -59,8 +63,9 @@ export function LivePage() {
     setWasComposing(composing)
     setHovered(null)
   }
-  // The focus was in the composer, which goes with it: the Running panel that returns gives it to the link that opens the composer, where it
-  // would otherwise fall to the page.
+  // The focus was in the composer, which goes with it: the page that returns gives it to the link that opens the composer, where it
+  // would otherwise fall to the page. That link is the Running panel's on desktop, and on the phone Live's own or Zone detail's, whichever
+  // the exit lands on.
   const put = useRef<HTMLAnchorElement>(null)
   const wasOpen = useRef(composing)
   useEffect(() => {
@@ -78,12 +83,20 @@ export function LivePage() {
     </Suspense>
   )
   if (phone) {
+    // Phone-PutLookOn: the composer's sheet fills the screen under the stage, over the stage's foot, so the page is <main>'s height and
+    // only the sheet's look list scrolls.
     return (
-      <div className="flex min-h-full flex-col">
+      <div className={cx('flex flex-col', composing ? 'h-full' : 'min-h-full')}>
         <div className="relative shrink-0" style={{ aspectRatio: `${LIVE_SPEC.phoneStage.width} / ${LIVE_SPEC.phoneStage.height}` }}>
           {stage}
         </div>
-        {zoneId === undefined ? <PhoneRunning /> : <ZoneDetail zoneId={zoneId} />}
+        {composing ? (
+          <ComposerSheet className="relative z-10 -mt-9 min-h-0 flex-1" />
+        ) : zoneId === undefined ? (
+          <PhoneRunning putRef={put} />
+        ) : (
+          <ZoneDetail zoneId={zoneId} putRef={put} />
+        )}
       </div>
     )
   }

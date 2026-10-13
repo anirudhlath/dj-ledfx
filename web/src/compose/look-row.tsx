@@ -4,7 +4,8 @@
 // name's 21 px and the line's 11.5 px are Phone-PutLookOn's. The label replaces what the button holds and
 // already says its state (aria-pressed the previewed one), which the line mostly shows too, so the
 // description is the look's category and inputs (lookInputs()), the one thing nothing else says, in a
-// visually hidden span.
+// visually hidden span, which the row holds with `relative`: an absolutely positioned span with no
+// positioned ancestor in its list escapes the list's clip and stretches <main>'s scroll area.
 import { useId } from 'react'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
@@ -24,7 +25,7 @@ export function LookRow({ look, selected, here, missing, tabbable, onSelect }: L
       data-look={look.id}
       tabIndex={tabbable ? 0 : -1}
       className={cx(
-        'flex w-full items-center gap-3 rounded-card border p-2 text-left',
+        'relative flex w-full items-center gap-3 rounded-card border p-2 text-left',
         selected ? 'border-text bg-control' : 'border-transparent',
       )}
       onClick={onSelect}

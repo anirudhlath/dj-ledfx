@@ -5,6 +5,7 @@ import { frames, previewSession } from '@/api/live'
 import { lookName } from '@/api/mocks/fixtures'
 import type { MockServer, MockServerOptions } from '@/api/mocks/mock-server'
 import { api, ApiError } from '@/api/rest'
+import { LIVE_SPEC } from '@/design/live-numbers'
 import { renderApp } from '@/test/app'
 import { HERO_NOW, pushFrame, restOn, startMockDataLayer } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
@@ -1178,5 +1179,238 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     fireEvent.keyDown(document.body, { key: 'Escape' })
     await settle()
     expect(screen.getByRole('button', { name: 'Running' })).toBeInTheDocument()
+  })
+})
+
+describe('Put a look on, on the phone (§8.10)', () => {
+  beforeEach(() => {
+    setViewportWidth(390)
+  })
+
+  const sheet = () => screen.getByRole('region', { name: 'Put a look on' })
+  const row = (id: Id) => sheet().querySelector<HTMLElement>(`[data-look="${id}"]`)!
+  const rowsShown = () => [...sheet().querySelectorAll<HTMLElement>('[data-look]')].map((each) => each.dataset.look)
+
+  // Phone-PutLookOn: a sheet under the stage, with no header or tab bar; Start names the look and the zone.
+  it('puts the composer in a sheet under the stage, and starts the look there', async () => {
+    const { server, router } = await openApp('/next/live/put?zone=living&look=embers')
+    const living = zoneName(server, 'living')
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
+    expect(within(sheet()).getByRole('heading', { level: 1 })).toHaveTextContent('Put a look on')
+    expect(within(sheet()).getByRole('group', { name: 'Where' })).toBeInTheDocument()
+    expect(rowsShown()).toEqual(server.state.looks.filter((each) => each.category === 'ambient').map((each) => each.id))
+    expect(row('embers')).toHaveAttribute('aria-pressed', 'true')
+    expect(sheet().querySelector('[data-consequence]')).toHaveTextContent(`Takes over from ${lookName('fireflies')}`)
+
+    fireEvent.click(within(sheet()).getByRole('button', { name: `Start ${lookName('embers')} on ${living}` }))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    expect(server.state.running.find((zone) => zone.zoneId === 'living')?.lookId).toBe('embers')
+    expect(screen.getByRole('banner')).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+  })
+
+  // F4 ruling 12: one look a row, so Up and Down move by one.
+  it('moves through the looks a row at a time, and closes', async () => {
+    const { router } = await openApp('/next/live/put?zone=living&look=embers')
+    const shown = rowsShown()
+    const next = shown[shown.indexOf('embers') + 1]!
+    expect(document.activeElement).toBe(row('embers'))
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' })
+    expect(router.state.location.search).toBe(`?zone=living&look=${next}`)
+    expect(document.activeElement).toBe(row(next))
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' })
+    expect(router.state.location.search).toBe('?zone=living&look=embers')
+
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+  })
+
+  // Phone-PutLookOn has no header, tab bar or search: the sheet's title is the screen's one h1, and the route's own ("Live") is drawn nowhere.
+  it('draws no other title, header, tab or search than the sheet\'s', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    expect(screen.queryByText('Live')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Live' })).not.toBeInTheDocument()
+    expect(within(sheet()).queryByRole('searchbox')).not.toBeInTheDocument()
+    expect(sheet().closest('main')).toBe(screen.getByRole('main'))
+  })
+
+  // The short consequence beside the transition, as F4 ruling 14 words it; a long refusal is said whole, as there is no other place for it.
+  it("says the short consequence, not the desktop's sentences, and holds Start where there is nothing to start", async () => {
+    await openApp('/next/live/put?zone=living&look=firmware')
+    expect(sheet().querySelector('[data-consequence]')).toHaveTextContent(/^Takes over from Fireflies$/)
+    expect(sheet().querySelector('[data-consequence] .font-serif')).toHaveTextContent(lookName('fireflies'))
+  })
+
+  it.each([
+    ['no look chosen', '?zone=living', 'Start', 'Choose a look to see it on the stage first.'],
+    ['a zone with no lights', '?zone=counter&look=embers', `Start ${lookName('embers')} on `, ' has no lights.'],
+  ])('holds Start for %s, and says why', async (_, search, start, says) => {
+    await openApp(`/next/live/put${search}`)
+    expect(within(sheet()).getByRole('button', { name: new RegExp(`^${start}`) })).toBeDisabled()
+    expect(sheet().querySelector('[data-consequence]')).toHaveTextContent(says)
+  })
+
+  // §8.2: "Home looks (whole-home scope) lock the zone to Whole home."
+  it('locks the zone to the whole home under a home look', async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=goodnight')
+    const home = server.state.zones.find((zone) => zone.kind === 'home')!
+    expect(chip(home.name)).toHaveAttribute('aria-pressed', 'true')
+    expect(within(screen.getByRole('group', { name: 'Where' })).getAllByRole('button').filter((button) => button.hasAttribute('disabled'))).toHaveLength(
+      server.state.zones.length - 1,
+    )
+    expect(within(sheet()).getByRole('button', { name: `Start ${lookName('goodnight')} on ${home.name}` })).toBeEnabled()
+  })
+
+  // The sheet previews through the same hook the panel does: the look chosen, on the zone chosen, as the sheet opens and on each arrow.
+  it('previews the look chosen on the zone chosen, and each look the arrows reach', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    expect(previewSession.snapshot()).toMatchObject({ status: 'on', zoneId: 'living', lookId: 'embers' })
+    const shown = rowsShown()
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' })
+    await settle()
+    expect(previewSession.snapshot()).toMatchObject({ status: 'on', zoneId: 'living', lookId: shown[shown.indexOf('embers') + 1] })
+  })
+
+  // §6.3: a chip and a category are choices made in place, so Back from the sheet still leaves it whole.
+  it('chooses a zone and a category in place, and Start names the zone', async () => {
+    const { server, router } = await openApp('/next/live/put?zone=living&look=embers')
+    const kitchen = zoneName(server, 'kitchen')
+    fireEvent.click(chip(kitchen))
+    await settle()
+    expect(router.state.location.search).toBe('?zone=kitchen&look=embers')
+    expect(router.state.historyAction).toBe('REPLACE')
+    expect(within(sheet()).getByRole('button', { name: `Start ${lookName('embers')} on ${kitchen}` })).toBeEnabled()
+
+    fireEvent.click(category('Tempo'))
+    expect(category('Tempo')).toHaveAttribute('aria-pressed', 'true')
+    expect(rowsShown()).toEqual(server.state.looks.filter((each) => each.category === 'tempo').map((each) => each.id))
+  })
+
+  // F4 ruling 15: "A room click chooses its zone and keeps the look", on the phone's stage as on the desktop's, in place.
+  it("chooses a room's zone from a tap on the stage above the sheet, keeping the look", async () => {
+    const { server, router } = await openApp('/next/live/put?zone=living&look=embers')
+    await loadedStage()
+    act(() => resizeObserved(LIVE_SPEC.phoneStage.width, LIVE_SPEC.phoneStage.height))
+    const room = server.state.home.rooms.find((each) => each.hasLights && each.id !== 'living')!
+    const [x, y] = projectPoint(drawn.props!.pose, [...room.labelAt, 0])
+    fireEvent.click(screen.getByTestId('stage-canvas').parentElement!, { clientX: x, clientY: y })
+    await settle()
+    expect(router.state.location.search).toBe(`?zone=${room.id}&look=embers`)
+    expect(router.state.historyAction).toBe('REPLACE')
+    expect(chip(zoneName(server, room.id))).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  // The sheet has no dialog's focus trap or backdrop: it is part of the page, so the stage above it stays Live's own, and mounted.
+  it('keeps the stage that Live drew, and leaves the page unlocked behind a sheet that is no dialog', async () => {
+    await openApp('/next/live')
+    await loadedStage()
+    act(() => resizeObserved(LIVE_SPEC.phoneStage.width, LIVE_SPEC.phoneStage.height))
+    const stage = screen.getByTestId('stage-canvas')
+    fireEvent.click(screen.getByRole('link', { name: 'Put a look on' }))
+    await settle()
+    expect(sheet()).toBeInTheDocument()
+    expect(screen.getByTestId('stage-canvas')).toBe(stage)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(sheet().closest('[aria-hidden="true"], [inert]')).toBeNull()
+  })
+
+  /** A click as a browser sends it: the control takes the focus, then is clicked. */
+  const tap = (element: HTMLElement) => {
+    element.focus()
+    fireEvent.click(element)
+  }
+
+  /** The ways out of the sheet; the phone has no Cancel. Each needs a look chosen, so Start can go. */
+  const EXITS_FROM_THE_SHEET = [
+    ['Close', () => fireEvent.click(within(sheet()).getByRole('button', { name: 'Close' }))],
+    ['Esc', () => expect(fireEvent.keyDown(document.body, { key: 'Escape' })).toBe(false)],
+    ['Start', () => fireEvent.click(within(sheet()).getByRole('button', { name: /^Start / }))],
+  ] as const
+
+  // The focus was in the sheet, which goes with it: the page the exit lands on takes it on its own link to the composer, as the desktop's
+  // Running panel does, where it would otherwise fall to <body>. Live's is the sticky Put a look on, and Zone detail's is Change, or Put a
+  // look on where the zone has no look of its own (once a Start has put one there, the page is drawn with Change).
+  describe.each([
+    ['Live', '/next/live', 'Put a look on', 'Put a look on'],
+    ["a running zone's detail", '/next/live/zones/living', 'Change', 'Change'],
+    ["a zone's detail where nothing runs", '/next/live/zones/kitchen', 'Put a look on', 'Change'],
+  ])('from %s', (_, path, link, afterStart) => {
+    it.each(EXITS_FROM_THE_SHEET)("puts the focus on the page's link to the composer after %s", async (exitName, exit) => {
+      const { router } = await openApp(path)
+      fireEvent.click(screen.getByRole('link', { name: link }))
+      await settle()
+      expect(router.state.location.pathname).toBe('/next/live/put')
+      // An ambient look: the composer opens on what runs there, which may be a home look, and that would lock the zone to the whole home.
+      // A click in a browser gives the control the focus (fireEvent's doesn't), and the row the focus began on goes with its category.
+      tap(category('Ambient'))
+      tap(row(rowsShown()[0]!))
+      await settle()
+      expect(sheet()).toContainElement(document.activeElement as HTMLElement)
+      exit()
+      await settle()
+      expect(router.state.location.pathname).toBe(path)
+      expect(screen.getByRole('link', { name: exitName === 'Start' ? afterStart : link })).toHaveFocus()
+    })
+  })
+
+  // A deep link or a reload has no page to step back to: the exit replaces it with Live, which takes the focus on its link all the same.
+  it("puts the focus on Live's Put a look on after an exit from a composer that was opened directly", async () => {
+    const { router } = await openApp('/next/live/put?zone=living&look=embers')
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    expect(router.state.historyAction).toBe('REPLACE')
+    expect(screen.getByRole('link', { name: 'Put a look on' })).toHaveFocus()
+  })
+
+  it('leaves the focus alone as the phone\'s Live and Zone detail open', async () => {
+    const { router } = await openApp('/next/live')
+    expect(screen.getByRole('link', { name: 'Put a look on' })).not.toHaveFocus()
+    await act(() => router.navigate('/live/zones/living'))
+    await settle()
+    expect(screen.getByRole('link', { name: 'Change' })).not.toHaveFocus()
+  })
+
+  // jsdom has no layout, so these check the classes; Chromium measured the rest (<main> never scrolls, from 844 px down to 480, and the
+  // chips' and rows' rings are whole), and Task 10's e2e pins it. An absolutely positioned span (a row's hidden description, `sr-only`)
+  // with no positioned ancestor inside the list escapes the list's clip, and stretched <main>'s scroll area by the last row's place.
+  it('holds every hidden description in a positioned row, so nothing in the list reaches out to <main>\'s scroll area', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const list = within(sheet()).getByRole('group', { name: 'Looks' })
+    const hidden = list.querySelectorAll('.sr-only')
+    expect(hidden).toHaveLength(rowsShown().length)
+    for (const each of hidden) {
+      const holder = each.closest('.relative')
+      expect(holder).not.toBeNull()
+      expect(list).toContainElement(holder as HTMLElement)
+    }
+  })
+
+  it('marks the chips and the transition select, which are drawn under the touch minimum, with touch-target, and pads the chips for their rings', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const categories = within(sheet()).getByRole('group', { name: 'Categories' })
+    const chips = within(categories).getAllByRole('button')
+    expect(chips.length).toBeGreaterThan(1)
+    for (const each of [...chips, within(sheet()).getByRole('combobox', { name: 'Transition' })]) expect(each).toHaveClass('touch-target')
+    expect(categories).toHaveClass('overflow-x-auto', '-m-1', 'p-1', 'scroll-px-1')
+  })
+
+  // Phone-PutLookOn: the stage keeps Phone-Live's box and the sheet fills the screen under it, over the stage's foot (F4 ruling 16). The
+  // page is <main>'s own height, so that only the list scrolls; where the screen is too short for the rest of the sheet, the sheet does.
+  it("fills the screen under the stage: the page is <main>'s height, and only the list, then the sheet, scrolls", async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    expect(sheet().parentElement).toHaveClass('h-full')
+    expect(sheet().parentElement).not.toHaveClass('min-h-full')
+    expect(sheet()).toHaveClass('-mt-9', 'min-h-0', 'flex-1', 'overflow-y-auto')
+    expect(within(sheet()).getByRole('group', { name: 'Looks' })).toHaveClass('min-h-0', 'grow', 'overflow-y-auto')
+  })
+
+  it("lets Live's page grow past <main> again once the sheet has gone", async () => {
+    await openApp('/next/live')
+    expect(screen.getByRole('link', { name: 'Put a look on' }).closest('.min-h-full')).not.toBeNull()
   })
 })

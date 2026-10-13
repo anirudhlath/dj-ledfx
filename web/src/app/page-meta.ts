@@ -27,6 +27,8 @@ export interface PageMeta {
   PhoneTitle?: ComponentType
   /** Phone only: a Back link before the title, to this path (Zone detail: Live). */
   phoneBack?: string
+  /** Phone only: a focused task (§8.10), drawn with no header and no tab bar (Phone-PutLookOn). */
+  focusedTask?: boolean
 }
 
 const FALLBACK: PageMeta = { title: 'dj-ledfx' }

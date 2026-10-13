@@ -4,7 +4,7 @@
 // it says so (F3 decision 39). While the link is down the controls are dimmed and inert, as Live's cards are.
 // ZoneTitle is the header's title. Look: Phone-Zone.html.
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type Ref } from 'react'
 import { useParams } from 'react-router'
 import type { Id, Look, RunningZone } from '@/api/contract'
 import { useLive } from '@/api/live-store'
@@ -36,7 +36,8 @@ export function ZoneTitle() {
   return zones?.find((zone) => zone.id === zoneId)?.name ?? zoneId
 }
 
-export function ZoneDetail({ zoneId }: { zoneId: Id }) {
+/** `putRef` is the ref of the link that opens the composer here (Change, or Put a look on where nothing runs), which the page gives the focus as the composer closes. */
+export function ZoneDetail({ zoneId, putRef }: { zoneId: Id; putRef?: Ref<HTMLAnchorElement> }) {
   const world = useZoneWorld()
   const zones = useLive((state) => state.running?.zones ?? null)
   const now = useNow()
@@ -45,16 +46,26 @@ export function ZoneDetail({ zoneId }: { zoneId: Id }) {
     <div className="flex flex-col gap-3.5 px-4 pt-2 pb-4">
       <ReconnectingCard variant="phone" />
       {running !== undefined ? (
-        <RunningDetail running={running} view={zoneView(running, world, now, true)} look={world.looks.get(running.lookId)} />
+        <RunningDetail running={running} view={zoneView(running, world, now, true)} look={world.looks.get(running.lookId)} putRef={putRef} />
       ) : (
         // Nothing until the server has said what runs.
-        zones !== null && <NotRunning zoneId={zoneId} name={world.zones.get(zoneId)?.name ?? zoneId} />
+        zones !== null && <NotRunning zoneId={zoneId} name={world.zones.get(zoneId)?.name ?? zoneId} putRef={putRef} />
       )}
     </div>
   )
 }
 
-function RunningDetail({ running, view, look }: { running: RunningZone; view: ZoneView; look: Look | undefined }) {
+function RunningDetail({
+  running,
+  view,
+  look,
+  putRef,
+}: {
+  running: RunningZone
+  view: ZoneView
+  look: Look | undefined
+  putRef?: Ref<HTMLAnchorElement>
+}) {
   const { brightness, busy, off, restart } = useZoneControls(running, view.name, view.lookName)
   const frozen = useConnectionStatus() === 'reconnecting'
   const still = frozen ? { inert: true, style: { opacity: LIVE_SPEC.frozenCardsOpacity } } : {}
@@ -84,7 +95,7 @@ function RunningDetail({ running, view, look }: { running: RunningZone; view: Zo
         </div>
       )}
       <div className="grid grid-cols-3 gap-2">
-        <ButtonLink size="lg" icon="looks" {...composerLink(running.zoneId)} className={TALL}>
+        <ButtonLink ref={putRef} size="lg" icon="looks" {...composerLink(running.zoneId)} className={TALL}>
           Change
         </ButtonLink>
         <ButtonLink size="lg" icon="sliders" to={`/looks/${encodeURIComponent(running.lookId)}`} className={TALL}>
@@ -111,12 +122,12 @@ function RunningDetail({ running, view, look }: { running: RunningZone; view: Zo
 }
 
 /** F3 decision 39: a zone with no look of its own. */
-function NotRunning({ zoneId, name }: { zoneId: Id; name: string }) {
+function NotRunning({ zoneId, name, putRef }: { zoneId: Id; name: string; putRef?: Ref<HTMLAnchorElement> }) {
   return (
     <div className="flex flex-col gap-3">
       <h2 className="font-serif text-[32px] leading-none">Nothing running</h2>
       <p className="text-size-control leading-[1.45] text-text-2">{name} has no look of its own.</p>
-      <ButtonLink variant="primary" size="cta" icon="plus" {...composerLink(zoneId)}>
+      <ButtonLink ref={putRef} variant="primary" size="cta" icon="plus" {...composerLink(zoneId)}>
         Put a look on
       </ButtonLink>
     </div>
