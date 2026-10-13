@@ -1,6 +1,7 @@
 from dj_ledfx.effects import aurora_curtains as _aurora_curtains  # noqa: F401
 from dj_ledfx.effects import beat_bursts as _beat_bursts  # noqa: F401
 from dj_ledfx.effects import beat_pulse as _beat_pulse  # noqa: F401
+from dj_ledfx.effects import bouncing_ball as _bouncing_ball  # noqa: F401
 from dj_ledfx.effects import breathe as _breathe  # noqa: F401
 from dj_ledfx.effects import checker_cubes as _checker_cubes  # noqa: F401
 from dj_ledfx.effects import color_carousel as _color_carousel  # noqa: F401
@@ -10,6 +11,7 @@ from dj_ledfx.effects import fire_storm as _fire_storm  # noqa: F401
 from dj_ledfx.effects import fireflies as _fireflies  # noqa: F401
 from dj_ledfx.effects import firmware_lifx as _firmware_lifx  # noqa: F401
 from dj_ledfx.effects import firmware_openrgb as _firmware_openrgb  # noqa: F401
+from dj_ledfx.effects import flock as _flock  # noqa: F401
 from dj_ledfx.effects import focus_field as _focus_field  # noqa: F401
 from dj_ledfx.effects import fountain as _fountain  # noqa: F401
 from dj_ledfx.effects import lava_plasma as _lava_plasma  # noqa: F401
@@ -24,4 +26,5 @@ from dj_ledfx.effects import speaker_waves as _speaker_waves  # noqa: F401
 from dj_ledfx.effects import spotlights as _spotlights  # noqa: F401
 from dj_ledfx.effects import strobe as _strobe  # noqa: F401
 from dj_ledfx.effects import sunset_gradient as _sunset_gradient  # noqa: F401
+from dj_ledfx.effects import twin_comets as _twin_comets  # noqa: F401
 from dj_ledfx.effects import vortex as _vortex  # noqa: F401
