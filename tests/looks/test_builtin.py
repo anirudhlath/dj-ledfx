@@ -38,12 +38,12 @@ from dj_ledfx.types import FloatRGB
 VENDORED = files("dj_ledfx.looks") / "data" / "looks.json"
 M2 = ("sunset", "aurora", "lava", "carousel", "ripples", "focus")
 M3 = ("shockwave", "scanner", "checker", "speakers")
-M5 = ("fireflies", "embers", "rain", "snow", "spotlights")  # ambient
+M5_AMBIENT = ("fireflies", "embers", "rain", "snow", "spotlights")
 M5_TEMPO = ("bursts", "vortex", "comets", "fountain", "flock", "ball")
 SHOWCASE = [  # in looks.json's order
     look_id
     for look_id in handoff_looks()
-    if look_id in {*M2, *M3, *M5, *M5_TEMPO, FIRMWARE_LOOK_ID}
+    if look_id in {*M2, *M3, *M5_AMBIENT, *M5_TEMPO, FIRMWARE_LOOK_ID}
 ]
 PARTICLE_KINDS = {
     "fireflies": "fireflies",
@@ -72,7 +72,7 @@ def test_the_handoff_looks_come_first_in_its_order_with_its_metadata() -> None:
     looks = builtin_looks()[: len(SHOWCASE)]
 
     assert [look.id for look in looks] == SHOWCASE
-    assert len(SHOWCASE) == len(M2) + len(M3) + len(M5) + len(M5_TEMPO) + 1
+    assert len(SHOWCASE) == len(M2) + len(M3) + len(M5_AMBIENT) + len(M5_TEMPO) + 1
     for look in looks:
         entry = handoff[look.id]
         assert (look.name, look.category, look.description) == (
@@ -110,21 +110,34 @@ def test_each_showcase_look_has_its_fields_and_firmware() -> None:
     assert aurora_morph.settings == {"palette": list(AURORA_PALETTE)}  # the curtains' palette
 
 
-def test_each_particle_look_has_its_particle_layer_named_after_it() -> None:
-    for look_id, kind in PARTICLE_KINDS.items():
-        look = builtin_look(look_id)
-        particles = look.layers[0]
-        assert (particles.type, particles.kind) == ("particles", kind)
-        assert particles.name == handoff_looks()[look_id]["name"]
-        assert isinstance(make_effect(particles), ParticleEffect)
-        assert [layer.type for layer in look.layers[1:]] == (
-            ["firmware"] if look_id == "embers" else []
+@pytest.mark.parametrize("look_id", PARTICLE_KINDS)
+def test_each_particle_look_has_its_particle_layer_named_after_it(look_id: str) -> None:
+    look = builtin_look(look_id)
+
+    particles, *others = look.layers
+    assert (particles.id, particles.type, particles.kind) == (
+        "particles",
+        "particles",
+        PARTICLE_KINDS[look_id],
+    )
+    assert particles.name == handoff_looks()[look_id]["name"]
+    assert isinstance(make_effect(particles), ParticleEffect)
+    # The embers alone have a second layer: LIFX Flame, on the lights that run it.
+    if look_id == "embers":
+        [flame] = others
+        assert (flame.id, flame.name, flame.type, flame.kind) == (
+            "flame",
+            "Flame",
+            "firmware",
+            "lifx_flame",
         )
-    flame = builtin_look("embers").layers[1]
-    assert flame.kind == "lifx_flame"
-    assert flame.lights == (Selector("type", "candle"), Selector("type", "tube"))
-    assert {look.category for look in map(builtin_look, M5)} == {"ambient"}
-    assert {look.needs for look in map(builtin_look, M5_TEMPO)} == {("tempo",)}
+        assert flame.lights == (Selector("type", "candle"), Selector("type", "tube"))
+    else:
+        assert others == []
+    if look_id in M5_AMBIENT:
+        assert look.category == "ambient"
+    else:
+        assert look.needs == ("tempo",)
 
 
 @pytest.mark.parametrize("look_id", ["focus", "shockwave", "speakers", "bursts", "fountain"])
@@ -232,3 +245,8 @@ def test_every_builtin_is_finite_in_range_and_repeats_with_a_fixed_seed(look: Lo
         assert np.isfinite(frame).all()
         assert frame.min() >= 0.0 and frame.max() <= 1.0
         assert np.array_equal(frame, repeat)
+    if look.id in PARTICLE_KINDS:
+        # None of that fails a look that is black everywhere. The particle layer draws the
+        # first frame of each step (the embers' Flame copy comes after it, and could light
+        # the LEDs without it).
+        assert any(frame.any() for frame in first[:: len(look.layers)]), "the particles are dark"

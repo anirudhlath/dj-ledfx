@@ -25,7 +25,7 @@ pytestmark = pytest.mark.usefixtures("_fields")
 ROW_LIGHT = placed_light("row", *[(0.5 * i, 0.0, 1.0) for i in range(9)])
 # Lamps a-d: four upright lamps at the corners of a 4 x 4 m room.
 CORNERS = [
-    placed_light(f"lamp-{name}", *[(x, y, z) for x, y, z in upright(x, y)])
+    placed_light(f"lamp-{name}", *upright(x, y))
     for name, (x, y) in zip("abcd", [(0.5, 0.5), (3.5, 0.5), (3.5, 3.5), (0.5, 3.5)], strict=True)
 ]
 PARTICLE_LOOKS = [
