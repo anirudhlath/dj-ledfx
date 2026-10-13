@@ -6,13 +6,16 @@ import type { Id, InputKind, Inputs, Look, RunningZone, Transition, Zone } from 
 import { newestFirst } from '@/stage/show'
 import { chipsFor, transitionLabel } from '@/zones/zone-view'
 
-/** The composer's URL (spec §4.3, F4 ruling 9): /live/put, with ?zone= and ?look= as chosen. */
+/** The composer's route (spec §4.3, F4 ruling 9): Live, with the composer in the Running panel's place. */
+export const COMPOSER_ROUTE = '/live/put'
+
+/** The composer's URL (spec §4.3, F4 ruling 9): its route, with ?zone= and ?look= as chosen. */
 export function composerPath(zoneId: Id | null, lookId: Id | null = null): string {
   const params = new URLSearchParams()
   if (zoneId !== null) params.set('zone', zoneId)
   if (lookId !== null) params.set('look', lookId)
   const query = params.toString()
-  return query === '' ? '/live/put' : `/live/put?${query}`
+  return query === '' ? COMPOSER_ROUTE : `${COMPOSER_ROUTE}?${query}`
 }
 
 /**

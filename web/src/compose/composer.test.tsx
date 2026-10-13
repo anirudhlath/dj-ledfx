@@ -113,6 +113,27 @@ function holdStart() {
   return () => answer()
 }
 /**
+ * From here a step back (navigate(-1)) waits for the test to let it land, as a browser's does: the memory router steps at once, and the
+ * page goes on in between. Returns how many have been asked, and what lets them land, in the order they were asked.
+ */
+function holdStepsBack(router: ReturnType<typeof renderApp>) {
+  const navigate = router.navigate.bind(router)
+  const waiting: (() => Promise<void>)[] = []
+  let holding = true
+  vi.spyOn(router, 'navigate').mockImplementation((to, options) => {
+    if (!holding || !Object.is(to, -1)) return navigate(to, options)
+    waiting.push(() => navigate(-1))
+    return Promise.resolve()
+  })
+  return {
+    asked: () => waiting.length,
+    land: async () => {
+      holding = false
+      for (const step of waiting) await step()
+    },
+  }
+}
+/**
  * What the consequence line says in the commit that chooses another look or zone: the effect that asks for its preview comes after it,
  * so the preview state is still the last choice's, and the line must say nothing of that. One entry for each preview asked for.
  */
@@ -798,6 +819,33 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
       two()
     })
     await settle()
+    expect(router.state.location.pathname).toBe('/next/live')
+    expect(router.state.historyAction).toBe('POP')
+    await act(() => router.navigate(-1))
+    expect(router.state.location.pathname).toBe('/next/settings')
+  })
+
+  // A look chosen in between replaces the entry: a new key on the same route, and the exit is still on its way. Not in one act, as the pairs
+  // are: the memory router steps back at once, so the choice would find Live and replace that. The step back is held until the choice and
+  // Cancel have been made, as a browser's lands after them.
+  it('steps out of the composer once when a look is chosen between Esc and Cancel, before it has left', async () => {
+    const { router } = await openApp('/next/settings')
+    await act(() => router.navigate('/live'))
+    await settle()
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    fireEvent.click(category('Ambient'))
+    const { asked, land } = holdStepsBack(router)
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    fireEvent.click(tile('embers'))
+    await settle()
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    expect(router.state.location.search).toContain('look=embers')
+    expect(router.state.historyAction).toBe('REPLACE')
+    fireEvent.click(within(composer()).getByRole('button', { name: 'Cancel' }))
+    await settle()
+    expect(asked()).toBe(1)
+    await act(() => land())
     expect(router.state.location.pathname).toBe('/next/live')
     expect(router.state.historyAction).toBe('POP')
     await act(() => router.navigate(-1))

@@ -3,30 +3,32 @@
 // was before and Back from Live leaves it; replacing the entry with Live instead left Live in the history twice. A composer with no step into it,
 // a deep link or a reload of one, has nowhere to step back to, and Live replaces it.
 import { useCallback, useEffect } from 'react'
-import { useLocation, useNavigate } from 'react-router'
-import { composerEntered } from './model'
+import { useLocation, useMatch, useNavigate } from 'react-router'
+import { COMPOSER_ROUTE, composerEntered } from './model'
 
 /**
- * The entry whose exit has been asked for, until the location has moved off it. Every caller shares it: Esc is Live's and Cancel and Close are
- * the panel's, and a second exit before the first has left (a double click, Esc and then Cancel) would step back once more, out of Live.
- * The browser's step back comes later than the click, and a replace was the same however often it was asked. Any exit on its way holds the
- * rest, whatever entry the caller was rendered for: a look chosen in the panel replaces the entry and gives it a new key, and a Start that
- * answers late still holds a close from before.
+ * Whether an exit has been asked for and the location has not yet left the composer's route. Every caller shares it: Esc is Live's, and
+ * Cancel, Close and Start are the panel's. A browser's step back lands after the click, so a second exit asked before then (a double
+ * click, Esc and then Cancel) would step back once more, out of Live; a replace was the same however often it was asked. An exit on its
+ * way therefore holds every other, whichever render's close asks (a Start that answers late calls one from an earlier render). A look
+ * chosen in the panel replaces the entry, a new key on the same route, and does not free it; only leaving the route does. Live's
+ * instance is always mounted and sees /live arrive, and an instance that mounts off the route (Live again, once every instance has gone
+ * with an exit on its way) finds the way free.
  */
-let leavingFrom: string | null = null
+let leaving = false
 
 export function useCloseComposer(): () => void {
   const navigate = useNavigate()
-  const { key, state } = useLocation()
+  const { state } = useLocation()
   const entered = composerEntered(state)
-  // The location moved: that exit is done, and the entry can be left again (stepped forward into, it is the same entry).
+  const composing = useMatch(COMPOSER_ROUTE) !== null
   useEffect(() => {
-    if (leavingFrom !== key) leavingFrom = null
-  }, [key])
+    if (!composing) leaving = false
+  }, [composing])
   return useCallback(() => {
-    if (leavingFrom !== null) return
-    leavingFrom = key
+    if (leaving) return
+    leaving = true
     if (entered) navigate(-1)
     else navigate('/live', { replace: true })
-  }, [navigate, entered, key])
+  }, [navigate, entered])
 }

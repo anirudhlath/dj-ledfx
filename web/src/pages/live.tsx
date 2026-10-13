@@ -11,6 +11,7 @@ import type { Id } from '@/api/contract'
 import { queries } from '@/api/queries'
 import { usePreviewOnly } from '@/chrome/hooks'
 import { ComposerPanel, ComposerWhere } from '@/compose/composer-panel'
+import { COMPOSER_ROUTE } from '@/compose/model'
 import { useStageCompose } from '@/compose/use-composer'
 import { useComposerKeys } from '@/compose/use-composer-keys'
 import { Button } from '@/design/button'
@@ -38,7 +39,7 @@ export function LivePage() {
   usePrefetchQuery(queries.zones())
   usePrefetchQuery(queries.looks())
   const { zoneId } = useParams()
-  const composing = useMatch('/live/put') !== null
+  const composing = useMatch(COMPOSER_ROUTE) !== null
   const compose = useStageCompose(composing)
   useComposerKeys(composing)
   const phone = useIsPhone()
