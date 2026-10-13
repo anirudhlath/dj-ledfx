@@ -11,17 +11,29 @@ import { COMPOSER_ROUTE, composerEntered } from './model'
  * Cancel, Close and Start are the panel's. A browser's step back lands after the click, so a second exit asked before then (a double
  * click, Esc and then Cancel) would step back once more, out of Live; a replace was the same however often it was asked. An exit on its
  * way therefore holds every other, whichever render's close asks (a Start that answers late calls one from an earlier render). A look
- * chosen in the panel replaces the entry, a new key on the same route, and does not free it; only leaving the route does. Live's
- * instance is always mounted and sees /live arrive, and an instance that mounts off the route (Live again, once every instance has gone
- * with an exit on its way) finds the way free.
+ * chosen in the panel replaces the entry, a new key on the same route, and does not free it. Two things do. The location leaving the
+ * route does: Live's instance is always mounted and sees /live arrive. And the last instance unmounting does, since with none left there
+ * is no exit to double, and a Start that answers late goes nowhere (use-composer.ts checks that its composer is still mounted). That
+ * closes Esc, then a rail click off Live (no instance is left to see the route change), then the step back landing on the composer:
+ * its instances mount on the composer's route, which frees nothing, and would find the way still held.
  */
 let leaving = false
+
+/** How many instances of the hook are mounted: the last to go frees the way. */
+let instances = 0
 
 export function useCloseComposer(): () => void {
   const navigate = useNavigate()
   const { state } = useLocation()
   const entered = composerEntered(state)
   const composing = useMatch(COMPOSER_ROUTE) !== null
+  useEffect(() => {
+    instances += 1
+    return () => {
+      instances -= 1
+      if (instances === 0) leaving = false
+    }
+  }, [])
   useEffect(() => {
     if (!composing) leaving = false
   }, [composing])

@@ -25,14 +25,14 @@ function Host() {
     <>
       <Probe name="Esc" />
       <button onClick={() => setAnother(true)}>Mount another</button>
+      <button onClick={() => setAnother(false)}>Unmount another</button>
       {another && <Probe name="Close" />}
     </>
   )
 }
 
-/** Live, then a step into the composer, as the app gets there. The guard is the module's and outlives a test: a mount on Live drops it. */
-async function openComposer() {
-  const router = createMemoryRouter([{ path: '*', element: <Host /> }], { initialEntries: ['/live'] })
+/** Every step back asked of `router` is held, as a browser's lands later. Returns how many have been asked. */
+function holdStepsBack(router: ReturnType<typeof createMemoryRouter>) {
   const navigate = router.navigate.bind(router)
   let asked = 0
   vi.spyOn(router, 'navigate').mockImplementation((to, options) => {
@@ -40,10 +40,26 @@ async function openComposer() {
     asked += 1
     return Promise.resolve()
   })
+  return () => asked
+}
+
+/** Live, then a step into the composer, as the app gets there. The guard is the module's and outlives a test: a mount on Live drops it. */
+async function openComposer() {
+  const router = createMemoryRouter([{ path: '*', element: <Host /> }], { initialEntries: ['/live'] })
+  const stepsBack = holdStepsBack(router)
   render(<RouterProvider router={router} />)
   const { to, state } = composerLink()
   await act(() => router.navigate(to, { state }))
-  return { router, stepsBack: () => asked }
+  return { router, stepsBack }
+}
+
+/** A page that opens straight onto the composer, as a step back lands on it: its entry carries the marker. */
+function openOnComposer() {
+  const { to, state } = composerLink()
+  const router = createMemoryRouter([{ path: '*', element: <Host /> }], { initialEntries: [{ pathname: to, state }] })
+  const stepsBack = holdStepsBack(router)
+  render(<RouterProvider router={router} />)
+  return { router, stepsBack }
 }
 
 const click = (name: string) => act(async () => void fireEvent.click(screen.getByRole('button', { name })))
@@ -87,6 +103,27 @@ describe('useCloseComposer, before the step back has landed', () => {
     expect(first.stepsBack()).toBe(1)
     cleanup()
     const { stepsBack } = await openComposer()
+    await click('Esc')
+    expect(stepsBack()).toBe(1)
+  })
+
+  // Esc, then a rail click off Live (no instance is left to see the route change), then the step back landing on the composer: its
+  // instances mount on the composer's route, which frees nothing, so the last instance going has to.
+  it('is free again to an instance that mounts on the composer itself once every instance has gone with an exit on its way', async () => {
+    const first = await openComposer()
+    await click('Esc')
+    expect(first.stepsBack()).toBe(1)
+    cleanup()
+    const { stepsBack } = openOnComposer()
+    await click('Esc')
+    expect(stepsBack()).toBe(1)
+  })
+
+  it('is not freed by an instance that goes while another stays', async () => {
+    const { stepsBack } = await openComposer()
+    await click('Mount another')
+    await click('Esc')
+    await click('Unmount another')
     await click('Esc')
     expect(stepsBack()).toBe(1)
   })
