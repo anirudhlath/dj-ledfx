@@ -79,6 +79,26 @@ def test_a_particle_lands_within_a_scatter_of_its_led_and_no_further() -> None:
     assert 0.06 < reach.mean() < 0.12  # most of a ball's volume is out toward its edge
 
 
+def test_how_high_a_particle_lands_in_its_ball_has_nothing_to_do_with_how_far_out() -> None:
+    """Round a bulb the landings fill a ball: a draw that set the depth by the height would
+    leave a line through it, so the two must be unrelated (a correlation near 0)."""
+    room = lights_at(*[[(float(x), 0.0, 1.0)] for x in range(4)], anchors={ANCHOR_ID: ANCHOR})
+    bursts = _bursts(per_beat=30)
+    offsets = []
+    for beat in range(2001, 2041):
+        drawn(bursts, tempo_ctx(beat + 0.7), room)
+        landed = bursts.particles.pos[bursts.particles.count - bursts.burst_size(beat) :]
+        # The bulbs are a metre apart, so the nearest one is the one a particle landed round.
+        gaps = landed[:, None, :] - room.pos[None, :, :]
+        nearest = np.linalg.norm(gaps, axis=2).argmin(axis=1)
+        offsets.append(gaps[np.arange(len(landed)), nearest])
+    offset = np.concatenate(offsets)
+    reach = np.linalg.norm(offset, axis=1)
+    assert len(offset) > 1000 and reach.max() <= SCATTER_M + 1e-5
+    assert offset[:, 2].min() < -0.1 and offset[:, 2].max() > 0.1  # up and down alike
+    assert abs(np.corrcoef(reach, offset[:, 2] / reach)[0, 1]) < 0.15
+
+
 def test_the_particles_of_a_burst_and_the_bursts_of_a_bar_each_land_in_places_of_their_own() -> (
     None
 ):

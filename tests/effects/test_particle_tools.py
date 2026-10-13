@@ -27,6 +27,7 @@ from dj_ledfx.effects.particle_tools import (
     around,
     draws,
     fired,
+    in_ball,
     in_birth_order,
     joined,
     lamp_streams,
@@ -368,6 +369,35 @@ def test_rise_under_takes_a_ceiling_and_ends_for_each_arc_and_one_of_each_alike(
     for place in range(3):
         alone = rise_under(ceiling[place], start[place], end, [10.0, 10.0, 0.5][place])
         assert together[place] == alone
+
+
+def test_in_ball_puts_a_point_by_its_height_its_turn_and_how_far_out() -> None:
+    top = in_ball([1.0], [0.0], [1.0], 2.0)
+    bottom = in_ball([0.0], [0.7], [1.0], 2.0)
+    east = in_ball([0.5], [0.0], [1.0], 2.0)  # the equator, at turn 0
+    south = in_ball([0.5], [0.25], [1.0], 2.0)  # a quarter of a turn on
+    half_way = in_ball([0.5], [0.0], [0.125], 2.0)  # an eighth of the volume: half the radius
+    np.testing.assert_allclose(top, [[0.0, 0.0, 2.0]], atol=1e-12)
+    np.testing.assert_allclose(bottom, [[0.0, 0.0, -2.0]], atol=1e-12)
+    np.testing.assert_allclose(east, [[2.0, 0.0, 0.0]], atol=1e-12)
+    np.testing.assert_allclose(south, [[0.0, 2.0, 0.0]], atol=1e-12)
+    np.testing.assert_allclose(half_way, [[1.0, 0.0, 0.0]], atol=1e-12)
+
+
+def test_in_ball_spreads_points_evenly_through_the_ball() -> None:
+    u = draws(3, np.arange(4000), 3)
+    points = in_ball(u[:, 0], u[:, 1], u[:, 2], 2.0)
+    assert points.shape == (4000, 3)
+    far = np.linalg.norm(points, axis=1)
+    assert far.max() <= 2.0 + 1e-12 and far.max() > 1.95
+    assert (
+        0.10 < np.mean(far < 1.0) < 0.15
+    )  # the inner half of the radius is an eighth of the volume
+    assert abs(np.mean(points[:, 2] > 0.0) - 0.5) < 0.03  # as many above the middle as below
+    assert (
+        abs(np.mean(points[:, 0] > 0.0) - 0.5) < 0.03
+        and abs(np.mean(points[:, 1] > 0.0) - 0.5) < 0.03
+    )
 
 
 def test_a_tour_visits_every_stop_each_round_and_never_stays() -> None:

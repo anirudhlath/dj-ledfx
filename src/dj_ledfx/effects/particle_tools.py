@@ -188,6 +188,20 @@ def rise_under(ceiling: ArrayLike, start: ArrayLike, end: ArrayLike, rise: Array
     return most
 
 
+def in_ball(up: ArrayLike, turn: ArrayLike, depth: ArrayLike, radius: float) -> F64:
+    """Points spread evenly through a ball of `radius` metres round the origin, one for each
+    row of random numbers from 0 to 1: `up` picks the height (evenly, from the bottom to the
+    top, which spreads the points evenly over the ball's surface), `turn` the way round it (in
+    turns) and `depth` how far out (as its cube root, which fills the ball's volume evenly).
+    Shape (points, 3)."""
+    height = 2.0 * np.asarray(up, dtype=np.float64) - 1.0
+    side = 2.0 * math.pi * np.asarray(turn, dtype=np.float64)
+    flat = np.sqrt(1.0 - height * height)
+    far = (radius * np.cbrt(np.asarray(depth, dtype=np.float64)))[:, None]
+    ball: F64 = far * np.stack([flat * np.cos(side), flat * np.sin(side), height], axis=1)
+    return ball
+
+
 TOURS = 1000  # tour k draws from stream TOURS + k
 
 

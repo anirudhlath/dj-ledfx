@@ -22,14 +22,13 @@ itself, and step() never cuts a burst short.
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from dj_ledfx.effects.field_tools import anchor_or_centre
 from dj_ledfx.effects.params import EffectParam, anchor_param
-from dj_ledfx.effects.particle_tools import draws, fired, swarm
+from dj_ledfx.effects.particle_tools import draws, fired, in_ball, swarm
 from dj_ledfx.effects.particles import ParamParticles
 from dj_ledfx.tempo.model import BEATS_PER_BAR
 
@@ -113,13 +112,8 @@ class BeatBursts(ParamParticles):
         k = np.arange(len(beat)) - np.repeat(np.cumsum(sizes) - sizes, sizes)  # 0, 1, … in a burst
         u = draws(self._seed, beat * BEAT_KEYS + k, 5)
         lamp = ground.lamps.pick(u[:, 0])
-        up = 2.0 * u[:, 1] - 1.0  # where round its LED it lands
-        side = 2.0 * math.pi * u[:, 2]
-        flat = np.sqrt(1.0 - up * up)
-        near = SCATTER_M * np.cbrt(u[:, 3])[:, None]
-        landing = ground.on(lamp, u[:, 4]) + near * np.stack(
-            [flat * np.cos(side), flat * np.sin(side), up], axis=1
-        )
+        # Where round its LED it lands: within SCATTER_M of it, evenly.
+        landing = ground.on(lamp, u[:, 4]) + in_ball(u[:, 1], u[:, 2], u[:, 3], SCATTER_M)
         # The scatter is an overhang: it stops at the floor and the ceiling, but never short
         # of the lamp's own LEDs.
         landing[:, 2] = ground.within(lamp, landing[:, 2])
