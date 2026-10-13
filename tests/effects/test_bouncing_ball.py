@@ -166,8 +166,9 @@ def test_the_ball_rises_to_the_ceiling_and_no_higher_not_flat_along_it() -> None
 def test_a_bounce_with_no_room_under_the_ceiling_stays_on_the_line_between_its_feet(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The backstop for a ceiling under the feet, which Ground.ceiling_for never gives: there
-    is no room to rise, and the ball doesn't dip under the line between its feet either."""
+    """The backstop for a ceiling under the feet, which Ground.ceiling_for never gives beyond
+    float32 rounding: there is no room to rise, and the ball doesn't dip under the line between
+    its feet either."""
 
     def under_every_foot(self: Ground, stop: Any) -> Any:
         return np.full(np.shape(stop), 0.05)

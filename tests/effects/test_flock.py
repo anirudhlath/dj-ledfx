@@ -454,9 +454,9 @@ def test_the_band_goes_from_the_lamp_the_flock_leaves_to_the_one_it_comes_to_eit
 def test_a_band_not_around_the_lamp_holds_every_bird_and_one_of_no_height_puts_them_at_one(
     monkeypatch: pytest.MonkeyPatch, low: float, high: float
 ) -> None:
-    """The backstop for a band that is not around the lamp, which Ground never gives: the
-    flock is moved into the band all the same, and a band of no height (or less) puts every
-    bird at one height, with no bird flung out of it by a negative room."""
+    """The backstop for a band that is not around the lamp, which Ground never gives beyond
+    float32 rounding: the flock is moved into the band all the same, and a band of no height
+    (or less) puts every bird at one height, with no bird flung out of it by a negative room."""
 
     def floor_for(self: Ground, stop: Any) -> Any:
         return np.full(np.shape(stop), low)

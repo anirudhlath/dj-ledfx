@@ -287,8 +287,9 @@ def test_a_hop_starts_where_the_last_one_landed_between_lamps_with_different_ban
 def test_a_hop_with_no_room_under_the_ceiling_stays_on_the_line_between_its_leds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The backstop for a ceiling under the LEDs, which Ground.ceiling_for never gives: there
-    is no room to rise, and the hop doesn't dip under the line between its LEDs either."""
+    """The backstop for a ceiling under the LEDs, which Ground.ceiling_for never gives beyond
+    float32 rounding: there is no room to rise, and the hop doesn't dip under the line between
+    its LEDs either."""
 
     def under_every_led(self: Ground, stop: Any) -> Any:
         return np.full(np.shape(stop), 0.05)
