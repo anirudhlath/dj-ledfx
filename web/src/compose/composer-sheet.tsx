@@ -41,10 +41,29 @@ export function ComposerSheet({ className }: { className?: string }) {
   // The pressed chip is scrolled wholly into the row as the sheet opens, and whenever a choice changes it (as ZonePicker's row does for its
   // zone, F4 ruling 5): a row that scrolls on its own can leave it cut at its edge or out of view. A layout effect, so it moves before the
   // paint; `nearest` leaves a chip that already shows alone, and the scroll is the instant kind, so reduced motion has nothing to hold back.
+  // The chips may be laid out in the fallback font then (a cold cache). The web font that swaps in makes them narrower while the row's
+  // scroll stays put, so a chip `nearest` brought to the row's end is left short of it, still wholly in view, and a second `nearest` moves
+  // nothing: once the fonts are in, the row goes back to where it was before this scroll and scrolls again, in the font it keeps.
+  // document.fonts.ready, not a ResizeObserver on the chip: the font is the one thing that resizes the chips after they're drawn, and it
+  // settles once, where an observer fires for each size change of the chip, the first observation included.
   const pressed = view.category
   const drawn = zones !== undefined && looks !== undefined && zone !== undefined
   useLayoutEffect(() => {
-    if (drawn) chips.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    const row = chips.current
+    if (!drawn || row === null) return
+    const reveal = () => row.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    const from = row.scrollLeft
+    reveal()
+    let gone = false
+    // jsdom has no document.fonts.
+    void document.fonts?.ready.then(() => {
+      if (gone) return
+      row.scrollLeft = from
+      reveal()
+    })
+    return () => {
+      gone = true
+    }
   }, [pressed, drawn])
 
   return (

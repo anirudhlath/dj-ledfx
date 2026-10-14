@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Id, Room } from '@/api/contract'
 import { frames, previewSession } from '@/api/live'
 import { liveStore } from '@/api/live-store'
@@ -1652,6 +1652,45 @@ describe('Put a look on, on the phone (§8.10)', () => {
     fireEvent.click(row(rowsShown()[0] as Id))
     await settle(100)
     expect(scrolled.filter(([element]) => categories.contains(element))).toEqual([])
+  })
+
+  // The chips are laid out in the fallback font when the sheet opens on a cold cache, and the web font that swaps in later makes them
+  // narrower, leaving the row's scroll where it was: once the fonts are in, the row goes back to where it was before and the pressed chip is
+  // scrolled into view again, only by the effect for the chip pressed now.
+  it('scrolls the pressed category chip into view again once the fonts are in, for the chip pressed last', async () => {
+    let fontsIn = () => {}
+    const ready = new Promise<void>((resolve) => (fontsIn = resolve))
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { ready } })
+    onTestFinished(() => void Reflect.deleteProperty(document, 'fonts'))
+    const scrolled = watchScrolling()
+    const { router } = await openApp('/next/live/put?zone=living&look=goodnight')
+    const categories = within(sheet()).getByRole('group', { name: 'Categories' })
+    const home = within(categories).getByRole('button', { name: 'Home' })
+    expect(scrolled.filter(([element]) => element === home)).toHaveLength(1)
+    // Where the scroll left the row, laid out in the fallback font (jsdom's stand-in scrolls nothing).
+    categories.scrollLeft = 40
+    fontsIn()
+    await settle(100)
+    // Back to where it was before, then scrolled again in the font it keeps.
+    expect(categories.scrollLeft).toBe(0)
+    expect(scrolled.filter(([element]) => element === home)).toEqual([
+      [home, { block: 'nearest', inline: 'nearest' }],
+      [home, { block: 'nearest', inline: 'nearest' }],
+    ])
+
+    // Opened again while the fonts are on their way, and another chip pressed before they come: that chip alone is scrolled again, once.
+    let later = () => {}
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { ready: new Promise<void>((resolve) => (later = resolve)) } })
+    await act(() => router.navigate('/live'))
+    await act(() => router.navigate('/live/put?zone=living&look=goodnight'))
+    await settle(100)
+    const firmware = within(within(sheet()).getByRole('group', { name: 'Categories' })).getByRole('button', { name: 'Firmware' })
+    fireEvent.click(firmware)
+    await settle(100)
+    scrolled.length = 0
+    later()
+    await settle(100)
+    expect(scrolled).toEqual([[firmware, { block: 'nearest', inline: 'nearest' }]])
   })
 
   // Phone-PutLookOn: the stage keeps Phone-Live's box and the sheet fills the screen under it, over the stage's foot (F4 ruling 16). The
