@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from conftest import builtin_look
-from map_home import upright
+from map_home import tiny_space, upright
 from runtime_fakes import (
     DotParticles,
     FlatField,
@@ -16,7 +18,20 @@ from runtime_fakes import (
     runtime_of,
 )
 
-from dj_ledfx.looks.model import HeightMask, Layer, LayerType, Mirror, Transform
+import dj_ledfx.zones.runtime as runtime_module
+from dj_ledfx.effects.context import RenderContext
+from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.effects.particles import Among, ParticleEffect, drawn
+from dj_ledfx.looks.model import (
+    HeightMask,
+    Layer,
+    LayerType,
+    Mask,
+    Mirror,
+    RoomMask,
+    Transform,
+)
+from dj_ledfx.types import FloatRGB
 from dj_ledfx.zones.runtime import ZoneRuntime
 
 pytestmark = pytest.mark.usefixtures("_fields")
@@ -77,9 +92,10 @@ def test_a_layers_transform_and_mirror_move_its_particles_as_they_move_a_field()
     assert _lit(mirrored) == [2, 6]  # at 1 m, and across the middle at 3 m
 
 
-def test_a_particle_layers_mask_weighs_the_leds_it_lights() -> None:
-    # Two LEDs 0.2 m under and over the dot: a mask from 1 m up keeps its light off the lower.
-    stack = placed_light("stack", (1.0, 0.0, 0.8), (1.0, 0.0, 1.2))
+def test_a_particle_layers_lamps_are_its_masks_leds_and_its_mask_weighs_what_they_light() -> None:
+    # LEDs 0.2 m under the dot, level with it and 0.2 m over it. A mask from 1 m up weighs
+    # them 0, a half (the band's soft edge) and 1.
+    stack = placed_light("stack", (1.0, 0.0, 0.8), (1.0, 0.0, 1.0), (1.0, 0.0, 1.2))
     field = field_layer(level=0.2)
     bare = runtime_of(look_of(field, dot_layer(x=1.0, level=0.5, blend="add")), [stack])
     masked = runtime_of(
@@ -88,12 +104,97 @@ def test_a_particle_layers_mask_weighs_the_leds_it_lights() -> None:
     )
     bare.tick(100.0)
     masked.tick(100.0)
-    # Each layer's ground holds both LEDs, the masked one's too: its particles move among
-    # every LED of its view, and the mask only weighs what they light.
-    assert DotParticles.ground_led_counts == [2, 2]
-    assert latest(bare)[0, 0] > 0.3  # the dot lights both LEDs
+    # The masked layer's lamp is the LEDs its mask weighs above 0: the soft edge's and over.
+    assert DotParticles.lamp_led_counts == [3, 2]
+    dot = latest(bare) - 0.2
+    assert dot[0, 0] > 0.1  # the dot lights all three
     np.testing.assert_allclose(latest(masked)[0], 0.2)  # under the band: the field alone
-    np.testing.assert_allclose(latest(masked)[1], latest(bare)[1])  # in it: the field and the dot
+    np.testing.assert_allclose(latest(masked)[1], 0.2 + 0.5 * dot[1], rtol=1e-5)  # soft
+    np.testing.assert_allclose(latest(masked)[2], latest(bare)[2])  # in it: the field and the dot
+
+
+# Two upright lamps in each room of the tiny home (west x 0-4, east x 4-8).
+TWO_ROOMS = [
+    placed_light(f"lamp-{name}", *upright(x, y))
+    for name, (x, y) in zip("abcd", [(1.0, 1.0), (3.0, 3.0), (5.0, 1.0), (7.0, 3.0)], strict=True)
+]
+WEST_EDGE_M = 4.0  # the wall between the rooms
+
+
+def _drawn_effects(monkeypatch: pytest.MonkeyPatch) -> list[ParticleEffect]:
+    """Every particle effect the runtime draws from now on, as it draws it."""
+    seen: list[ParticleEffect] = []
+
+    def recording(
+        effect: ParticleEffect, ctx: RenderContext, leds: LedSet, among: Among = None
+    ) -> FloatRGB:
+        seen.append(effect)
+        return drawn(effect, ctx, leds, among)
+
+    monkeypatch.setattr(runtime_module, "drawn", recording)
+    return seen
+
+
+def _builtin_layer(look_id: str, mask: Mask) -> Layer:
+    return replace(builtin_look(look_id).layers[0], mask=mask)
+
+
+def test_fireflies_masked_to_a_room_all_wander_in_that_rooms_lamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _drawn_effects(monkeypatch)
+    layer = _builtin_layer("fireflies", RoomMask("west"))
+    runtime = runtime_of(look_of(layer), TWO_ROOMS, space=tiny_space())
+
+    for second in range(40):
+        runtime.tick(1000.0 + 1.5 * second)
+        particles = seen[-1].particles
+        assert particles.count == int(layer.settings.get("count", 12))  # every one, there
+        assert (particles.pos[:, 0] < WEST_EDGE_M).all()  # round the west room's lamps
+    east = np.arange(28, 56)  # the east lamps' LEDs: masked out, so never lit
+    assert not latest(runtime)[east].any()
+
+
+def test_spotlights_masked_to_a_room_tour_only_its_lamps(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _drawn_effects(monkeypatch)
+    runtime = runtime_of(
+        look_of(_builtin_layer("spotlights", RoomMask("east"))), TWO_ROOMS, space=tiny_space()
+    )
+
+    xs = []
+    for step in range(120):
+        runtime.tick(1000.0 + 0.5 * step)
+        xs.append(seen[-1].particles.pos[:, 0])
+    reached = np.concatenate(xs)
+    assert (reached > WEST_EDGE_M).all()  # only the east lamps, resting and gliding
+    assert reached.min() < 5.5 and reached.max() > 6.5  # and both of them
+
+
+def test_a_changed_mask_moves_the_particles_to_its_lamps(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _drawn_effects(monkeypatch)
+    west = look_of(_builtin_layer("fireflies", RoomMask("west")))
+    runtime = runtime_of(west, TWO_ROOMS, space=tiny_space())
+    runtime.tick(1000.0)
+    assert (seen[-1].particles.pos[:, 0] < WEST_EDGE_M).all()
+    effect = seen[-1]
+
+    runtime.update_look(look_of(_builtin_layer("fireflies", RoomMask("east"))))
+    runtime.tick(1000.1)
+
+    assert seen[-1] is effect  # tuned in place: the effect places itself again
+    assert (seen[-1].particles.pos[:, 0] > WEST_EDGE_M).all()
+
+
+def test_a_mask_that_weighs_no_led_gives_no_particles(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _drawn_effects(monkeypatch)
+    runtime = runtime_of(
+        look_of(_builtin_layer("fireflies", RoomMask("attic"))), TWO_ROOMS, space=tiny_space()
+    )
+
+    runtime.tick(1000.0)
+
+    assert seen[-1].particles.count == 0
+    assert runtime.crash is None and not latest(runtime).any()
 
 
 def test_a_hidden_particle_layer_draws_nothing() -> None:

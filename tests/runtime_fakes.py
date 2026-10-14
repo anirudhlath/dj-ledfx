@@ -81,10 +81,10 @@ class PlaceField(FieldEffect, register=False):
 class DotParticles(ParamParticles, register=False):
     """One dot of `level` grey at `x` metres east on the map's axes (y 0, 1 m up), of a 0.3 m
     radius (its light reaches 0.75 m), as the layer sees it: a layer's transform moves it with
-    the field. Its colour is NaN while FlatField.mode is "nan". `ground_led_counts` keeps the
-    LED count of every ground it was asked for particles on, in order."""
+    the field. Its colour is NaN while FlatField.mode is "nan". `lamp_led_counts` keeps the
+    count of the LEDs of the lamps of every ground it was asked for particles on, in order."""
 
-    ground_led_counts: ClassVar[list[int]] = []
+    lamp_led_counts: ClassVar[list[int]] = []
 
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
@@ -94,7 +94,7 @@ class DotParticles(ParamParticles, register=False):
         }
 
     def positions(self, ctx: RenderContext, ground: Ground) -> Particles:
-        DotParticles.ground_led_counts.append(ground.leds.count)
+        DotParticles.lamp_led_counts.append(len(ground.lamps.members))
         level = np.nan if FlatField.mode == "nan" else float(self._values["level"])
         return swarm([[float(self._values["x"]), 0.0, 1.0]], [level, level, level], 0.3)
 
@@ -105,7 +105,7 @@ def register_fields() -> None:
     Effect._registry["dot_particles"] = DotParticles
     FlatField.mode = "ok"
     PlaceField.seen = []
-    DotParticles.ground_led_counts = []
+    DotParticles.lamp_led_counts = []
 
 
 def field_layer(level: float = 0.5, opacity: float = 1.0, **changes: Any) -> Layer:

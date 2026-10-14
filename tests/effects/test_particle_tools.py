@@ -623,6 +623,53 @@ def test_a_zone_with_no_leds_has_no_lamps() -> None:
     assert Ground.of(lights_at()).lamps.count == 0
 
 
+# Three lights with no map: a lamp at x 1, a lamp at x 3 and a bulb at x 5.
+THREE = lights_at(
+    [(1.0, 1.0, 0.2), (1.0, 1.0, 1.2)],
+    [(3.0, 1.0, 0.5), (3.0, 1.0, 1.0), (3.0, 1.0, 2.5)],
+    [(5.0, 1.0, 1.0)],
+    ceiling=None,
+)
+
+
+def test_a_ground_among_some_leds_has_only_their_lamps_and_lights_every_led() -> None:
+    # The first lamp's LEDs, and the second's two highest: the bulb and the rest are left out.
+    among = np.array([True, True, False, True, True, False])
+
+    ground = Ground.of(THREE, among=among)
+
+    assert ground.leds is THREE  # it lights every LED of the set
+    assert ground.lamps.count == 2
+    assert ground.lamps.members.tolist() == [0, 1, 3, 4]
+    assert ground.lamps.starts.tolist() == [0, 2, 4]
+    np.testing.assert_allclose(ground.lamps.centre, [[1.0, 1.0, 0.7], [3.0, 1.0, 1.75]])
+    np.testing.assert_allclose(ground.lamps.low, [0.2, 1.0])
+    np.testing.assert_allclose(ground.lamps.high, [1.2, 2.5])
+    # The floor and the ceiling are the whole set's, as its frame is.
+    whole = Ground.of(THREE)
+    assert (ground.floor, ground.ceiling) == (whole.floor, whole.ceiling)
+    np.testing.assert_array_equal(ground.low, whole.low)
+    np.testing.assert_array_equal(ground.high, whole.high)
+
+
+def test_a_ground_holds_its_set_and_a_mask_equal_to_its_own() -> None:
+    among = np.array([True, True, False, True, True, False])
+    ground = Ground.of(THREE, among=among)
+
+    assert ground.holds(THREE, among) and ground.holds(THREE, among.copy())
+    assert not ground.holds(THREE, None) and not ground.holds(THREE, ~among)
+    assert not ground.holds(lights_at(*[[tuple(p)] for p in THREE.pos]), among)
+    assert Ground.of(THREE).holds(THREE, None) and not Ground.of(THREE).holds(THREE, among)
+
+
+def test_a_ground_among_no_leds_has_no_lamps_and_among_every_led_is_the_whole_sets() -> None:
+    assert Ground.of(THREE, among=np.zeros(THREE.count, dtype=np.bool_)).lamps.count == 0
+    every = Ground.of(THREE, among=np.ones(THREE.count, dtype=np.bool_)).lamps
+    whole = lamps_of(THREE)
+    for name in ("centre", "low", "high", "members", "starts"):
+        np.testing.assert_array_equal(getattr(every, name), getattr(whole, name))
+
+
 def _lamps_light_by_light(leds: LedSet) -> Lamps:
     """lamps_of as it was first written: each light's middle measured against each stop's
     first middle, one at a time. lamps_of must give exactly what this gives."""

@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 F32 = NDArray[np.float32]
 F64 = NDArray[np.float64]
+Among: TypeAlias = NDArray[np.bool_] | None  # the LEDs a ground's lamps are made of; None: all
 
 REACH = 2.5  # a particle lights nothing past this many radii: under half an 8-bit step
 # From this many LEDs on, lit() looks only near each particle. The spec says "about 2k" (§4.1).
@@ -371,21 +372,31 @@ NO_LAMPS = Lamps(
 )
 
 
-def lamps_of(leds: LedSet) -> Lamps:
+def lamps_of(leds: LedSet, among: Among = None) -> Lamps:
     """The stops the LEDs make, in the zone's order: each light's LEDs, joined with the
     stop before whose first light's middle is within SAME_STOP_M. A stop's middle is the
-    mean of its lights' middles.
+    mean of its lights' middles. Given `among` (a mask of the LEDs), only the LEDs it marks
+    make stops: a light's middle, its lowest and highest LED are those of its marked LEDs,
+    and a light with none of them is no stop.
 
     Each light is measured against every stop's first middle at once, so many lamps cost one
     loop over the lights (1000 lamps: about 6 ms), not one over the lights and the stops."""
-    first = np.array([piece.start for piece in leds.slices if piece.count], dtype=np.intp)
-    if len(first) == 0:
+    pieces = [piece for piece in leds.slices if piece.count]
+    starts_of = np.array([piece.start for piece in pieces], dtype=np.intp)
+    ends_of = np.array([piece.stop for piece in pieces], dtype=np.intp)
+    chosen = np.arange(leds.count, dtype=np.intp) if among is None else np.flatnonzero(among)
+    light_of = np.searchsorted(ends_of, chosen, side="right")  # each chosen LED's light
+    held = light_of < len(pieces)  # an LED that no light's slice holds is in no lamp
+    held[held] = chosen[held] >= starts_of[light_of[held]]
+    chosen, light_of = chosen[held], light_of[held]
+    if len(chosen) == 0:
         return NO_LAMPS
-    many = np.array([piece.count for piece in leds.slices if piece.count], dtype=np.intp)
+    first = np.flatnonzero(np.diff(light_of, prepend=-1))  # each light's first, in `chosen`
+    many = np.diff(first, append=len(chosen))  # and how many it has there
     middles = np.empty((len(first), 3), dtype=np.float32)
     for count in np.unique(many):  # the lights of each LED count at once
         alike = np.flatnonzero(many == count)
-        middles[alike] = leds.pos[first[alike, None] + np.arange(count)].mean(axis=1)
+        middles[alike] = leds.pos[chosen[first[alike, None] + np.arange(count)]].mean(axis=1)
     stop_of = np.empty(len(first), dtype=np.intp)  # each light's stop
     firsts = np.empty((3, len(first)), dtype=np.float32)  # each stop's first middle, by axis
     stops = 0
@@ -403,9 +414,10 @@ def lamps_of(leds: LedSet) -> Lamps:
     lights = np.argsort(stop_of, kind="stable")  # stop by stop, each stop's in zone order
     by_stop = np.concatenate([[0], np.cumsum(np.bincount(stop_of))])  # into `lights`
     ends = np.cumsum(many[lights])
-    members = np.arange(ends[-1], dtype=np.intp) + np.repeat(
-        first[lights] - (ends - many[lights]), many[lights]
-    )
+    members = chosen[
+        np.arange(ends[-1], dtype=np.intp)
+        + np.repeat(first[lights] - (ends - many[lights]), many[lights])
+    ]
     starts = np.concatenate([[0], ends[by_stop[1:] - 1]]).astype(np.intp)
     heights = leds.pos[members, 2]
     centre = np.ascontiguousarray(firsts[:, :stops].T)
@@ -461,27 +473,42 @@ _NEIGHBOURS = np.array(
 
 @dataclass(frozen=True, eq=False)
 class Ground:
-    """Where a particle effect's particles move, worked out once for each LED set: the
-    LEDs, their lamps, the zone's frame (the set's bounds, which a layer's view keeps), its
-    floor and its ceiling. The floor is the map's (height 0) and the ceiling the map's
-    under a map; with none, the lowest LED and CEILING_OVER_M over the highest. A lamp the
-    map (or a layer's transform) puts outside them, as far as float32 (which the LEDs are held
-    in) can tell, has a floor and a ceiling of its own (floor_for, ceiling_for): what moves
-    along a lamp takes in all of its LEDs."""
+    """Where a particle effect's particles move, worked out once for each LED set (and each
+    `among`): the LEDs, which the particles light, their lamps, the zone's frame (the set's
+    bounds, which a layer's view keeps), its floor and its ceiling. The floor is the map's
+    (height 0) and the ceiling the map's under a map; with none, the lowest LED and
+    CEILING_OVER_M over the highest. A lamp the map (or a layer's transform) puts outside
+    them, as far as float32 (which the LEDs are held in) can tell, has a floor and a ceiling of
+    its own (floor_for, ceiling_for): what moves along a lamp takes in all of its LEDs.
+
+    Given `among`, a mask of the LEDs (a layer's mask: the LEDs it weighs above 0), the lamps
+    are made of the marked LEDs alone (lamps_of), so particles go only to them; the frame, the
+    floor and the ceiling stay the whole set's, as the zone's space is, and every LED is lit."""
 
     leds: LedSet
     lamps: Lamps
     floor: float
     ceiling: float
+    among: Among = None
     _grids: dict[float, _Grid] = field(default_factory=dict)
 
     @classmethod
-    def of(cls, leds: LedSet) -> Ground:
+    def of(cls, leds: LedSet, among: Among = None) -> Ground:
         low, high = leds.bounds
+        lamps = lamps_of(leds, among)
         ceiling = leds.space.ceiling
         if ceiling is not None and ceiling > 0.0:
-            return cls(leds, lamps_of(leds), 0.0, float(ceiling))
-        return cls(leds, lamps_of(leds), float(low[2]), float(high[2]) + CEILING_OVER_M)
+            return cls(leds, lamps, 0.0, float(ceiling), among)
+        return cls(leds, lamps, float(low[2]), float(high[2]) + CEILING_OVER_M, among)
+
+    def holds(self, leds: LedSet, among: Among) -> bool:
+        """Whether this is the ground of these LEDs and this mask of them: the same set, and
+        the same mask (the same array, or one equal to it)."""
+        if self.leds is not leds:
+            return False
+        if self.among is None or among is None:
+            return self.among is among
+        return self.among is among or bool(np.array_equal(self.among, among))
 
     @property
     def low(self) -> F32:

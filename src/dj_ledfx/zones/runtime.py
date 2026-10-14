@@ -727,14 +727,15 @@ class ZoneRuntime:
     def _render_layers(self, ctx: RenderContext) -> FloatRGB:
         """The streamed layers blended bottom to top, then each firmware layer's copy drawn
         on the lights that stream it. A particle layer's particles move to the frame's
-        moment among every LED of its view; its mask only weighs what they light."""
+        moment among the lamps its mask weighs above 0 (all of its view's, with no mask),
+        and light every LED of its view, which the mask then weighs."""
         count = self.leds.count
         frame: FloatRGB | None = None
         for index, (layer, effect) in enumerate(self._streamed):
             self._rendering = layer.name
             view = self._view(index, layer)
             if isinstance(effect, ParticleEffect):
-                colors = _finite(drawn(effect, ctx, view.leds))
+                colors = _finite(drawn(effect, ctx, view.leds, view.among))
             else:
                 colors = _finite(effect.render(ctx, view.leds))
             opacity = _opacity(layer, view)
