@@ -1,6 +1,7 @@
 """Lamps that the map, or a layer's transform, puts outside the floor-to-ceiling band, for the
-particle effects that keep to a lamp's band: those that run along a lamp (embers, rain, snow,
-fireflies, spotlights) and the tempo looks that go to its LEDs (beat_bursts, fountain, vortex).
+particle effects, which keep to a lamp's band: all eleven (embers, rain_storm, snowfall,
+fireflies, spotlights, beat_bursts, fountain, vortex, flock, bouncing_ball and twin_comets)
+try them.
 
 Particles stay between the floor and the ceiling, widened for each lamp to take in its own
 LEDs: a run's overhang past a lamp stops at the floor or the ceiling, but a lamp's own extent
