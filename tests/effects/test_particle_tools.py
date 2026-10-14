@@ -7,9 +7,11 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
+from conftest import CallCounts
 from map_home import HOMES, ROW, bulbs, leds_at, lights_at, upright
 from numpy.typing import NDArray
 
+from dj_ledfx.effects import particle_tools
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.particle_tools import (
     CEILING_OVER_M,
@@ -145,6 +147,30 @@ def test_the_grid_lights_a_few_far_larger_particles_as_the_dense_sum_does() -> N
     particles = joined(small, large)
 
     np.testing.assert_allclose(lit(ground, particles), _exactly(ground.leds, particles), atol=1e-4)
+
+
+# Where the grid would gather more than DENSE_FROM_SHARE of every pair of an LED and a particle,
+# lit() takes the dense sum instead, which is cheaper there. On these LEDs, particles of 0.7 m
+# gather about 13% (the grid) and of 0.9 m about 24% (the dense sum): either way, the colours are
+# the exact sum's.
+@pytest.mark.parametrize(("radius", "dense"), [(0.7, False), (0.9, True)])
+def test_the_grid_gives_way_to_the_dense_sum_where_it_would_gather_most_pairs_and_both_agree(
+    radius: float, dense: bool, call_counts: CallCounts
+) -> None:
+    ground = Ground.of(_scattered(GRID_FROM_LEDS + 500, seed=1))
+    rng = np.random.default_rng(3)
+    particles = swarm(
+        rng.uniform((0.0, 0.0, 0.0), (15.0, 15.0, 3.0), (100, 3)),
+        rng.uniform(0.0, 1.0, (100, 3)),
+        radius,
+    )
+    call_counts.spy(particle_tools, "_densely")
+
+    colours = lit(ground, particles)
+
+    assert call_counts.calls.get("_densely", 0) == int(dense)
+    assert colours.any()
+    np.testing.assert_allclose(colours, _exactly(ground.leds, particles), atol=1e-4)
 
 
 # A layer's mirror or transform moves its LEDs and keeps the zone's frame (LedSet.moved), so

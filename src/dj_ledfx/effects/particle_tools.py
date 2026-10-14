@@ -34,6 +34,15 @@ REACH = 2.5  # a particle lights nothing past this many radii: under half an 8-b
 # with the LEDs: 2.7 ms at 1800, the half of §4.1's 5 ms that each look of a transition gets
 # (§5.3: both are rendered), and 4.4 ms at 3000.
 GRID_FROM_LEDS = 600
+# Where the grid would gather more than this share of every pair of an LED and a particle, the
+# dense sum is cheaper and lit() takes it. A pair costs the grid 6 to 12 times what it costs the
+# dense sum, so they cross between a twelfth and a sixth. Measured (500 particles, 1000 to 10k
+# LEDs through 15 x 15 x 3 m, radii 0.3 to 2 m), the share comes in steps as the cells grow by
+# root 2: about 0.03, 0.07, 0.13, 0.24, 0.42 and 0.67. At 0.24 and over the dense sum is 1.3 to
+# 3.1 times cheaper; at 0.13 either can be (the grid 0.7 to 1.4 times the dense sum's cost),
+# and under it the grid is. A fifth sends 0.24 and over to the dense sum, and is at most 1.5
+# times the cheaper way's cost on any of them; a quarter would leave 0.24 to the grid.
+DENSE_FROM_SHARE = 0.2
 SAME_STOP_M = 0.3  # lights whose middles are this close make one stop
 CEILING_OVER_M = 0.5  # with no map, the ceiling is this far over the highest LED
 WINDOW_MIN = 0.25  # a lamp's events are born in this share of their stretches at the least
@@ -678,7 +687,8 @@ def _densely(ground: Ground, particles: Particles, out: FloatRGB) -> None:
 
 def _by_grid(ground: Ground, particles: Particles, out: FloatRGB) -> None:
     """Only the LEDs in the 27 cells round each particle's, the cells REACH radii of the
-    largest particle wide: each pair of a particle and an LED near it, gathered at once."""
+    largest particle wide: each pair of a particle and an LED near it, gathered at once. Where
+    that's more than DENSE_FROM_SHARE of every pair, every LED against every particle."""
     if particles.count == 0:
         return
     grid = ground.grid(REACH * float(particles.radius.max()))
@@ -687,6 +697,9 @@ def _by_grid(ground: Ground, particles: Particles, out: FloatRGB) -> None:
     many = np.searchsorted(grid.keys, near, side="right").ravel() - first
     pairs = int(many.sum())
     if pairs == 0:
+        return
+    if pairs > DENSE_FROM_SHARE * len(out) * particles.count:  # the grid would cost more
+        _densely(ground, particles, out)
         return
     whose = np.repeat(np.repeat(np.arange(particles.count), len(_NEIGHBOURS)), many)
     step = np.arange(pairs) - np.repeat(np.cumsum(many) - many, many)
