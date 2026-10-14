@@ -193,7 +193,7 @@ What every particle effect shares, in pure numpy, before any effect uses it: the
 - Produces, in `effects.particle_tools`:
   - `F32 = NDArray[np.float32]`, `F64 = NDArray[np.float64]`; `REACH = 2.5`, `GRID_FROM_LEDS = 600` (ruling 5), `SAME_STOP_M = 0.3`, `CEILING_OVER_M = 0.5`, `MIN_RADIUS_M = 0.01`.
   - `Particles(pos: F32, colour: F32, radius: F32)`, frozen, shapes (P, 3), (P, 3) and (P,), oldest first, with `count`, `newest(count) -> Particles` and `pick(which: NDArray[np.bool_]) -> Particles`; `swarm(pos, colour, radius) -> Particles` (one colour or one radius for all, radii at least `MIN_RADIUS_M`); `NO_PARTICLES`; `joined(*parts: Particles) -> Particles`.
-  - `draws(seed: int, keys: ArrayLike, count: int, stream: int = 0) -> F64`, shape (keys, count), each from 0 to 1 (1 left out), the same for the same seed, stream and key.
+  - `draws(seed: int, keys: ArrayLike, count: int, stream: ArrayLike = 0) -> F64`, shape (keys, count), each from 0 to 1 (1 left out), the same for the same seed, stream and key (`stream` is one number for all the keys, or one for each of them).
   - `recent(now: float, every: float, life: float) -> NDArray[np.int64]`: the events, one every `every` at a random moment within it, that may be alive at `now`.
   - `WANDER_DRAWS = 12`; `wander(u: F64, t: float, speed: float, low: ArrayLike, high: ArrayLike) -> F64`, shape (wanderers, 3), inside its box (one box, or one each).
   - `arc(start: ArrayLike, end: ArrayLike, share: ArrayLike, rise: ArrayLike) -> F64`: points on a parabola from start to end, `rise` metres over the line half-way.
