@@ -456,7 +456,8 @@ export function extractRender(read: ReadText): Record<string, unknown> {
  * LookThumb's scene, its viewBox and background, read in each render and the same in both; and the note beside the
  * chosen zone's name on the desktop's chip, and under it on the phone's zone button: tokens.css has no colour for it.
  * The phone's stage outlines the chosen zone in a narrower stroke than the spec's number, which Live-PutLookOn.html's
- * matches: the phone's render isn't scaled (its floor strokes are as wide as the desktop's).
+ * matches: the phone's render isn't scaled (its floor strokes are as wide as the desktop's). The phone's sheet: how far it lies over
+ * the stage's foot, and the padding under Start.
  */
 export function extractLiveRender(read: ReadText): Record<string, unknown> {
   const tokens = read('tokens.css')
@@ -514,6 +515,20 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     where: "Phone-PutLookOn.html's zone outline",
     pattern: /<path d="M[\d. L]+ Z" fill="none" stroke="#[0-9a-f]{6}" stroke-width="([\d.]+)"/,
   })
+  // The phone's sheet lies over the stage's foot: Phone-PutLookOn.html places the stage and the sheet by their tops, so the overlap is the
+  // stage's bottom less the sheet's top, and the sheet's footer pads its bottom (under Start) by the last of its four numbers.
+  const phoneStage = same(phonePut, {
+    where: "Phone-PutLookOn.html's stage",
+    pattern: /position: absolute; left: 0px; top: (\d+)px; width: \d+px; height: (\d+)px/,
+  })
+  const phoneSheet = same(phonePut, {
+    where: "Phone-PutLookOn.html's sheet",
+    pattern: /<section aria-label="Put a look on" style="position: absolute; left: 0; top: (\d+)px;/,
+  })
+  const phoneFooter = same(phonePut, {
+    where: "Phone-PutLookOn.html's sheet footer",
+    pattern: /padding: 12px 16px (\d+)px; border-top: 1px solid #[0-9a-f]{6}; display: flex; flex-direction: column; gap: 10px/,
+  })
   return {
     pip: {
       rest: colour(tokens, curve[1]),
@@ -530,6 +545,7 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     lookThumb: { width: n(thumb[1]), height: n(thumb[2]), background: colour(tokens, thumb[3]) },
     selectedZoneNote: { chip: colour(tokens, chipNote[1]), button: colour(tokens, buttonNote[1]) },
     phoneOutlinePx: n(phoneOutline[1]),
+    phoneSheet: { overlapPx: n(phoneStage[1]) + n(phoneStage[2]) - n(phoneSheet[1]), footerPaddingPx: n(phoneFooter[1]) },
   }
 }
 

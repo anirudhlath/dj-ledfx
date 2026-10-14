@@ -75,5 +75,9 @@ export const LIVE_RENDER = {
     "chip": "#4a4640",
     "button": "#5a564e"
   },
-  "phoneOutlinePx": 1.4
+  "phoneOutlinePx": 1.4,
+  "phoneSheet": {
+    "overlapPx": 36,
+    "footerPaddingPx": 30
+  }
 } as const

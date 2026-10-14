@@ -5,7 +5,7 @@ import { frames, previewSession } from '@/api/live'
 import { lookName } from '@/api/mocks/fixtures'
 import type { MockServer, MockServerOptions } from '@/api/mocks/mock-server'
 import { api, ApiError } from '@/api/rest'
-import { LIVE_SPEC } from '@/design/live-numbers'
+import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import { renderApp } from '@/test/app'
 import { HERO_NOW, pushFrame, restOn, startMockDataLayer } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
@@ -1551,7 +1551,10 @@ describe('Put a look on, on the phone (§8.10)', () => {
     await openApp('/next/live/put?zone=living&look=embers')
     expect(sheet().parentElement).toHaveClass('h-full')
     expect(sheet().parentElement).not.toHaveClass('min-h-full')
-    expect(sheet()).toHaveClass('-mt-9', 'min-h-0', 'flex-1', 'overflow-y-auto')
+    // The render's overlap and footer padding are generated (4 px a step of Tailwind's spacing scale): a new handoff fails here, not in the code.
+    const { overlapPx, footerPaddingPx } = LIVE_RENDER.phoneSheet
+    expect(sheet()).toHaveClass(`-mt-${overlapPx / 4}`, 'min-h-0', 'flex-1', 'overflow-y-auto')
+    expect(within(sheet()).getByRole('button', { name: /^Start/ }).parentElement).toHaveClass(`pb-${footerPaddingPx / 4}`)
     expect(within(sheet()).getByRole('group', { name: 'Looks' })).toHaveClass('grow', 'overflow-y-auto')
   })
 
