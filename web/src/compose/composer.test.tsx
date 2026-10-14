@@ -1348,7 +1348,7 @@ describe('Put a look on, on the phone (§8.10)', () => {
     expect(within(row('embers')).getByText('Previewing on screen')).toBeInTheDocument()
   })
 
-  it('claims no preview on a zone with no lights, or one the server refused, and keeps the look chosen', async () => {
+  it('claims no preview on a zone with no lights, and keeps the look chosen', async () => {
     await openApp('/next/live/put?zone=counter&look=embers')
     expect(row('embers')).toHaveAttribute('aria-pressed', 'true')
     expect(sheet()).not.toHaveTextContent(/Previewing/i)
