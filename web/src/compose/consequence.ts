@@ -57,11 +57,12 @@ const unique = (names: readonly string[]) => [...new Set(names)]
 /** A light named with a number: "<name> 2". */
 const NUMBERED = /^(.*\S)\s+\d+$/
 
-/** "Box" is "Boxes", "Pantry" is "Pantries", "Bay" is "Bays". */
+/** "Box" is "Boxes", "Pantry" is "Pantries", "Bay" is "Bays"; a name in capitals keeps them ("PARTY" is "PARTIES"). */
 function plural(word: string): string {
-  if (/(x|z|ch|sh)$/i.test(word)) return `${word}es`
-  if (/[^aeiou]y$/i.test(word)) return `${word.slice(0, -1)}ies`
-  return `${word}s`
+  const suffix = (ending: string) => (word === word.toUpperCase() && word !== word.toLowerCase() ? ending.toUpperCase() : ending)
+  if (/(x|z|ch|sh)$/i.test(word)) return `${word}${suffix('es')}`
+  if (/[^aeiou]y$/i.test(word)) return `${word.slice(0, -1)}${suffix('ies')}`
+  return `${word}${suffix('s')}`
 }
 
 /** A name that's plural already ("Fairy lights") has no plural to fold into: its lights are named one by one. */

@@ -140,6 +140,14 @@ describe('lights by name', () => {
     expect(lightsPhrase(['l2', 'l3'], rooms)).toBe('the Bays')
   })
 
+  it('keep the case of a name in capitals in its plural', () => {
+    const caps = named('PARTY 1', 'PARTY 2', 'BOX 1', 'BOX 2', 'BAR 1', 'BAR 2', 'BAY 1', 'BAY 2')
+    expect(lightsPhrase(['l0', 'l1'], caps)).toBe('the PARTIES')
+    expect(lightsPhrase(['l2', 'l3'], caps)).toBe('the BOXES')
+    expect(lightsPhrase(['l4', 'l5'], caps)).toBe('the BARS')
+    expect(lightsPhrase(['l6', 'l7'], caps)).toBe('the BAYS')
+  })
+
   it("name the lights of a name that's plural already one by one, whatever its case", () => {
     const strings = named('Fairy lights 1', 'Fairy lights 2', 'FAIRY LIGHTS 1', 'FAIRY LIGHTS 2')
     expect(lightsPhrase(['l0', 'l1'], strings)).toBe('the Fairy lights 1 and the Fairy lights 2')
