@@ -494,11 +494,11 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
   // leaves the other's to stand for both.
   const thumbPattern =
     /<svg class="tb " viewBox="0 0 (\d+) (\d+)" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: block; background: (#[0-9a-f]{6}); ">/
-  const thumb = same(put, { where: "Live-PutLookOn.html's thumbs", pattern: thumbPattern })
-  const phoneThumb = same(phonePut, { where: "Phone-PutLookOn.html's thumbs", pattern: thumbPattern })
+  const thumb = same(put, { where: "Live-PutLookOn.html's thumb", pattern: thumbPattern })
+  const phoneThumb = same(phonePut, { where: "Phone-PutLookOn.html's thumb", pattern: thumbPattern })
   const [scene, phoneScene] = [thumb, phoneThumb].map((m) => JSON.stringify(m.slice(1)))
   if (scene !== phoneScene) {
-    throw new Error(`design numbers: Live-PutLookOn.html's and Phone-PutLookOn.html's thumbs draws it two ways: ${scene} and ${phoneScene}`)
+    throw new Error(`design numbers: Live-PutLookOn.html's thumb and Phone-PutLookOn.html's thumb draw the scene two ways: ${scene} and ${phoneScene}`)
   }
   const chipNote = same(put, {
     where: "Live-PutLookOn.html, the selected zone chip's note",

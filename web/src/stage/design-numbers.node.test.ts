@@ -74,11 +74,11 @@ describe('the design numbers', () => {
     expect(() => extractLive(handoff.spec.replace('**`LookTile`** (composer', '**`LookTile`** (library'))).toThrow(/§6\.4 LookTile/)
   })
 
-  // A render whose thumbs moved is named, whichever it is: it never drops out and leaves the other's to stand for both.
-  it.runIf(handoff.read !== null)('name the render whose thumbs moved', () => {
+  // A render whose thumb moved is named, whichever it is: it never drops out and leaves the other's to stand for both.
+  it.runIf(handoff.read !== null)('name the render whose thumb moved', () => {
     const renamed = (html: string) => html.replaceAll('<svg class="tb "', '<svg class="tile "')
-    expect(() => extractLiveRender(edited('Phone-PutLookOn', renamed))).toThrow(/Phone-PutLookOn\.html's thumbs no longer reads/)
-    expect(() => extractLiveRender(edited('Live-PutLookOn', renamed))).toThrow(/Live-PutLookOn\.html's thumbs no longer reads/)
+    expect(() => extractLiveRender(edited('Phone-PutLookOn', renamed))).toThrow(/Phone-PutLookOn\.html's thumb no longer reads/)
+    expect(() => extractLiveRender(edited('Live-PutLookOn', renamed))).toThrow(/Live-PutLookOn\.html's thumb no longer reads/)
   })
 
   // The phone's outline is read from the one path Phone-PutLookOn draws it with: a render that moves it is named.
@@ -91,7 +91,7 @@ describe('the design numbers', () => {
   it.runIf(handoff.read !== null)('name the renders that draw a thumb two ways', () => {
     const taller = (html: string) => html.replaceAll(/(<svg class="tb " viewBox="0 0 \d+ )\d+"/g, (_, head: string) => `${head}999"`)
     const paler = (html: string) => html.replaceAll(/(<svg class="tb "[^>]*background: )#[0-9a-f]{6}/g, (_, head: string) => `${head}#123456`)
-    const twoWays = /Live-PutLookOn\.html's and Phone-PutLookOn\.html's thumbs draws it two ways/
+    const twoWays = /Live-PutLookOn\.html's thumb and Phone-PutLookOn\.html's thumb draw the scene two ways/
     expect(() => extractLiveRender(edited('Phone-PutLookOn', taller))).toThrow(twoWays)
     expect(() => extractLiveRender(edited('Phone-PutLookOn', paler))).toThrow(twoWays)
   })
