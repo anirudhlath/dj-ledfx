@@ -19,6 +19,7 @@ import {
   rowNote,
   runningOn,
   steppedTo,
+  tileTag,
   transitionChoices,
   transitionKey,
   zoneNote,
@@ -210,19 +211,40 @@ describe('where an arrow key steps among the looks', () => {
 describe("a look's words in the composer", () => {
   // Phone-PutLookOn's rows: "Previewing on screen", "Running here now", "Ambient · no input".
   it("say what a phone row's line says", () => {
-    expect(rowNote(look('embers'), true, false, [])).toEqual({ text: 'Previewing on screen', signal: false })
-    expect(rowNote(look('fireflies'), false, true, [])).toEqual({ text: 'Running here now', signal: false })
+    expect(rowNote(look('embers'), true, true, false, [])).toEqual({ text: 'Previewing on screen', signal: false })
+    expect(rowNote(look('fireflies'), false, false, true, [])).toEqual({ text: 'Running here now', signal: false })
     // The look the stage previews can be the one the zone runs: the row says it's previewing.
-    expect(rowNote(look('fireflies'), true, true, [])).toEqual({ text: 'Previewing on screen', signal: false })
-    expect(rowNote(look('aurora'), false, false, [])).toEqual({ text: 'Ambient · no input', signal: false })
-    expect(rowNote(look('spectrum'), false, false, []).text).toMatch(/^Audio · Music/)
+    expect(rowNote(look('fireflies'), true, true, true, [])).toEqual({ text: 'Previewing on screen', signal: false })
+    expect(rowNote(look('aurora'), false, false, false, [])).toEqual({ text: 'Ambient · no input', signal: false })
+    expect(rowNote(look('spectrum'), false, false, false, []).text).toMatch(/^Audio · Music/)
     // A look that uses two inputs says both, in §6.3's chip order.
-    expect(rowNote(look('drop'), false, false, []).text).toBe('Audio · Tempo · Music')
+    expect(rowNote(look('drop'), false, false, false, []).text).toBe('Audio · Tempo · Music')
+  })
+
+  // The tag and the row's note say what the stage shows, so a look whose preview is refused (a zone with no lights, or any refusal) claims
+  // none of it: a refused look that runs here says so, and any other falls back to its inputs. aria-pressed is the choice, not the claim.
+  it("don't claim a preview that is refused", () => {
+    expect(rowNote(look('embers'), true, false, false, [])).toEqual({ text: 'Ambient · no input', signal: false })
+    expect(rowNote(look('fireflies'), true, false, true, [])).toEqual({ text: 'Running here now', signal: false })
+    // The input it would wait for still shows, chosen or not.
+    expect(rowNote(look('spectrum'), true, false, false, ['music'])).toEqual({ text: 'Waits for music', signal: true })
+    // Another look is not the one previewed, whatever the flag says.
+    expect(rowNote(look('aurora'), false, true, false, []).text).toBe('Ambient · no input')
+  })
+
+  it('give a tile one tag: PREVIEWING on the look previewed, else RUNNING HERE on the look that runs, else none', () => {
+    expect(tileTag(true, true, false)).toBe('previewing')
+    expect(tileTag(true, true, true)).toBe('previewing')
+    expect(tileTag(true, false, true)).toBe('here')
+    expect(tileTag(true, false, false)).toBeNull()
+    expect(tileTag(false, true, true)).toBe('here')
+    expect(tileTag(false, true, false)).toBeNull()
+    expect(tileTag(false, false, false)).toBeNull()
   })
 
   // §8.2: "its tile says 'Waits for music' / 'Needs Home Assistant' in signal", chosen or not.
   it('say the input a look would wait for first, in signal', () => {
-    expect(rowNote(look('spectrum'), true, false, ['music'])).toEqual({ text: 'Waits for music', signal: true })
+    expect(rowNote(look('spectrum'), true, true, false, ['music'])).toEqual({ text: 'Waits for music', signal: true })
     expect(lookLabel(look('goodnight'), false, ['home-assistant'])).toBe(`${look('goodnight').name}, Needs Home Assistant`)
     expect(lookLabel(look('fireflies'), true, [])).toBe(`${look('fireflies').name}, running here`)
   })
@@ -230,7 +252,7 @@ describe("a look's words in the composer", () => {
   // missingInputs() hands over the inputs in §6.3's chip order, so the first is the one a tile says.
   it('say only the first of several inputs, after the tag', () => {
     const both = ['music', 'home-assistant'] as const
-    expect(rowNote(look('spectrum'), false, false, both)).toEqual({ text: 'Waits for music', signal: true })
+    expect(rowNote(look('spectrum'), false, false, false, both)).toEqual({ text: 'Waits for music', signal: true })
     expect(lookLabel(look('spectrum'), true, both)).toBe(`${look('spectrum').name}, running here, Waits for music`)
   })
 

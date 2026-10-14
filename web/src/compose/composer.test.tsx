@@ -260,6 +260,44 @@ describe('Put a look on (§8.2)', () => {
     expect(ask).not.toHaveBeenCalled()
   })
 
+  // Ruling on the tag: it says what the stage shows, so it shows on the look chosen only while that preview isn't refused. A pending preview
+  // counts as previewing (else the tag would blink off on every new choice). aria-pressed and the frame are the choice, and stay.
+  it('claims a preview on the look chosen while it is on its way, and once it is on', async () => {
+    const waiting = holdPreviews()
+    await openApp('/next/live/put?zone=living&look=embers')
+    expect(waiting).toHaveLength(1)
+    expect(tile('embers')).toHaveAttribute('aria-pressed', 'true')
+    expect(within(tile('embers')).getByText('Previewing')).toBeInTheDocument()
+    waiting.shift()!()
+    await settle(100)
+    expect(previewSession.snapshot()).toMatchObject({ status: 'on', lookId: 'embers' })
+    expect(within(tile('embers')).getByText('Previewing')).toBeInTheDocument()
+  })
+
+  it('claims no preview on a zone with no lights, and keeps the look chosen', async () => {
+    await openApp('/next/live/put?zone=counter&look=embers')
+    expect(tile('embers')).toHaveAttribute('aria-pressed', 'true')
+    expect(composer()).not.toHaveTextContent(/Previewing/i)
+  })
+
+  it('claims no preview the server refused, shows RUNNING HERE for a refused look that runs on the zone, and claims again on the next look', async () => {
+    const real = api.startPreview.bind(api)
+    vi.spyOn(api, 'startPreview').mockImplementation((body) =>
+      body.lookId === 'goodnight' || body.lookId === 'fireflies'
+        ? Promise.reject(new ApiError(400, 'Not now', '/api/preview'))
+        : real(body),
+    )
+    // The hero runs fireflies on the living room.
+    await openApp('/next/live/put?zone=living&look=fireflies')
+    expect(tile('fireflies')).toHaveAttribute('aria-pressed', 'true')
+    expect(within(tile('fireflies')).queryByText('Previewing')).not.toBeInTheDocument()
+    expect(within(tile('fireflies')).getByText('Running here')).toBeInTheDocument()
+    fireEvent.click(tile('embers'))
+    await settle(100)
+    expect(within(tile('embers')).getByText('Previewing')).toBeInTheDocument()
+    expect(within(tile('fireflies')).getByText('Running here')).toBeInTheDocument()
+  })
+
   // A link can name a zone or a look the server hasn't got (one deleted since). The zone falls back as a missing ?zone= does, the last one
   // started on, else the whole home; and a choice made in place doesn't carry the stale id on.
   it('falls back to the whole home for a zone the server has not got, and a pick writes a URL without it', async () => {
@@ -1296,6 +1334,33 @@ describe('Put a look on, on the phone (§8.10)', () => {
     await openApp(`/next/live/put${search}`)
     expect(within(sheet()).getByRole('button', { name: new RegExp(`^${start}`) })).toBeDisabled()
     expect(sheet().querySelector('[data-consequence]')).toHaveTextContent(says)
+  })
+
+  // The row's note and the check say what the stage shows (see the panel's tag): a pending preview counts, a refused one claims nothing.
+  it("says 'Previewing on screen' on the look chosen while its preview is on its way, and once it is on", async () => {
+    const waiting = holdPreviews()
+    await openApp('/next/live/put?zone=living&look=embers')
+    expect(waiting).toHaveLength(1)
+    expect(row('embers')).toHaveAttribute('aria-pressed', 'true')
+    expect(within(row('embers')).getByText('Previewing on screen')).toBeInTheDocument()
+    waiting.shift()!()
+    await settle(100)
+    expect(within(row('embers')).getByText('Previewing on screen')).toBeInTheDocument()
+  })
+
+  it('claims no preview on a zone with no lights, or one the server refused, and keeps the look chosen', async () => {
+    await openApp('/next/live/put?zone=counter&look=embers')
+    expect(row('embers')).toHaveAttribute('aria-pressed', 'true')
+    expect(sheet()).not.toHaveTextContent(/Previewing/i)
+    expect(within(row('embers')).getByText('Ambient · no input', { selector: ':not(.sr-only)' })).toBeInTheDocument()
+  })
+
+  it('says what a refused look that runs on the zone does, not that it previews', async () => {
+    vi.spyOn(api, 'startPreview').mockRejectedValue(new ApiError(400, 'Not now', '/api/preview'))
+    await openApp('/next/live/put?zone=living&look=fireflies')
+    expect(row('fireflies')).toHaveAttribute('aria-pressed', 'true')
+    expect(sheet()).not.toHaveTextContent(/Previewing/i)
+    expect(within(row('fireflies')).getByText('Running here now')).toBeInTheDocument()
   })
 
   // §8.2: "Home looks (whole-home scope) lock the zone to Whole home."

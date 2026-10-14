@@ -1,8 +1,9 @@
 // §8.10 Put a look on's look rows (Phone-PutLookOn): the thumb at LIVE_SPEC.phoneComposer.thumb, the
-// name in serif, and one line (rowNote()); the chosen row framed in `text` with a check. On the chosen
+// name in serif, and one line (rowNote(), which claims a preview only while the chosen look's isn't refused); the chosen row framed in `text`
+// with a check. On the chosen
 // row's control fill the line is text-2, not the render's text-3, for §14's contrast (F4 ruling 19). The
 // name's 21 px and the line's 11.5 px are Phone-PutLookOn's. The label replaces what the button holds and
-// already says its state (aria-pressed the previewed one), which the line mostly shows too, so the
+// already says its state (aria-pressed the one chosen), which the line mostly shows too, so the
 // description is the look's category and inputs (lookInputs()), the one thing nothing else says, in a
 // visually hidden span, which the row holds with `relative`: an absolutely positioned span with no
 // positioned ancestor in its list escapes the list's clip and stretches <main>'s scroll area.
@@ -24,8 +25,8 @@ const BORDER = 1
  */
 export const ROW_HEIGHT = LIVE_SPEC.phoneComposer.thumb.height + 2 * (PADDING + BORDER)
 
-export function LookRow({ look, selected, here, missing, tabbable, onSelect }: LookTileProps) {
-  const note = rowNote(look, selected, here, missing)
+export function LookRow({ look, selected, previewed, here, missing, tabbable, onSelect }: LookTileProps) {
+  const note = rowNote(look, selected, previewed, here, missing)
   const inputs = useId()
   return (
     <button

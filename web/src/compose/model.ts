@@ -111,8 +111,8 @@ export function missingInputs(look: Look, inputs: Pick<Inputs, 'music' | 'homeAs
 }
 
 /**
- * A tile's or a row's name for a screen reader: the look, and what its tags and signal say (its
- * PREVIEWING tag is its aria-pressed). What a tile's icons and a row's line show of its inputs is its
+ * A tile's or a row's name for a screen reader: the look, and what its tags and signal say (the look chosen
+ * is its aria-pressed, which is the choice and not a claim about the stage). What a tile's icons and a row's line show of its inputs is its
  * description (lookInputs()), since the label replaces what the button holds.
  */
 export function lookLabel(look: Look, here: boolean, missing: readonly MissingInput[]): string {
@@ -130,14 +130,34 @@ export function lookInputs(look: Look): string {
   return `${category} · ${inputs.length === 0 ? 'no input' : inputs.join(' · ')}`
 }
 
+/** A tile's one tag: PREVIEWING, RUNNING HERE, or none. */
+export type TileTag = 'previewing' | 'here'
+
+/**
+ * The tag a tile wears (§6.4): PREVIEWING on the look chosen while the stage previews it, else RUNNING HERE on the look the zone runs, else
+ * none. The tag claims what the stage shows, so a chosen look whose preview is refused (`previewed` false: a zone with no lights, or any
+ * refusal) claims none of it, and falls through to RUNNING HERE where it runs on the zone. A preview still on its way counts as previewed.
+ */
+export function tileTag(selected: boolean, previewed: boolean, here: boolean): TileTag | null {
+  if (selected && previewed) return 'previewing'
+  return here ? 'here' : null
+}
+
 /**
  * A phone look row's line (Phone-PutLookOn): the input it would wait for, in signal (§8.2), else
- * "Previewing on screen", "Running here now", or its category and the inputs it uses.
+ * "Previewing on screen" (tileTag()'s claim), "Running here now", or its category and the inputs it uses.
  */
-export function rowNote(look: Look, selected: boolean, here: boolean, missing: readonly MissingInput[]): { text: string; signal: boolean } {
+export function rowNote(
+  look: Look,
+  selected: boolean,
+  previewed: boolean,
+  here: boolean,
+  missing: readonly MissingInput[],
+): { text: string; signal: boolean } {
   if (missing.length > 0) return { text: MISSING_SIGNAL[missing[0]], signal: true }
-  if (selected) return { text: 'Previewing on screen', signal: false }
-  if (here) return { text: 'Running here now', signal: false }
+  const tag = tileTag(selected, previewed, here)
+  if (tag === 'previewing') return { text: 'Previewing on screen', signal: false }
+  if (tag === 'here') return { text: 'Running here now', signal: false }
   return { text: lookInputs(look), signal: false }
 }
 

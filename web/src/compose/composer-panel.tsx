@@ -134,6 +134,7 @@ export function ComposerPanel({ className }: { className?: string }) {
                     key={each.id}
                     look={each}
                     selected={each.id === look?.id}
+                    previewed={view.previewed}
                     here={each.id === view.here?.lookId}
                     missing={view.missing(each)}
                     tabbable={each.id === view.tabbable}

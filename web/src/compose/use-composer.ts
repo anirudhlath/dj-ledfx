@@ -117,6 +117,12 @@ export interface Composer extends ComposeChoice {
   missing: (look: Look) => MissingInput[]
   /** What Start would do (§8.2); null until the zones load. */
   consequence: Consequence | null
+  /**
+   * The stage shows the look chosen, or is about to: it is chosen on a zone with lights, and the server hasn't refused it. A tile's tag and a
+   * row's note claim a preview only then (tileTag()). Built from the expressions the consequence line reads, so they never disagree; not
+   * `preview.showing`, which is null while a first choice is starting, so the tag would blink off on every new choice.
+   */
+  previewed: boolean
   /** Start is on its way. */
   starting: boolean
   /** Starts the look on the zone with `transition` (F4 ruling 13); a failure is said, and the composer stays. */
@@ -152,6 +158,8 @@ export function useComposer(): Composer {
   const missing = (each: Look) => missingInputs(each, inputs)
   // The preview state is for the choice made now, from the moment it was asked for: its status says how that went.
   const forThisChoice = preview.zoneId === zone?.id && preview.lookId === look?.id
+  const refused = forThisChoice && preview.status === 'failed'
+  const previewed = look !== undefined && zone !== undefined && zone.lights.length > 0 && !refused
   const said =
     zone === undefined
       ? null
@@ -162,7 +170,7 @@ export function useComposer(): Composer {
           lights: names,
           plan: forThisChoice && preview.status === 'on' ? preview.lights : null,
           missing: look === undefined ? [] : missing(look),
-          refused: forThisChoice && preview.status === 'failed' && look !== undefined ? failureText(`preview ${look.name}`, preview.error) : null,
+          refused: refused && look !== undefined ? failureText(`preview ${look.name}`, preview.error) : null,
         })
   const start = (transition: Transition) => {
     if (zone === undefined || look === undefined || starting) return
@@ -181,5 +189,5 @@ export function useComposer(): Composer {
       },
     )
   }
-  return { ...choice, running, preview, missing, consequence: said, starting, start, close }
+  return { ...choice, running, preview, missing, consequence: said, previewed, starting, start, close }
 }

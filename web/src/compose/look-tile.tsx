@@ -1,6 +1,6 @@
 // §6.4 LookTile (composer, LIVE_SPEC.lookTile.px wide): the look's thumb, its name in serif and the
-// icons of the inputs it uses; PREVIEWING while the stage previews it, RUNNING HERE while it runs on the
-// chosen zone, and the first input it would wait for in signal (§8.2). Live-PutLookOn draws it, with no
+// icons of the inputs it uses; PREVIEWING while the stage previews it (tileTag(): not on a look whose preview is
+// refused), RUNNING HERE while it runs on the chosen zone, and the first input it would wait for in signal (§8.2). Live-PutLookOn draws it, with no
 // input on any tile, so the icons (13 px) and the signal line (11.5 px) take the sizes Looks.html's
 // LookCard draws its inputs at. The icons say nothing to a screen reader, and the label replaces what the
 // button holds, so the look's category and inputs (lookInputs()) are its description, in a visually hidden
@@ -13,12 +13,14 @@ import { Icon } from '@/design/icon'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { LookThumb } from '@/looks/look-thumb'
 import { chipsFor } from '@/zones/zone-view'
-import { lookInputs, lookLabel, MISSING_SIGNAL, type MissingInput } from './model'
+import { lookInputs, lookLabel, MISSING_SIGNAL, tileTag, type MissingInput } from './model'
 
 export interface LookTileProps {
   look: Look
-  /** The look the stage previews: aria-pressed. */
+  /** The look chosen: aria-pressed, the frame, the check. */
   selected: boolean
+  /** The chosen look's preview isn't refused, so the stage shows it (or is about to): it claims PREVIEWING. */
+  previewed: boolean
   /** The look the chosen zone runs now. */
   here: boolean
   /** The inputs it would wait for (missingInputs()). */
@@ -32,8 +34,9 @@ export interface LookTileProps {
 // HERE is drawn 20 px plus a 1 px border each side (the render sets no box-sizing), so it's 22 px here.
 const TAG = 'absolute top-2 left-2 inline-flex items-center rounded-pill px-1.75 text-[10.5px] font-bold tracking-[0.06em] uppercase'
 
-export function LookTile({ look, selected, here, missing, tabbable, onSelect }: LookTileProps) {
+export function LookTile({ look, selected, previewed, here, missing, tabbable, onSelect }: LookTileProps) {
   const inputs = useId()
+  const tag = tileTag(selected, previewed, here)
   return (
     <button
       type="button"
@@ -46,14 +49,13 @@ export function LookTile({ look, selected, here, missing, tabbable, onSelect }: 
       onClick={onSelect}
     >
       <LookThumb lookId={look.id} size="tile" className={selected ? 'border-[1.5px] border-text' : 'border-line'}>
-        {selected ? (
+        {tag === 'previewing' && (
           <span className={cx(TAG, 'h-5 gap-1.25 bg-text text-on-text')}>
             <Icon name="eye" size={12} />
             Previewing
           </span>
-        ) : (
-          here && <span className={cx(TAG, 'h-5.5 border border-line bg-bg/80 text-text-2')}>Running here</span>
         )}
+        {tag === 'here' && <span className={cx(TAG, 'h-5.5 border border-line bg-bg/80 text-text-2')}>Running here</span>}
       </LookThumb>
       <span className="flex items-center justify-between gap-1.5 px-0.5">
         <span className="font-serif leading-[1.1] text-text" style={{ fontSize: LIVE_SPEC.lookTile.namePx }}>

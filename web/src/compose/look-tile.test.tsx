@@ -12,10 +12,10 @@ import { LookTile, type LookTileProps } from './look-tile'
 
 const inQuery = (ui: ReactNode) => render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 
-/** A tile's props for a look: not chosen, not running, waiting for nothing. */
+/** A tile's props for a look: not chosen (and so, if it were, previewed), not running, waiting for nothing. */
 function props(id: string, overrides: Partial<LookTileProps> = {}): LookTileProps {
   const look = lookFixtures.find((each) => each.id === id)!
-  return { look, selected: false, here: false, missing: [], tabbable: false, onSelect: () => {}, ...overrides }
+  return { look, selected: false, previewed: true, here: false, missing: [], tabbable: false, onSelect: () => {}, ...overrides }
 }
 
 // The thumbs read the looks from REST's cache.
@@ -110,6 +110,42 @@ describe('LookTile (§6.4)', () => {
     const tile = screen.getByRole('button', { name: `${lookName('fireflies')}, running here`, pressed: true })
     expect(within(tile).getByText('Previewing')).toBeInTheDocument()
     expect(within(tile).queryByText('Running here')).not.toBeInTheDocument()
+  })
+})
+
+// The tag says what the stage shows: a chosen look whose preview is refused (a zone with no lights, any refusal) keeps its frame and its
+// aria-pressed, which are the choice, but claims no preview.
+describe('a chosen look whose preview is refused', () => {
+  it('keeps its frame on a tile and says nothing of previewing', () => {
+    inQuery(<LookTile {...props('embers', { selected: true, previewed: false, tabbable: true })} />)
+    const tile = screen.getByRole('button', { name: lookName('embers'), pressed: true })
+    expect(tile.querySelector('[data-thumb]')).toHaveClass('border-text')
+    expect(within(tile).queryByText('Previewing')).not.toBeInTheDocument()
+    expect(within(tile).queryByText('Running here')).not.toBeInTheDocument()
+  })
+
+  it('shows RUNNING HERE on a tile when it runs on the zone', () => {
+    inQuery(<LookTile {...props('fireflies', { selected: true, previewed: false, here: true })} />)
+    const tile = screen.getByRole('button', { name: `${lookName('fireflies')}, running here`, pressed: true })
+    expect(within(tile).getByText('Running here')).toBeInTheDocument()
+    expect(within(tile).queryByText('Previewing')).not.toBeInTheDocument()
+  })
+
+  it('keeps its frame and check on a row, with its inputs for the line, or "Running here now"', () => {
+    inQuery(
+      <>
+        <LookRow {...props('embers', { selected: true, previewed: false })} />
+        <LookRow {...props('fireflies', { selected: true, previewed: false, here: true })} />
+      </>,
+    )
+    const chosen = screen.getByRole('button', { name: lookName('embers'), pressed: true })
+    expect(chosen).toHaveClass('border-text', 'bg-control')
+    expect(chosen.querySelectorAll('svg')).toHaveLength(1)
+    expect(within(chosen).queryByText('Previewing on screen')).not.toBeInTheDocument()
+    expect(within(chosen).getByText('Ambient · no input', { selector: ':not(.sr-only)' })).toHaveClass('text-text-2')
+    const running = screen.getByRole('button', { name: `${lookName('fireflies')}, running here`, pressed: true })
+    expect(within(running).getByText('Running here now')).toBeInTheDocument()
+    expect(within(running).queryByText('Previewing on screen')).not.toBeInTheDocument()
   })
 })
 
