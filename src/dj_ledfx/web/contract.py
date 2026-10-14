@@ -439,6 +439,9 @@ _ACTIVITY: dict[LightMode, int] = {"own-effect": 2, "streamed-copy": 1, "streami
 def preview_started(
     preview_id: str, lights: Iterable[preview.PreviewLight], index: LightIndex
 ) -> PreviewStarted:
+    """The preview's answer, each light once: the PC answers as its most active part
+    (`_ACTIVITY`). Between parts equally active, the first in the runtime's light order (a
+    deterministic one) names the PC's effect."""
     chosen: dict[str, preview.PreviewLight] = {}
     for light in lights:
         light_id = index.light_of(light.device_id)
