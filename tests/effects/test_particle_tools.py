@@ -3,10 +3,11 @@ from __future__ import annotations
 import math
 import statistics
 import time
+from collections.abc import Callable
 
 import numpy as np
 import pytest
-from map_home import ROW, leds_at, lights_at, upright
+from map_home import HOMES, ROW, bulbs, leds_at, lights_at, upright
 from numpy.typing import NDArray
 
 from dj_ledfx.effects.ledset import LedSet
@@ -21,6 +22,7 @@ from dj_ledfx.effects.particle_tools import (
     WANDER_DRAWS,
     WINDOW_MIN,
     Ground,
+    Lamps,
     Particles,
     Streams,
     arc,
@@ -619,6 +621,85 @@ def test_lights_at_one_spot_make_one_stop() -> None:
 def test_a_zone_with_no_leds_has_no_lamps() -> None:
     assert lamps_of(lights_at()).count == 0
     assert Ground.of(lights_at()).lamps.count == 0
+
+
+def _lamps_light_by_light(leds: LedSet) -> Lamps:
+    """lamps_of as it was first written: each light's middle measured against each stop's
+    first middle, one at a time. lamps_of must give exactly what this gives."""
+    groups: list[list[NDArray[np.intp]]] = []
+    firsts: list[NDArray[np.float32]] = []
+    for piece in leds.slices:
+        if piece.count == 0:
+            continue
+        middle = leds.pos[piece.start : piece.stop].mean(axis=0)
+        near = next(
+            (i for i, first in enumerate(firsts) if np.linalg.norm(first - middle) <= SAME_STOP_M),
+            None,
+        )
+        which = np.arange(piece.start, piece.stop, dtype=np.intp)
+        if near is None:
+            firsts.append(middle)
+            groups.append([which])
+        else:
+            groups[near].append(which)
+    members = [np.concatenate(group) for group in groups]
+    heights = [leds.pos[which, 2] for which in members]
+    return Lamps(
+        centre=np.array(
+            [np.mean([leds.pos[w].mean(axis=0) for w in group], axis=0) for group in groups],
+            dtype=np.float32,
+        ),
+        low=np.array([z.min() for z in heights], dtype=np.float32),
+        high=np.array([z.max() for z in heights], dtype=np.float32),
+        members=np.concatenate(members),
+        starts=np.cumsum([0, *(len(which) for which in members)]).astype(np.intp),
+    )
+
+
+def _crowded(count: int, seed: int) -> LedSet:
+    """`count` lights of one to four LEDs in a 3 x 3 m corner, so that many stand within
+    SAME_STOP_M of another and join its stop."""
+    rng = np.random.default_rng(seed)
+    return lights_at(
+        *[
+            [
+                tuple(rng.uniform((0.0, 0.0, 0.0), (3.0, 3.0, 2.5)))
+                for _ in range(rng.integers(1, 5))
+            ]
+            for _ in range(count)
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "leds",
+    [*HOMES.values(), lambda: bulbs(300), lambda: _crowded(300, 4)],
+    ids=[*HOMES, "300 bulbs", "300 crowded lights"],
+)
+def test_the_stops_are_the_ones_light_by_light_measuring_makes(leds: Callable[[], LedSet]) -> None:
+    zone = leds()
+    lamps, expected = lamps_of(zone), _lamps_light_by_light(zone)
+
+    assert 0 < lamps.count == expected.count
+    for name in ("centre", "low", "high", "members", "starts"):
+        np.testing.assert_array_equal(getattr(lamps, name), getattr(expected, name))
+
+
+# lamps_of runs inside a render whenever a particle layer's LEDs or modifiers change: for the
+# layer and for each twin of it. Measuring each light against every stop one at a time took
+# 810 ms for 1000 lamps; measuring it against them all at once takes about 6 ms, so the frame
+# that changes a layer of 1000 lamps runs about a frame long, once (this home has 19).
+@pytest.mark.perf
+def test_a_thousand_lamps_make_their_stops_in_about_a_frame() -> None:
+    leds = bulbs(1000)
+    lamps_of(leds)
+    durations = []
+    for _ in range(15):
+        started = time.perf_counter()
+        lamps_of(leds)
+        durations.append(time.perf_counter() - started)
+
+    assert statistics.median(durations) < 2 * FRAME_BUDGET_S
 
 
 def test_around_goes_round_the_middle() -> None:
