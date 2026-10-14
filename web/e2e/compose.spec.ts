@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { LIVE_SPEC } from '../src/design/live-numbers'
-import { notch, open, stageCanvas, type Insets } from './helpers'
+import { LIVE_RENDER, LIVE_SPEC } from '../src/design/live-numbers'
+import { absoluteEscapes, expectRingWhole, mainScroll, notch, open, SLACK, settled, stageCanvas, walkLooks, type Insets } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in the home's time zone (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -15,40 +15,8 @@ async function box(locator: Locator) {
   return found
 }
 
-/** Layout's rounding: a fraction of a pixel is neither a cut ring, nor a scroll, nor a hit band short of --touch-min. */
-const SLACK = 0.5
-
-/**
- * Phone-PutLookOn's sheet lies this far up over the stage's foot, and pads this far under Start. The render's HTML sets both (a -36px margin
- * and a 30px bottom padding) and `design:numbers` generates neither, so they are written here, once, for the measurements to compare with.
- */
-const PHONE_SHEET_OVERLAP_PX = 36
-const PHONE_FOOTER_PAD_PX = 30
-
-/** How far <main> can scroll (what its content has beyond its box), and the offset it is scrolled to: the composer's pages fit it, so neither is ever more than 0. */
-function mainScroll(page: Page) {
-  return page.locator('main').evaluate((main) => ({ beyond: main.scrollHeight - main.clientHeight, at: main.scrollTop }))
-}
-
-/** Waits until nothing on the page scrolls any more: every element's offsets are the same for five frames running. */
-function settled(page: Page): Promise<void> {
-  return page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        const offsets = () => Array.from(document.querySelectorAll('*'), (element) => `${element.scrollLeft},${element.scrollTop}`).join(' ')
-        let last = offsets()
-        let still = 0
-        const frame = () => {
-          const now = offsets()
-          still = now === last ? still + 1 : 0
-          last = now
-          if (still >= 5) resolve()
-          else requestAnimationFrame(frame)
-        }
-        requestAnimationFrame(frame)
-      }),
-  )
-}
+/** Phone-PutLookOn's sheet lies this far up over the stage's foot, and pads this far under Start: both read from the render by `design:numbers`. */
+const { overlapPx: PHONE_SHEET_OVERLAP_PX, footerPaddingPx: PHONE_FOOTER_PAD_PX } = LIVE_RENDER.phoneSheet
 
 /** The composer gives the chosen look's tile or row the focus as it opens (F4 ruling 12): waits for that, so no focus of its own comes after the test's. */
 function opened(page: Page) {
@@ -67,42 +35,6 @@ async function restingBox(locator: Locator) {
     })
     .toBe(true)
   return box(locator)
-}
-
-/**
- * Whether the focused element's ring is whole: how far it reaches past the nearest ancestor that clips it (the viewport, where none does),
- * side by side. A ring reaches its outline's width and offset beyond the element (tokens.css); 0 or less on every side is a whole ring.
- * The page must have settled.
- */
-async function expectRingWhole(page: Page, what: string) {
-  await settled(page)
-  const { ring, past } = await page.evaluate(() => {
-    const element = document.activeElement
-    if (!(element instanceof HTMLElement)) throw new Error('nothing has the focus')
-    const style = getComputedStyle(element)
-    if (style.outlineStyle === 'none') throw new Error(`${element.tagName} draws no focus ring`)
-    const reach = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset)
-    let clip: Element | null = element.parentElement
-    while (clip && clip !== document.documentElement) {
-      const { overflowX, overflowY } = getComputedStyle(clip)
-      if (overflowX !== 'visible' || overflowY !== 'visible') break
-      clip = clip.parentElement
-    }
-    let port = { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
-    if (clip && clip !== document.documentElement) {
-      // The scrollport: the box inside the clipper's border, and inside its scrollbar.
-      const edge = clip.getBoundingClientRect()
-      const left = edge.left + clip.clientLeft
-      const top = edge.top + clip.clientTop
-      port = { left, top, right: left + clip.clientWidth, bottom: top + clip.clientHeight }
-    }
-    const own = element.getBoundingClientRect()
-    return {
-      ring: reach,
-      past: { left: port.left - (own.left - reach), right: own.right + reach - port.right, top: port.top - (own.top - reach), bottom: own.bottom + reach - port.bottom },
-    }
-  })
-  expect(Math.max(...Object.values(past)), `${what}: its ${ring} px ring reaches past the clip by ${JSON.stringify(past)}`).toBeLessThanOrEqual(SLACK)
 }
 
 /**
@@ -204,9 +136,10 @@ for (const size of ['desktop', 'phone'] as const) {
         await expect(state.ready(page)).toBeVisible()
         // As live.spec.ts: on desktop, the banner's frame rate settled.
         if (size === 'desktop') await expect(page.getByRole('banner').getByText('60 fps')).toBeVisible({ timeout: 10_000 })
+        // The composer gives a look the focus as it opens (F4 ruling 12), in a passive effect after the first paint: wait for it, or it
+        // can land after the blur below and ring a look as a keyboard would. The renders draw the page at rest.
+        await opened(page)
         await state.then?.(page)
-        // The composer gives a look the focus as it opens (F4 ruling 12), and a page opened by its URL
-        // rings it as a keyboard would; the renders draw the page at rest.
         await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
         await expect(page).toHaveScreenshot(`${state.name}.png`)
       })
@@ -214,49 +147,16 @@ for (const size of ['desktop', 'phone'] as const) {
   })
 }
 
-// A scroller clips an absolutely positioned element only if the element's containing block (its nearest positioned ancestor) is inside the
-// scroller. With the holder outside, the element is neither clipped nor scrolled with it, and a hidden label (sr-only) that way stretched
-// <main>'s scroll area by its place: the Running panel's slider labels and a transition's "from" and "to" did, by 27 to 39 px on a short screen
-// (the Running panel's test, below). It happens at any height, so this finds the element itself, wherever it is in <main>: none may escape a clip.
-for (const [name, path, ready] of [
-  ['Live', '/next/live?scenario=transition&still', (page: Page) => page.getByRole('slider').first()],
-  ['Live, with a problem', '/next/live?scenario=problems&still', (page: Page) => page.getByRole('slider').first()],
-  ['Put a look on', '/next/live/put?zone=living&look=embers&still', (page: Page) => page.getByRole('group', { name: 'Categories' })],
-  ['Zone detail', '/next/live/zones/living?scenario=transition&still', (page: Page) => page.getByRole('slider').first()],
-] as const) {
-  test(`${name}: nothing absolutely positioned in <main> escapes a clip`, async ({ page }) => {
-    await open(page, path, stageCanvas(page))
-    await expect(ready(page)).toBeVisible()
-    await settled(page)
-    const { examined, escaped } = await page.locator('main').evaluate((main) => {
-      const clips = (element: Element) => {
-        const { overflowX, overflowY } = getComputedStyle(element)
-        return overflowX !== 'visible' || overflowY !== 'visible'
-      }
-      /** Whether an element is the containing block of what it holds that is absolutely positioned: positioned, or a transform or the like. */
-      const holds = (element: Element) => {
-        const style = getComputedStyle(element)
-        return style.position !== 'static' || style.transform !== 'none' || style.perspective !== 'none' || style.filter !== 'none' || /layout|paint|strict|content/.test(style.contain)
-      }
-      let examined = 0
-      const escaped: string[] = []
-      for (const element of main.querySelectorAll('*')) {
-        if (getComputedStyle(element).position !== 'absolute' || element.getClientRects().length === 0) continue
-        examined++
-        const clippers: string[] = []
-        for (let up = element.parentElement; up && !holds(up); up = up.parentElement) {
-          if (clips(up)) clippers.push(`${up.tagName.toLowerCase()}.${up.getAttribute('class')?.slice(0, 30) ?? ''}`)
-        }
-        if (clippers.length > 0) {
-          escaped.push(`${element.tagName.toLowerCase()}.${element.getAttribute('class')?.slice(0, 30) ?? ''} "${(element.textContent ?? '').slice(0, 20)}" escapes ${clippers.join(' > ')}`)
-        }
-      }
-      return { examined, escaped }
-    })
-    expect(examined, 'absolutely positioned elements looked at, or this checks nothing').toBeGreaterThan(0)
-    expect(escaped).toEqual([])
-  })
-}
+// A hidden label (sr-only) is absolutely positioned: with no positioned ancestor inside a scroller it escapes the scroller's clip and stretches
+// <main>'s scroll area. The composer's tiles, rows and chips hold theirs with `relative`; live.spec.ts runs the same audit over Live and Zone detail.
+test('Put a look on: nothing absolutely positioned in <main> escapes a clip', async ({ page }) => {
+  await open(page, '/next/live/put?zone=living&look=embers&still', stageCanvas(page))
+  await expect(page.getByRole('group', { name: 'Categories' })).toBeVisible()
+  await settled(page)
+  const { examined, escaped } = await absoluteEscapes(page)
+  expect(examined, 'absolutely positioned elements looked at, or this checks nothing').toBeGreaterThan(0)
+  expect(escaped).toEqual([])
+})
 
 test.describe('on desktop', () => {
   test.skip(({ isMobile }) => isMobile)
@@ -313,38 +213,6 @@ test.describe('on desktop', () => {
     })
   }
 
-  // The Running panel's list scrolls when its cards don't fit, and what is hidden in a card (a slider's label, a transition's "from" and "to")
-  // is positioned by the card, not by <main>: with no positioned ancestor inside the list it escaped the list's clip and stretched <main>'s
-  // scroll area (measured before the fix: 27 px at 1440 x 400, 39 px at 844 x 390).
-  for (const [scenario, width, height] of [
-    ['problems', 1440, 350],
-    ['doorbell', 1440, 400],
-    ['transition', 1440, 400],
-    ['doorbell', 844, 390],
-    ['problems', 844, 390],
-  ] as const) {
-    test(`Live's Running panel scrolls at ${width} x ${height} (${scenario}), and <main> doesn't`, async ({ page }) => {
-      await page.setViewportSize({ width, height })
-      await open(page, `/next/live?scenario=${scenario}&still`)
-      await expect(stageCanvas(page)).toBeVisible()
-      const panel = page.getByRole('complementary', { name: 'Running' })
-      await expect(panel).toBeVisible()
-      // The premise: the cards have come in and the panel's list scrolls.
-      await expect
-        .poll(
-          () =>
-            panel.evaluate((aside) => {
-              const list = [...aside.querySelectorAll('div')].find((each) => getComputedStyle(each).overflowY === 'auto')
-              return list === undefined ? null : list.scrollHeight - list.clientHeight
-            }),
-          { message: "the panel's list overflows, or this checks nothing" },
-        )
-        .toBeGreaterThan(0)
-      await settled(page)
-      expect(await mainScroll(page)).toEqual({ beyond: 0, at: 0 })
-    })
-  }
-
   // F4 ruling 12 and §14: Tab reaches the category row. It clips (its last chip is cut at the panel's edge, as drawn), and the browser leaves
   // a chip that is 32 px or more in view where it is, which cut the last chip's ring by 45 px at 1440 x 900: a chip the keyboard focuses
   // is scrolled in with the room its ring needs, and the row goes back to its start once focus leaves, as nothing else can scroll it back.
@@ -389,32 +257,17 @@ test.describe('on desktop', () => {
     await open(page, still('/next/live/put?zone=living&look=embers'))
     const grid = page.getByRole('group', { name: 'Looks' })
     const scroller = grid.locator('xpath=..')
-    const focused = () => page.evaluate(() => (document.activeElement as HTMLElement).dataset.look)
     await opened(page)
     expect(await scroller.evaluate((element) => element.scrollHeight - element.clientHeight), 'the grid scrolls').toBeGreaterThan(0)
 
-    /** Presses `key` until the focus stops moving, with every tile it reaches rung whole; returns the tiles reached. */
-    async function walk(key: string) {
-      const reached: string[] = []
-      for (let step = 0; step < 40; step++) {
-        const before = await focused()
-        await page.keyboard.press(key)
-        const after = await focused()
-        if (after === before) return reached
-        expect(after).toBeDefined()
-        await expectRingWhole(page, `${key} to ${after}`)
-        reached.push(after!)
-      }
-      throw new Error(`${key} never stopped`)
-    }
-    await walk('ArrowUp')
+    await walkLooks(page, 'ArrowUp')
     await expect(grid.locator('[data-look]').first()).toBeFocused()
     expect(await scroller.evaluate((element) => element.scrollTop), 'at the top').toBe(0)
-    const down = await walk('ArrowDown')
+    const down = await walkLooks(page, 'ArrowDown')
     expect(down.length, 'rows below').toBeGreaterThan(2)
-    await walk('ArrowRight')
+    await walkLooks(page, 'ArrowRight')
     await expect(grid.locator('[data-look]').last()).toBeFocused()
-    expect((await walk('ArrowUp')).length, 'and back up').toBeGreaterThan(2)
+    expect((await walkLooks(page, 'ArrowUp')).length, 'and back up').toBeGreaterThan(2)
     expect(await scroller.evaluate((element) => element.scrollTop), 'back at the top').toBe(0)
   })
 
@@ -673,6 +526,57 @@ test.describe('on the phone', () => {
     expect(Math.min(last.left, last.right), `the last zone is whole in the row: ${JSON.stringify(last)}`).toBeGreaterThanOrEqual(-SLACK)
   })
 
+  // As the zone row opens on the chosen zone, the category row shows the pressed chip wholly: a home look's chip (Home) sat cut at the row's edge,
+  // and a look of the last category (Firmware) sat out of view. A chip pressed later is scrolled in the same way.
+  test('the pressed category chip is wholly in its row as the sheet opens, and when another is pressed', async ({ page }) => {
+    const wholeIn = async (row: Locator) => {
+      await settled(page)
+      return row.evaluate((element) => {
+        const port = element.getBoundingClientRect()
+        const chip = element.querySelector('[aria-pressed="true"]')!.getBoundingClientRect()
+        return { left: chip.left - port.left, right: port.right - chip.right, scrolls: element.scrollWidth > element.clientWidth }
+      })
+    }
+    for (const look of ['goodnight', 'firmware', 'embers']) {
+      await open(page, still(`/next/live/put?zone=living&look=${look}`))
+      const row = page.getByRole('group', { name: 'Categories' })
+      await expect(row.getByRole('button', { pressed: true })).toBeVisible()
+      const where = await wholeIn(row)
+      expect(where.scrolls, 'the row scrolls, or this checks nothing').toBe(true)
+      expect(Math.min(where.left, where.right), `${look}: the pressed chip is whole in the row: ${JSON.stringify(where)}`).toBeGreaterThanOrEqual(-SLACK)
+      expect(await mainScroll(page), '<main>').toEqual({ beyond: 0, at: 0 })
+    }
+    // A chip pressed where it shows cut at the row's right edge, and then one cut at its left (the row scrolled to its end first).
+    await open(page, still('/next/live/put?zone=living&look=embers'))
+    const row = page.getByRole('group', { name: 'Categories' })
+    const chips = row.getByRole('button')
+    /** The first chip the row cuts at its `side`, or -1. */
+    const cut = (side: 'left' | 'right') =>
+      row.evaluate((element, edge) => {
+        const port = element.getBoundingClientRect()
+        return [...element.querySelectorAll('button')].findIndex((each) => {
+          const chip = each.getBoundingClientRect()
+          return edge === 'right' ? chip.right > port.right && chip.left < port.right : chip.left < port.left && chip.right > port.left
+        })
+      }, side)
+    for (const side of ['right', 'left'] as const) {
+      if (side === 'left') {
+        await row.evaluate((element) => (element.scrollLeft = element.scrollWidth))
+        await settled(page)
+      }
+      const at = await cut(side)
+      expect(at, `a chip is cut at the row's ${side}, or this checks nothing`).toBeGreaterThanOrEqual(0)
+      // A touch on the part of it that shows: Playwright's own tap would scroll the chip into view first, and hide what is checked.
+      const port = await box(row)
+      const shown = await box(chips.nth(at))
+      const [from, to] = [Math.max(shown.x, port.x), Math.min(shown.x + shown.width, port.x + port.width)]
+      await page.touchscreen.tap((from + to) / 2, shown.y + shown.height / 2)
+      await expect(chips.nth(at)).toHaveAttribute('aria-pressed', 'true')
+      const where = await wholeIn(row)
+      expect(Math.min(where.left, where.right), `the chip cut at the ${side}, pressed: whole in the row: ${JSON.stringify(where)}`).toBeGreaterThanOrEqual(-SLACK)
+    }
+  })
+
   // A home look locks the zone to the whole home, which moves the zone row to its first button: that scroll must not take <main> with it,
   // on a screen so short that the sheet itself scrolls too.
   for (const [width, height] of [
@@ -684,11 +588,14 @@ test.describe('on the phone', () => {
       await open(page, still('/next/live/put?zone=living&look=embers'))
       const sheet = page.getByRole('region', { name: 'Put a look on' })
       const row = sheet.getByRole('group', { name: 'Where' })
-      await expect(row.getByRole('button', { pressed: true })).toContainText('Living')
+      // The whole home is the server's first zone (the row is in its order), and the living room, chosen by the path, is not.
+      const zones = row.getByRole('button')
+      await expect(zones.first()).toHaveAttribute('aria-pressed', 'false')
+      await expect(row.getByRole('button', { pressed: true })).toHaveCount(1)
       await sheet.getByRole('group', { name: 'Categories' }).getByRole('button', { name: 'Home' }).tap()
       await sheet.locator('[data-look="goodnight"]').tap()
       await expect(sheet.locator('[data-look="goodnight"]')).toHaveAttribute('aria-pressed', 'true')
-      await expect(row.getByRole('button', { pressed: true })).toContainText('Whole home')
+      await expect(zones.first()).toHaveAttribute('aria-pressed', 'true')
       await settled(page)
       expect(await mainScroll(page), '<main>').toEqual({ beyond: 0, at: 0 })
       const whole = await row.evaluate((element) => {
@@ -702,67 +609,82 @@ test.describe('on the phone', () => {
 
   // Tab walks the zone buttons, then the category chips: each row scrolls on its own and clips, and the browser leaves a button that is mostly in
   // view where it is, which cut a ring part-way along (the row's buttons) and at its end (the last). The first and the last of each are whole.
-  test('Tab walks the zone buttons and the category chips with every ring whole', async ({ page }) => {
-    await open(page, still('/next/live/put?zone=living&look=embers'))
-    const sheet = page.getByRole('region', { name: 'Put a look on' })
-    await expect(sheet.getByRole('group', { name: 'Categories' }).getByRole('button').first()).toBeVisible()
-    await opened(page)
-    await sheet.getByRole('button', { name: 'Close' }).focus()
-    for (const [name, buttons] of [
-      ['zone button', sheet.getByRole('group', { name: 'Where' }).getByRole('button')],
-      ['category chip', sheet.getByRole('group', { name: 'Categories' }).getByRole('button')],
-    ] as const) {
-      const count = await buttons.count()
-      for (let at = 0; at < count; at++) {
+  // On a screen too short for the sheet (375 x 548: it scrolls by about 111 px) the sheet clips too, and Shift+Tab back from the list to a zone
+  // button scrolls the sheet up to it: its ring is checked against the sheet's own edge as well as the row's (expectRingWhole takes every clipper).
+  // The arrows then walk the rows, which the sheet scrolls to as well.
+  for (const [width, height] of [
+    [390, 844],
+    [375, 548],
+  ]) {
+    test(`Tab walks the zone buttons and the category chips with every ring whole at ${width} x ${height}`, async ({ page }) => {
+      await page.setViewportSize({ width, height })
+      await open(page, still('/next/live/put?zone=living&look=embers'))
+      const sheet = page.getByRole('region', { name: 'Put a look on' })
+      await expect(sheet.getByRole('group', { name: 'Categories' }).getByRole('button').first()).toBeVisible()
+      await opened(page)
+      await sheet.getByRole('button', { name: 'Close' }).focus()
+      for (const [name, buttons] of [
+        ['zone button', sheet.getByRole('group', { name: 'Where' }).getByRole('button')],
+        ['category chip', sheet.getByRole('group', { name: 'Categories' }).getByRole('button')],
+      ] as const) {
+        const count = await buttons.count()
+        for (let at = 0; at < count; at++) {
+          await page.keyboard.press('Tab')
+          await expect(buttons.nth(at)).toBeFocused()
+          await expectRingWhole(page, `${name} ${at + 1} of ${count}`)
+        }
+      }
+      // On through the list, the transition and Start: the sheet scrolls to reach the last two on a short screen.
+      const transition = sheet.getByRole('combobox', { name: 'Transition' })
+      const start = sheet.getByRole('button', { name: /^Start/ })
+      await page.keyboard.press('Tab')
+      await expect(sheet.getByRole('group', { name: 'Looks' }).locator('[data-look][tabindex="0"]')).toBeFocused()
+      for (const [name, control] of [['Transition', transition], ['Start', start]] as const) {
         await page.keyboard.press('Tab')
-        await expect(buttons.nth(at)).toBeFocused()
-        await expectRingWhole(page, `${name} ${at + 1} of ${count}`)
+        await expect(control).toBeFocused()
+        await expectRingWhole(page, name)
       }
-    }
-    // And back from the list: the last chip, out of view again, to the first zone button.
-    await page.keyboard.press('Tab')
-    await expect(sheet.getByRole('group', { name: 'Looks' }).locator('[data-look][tabindex="0"]')).toBeFocused()
-    for (const [name, buttons] of [
-      ['category chip', sheet.getByRole('group', { name: 'Categories' }).getByRole('button')],
-      ['zone button', sheet.getByRole('group', { name: 'Where' }).getByRole('button')],
-    ] as const) {
-      for (let at = (await buttons.count()) - 1; at >= 0; at--) {
-        await page.keyboard.press('Shift+Tab')
-        await expect(buttons.nth(at)).toBeFocused()
-        await expectRingWhole(page, `${name} ${at + 1}, going back`)
+      // And all the way back: Start, the transition, the list, the last chip (out of view again), the first zone button, and Close.
+      await page.keyboard.press('Shift+Tab')
+      await expect(transition).toBeFocused()
+      await expectRingWhole(page, 'Transition, going back')
+      await page.keyboard.press('Shift+Tab')
+      await expect(sheet.getByRole('group', { name: 'Looks' }).locator('[data-look][tabindex="0"]')).toBeFocused()
+      for (const [name, buttons] of [
+        ['category chip', sheet.getByRole('group', { name: 'Categories' }).getByRole('button')],
+        ['zone button', sheet.getByRole('group', { name: 'Where' }).getByRole('button')],
+      ] as const) {
+        for (let at = (await buttons.count()) - 1; at >= 0; at--) {
+          await page.keyboard.press('Shift+Tab')
+          await expect(buttons.nth(at)).toBeFocused()
+          await expectRingWhole(page, `${name} ${at + 1}, going back`)
+        }
       }
-    }
-  })
+      await page.keyboard.press('Shift+Tab')
+      await expect(sheet.getByRole('button', { name: 'Close' })).toBeFocused()
+      await expectRingWhole(page, 'Close, going back')
+      // The premise on the short screen: reaching those scrolled the sheet, so its edge was a clip a ring could meet.
+      if (height < 600) expect(await sheet.evaluate((element) => element.scrollHeight - element.clientHeight), 'the sheet scrolls').toBeGreaterThan(0)
+      expect(await mainScroll(page), '<main>').toEqual({ beyond: 0, at: 0 })
+    })
 
-  // Up and Down move through the rows, previewing each: the list scrolls to the row, and a ring is whole at the list's edges too.
-  test('the arrows walk the rows with every ring whole', async ({ page }) => {
-    await open(page, still('/next/live/put?zone=living&look=embers'))
-    const list = page.getByRole('group', { name: 'Looks' })
-    const focused = () => page.evaluate(() => (document.activeElement as HTMLElement).dataset.look)
-    await opened(page)
-    expect(await list.evaluate((element) => element.scrollHeight - element.clientHeight), 'the list scrolls').toBeGreaterThan(0)
-
-    /** Presses `key` until the focus stops moving, with every row it reaches rung whole; returns the rows reached. */
-    async function walk(key: string) {
-      const reached: string[] = []
-      for (let step = 0; step < 40; step++) {
-        const before = await focused()
-        await page.keyboard.press(key)
-        const after = await focused()
-        if (after === before) return reached
-        expect(after).toBeDefined()
-        await expectRingWhole(page, `${key} to ${after}`)
-        reached.push(after!)
-      }
-      throw new Error(`${key} never stopped`)
-    }
-    await walk('ArrowUp')
-    await expect(list.locator('[data-look]').first()).toBeFocused()
-    expect(await list.evaluate((element) => element.scrollTop), 'at the top').toBe(0)
-    expect((await walk('ArrowDown')).length, 'rows below').toBeGreaterThan(2)
-    await expect(list.locator('[data-look]').last()).toBeFocused()
-    expect((await walk('ArrowUp')).length, 'and back up').toBeGreaterThan(2)
-  })
+    // Up and Down move through the rows, previewing each: the list scrolls to the row, and a ring is whole at the list's edges too.
+    test(`the arrows walk the rows with every ring whole at ${width} x ${height}`, async ({ page }) => {
+      await page.setViewportSize({ width, height })
+      await open(page, still('/next/live/put?zone=living&look=embers'))
+      const list = page.getByRole('group', { name: 'Looks' })
+      await opened(page)
+      expect(await list.evaluate((element) => element.scrollHeight - element.clientHeight), 'the list scrolls').toBeGreaterThan(0)
+      await walkLooks(page, 'ArrowUp')
+      await expect(list.locator('[data-look]').first()).toBeFocused()
+      // On the short screen the list is one row and its padding (84 px for a 72 px row), and Chromium rests it 2 px along: the ring was rung whole.
+      if (height >= 844) expect(await list.evaluate((element) => element.scrollTop), 'at the top').toBe(0)
+      expect((await walkLooks(page, 'ArrowDown')).length, 'rows below').toBeGreaterThan(2)
+      await expect(list.locator('[data-look]').last()).toBeFocused()
+      expect((await walkLooks(page, 'ArrowUp')).length, 'and back up').toBeGreaterThan(2)
+      expect(await mainScroll(page), '<main>').toEqual({ beyond: 0, at: 0 })
+    })
+  }
 
   // F4 ruling 12 on the phone: L opens the composer on the first row, Up and Down move through the rows and choose, Enter starts, Esc leaves.
   test('the keyboard puts a look on: L, the arrows and Enter', async ({ page }) => {

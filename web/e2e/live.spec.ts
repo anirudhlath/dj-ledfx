@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { open, stageCanvas } from './helpers'
+import { absoluteEscapes, mainScroll, open, settled, stageCanvas } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in Dallas (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -120,6 +120,26 @@ test.describe('the link', () => {
   })
 })
 
+// A scroller clips an absolutely positioned element only if the element's containing block (its nearest positioned ancestor) is inside the
+// scroller. With the holder outside, the element is neither clipped nor scrolled with it, and a hidden label (sr-only) that way stretched
+// <main>'s scroll area by its place: the Running panel's slider labels and a transition's "from" and "to" did, by 27 to 39 px on a short screen
+// (the Running panel's test, below). It happens at any height, so this finds the element itself, wherever it is in <main>: none may escape a clip.
+// The composer's own page is audited in compose.spec.ts.
+for (const [name, path, ready] of [
+  ['Live', '/next/live?scenario=transition&still', (page: Page) => page.getByRole('slider').first()],
+  ['Live, with a problem', '/next/live?scenario=problems&still', (page: Page) => page.getByRole('slider').first()],
+  ['Zone detail', '/next/live/zones/living?scenario=transition&still', (page: Page) => page.getByRole('slider').first()],
+] as const) {
+  test(`${name}: nothing absolutely positioned in <main> escapes a clip`, async ({ page }) => {
+    await open(page, path, stageCanvas(page))
+    await expect(ready(page)).toBeVisible()
+    await settled(page)
+    const { examined, escaped } = await absoluteEscapes(page)
+    expect(examined, 'absolutely positioned elements looked at, or this checks nothing').toBeGreaterThan(0)
+    expect(escaped).toEqual([])
+  })
+}
+
 test.describe('on desktop', () => {
   test.skip(({ isMobile }) => isMobile)
 
@@ -164,6 +184,37 @@ test.describe('on desktop', () => {
       expect((await box(tool)).y).toBeGreaterThanOrEqual(label.y + label.height)
     }
   })
+  // The Running panel's list scrolls when its cards don't fit, and what is hidden in a card (a slider's label, a transition's "from" and "to")
+  // is positioned by the card, not by <main>: with no positioned ancestor inside the list it escaped the list's clip and stretched <main>'s
+  // scroll area (measured before the fix: 27 px at 1440 x 400, 39 px at 844 x 390).
+  for (const [scenario, width, height] of [
+    ['problems', 1440, 350],
+    ['doorbell', 1440, 400],
+    ['transition', 1440, 400],
+    ['doorbell', 844, 390],
+    ['problems', 844, 390],
+  ] as const) {
+    test(`Live's Running panel scrolls at ${width} x ${height} (${scenario}), and <main> doesn't`, async ({ page }) => {
+      await page.setViewportSize({ width, height })
+      await open(page, `/next/live?scenario=${scenario}&still`)
+      await expect(stageCanvas(page)).toBeVisible()
+      const panel = page.getByRole('complementary', { name: 'Running' })
+      await expect(panel).toBeVisible()
+      // The premise: the cards have come in and the panel's list scrolls.
+      await expect
+        .poll(
+          () =>
+            panel.evaluate((aside) => {
+              const list = [...aside.querySelectorAll('div')].find((each) => getComputedStyle(each).overflowY === 'auto')
+              return list === undefined ? null : list.scrollHeight - list.clientHeight
+            }),
+          { message: "the panel's list overflows, or this checks nothing" },
+        )
+        .toBeGreaterThan(0)
+      await settled(page)
+      expect(await mainScroll(page)).toEqual({ beyond: 0, at: 0 })
+    })
+  }
 })
 
 // Owner's difference #6: the phone's preview-only banner keeps Phone-State-Preview-Only's 36 px Turn off, and
