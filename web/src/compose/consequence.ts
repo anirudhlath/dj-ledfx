@@ -34,7 +34,7 @@ export interface ConsequenceSources {
   plan: readonly PreviewLight[] | null
   /** The inputs the look would wait for, in §6.3's chip order. */
   missing: readonly InputKind[]
-  /** What the preview's failure says, when the server refused the look on the zone. */
+  /** What the failure says, when the server refused the look on the zone: Start's, else the preview's. */
   refused: string | null
 }
 

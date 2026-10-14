@@ -131,8 +131,13 @@ export interface Composer extends ComposeChoice {
    * The choices don't wait, and the preview of the last one is asked for again once the link is back (PreviewSession.resume()).
    */
   frozen: boolean
-  /** Starts the look on the zone with `transition` (F4 ruling 13); a failure is said, and the composer stays. */
+  /**
+   * Starts the look on the zone with `transition` (F4 ruling 13); a failure is said aloud and where the consequence goes, until the next
+   * choice, and the composer stays.
+   */
   start: (transition: Transition) => void
+  /** A choice made in the composer itself (a transition, a category, a search) puts the consequence back in a refused Start's place. */
+  forgetStart: () => void
   /** Cancel and Close: back to Live, the lights as they were. */
   close: () => void
 }
@@ -152,6 +157,13 @@ export function useComposer(): Composer {
   const announce = useAnnounce()
   const [starting, setStarting] = useState(false)
   const frozen = useConnectionStatus() === 'reconnecting'
+  // What a refused Start said, for the choice it was refused on. Another zone or look, from wherever it's chosen (a chip, a tile, a room on
+  // the stage, the arrows), is the next choice, and the line goes back to the consequence.
+  const [startRefused, setStartRefused] = useState<{ zoneId: Id; lookId: Id; text: string } | null>(null)
+  if (startRefused !== null && (startRefused.zoneId !== zone?.id || startRefused.lookId !== look?.id)) {
+    // React's way to adjust state to a prop.
+    setStartRefused(null)
+  }
   // Whether this composer is still on the page: a Start's answer can come after it was left.
   const mounted = useRef(false)
   useEffect(() => {
@@ -177,7 +189,8 @@ export function useComposer(): Composer {
           lights: names,
           plan: forThisChoice && preview.status === 'on' ? preview.lights : null,
           missing: look === undefined ? [] : missing(look),
-          refused: refused && look !== undefined ? failureText(`preview ${look.name}`, preview.error) : null,
+          // A refused Start is newer than its choice's preview, and says the failure that matters now.
+          refused: startRefused?.text ?? (refused && look !== undefined ? failureText(`preview ${look.name}`, preview.error) : null),
         })
   const start = (transition: Transition) => {
     if (zone === undefined || look === undefined || starting || frozen) return
@@ -192,9 +205,11 @@ export function useComposer(): Composer {
       },
       (error: unknown) => {
         setStarting(false)
-        announce(failureText(`start ${look.name}`, error))
+        const text = failureText(`start ${look.name}`, error)
+        setStartRefused({ zoneId: zone.id, lookId: look.id, text })
+        announce(text)
       },
     )
   }
-  return { ...choice, running, preview, missing, consequence: said, previewed, starting, frozen, start, close }
+  return { ...choice, running, preview, missing, consequence: said, previewed, starting, frozen, start, forgetStart: () => setStartRefused(null), close }
 }

@@ -474,14 +474,40 @@ describe('Put a look on (§8.2)', () => {
     expect(router.state.location.pathname).toBe('/next/live')
   })
 
-  it('says why Start failed, and stays open', async () => {
+  // A refused Start is said aloud and where the consequence goes, as a refused preview is, until the next choice.
+  it('says why Start failed, aloud and in the consequence line until the next choice, and stays open', async () => {
     vi.spyOn(api, 'start').mockRejectedValue(new ApiError(503, 'The engine is busy', '/api/zones/living/start'))
     const { router } = await openApp('/next/live/put?zone=living&look=embers')
     fireEvent.click(startButton('embers'))
     await settle()
-    expect(screen.getByRole('status')).toHaveTextContent(`Couldn't start ${lookName('embers')}. The engine is busy`)
+    const refused = `Couldn't start ${lookName('embers')}. The engine is busy`
+    expect(screen.getByRole('status')).toHaveTextContent(refused)
+    expect(consequenceLine()).toHaveTextContent(refused)
     expect(router.state.location.pathname).toBe('/next/live/put')
     expect(startButton('embers')).toBeEnabled()
+
+    fireEvent.click(tile('fireflies'))
+    await settle()
+    expect(consequenceLine()).not.toHaveTextContent("Couldn't start")
+  })
+
+  it.each([
+    ['a transition', async () => {
+      fireEvent.click(within(composer()).getByRole('combobox', { name: 'Transition' }))
+      await settle(100)
+      press(screen.getByRole('option', { name: 'Fade · 3 s' }))
+    }],
+    ['a category', async () => fireEvent.click(category('Tempo'))],
+    ['a search', async () => fireEvent.change(within(composer()).getByRole('searchbox', { name: 'Search looks' }), { target: { value: 'e' } })],
+  ])("forgets a refused Start's words at the next choice of %s", async (_, choose) => {
+    vi.spyOn(api, 'start').mockRejectedValue(new ApiError(503, 'The engine is busy', '/api/zones/living/start'))
+    await openApp('/next/live/put?zone=living&look=embers')
+    fireEvent.click(startButton('embers'))
+    await settle()
+    expect(consequenceLine()).toHaveTextContent("Couldn't start")
+    await choose()
+    await settle(100)
+    expect(consequenceLine()).not.toHaveTextContent("Couldn't start")
   })
 
   // F4 ruling 3: the engine refuses a whole-home look until M6 (the mock plays one, so a refusal stands in).
@@ -1445,6 +1471,20 @@ describe('Put a look on, on the phone (§8.10)', () => {
     fireEvent.click(category('Tempo'))
     expect(category('Tempo')).toHaveAttribute('aria-pressed', 'true')
     expect(rowsShown()).toEqual(server.state.looks.filter((each) => each.category === 'tempo').map((each) => each.id))
+  })
+
+  it("says why Start failed in the sheet's consequence line until the next choice", async () => {
+    vi.spyOn(api, 'start').mockRejectedValue(new ApiError(503, 'The engine is busy', '/api/zones/living/start'))
+    const { server } = await openApp('/next/live/put?zone=living&look=embers')
+    fireEvent.click(within(sheet()).getByRole('button', { name: `Start ${lookName('embers')} on ${zoneName(server, 'living')}` }))
+    await settle()
+    const refused = `Couldn't start ${lookName('embers')}. The engine is busy`
+    expect(screen.getByRole('status')).toHaveTextContent(refused)
+    expect(sheet().querySelector('[data-consequence]')).toHaveTextContent(refused)
+
+    fireEvent.click(chip(zoneName(server, 'kitchen')))
+    await settle()
+    expect(sheet().querySelector('[data-consequence]')).not.toHaveTextContent("Couldn't start")
   })
 
   // §9.4 Reconnecting on the phone: the focused task hides the list its card sits on, so the sheet says it, at its top. Start waits for the

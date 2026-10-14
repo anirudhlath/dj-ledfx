@@ -102,14 +102,21 @@ export function useComposerView(steps: LookSteps, list: RefObject<HTMLElement | 
     chooseCategory: (next) => {
       setCategory(next)
       setQuery('')
+      composer.forgetStart()
     },
     query,
-    search: setQuery,
+    search: (next) => {
+      setQuery(next)
+      composer.forgetStart()
+    },
     searching: query.trim() !== '',
     shown,
     transitions,
     transition: key,
-    chooseTransition: (next) => setChosen({ lookId: look?.id ?? null, key: next }),
+    chooseTransition: (next) => {
+      setChosen({ lookId: look?.id ?? null, key: next })
+      composer.forgetStart()
+    },
     blocked,
     tabbable,
     onListKey,
