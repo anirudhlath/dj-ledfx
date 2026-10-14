@@ -1553,7 +1553,8 @@ describe('Put a look on, on the phone (§8.10)', () => {
     expect(sheet().parentElement).not.toHaveClass('min-h-full')
     // The render's overlap and footer padding are generated (4 px a step of Tailwind's spacing scale): a new handoff fails here, not in the code.
     const { overlapPx, footerPaddingPx } = LIVE_RENDER.phoneSheet
-    expect(sheet()).toHaveClass(`-mt-${overlapPx / 4}`, 'min-h-0', 'flex-1', 'overflow-y-auto')
+    // scroll-py-1: the sheet scrolls on a short screen, and a control it scrolls to lands with the room its focus ring needs (4 px).
+    expect(sheet()).toHaveClass(`-mt-${overlapPx / 4}`, 'min-h-0', 'flex-1', 'overflow-y-auto', 'scroll-py-1')
     expect(within(sheet()).getByRole('button', { name: /^Start/ }).parentElement).toHaveClass(`pb-${footerPaddingPx / 4}`)
     expect(within(sheet()).getByRole('group', { name: 'Looks' })).toHaveClass('grow', 'overflow-y-auto')
   })

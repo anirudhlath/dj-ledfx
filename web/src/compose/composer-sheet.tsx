@@ -11,7 +11,9 @@
 // Start can be reached. The stage keeps its aspect, so how short depends on the width: under about 670 px
 // at 390 wide, 660 at 375 and 700 at 430. <main> never scrolls. The two rows that scroll on their own
 // (the chips, the looks) pad by the reach of a focus ring (tokens.css's outline and offset, 4 px) and pull
-// back by as much, so a ring is never cut at the row's edge and nothing moves; ZonePicker's row does too.
+// back by as much, so a ring is never cut at the row's edge and nothing moves; ZonePicker's row does too. The sheet itself scrolls on a short
+// screen, so it leaves a control that is scrolled to the room its ring needs (scroll-py-1, as the lists do): Tab to the transition cut its ring
+// at the sheet's foot by 4 px.
 import { useId, useLayoutEffect, useRef } from 'react'
 import { Button } from '@/design/button'
 import { cx } from '@/design/cx'
@@ -44,7 +46,7 @@ export function ComposerSheet({ className }: { className?: string }) {
   }, [pressed, drawn])
 
   return (
-    <section aria-labelledby={title} className={cx('flex flex-col overflow-y-auto rounded-t-sheet border-t border-line bg-panel', className)}>
+    <section aria-labelledby={title} className={cx('flex scroll-py-1 flex-col overflow-y-auto rounded-t-sheet border-t border-line bg-panel', className)}>
       <Grabber className="mt-2" />
       <div className="flex items-center justify-between px-4 pt-2">
         <h1 id={title} className="text-title font-semibold">Put a look on</h1>
