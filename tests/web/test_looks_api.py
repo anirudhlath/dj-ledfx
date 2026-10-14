@@ -15,12 +15,23 @@ from tests.web.conftest import raw_json
 
 BUILT_INS = [
     "sunset",
+    "fireflies",
+    "embers",
+    "rain",
+    "snow",
     "aurora",
     "lava",
     "carousel",
     "ripples",
     "focus",
+    "spotlights",
+    "bursts",
     "shockwave",
+    "vortex",
+    "comets",
+    "fountain",
+    "flock",
+    "ball",
     "scanner",
     "checker",
     "speakers",
@@ -88,6 +99,19 @@ async def test_looks_come_built_in_first_in_the_contract_shape(api: Api) -> None
         "step": 0.5,
         "options": None,
     }
+
+
+async def test_a_particle_look_comes_with_its_layer_and_its_settings(api: Api) -> None:
+    looks = (await api.client.get("/api/looks")).json()
+
+    ball = looks[BUILT_INS.index("ball")]
+    [layer] = ball["layers"]
+    assert (layer["type"], layer["kind"], layer["name"]) == (
+        "particles",
+        "bouncing_ball",
+        ball["name"],
+    )
+    assert [entry["key"] for entry in layer["schema"]] == ["palette", "height_m", "size"]
 
 
 async def test_a_look_is_saved_as_new_changed_and_deleted(api: Api) -> None:

@@ -11,6 +11,7 @@ one per layer until either changes.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -45,6 +46,12 @@ class LayerView:
 
     leds: LedSet
     weight: NDArray[np.float32] | None = None
+
+    @cached_property
+    def among(self) -> NDArray[np.bool_] | None:
+        """The LEDs the mask weighs above 0 (None: no mask, every LED): a particle layer's
+        lamps are made of these, one array for as long as the view is kept."""
+        return None if self.weight is None else self.weight[:, 0] > 0.0
 
 
 def layer_view(layer: Layer, leds: LedSet) -> LayerView:

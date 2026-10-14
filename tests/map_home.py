@@ -165,6 +165,35 @@ def leds_at(
     return build_ledset([LedSource("light", len(points), placed=placed)], space)
 
 
+def lights_at(
+    *lights: Sequence[Sequence[float]],
+    ceiling: float | None = 3.0,
+    anchors: Mapping[str, Sequence[float]] | None = None,
+) -> LedSet:
+    """Lights' LEDs at these map positions, one light for each list of points, in this
+    order, in a zone with this ceiling and these anchors."""
+    sources = [
+        LedSource(
+            f"light-{index}",
+            len(points),
+            placed=PlacedLeds.from_positions(np.asarray(points, dtype=np.float64).reshape(-1, 3)),
+        )
+        for index, points in enumerate(lights)
+    ]
+    points = {name: np.asarray(p, dtype=np.float32) for name, p in (anchors or {}).items()}
+    return build_ledset(sources, Space(anchors=MappingProxyType(points), ceiling=ceiling))
+
+
+def upright(x: float, y: float, low: float = 0.1, high: float = 1.4) -> list[list[float]]:
+    """An upright lamp's 14 LEDs at (x, y), from `low` to `high` metres up."""
+    return [[x, y, z] for z in np.linspace(low, high, 14)]
+
+
+def bulbs(count: int) -> LedSet:
+    """A zone of `count` bulbs (one light, one LED each) in a row a metre apart, 1 m up."""
+    return lights_at(*[[(float(x), 0.0, 1.0)] for x in range(count)])
+
+
 ROW = [[x, 0.0, 1.0] for x in np.linspace(0.0, 4.0, 9)]  # 0.5 m apart, west to east
 
 
@@ -218,3 +247,12 @@ def seeded_ledset() -> LedSet:
         for light in seeded_zone_lights()
     ]
     return build_ledset(sources, seeded_space())
+
+
+# The zones the particle effects are run on at their largest: this home, and one with so many
+# lamps that an effect making particles for each lamp goes past the cap unless it keeps to it
+# (at their largest settings snow asks for 2000 there, embers for 1000 and rain for 800).
+HOMES: dict[str, Callable[[], LedSet]] = {
+    "this home": seeded_ledset,
+    "a hundred bulbs": lambda: bulbs(100),
+}

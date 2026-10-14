@@ -12,6 +12,7 @@ from api_home import Api, api_home
 from conftest import FakeLight
 
 from dj_ledfx.devices.lights import LightIndex
+from dj_ledfx.looks.builtin import handoff_looks
 from dj_ledfx.web.contract import running_zone_out
 from dj_ledfx.zones.model import RunningZoneInfo, ZoneRecord
 from tests.web.conftest import raw_json
@@ -77,6 +78,15 @@ async def test_a_start_answers_the_running_zone_and_its_take_overs(api: Api) -> 
         ("left", ["a"]),
     ]
     assert running["overlays"] == []
+
+
+async def test_a_particle_look_starts_on_a_zone_like_any_other(api: Api) -> None:
+    resp = await api.client.post("/api/zones/desk/start", json={"lookId": "ball"})
+
+    assert resp.status_code == 200
+    started = resp.json()
+    assert started["lookName"] == handoff_looks()["ball"]["name"]
+    assert (started["state"], started["lights"], started["error"]) == ("running", ["a", "b"], None)
 
 
 async def test_a_draft_look_runs_without_being_saved(api: Api) -> None:

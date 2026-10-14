@@ -1,0 +1,1051 @@
+from __future__ import annotations
+
+import math
+import statistics
+import time
+from collections.abc import Callable
+
+import numpy as np
+import pytest
+from conftest import CallCounts
+from map_home import HOMES, ROW, bulbs, leds_at, lights_at, upright
+from numpy.typing import NDArray
+
+from dj_ledfx.effects import particle_tools
+from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.effects.particle_tools import (
+    CEILING_OVER_M,
+    GRID_FROM_LEDS,
+    LAMP_KEYS,
+    MIN_RADIUS_M,
+    NO_PARTICLES,
+    REACH,
+    SAME_STOP_M,
+    WANDER_DRAWS,
+    WINDOW_MIN,
+    Ground,
+    Lamps,
+    Particles,
+    Streams,
+    arc,
+    around,
+    draws,
+    fired,
+    in_ball,
+    in_birth_order,
+    joined,
+    lamp_streams,
+    lamps_of,
+    lit,
+    recent,
+    rise_under,
+    spread_over,
+    swarm,
+    tour,
+    wander,
+)
+from dj_ledfx.zones.runtime import FRAME_BUDGET_S
+
+
+def _scattered(count: int, seed: int) -> LedSet:
+    """`count` LEDs scattered through a 15 x 15 x 3 m home, as one light."""
+    points = np.random.default_rng(seed).uniform((0.0, 0.0, 0.0), (15.0, 15.0, 3.0), (count, 3))
+    return lights_at([tuple(point) for point in points])
+
+
+def _exactly(leds: LedSet, particles: Particles) -> NDArray[np.float64]:
+    """What lit() means, worked out in float64 with every LED against every particle."""
+    gap = leds.pos[:, None, :].astype(np.float64) - particles.pos[None, :, :]
+    square = np.einsum("ijk,ijk->ij", gap, gap)
+    reach = particles.radius.astype(np.float64) ** 2
+    weight = np.where(square <= REACH**2 * reach, np.exp(-square / reach), 0.0)
+    return np.minimum(weight @ particles.colour, 1.0)
+
+
+def test_a_particle_lights_each_led_by_a_gaussian_falloff_out_to_its_reach() -> None:
+    ground = Ground.of(leds_at(ROW))  # 0.5 m apart along x
+    one = swarm([[0.0, 0.0, 1.0]], [1.0, 0.0, 0.0], 0.5)
+
+    reds = lit(ground, one)[:, 0]
+
+    expected = [
+        math.exp(-((d / 0.5) ** 2)) if d <= REACH * 0.5 else 0.0 for d in np.arange(9) * 0.5
+    ]
+    np.testing.assert_allclose(reds, expected, atol=1e-6)
+    assert reds[2] > 0.0 and reds[3] == 0.0  # 1 m is two radii; 1.5 m is past REACH
+
+
+def test_light_adds_up_and_stays_at_most_1() -> None:
+    ground = Ground.of(leds_at(ROW))
+    two = swarm([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], [0.6, 0.6, 0.6], 0.5)
+
+    frame = lit(ground, two)
+
+    assert frame.dtype == np.float32
+    np.testing.assert_allclose(frame[0], 1.0)  # 1.2, held at 1
+    np.testing.assert_allclose(frame[1], 1.2 * math.exp(-1.0), rtol=1e-5)
+
+
+def test_no_particles_or_no_leds_light_nothing() -> None:
+    ground = Ground.of(leds_at(ROW))
+    assert not lit(ground, NO_PARTICLES).any()
+    empty = Ground.of(lights_at())
+    assert lit(empty, swarm([[0.0, 0.0, 0.0]], [1.0, 1.0, 1.0], 1.0)).shape == (0, 3)
+
+
+def test_a_radius_is_never_below_the_floor() -> None:
+    particles = swarm([[0.0, 0.0, 0.0]], [1.0, 1.0, 1.0], 0.0)
+    assert particles.radius[0] == pytest.approx(MIN_RADIUS_M)
+    assert np.isfinite(lit(Ground.of(leds_at(ROW)), particles)).all()
+
+
+# Plan ruling 4 cuts a particle off at REACH, where it adds under half an 8-bit step, so the sum
+# must be right to half a step too. The dense sum works square distances out as |a|² + |b|² -
+# 2a·b round the frame's centre, small differences of big numbers: in float32 they were off by
+# several steps for a small particle on an LED, a layer's transform having moved the LEDs far
+# from the centre.
+def test_small_particles_on_leds_far_from_the_centre_are_lit_to_within_half_a_step() -> None:
+    points = np.random.default_rng(3).uniform((0.0, 0.0, 0.0), (15.0, 15.0, 3.0), (200, 3))
+    strip = [(8.0 + 0.025 * i, 12.0, 2.0) for i in range(100)]  # 40 LEDs a metre
+    leds = lights_at([tuple(point) for point in points], strip)
+    moved = leds.moved(leds.pos.astype(np.float64) + [4.0, 0.0, 0.0])  # the frame stays
+    ground = Ground.of(moved)
+    assert moved.count < GRID_FROM_LEDS  # the dense sum
+    stops = np.array([0] * 150 + [1] * 20)  # 150 particles on the scattered LEDs, 20 on the strip
+    rng = np.random.default_rng(11)
+    particles = swarm(ground.on(stops, rng.uniform(0.0, 1.0, len(stops))), [0.6, 0.6, 0.6], 0.03)
+
+    exact = _exactly(moved, particles)
+
+    assert ((exact > 0.0) & (exact < 0.6)).any(axis=1).sum() > 20  # the strip's LEDs part-lit
+    np.testing.assert_allclose(lit(ground, particles), exact, atol=0.5 / 255)
+
+
+# Spec §4.1: on a big zone (GRID_FROM_LEDS LEDs or more), particles light by a spatial grid.
+# It must light the LEDs as the dense sum would, particles outside the frame and of every size
+# included.
+def test_the_grid_lights_the_leds_as_every_led_against_every_particle_does() -> None:
+    ground = Ground.of(_scattered(GRID_FROM_LEDS + 500, seed=1))
+    rng = np.random.default_rng(2)
+    particles = swarm(
+        rng.uniform((-2.0, -2.0, -1.0), (17.0, 17.0, 4.0), (300, 3)),
+        rng.uniform(0.0, 1.0, (300, 3)),
+        rng.uniform(0.05, 0.6, 300),
+    )
+
+    by_grid = lit(ground, particles)
+
+    assert by_grid.any()
+    np.testing.assert_allclose(by_grid, _exactly(ground.leds, particles), atol=1e-4)
+
+
+def test_the_grid_lights_a_few_far_larger_particles_as_the_dense_sum_does() -> None:
+    ground = Ground.of(_scattered(GRID_FROM_LEDS, seed=4))
+    rng = np.random.default_rng(5)
+    small = swarm(rng.uniform(0.0, 15.0, (200, 3)), rng.uniform(0.0, 1.0, (200, 3)), 0.2)
+    large = swarm(rng.uniform(0.0, 15.0, (3, 3)), rng.uniform(0.0, 1.0, (3, 3)), [2.0, 2.5, 3.0])
+    particles = joined(small, large)
+
+    np.testing.assert_allclose(lit(ground, particles), _exactly(ground.leds, particles), atol=1e-4)
+
+
+# Where the grid would gather more than DENSE_FROM_SHARE of every pair of an LED and a particle,
+# lit() takes the dense sum instead, which is cheaper there. On these LEDs, particles of 0.7 m
+# gather about 13% (the grid) and of 0.9 m about 24% (the dense sum): either way, the colours are
+# the exact sum's.
+@pytest.mark.parametrize(("radius", "dense"), [(0.7, False), (0.9, True)])
+def test_the_grid_gives_way_to_the_dense_sum_where_it_would_gather_most_pairs_and_both_agree(
+    radius: float, dense: bool, call_counts: CallCounts
+) -> None:
+    ground = Ground.of(_scattered(GRID_FROM_LEDS + 500, seed=1))
+    rng = np.random.default_rng(3)
+    particles = swarm(
+        rng.uniform((0.0, 0.0, 0.0), (15.0, 15.0, 3.0), (100, 3)),
+        rng.uniform(0.0, 1.0, (100, 3)),
+        radius,
+    )
+    call_counts.spy(particle_tools, "_densely")
+
+    colours = lit(ground, particles)
+
+    assert call_counts.calls.get("_densely", 0) == int(dense)
+    assert colours.any()
+    np.testing.assert_allclose(colours, _exactly(ground.leds, particles), atol=1e-4)
+
+
+# A layer's mirror or transform moves its LEDs and keeps the zone's frame (LedSet.moved), so
+# LEDs can sit below the frame's low corner, and the grid must find them there.
+def test_the_grid_lights_leds_moved_below_the_frame_as_the_exact_sum_does() -> None:
+    leds = _scattered(GRID_FROM_LEDS + 500, seed=1)
+    moved = leds.moved(leds.pos.astype(np.float64) - np.array([3.0, 2.0, 1.0]))
+    ground = Ground.of(moved)
+    rng = np.random.default_rng(2)
+    particles = swarm(
+        rng.uniform((-4.0, -3.0, -2.0), (13.0, 14.0, 3.0), (300, 3)),
+        rng.uniform(0.0, 1.0, (300, 3)),
+        rng.uniform(0.05, 0.6, 300),
+    )
+
+    by_grid = lit(ground, particles)
+
+    assert (moved.pos < ground.low).any(axis=0).all()  # LEDs below the frame, on every axis
+    assert by_grid.any()
+    np.testing.assert_allclose(by_grid, _exactly(moved, particles), atol=1e-4)
+
+
+# Spec §8: a look that produces NaN is crashed. A particle with no place or size makes every LED
+# NaN in the dense sum (below GRID_FROM_LEDS), so it must in the grid's too. Left to the grid, a
+# NaN place is cast to some cell with a warning and lights nothing, and a NaN size raises.
+@pytest.mark.filterwarnings("error")
+@pytest.mark.parametrize("flaw", ["place", "size"])
+def test_a_particle_with_no_place_or_size_makes_every_led_nan_on_either_path(flaw: str) -> None:
+    rng = np.random.default_rng(8)
+    where, radius = rng.uniform(0.0, 15.0, (50, 3)), np.full(50, 0.25)
+    if flaw == "place":
+        where[17, 0] = np.nan
+    else:
+        radius[17] = np.nan
+    particles = swarm(where, rng.uniform(0.0, 1.0, (50, 3)), radius)
+
+    for count in (GRID_FROM_LEDS - 1, GRID_FROM_LEDS):  # the dense sum, and the grid
+        assert np.isnan(lit(Ground.of(_scattered(count, seed=9)), particles)).all()
+
+
+# An infinite radius is the falloff's limit: exp(-(d / r)²) is 1 at every distance, so the
+# particle lights every LED with its whole colour. It goes the dense way whatever the LED count
+# (a grid's cell can't be infinitely wide), and the frame stays finite.
+@pytest.mark.filterwarnings("error")
+def test_a_particle_of_an_infinite_radius_lights_every_led_with_its_colour_on_either_path() -> (
+    None
+):
+    particles = swarm([[7.0, 7.0, 1.0]], [0.25, 0.5, 0.75], np.inf)
+
+    for count in (GRID_FROM_LEDS - 1, GRID_FROM_LEDS):  # the dense sum, and the grid's count
+        colours = lit(Ground.of(_scattered(count, seed=9)), particles)
+        assert colours.shape == (count, 3) and np.isfinite(colours).all()
+        np.testing.assert_array_equal(colours, np.tile([0.25, 0.5, 0.75], (count, 1)))
+
+
+def test_a_ground_keeps_a_few_grids_and_reuses_one_for_close_sizes() -> None:
+    ground = Ground.of(_scattered(100, seed=3))
+
+    assert ground.grid(0.9) is ground.grid(0.95)  # sizes go up in √2 steps: both want 1 m
+    assert ground.grid(0.9).size == 1.0
+    for size in np.linspace(0.05, 20.0, 40):
+        ground.grid(float(size))
+    assert len(ground._grids) <= 8
+
+
+def test_draws_repeat_for_a_seed_and_key_and_differ_for_another() -> None:
+    first = draws(7, [1, 2, 3], 4)
+    assert first.shape == (3, 4)
+    np.testing.assert_array_equal(first, draws(7, [1, 2, 3], 4))
+    np.testing.assert_array_equal(first[1:2], draws(7, [2], 4))  # each key on its own
+    assert not np.array_equal(first, draws(8, [1, 2, 3], 4))
+    assert not np.array_equal(first[0], first[1])
+    many = draws(7, np.arange(-5000, 5000), 2)  # negative keys too
+    assert many.min() >= 0.0 and many.max() < 1.0
+    assert abs(float(many.mean()) - 0.5) < 0.01
+
+
+def test_each_stream_draws_its_own_numbers() -> None:
+    assert not np.array_equal(draws(7, [1, 2], 3), draws(7, [1, 2], 3, stream=1))
+    np.testing.assert_array_equal(draws(7, [1, 2], 3, stream=1), draws(7, [1, 2], 3, stream=1))
+
+
+def test_draws_can_take_a_stream_for_each_key() -> None:
+    keys, streams = [5, 6, 7, 8], [0, 1, 1, 2]
+
+    many = draws(7, keys, 3, stream=streams)
+
+    assert many.shape == (4, 3)
+    for row, key, stream in zip(many, keys, streams, strict=True):
+        np.testing.assert_array_equal(row, draws(7, [key], 3, stream=stream)[0])
+    np.testing.assert_array_equal(draws(7, keys, 3, stream=1), draws(7, keys, 3, stream=[1] * 4))
+
+
+def test_draws_of_a_stream_are_what_they_always_were() -> None:
+    np.testing.assert_array_equal(
+        draws(7, [1, 2, 3], 2, stream=1),
+        [
+            [0.22172666191306756, 0.8886931675725617],
+            [0.16618549382196712, 0.871793020180068],
+            [0.6273586135114076, 0.9094659210531775],
+        ],
+    )
+
+
+def test_recent_events_hold_every_event_alive_now() -> None:
+    every, life = 0.5, 1.2
+    for now in (0.0, 3.1, 10.3, 1e6 + 0.25):
+        events = set(recent(now, every, life).tolist())
+        for n in range(math.floor(now / every) - 10, math.floor(now / every) + 10):
+            for u in (0.0, 0.5, 0.999, 1.5, 1.999):  # event n comes at (n + u) * every
+                if (n + u) * every <= now < (n + u) * every + life:
+                    assert n in events
+        assert len(events) <= life / every + 3
+
+
+def test_fired_names_the_beats_whose_bursts_are_in_the_air_oldest_first() -> None:
+    assert fired(7.0, 1.5).tolist() == [6, 7]  # a burst is in the air from its beat on
+    assert fired(7.5, 1.5).tolist() == [7]  # and gone fade beats after it
+    assert fired(7.49, 1.5).tolist() == [6, 7]
+    assert fired(7.0, 1.0).tolist() == [7]
+    assert fired(7.0, 4.0).tolist() == [4, 5, 6, 7]
+    assert fired(0.0, 0.25).tolist() == [0]
+    assert fired(7.0, 1.5).dtype == np.int64
+
+
+def test_fired_holds_exactly_the_beats_that_are_not_yet_gone_and_not_still_to_come() -> None:
+    generator = np.random.default_rng(5)
+    nows = np.concatenate(
+        [
+            generator.uniform(0.0, 2000.0, 300),
+            np.arange(1000.0, 1010.0, 0.25),  # on the beat and on its quarters
+            np.nextafter(np.arange(1000.0, 1006.0), -np.inf),  # a hair before a beat
+        ]
+    )
+    for now in nows:
+        for life in (0.25, 0.5, 1.0, 1.5, 2.0, 3.75, 4.0):
+            expected = [
+                j for j in range(math.floor(now) - 6, math.floor(now) + 3) if 0 <= now - j < life
+            ]
+            assert fired(float(now), life).tolist() == expected
+
+
+def test_wanderers_stay_in_their_box_and_move_smoothly() -> None:
+    u = draws(3, np.arange(20), WANDER_DRAWS)
+    low, high = np.array([0.0, 1.0, 0.5]), np.array([4.0, 3.0, 2.5])
+    speed = 0.5
+    times = 1000.0 + np.arange(600) / 60  # ten seconds at 60 frames a second
+    path = np.array([wander(u, float(t), speed, low, high) for t in times])  # (T, 20, 3)
+
+    assert (path >= low - 1e-9).all() and (path <= high + 1e-9).all()
+    steps = np.linalg.norm(np.diff(path, axis=0), axis=2)
+    assert steps.max() <= 1.4 * speed * math.sqrt(3.0) / 60  # never a jump
+    assert np.ptp(path[:, :, 0], axis=0).min() > 0.1  # each of them moves
+    assert len({tuple(p) for p in np.round(path[0], 3)}) == 20  # each where it alone is
+
+
+def test_each_wanderer_keeps_to_a_box_of_its_own() -> None:
+    u = draws(5, np.arange(3), WANDER_DRAWS)
+    low = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0]])
+    for t in np.arange(0.0, 60.0, 0.5):
+        where = wander(u, float(t), 1.0, low, low + 1.0)
+        assert (where >= low - 1e-9).all() and (where <= low + 1.0 + 1e-9).all()
+
+
+def test_a_wanderer_in_a_flat_box_keeps_to_it() -> None:
+    u = draws(4, np.arange(5), WANDER_DRAWS)
+    where = wander(u, 50.0, 0.3, [1.0, 1.0, 1.0], [1.0, 1.0, 1.0])
+    np.testing.assert_allclose(where, 1.0, atol=0.05 + 1e-9)
+
+
+def test_an_arc_goes_from_start_to_end_rising_half_way() -> None:
+    start, end = np.array([[0.0, 0.0, 1.0]]), np.array([[2.0, 0.0, 1.0]])
+    np.testing.assert_allclose(arc(start, end, [0.0], 0.5), start)
+    np.testing.assert_allclose(arc(start, end, [1.0], 0.5), end)
+    np.testing.assert_allclose(arc(start, end, [0.5], 0.5), [[1.0, 0.0, 1.5]])
+    many = arc(start, end, np.linspace(0.0, 1.0, 5), 0.5)
+    assert many.shape == (5, 3) and many[:, 2].max() == 1.5
+
+
+def _top_of(start: float, end: float, rise: float) -> float:
+    """The highest point of the arc from height `start` to height `end` that rises `rise`
+    over the line between them, found by looking along it."""
+    where = arc([0.0, 0.0, start], [1.0, 0.0, end], np.linspace(0.0, 1.0, 20001), rise)
+    return float(where[:, 2].max())
+
+
+ENDS = [
+    pytest.param(1.0, 1.0, id="level"),
+    pytest.param(0.1, 1.4, id="a climb"),
+    pytest.param(1.4, 0.1, id="a fall"),
+    pytest.param(1.0, 2.95, id="to an end near the ceiling"),
+    pytest.param(2.0, 3.0, id="to an end at the ceiling"),
+    pytest.param(3.0, 3.0, id="both at the ceiling"),
+    pytest.param(0.0, 0.0, id="on the floor"),
+]
+
+
+@pytest.mark.parametrize(("start", "end"), ENDS)
+def test_the_most_an_arc_can_rise_under_a_ceiling_is_where_its_top_touches_it(
+    start: float, end: float
+) -> None:
+    """The top of an arc is its higher end or an apex over the line: the most it can rise
+    keeps the top at the ceiling, to the last bit, and any more takes it through."""
+    most = float(rise_under(3.0, start, end, 100.0))
+    assert _top_of(start, end, most) == pytest.approx(3.0, abs=1e-6)
+    assert _top_of(start, end, most) <= 3.0 + 1e-9
+    assert _top_of(start, end, 1.05 * most + 0.01) > 3.0 + 1e-4
+
+
+@pytest.mark.parametrize(("start", "end"), ENDS)
+def test_an_arc_has_at_least_the_room_over_its_higher_end_to_rise_in(
+    start: float, end: float
+) -> None:
+    """The exact fit is never less than the room over the higher end (what an arc may rise
+    when it is held to that), and a rise that fits is left as it is."""
+    room = 3.0 - max(start, end)
+    assert float(rise_under(3.0, start, end, 100.0)) >= room - 1e-12
+    assert float(rise_under(3.0, start, end, room / 2.0)) == room / 2.0
+
+
+def test_an_arc_between_equal_ends_rises_the_room_over_them_and_a_climb_a_quarter_of_it() -> None:
+    assert float(rise_under(3.0, 1.0, 1.0, 100.0)) == pytest.approx(2.0)
+    assert float(rise_under(3.0, 0.0, 3.0, 100.0)) == pytest.approx(0.75)  # a quarter of the climb
+    assert float(rise_under(3.0, 1.0, 3.0, 0.5)) == 0.5  # a rise that fits stays
+
+
+def test_an_arc_with_no_room_does_not_rise_and_an_end_over_the_ceiling_is_at_it() -> None:
+    assert float(rise_under(1.0, 1.0, 1.0, 5.0)) == 0.0
+    assert float(rise_under(1.0, 2.0, 3.0, 5.0)) == 0.0  # both ends over it
+    # One over it counts as at it: the arc can rise a quarter of the way down from there.
+    assert float(rise_under(3.0, 1.0, 3.5, 5.0)) == pytest.approx(0.5)
+    assert float(rise_under(3.0, 3.5, 1.0, 5.0)) == pytest.approx(0.5)
+
+
+def test_rise_under_takes_a_ceiling_and_ends_for_each_arc_and_one_of_each_alike() -> None:
+    ceiling, start, end = np.array([3.0, 3.4, 3.0]), np.array([1.0, 2.9, 1.0]), 1.0
+    together = rise_under(ceiling, start, end, np.array([10.0, 10.0, 0.5]))
+    assert together.shape == (3,)
+    for place in range(3):
+        alone = rise_under(ceiling[place], start[place], end, [10.0, 10.0, 0.5][place])
+        assert together[place] == alone
+
+
+def test_in_ball_puts_a_point_by_its_height_its_turn_and_how_far_out() -> None:
+    top = in_ball([1.0], [0.0], [1.0], 2.0)
+    bottom = in_ball([0.0], [0.7], [1.0], 2.0)
+    east = in_ball([0.5], [0.0], [1.0], 2.0)  # the equator, at turn 0
+    south = in_ball([0.5], [0.25], [1.0], 2.0)  # a quarter of a turn on
+    half_way = in_ball([0.5], [0.0], [0.125], 2.0)  # an eighth of the volume: half the radius
+    np.testing.assert_allclose(top, [[0.0, 0.0, 2.0]], atol=1e-12)
+    np.testing.assert_allclose(bottom, [[0.0, 0.0, -2.0]], atol=1e-12)
+    np.testing.assert_allclose(east, [[2.0, 0.0, 0.0]], atol=1e-12)
+    np.testing.assert_allclose(south, [[0.0, 2.0, 0.0]], atol=1e-12)
+    np.testing.assert_allclose(half_way, [[1.0, 0.0, 0.0]], atol=1e-12)
+
+
+def test_in_ball_spreads_points_evenly_through_the_ball() -> None:
+    u = draws(3, np.arange(4000), 3)
+    points = in_ball(u[:, 0], u[:, 1], u[:, 2], 2.0)
+    assert points.shape == (4000, 3)
+    far = np.linalg.norm(points, axis=1)
+    assert far.max() <= 2.0 + 1e-12 and far.max() > 1.95
+    assert (
+        0.10 < np.mean(far < 1.0) < 0.15
+    )  # the inner half of the radius is an eighth of the volume
+    assert abs(np.mean(points[:, 2] > 0.0) - 0.5) < 0.03  # as many above the middle as below
+    assert (
+        abs(np.mean(points[:, 0] > 0.0) - 0.5) < 0.03
+        and abs(np.mean(points[:, 1] > 0.0) - 0.5) < 0.03
+    )
+
+
+def test_a_tour_visits_every_stop_each_round_and_never_stays() -> None:
+    for stops in (3, 5, 11):
+        visits = tour(1, 0, np.arange(-stops, 12 * stops), stops)
+        assert (visits[:-1] != visits[1:]).all()
+        for start in range(0, len(visits), stops):
+            assert sorted(visits[start : start + stops].tolist()) == list(range(stops))
+    assert tour(1, 0, np.arange(4), 2).tolist() == [0, 1, 0, 1]
+    assert tour(1, 0, np.arange(4), 1).tolist() == [0, 0, 0, 0]
+    tours = [tour(1, key, np.arange(10), 5).tolist() for key in range(3)]
+    assert tours[0] != tours[1] != tours[2]  # each tour its own
+
+
+def test_a_tour_goes_where_it_always_went() -> None:
+    """Pinned from tour() when it took one key and one step at a time: the spotlights'
+    routes must not change."""
+    assert tour(1, 0, np.arange(15), 5).tolist() == [2, 0, 3, 1, 4, 0, 4, 1, 2, 3, 4, 3, 2, 0, 1]
+    assert tour(1, 2, np.arange(-3, 9), 3).tolist() == [2, 1, 0, 1, 0, 2, 1, 2, 0, 1, 2, 0]
+    assert tour(7, 1, np.arange(20, 42), 11).tolist() == [
+        3, 6, 3, 7, 5, 9, 0, 6, 1, 8, 2, 10, 4, 0, 6, 9, 7, 8, 1, 2, 3, 5,
+    ]  # fmt: skip
+    assert tour(3, 5, np.arange(-4, 12), 4).tolist() == [
+        1, 3, 2, 0, 1, 3, 0, 2, 3, 2, 1, 0, 2, 0, 1, 3,
+    ]  # fmt: skip
+
+
+def test_tours_and_steps_broadcast_together() -> None:
+    keys, steps = np.array([[0], [3], [4]]), np.array([[0, 1, 2, 7]])
+
+    together = tour(1, keys, steps, 5)
+
+    assert together.shape == (3, 4)
+    for row, key in zip(together, keys[:, 0], strict=True):
+        assert row.tolist() == tour(1, int(key), steps[0], 5).tolist()
+    assert tour(1, 0, 3, 5).shape == ()  # one tour at one step is one stop
+
+
+def test_things_spread_over_every_stop_before_any_takes_two() -> None:
+    taken = spread_over(1, 12, 5)
+    assert sorted(taken[:5].tolist()) == list(range(5))
+    assert np.bincount(taken, minlength=5).tolist().count(3) == 2  # 12 over 5: 3, 3, 2, 2, 2
+    assert spread_over(1, 3, 1).tolist() == [0, 0, 0]
+    assert not np.array_equal(spread_over(1, 5, 5), spread_over(2, 5, 5))
+
+
+def test_a_home_with_room_for_every_event_gets_the_rate_it_asked_for() -> None:
+    for lamps, rate in ((19, 10.0), (100, 3.0), (1, 100.0)):  # 3 * 1.25 + 1 < 5 for a hundred
+        streams = lamp_streams(1, lamps, rate, 0.5, 500)
+        assert streams.lamp.tolist() == list(range(lamps))
+        assert streams.rate == rate and streams.window == 1.0
+        assert not streams.start.any()  # births anywhere in their stretches, as ever
+        event, lamp = streams.events(np.array([-2, 7]))
+        np.testing.assert_array_equal(
+            streams.born(event, lamp, np.full(len(event), 0.5)), event + 0.5
+        )
+
+
+def test_a_crowded_home_gets_a_lower_rate_for_every_lamp_that_keeps_to_the_room() -> None:
+    for lamps in (60, 100, 101, 167, 250, 251, 499, 500, 501, 700):
+        for rate in (0.5, 3.0, 10.0):
+            for spread in (0.0, 0.5):
+                longest = 1.0 + spread / 2.0  # a life is its usual one give or take half of this
+                streams = lamp_streams(3, lamps, rate, spread, 500)
+                served = min(lamps, 500)
+                assert len(streams.lamp) == served
+                assert streams.rate <= rate and WINDOW_MIN <= streams.window <= 1.0
+                assert longest * streams.rate + streams.window < 500 // served - 0.005  # to spare
+                # With births confined to a share of their stretch, a lamp has at most this many
+                # events alive at once, however its draws fall, and its share of the room is more.
+                most = math.ceil(longest * streams.rate + streams.window)
+                assert served * most <= 500
+                if streams.rate < rate:  # it came down only as far as the room needs
+                    assert 500 // served - 0.02 < longest * streams.rate + streams.window
+                    assert streams.window == WINDOW_MIN
+                if lamps <= 100 and rate * longest + 1 < 5 - 0.01:
+                    assert streams.rate == rate and streams.window == 1.0  # it all fits
+
+
+def test_a_rate_that_fits_in_a_narrower_window_keeps_its_rate_and_narrows_the_births() -> None:
+    streams = lamp_streams(
+        1, 100, 3.5, 0.5, 500
+    )  # a life of up to 1.25: 3.5 * 1.25 + 1 is over 5, + 0.6 is not
+    assert streams.rate == 3.5
+    assert WINDOW_MIN < streams.window < 1.0
+    assert math.ceil(1.25 * 3.5 + streams.window) == 5
+    wider = lamp_streams(1, 100, 3.4, 0.5, 500)  # a lower rate leaves a wider window
+    assert streams.window < wider.window <= 1.0
+
+
+def test_lamps_past_the_room_are_served_in_a_seeded_few_and_the_rest_make_nothing() -> None:
+    streams = lamp_streams(1, 700, 3.0, 0.5, 500)
+    assert len(streams.lamp) == 500 and len(set(streams.lamp.tolist())) == 500
+    assert (np.diff(streams.lamp) > 0).all() and 0 <= streams.lamp.min() < streams.lamp.max() < 700
+    np.testing.assert_array_equal(streams.lamp, lamp_streams(1, 700, 3.0, 0.5, 500).lamp)
+    assert not np.array_equal(streams.lamp, lamp_streams(2, 700, 3.0, 0.5, 500).lamp)
+    fewer = lamp_streams(1, 700, 3.0, 0.5, 498).lamp  # the same shuffle, cut shorter
+    assert set(fewer.tolist()) < set(streams.lamp.tolist())
+    assert math.ceil(1.25 * streams.rate + streams.window) == 1  # one at a time, for each lamp
+
+
+def test_each_lamps_births_start_at_a_moment_of_their_own_in_the_stretch() -> None:
+    streams = lamp_streams(1, 100, 10.0, 0.5, 500)
+    start = streams.start[streams.lamp]
+    assert (start >= 0.0).all() and (start < 1.0).all()
+    assert np.ptp(start) > 0.9  # spread over the whole stretch, so the lamps are not in step
+    np.testing.assert_array_equal(start, lamp_streams(1, 100, 10.0, 0.5, 500).start[streams.lamp])
+    assert not np.array_equal(start, lamp_streams(2, 100, 10.0, 0.5, 500).start[streams.lamp])
+    event, lamp = streams.events(np.array([4]))
+    born = streams.born(event, lamp, np.zeros(len(event)))
+    np.testing.assert_allclose(born, 4.0 + start)
+
+
+def test_no_lamps_or_no_room_serve_no_lamp() -> None:
+    assert len(lamp_streams(1, 0, 3.0, 0.5, 500).lamp) == 0
+    assert len(lamp_streams(1, 10, 3.0, 0.5, 0).lamp) == 0
+    assert len(lamp_streams(1, 10, 3.0, 0.5, -4).lamp) == 0
+    event, lamp = lamp_streams(1, 10, 3.0, 0.5, 0).events(np.arange(5))
+    assert len(event) == 0 and len(lamp) == 0
+
+
+def test_the_events_of_lamps_go_turn_by_turn_and_each_has_a_key_of_its_own() -> None:
+    event, lamp = lamp_streams(1, 4, 3.0, 0.5, 500).events(np.array([5, 6]))
+    assert event.tolist() == [5, 5, 5, 5, 6, 6, 6, 6]
+    assert lamp.tolist() == [0, 1, 2, 3, 0, 1, 2, 3]
+    event, lamp = lamp_streams(1, 700, 0.5, 0.5, 500).events(np.arange(-20, 20))
+    keys = event * LAMP_KEYS + lamp  # event n of lamp s draws from key n * LAMP_KEYS + s
+    assert len(set(keys.tolist())) == len(keys)
+
+
+def _alive_the_long_way(
+    seed: int, streams: Streams, t: float, usual: float, spread: float, count: int
+) -> tuple[list[int], list[float]]:
+    """Every (lamp, birth) alive at t, from the rule alone: event n of lamp s is born at
+    (n + start + window * u) * every, from its own draws, and lives its usual life give or
+    take half the spread of it. Looks at far more events than can be alive."""
+    every = usual / streams.rate
+    n = (math.floor(t / every) - 40 + np.arange(80, dtype=np.int64))[:, None]  # (events, 1)
+    lamp = streams.lamp[None, :]  # (1, lamps)
+    u = draws(seed, (n * LAMP_KEYS + lamp).ravel(), count).reshape(80, lamp.shape[1], count)
+    born = (n + streams.start[lamp] + streams.window * u[..., 0]) * every
+    alive = (born <= t) & (t < born + usual * (1.0 - spread / 2.0 + spread * u[..., 1]))
+    found = sorted(
+        zip(np.broadcast_to(lamp, born.shape)[alive].tolist(), born[alive].tolist(), strict=True)
+    )
+    return [lamp for lamp, _ in found], [born for _, born in found]
+
+
+# At 9 events to a usual life, a spread of half makes lives of up to 11 stretches, past the 9
+# that recent() would look back over if it forgot the spread; 40 lamps narrow the windows to
+# fit the room, and so give each lamp a start in its stretch (births up to a stretch late).
+@pytest.mark.parametrize("rate", [3.0, 9.0])
+@pytest.mark.parametrize("spread", [0.0, 0.5])
+@pytest.mark.parametrize("lamps", [3, 40])
+def test_the_events_alive_are_those_born_and_not_yet_over_oldest_first(
+    lamps: int, spread: float, rate: float
+) -> None:
+    streams = lamp_streams(1, lamps, rate, spread, 500)
+    for t in (500.0, 503.3, 517.77, 1e6 + 0.25):
+        now = streams.alive(1, t, 4.0, 5)
+
+        lamp, born = _alive_the_long_way(1, streams, t, 4.0, spread, 5)
+        by_lamp = np.lexsort((now.born, now.lamp))  # the same events, lamp by lamp
+        assert now.lamp[by_lamp].tolist() == lamp
+        np.testing.assert_allclose(now.born[by_lamp], born, rtol=1e-12)
+        assert (np.diff(now.born) >= 0.0).all()  # oldest first
+        np.testing.assert_allclose(now.age, t - now.born)
+        assert (now.age >= 0.0).all() and (now.share >= 0.0).all() and (now.share < 1.0).all()
+        assert now.u.shape == (len(now.lamp), 5)
+        assert (now.u >= 0.0).all() and (now.u < 1.0).all()
+        if spread == 0.0:  # every life the usual one
+            np.testing.assert_array_equal(now.share, now.age / 4.0)
+
+
+def test_events_alive_make_nothing_without_lamps_to_make_them() -> None:
+    now = lamp_streams(1, 10, 3.0, 0.5, 0).alive(1, 500.0, 4.0, 5)
+    assert len(now.lamp) == 0 and now.u.shape == (0, 5) and len(now.born) == 0
+
+
+def test_each_light_is_a_stop_at_its_middle_with_its_lowest_and_highest_led() -> None:
+    lamps = lamps_of(lights_at([(1.0, 1.0, 0.1), (1.0, 1.0, 1.5)], [(4.0, 2.0, 1.0)]))
+
+    assert lamps.count == 2
+    np.testing.assert_allclose(lamps.centre, [[1.0, 1.0, 0.8], [4.0, 2.0, 1.0]], atol=1e-6)
+    np.testing.assert_allclose(lamps.low, [0.1, 1.0])
+    np.testing.assert_allclose(lamps.high, [1.5, 1.0])
+    assert lamps.members.tolist() == [0, 1, 2] and lamps.starts.tolist() == [0, 2, 3]
+
+
+def test_a_stop_and_an_led_of_it_are_picked_alike() -> None:
+    ground = Ground.of(lights_at([(0.0, 0.0, 1.0), (1.0, 0.0, 1.0)], [(5.0, 0.0, 1.0)]))
+    lamps = ground.lamps
+
+    assert lamps.pick([0.0, 0.49, 0.5, 0.999]).tolist() == [0, 0, 1, 1]
+    assert lamps.led([0, 0, 1], [0.2, 0.7, 0.9]).tolist() == [0, 1, 2]
+    np.testing.assert_allclose(ground.on([0, 1], [0.7, 0.0]), [[1.0, 0.0, 1.0], [5.0, 0.0, 1.0]])
+
+
+def test_a_foot_is_under_an_led_at_its_lamps_lowest() -> None:
+    ground = Ground.of(lights_at([(1.0, 1.0, 0.1), (1.0, 1.0, 1.5)], [(3.0, 0.0, 2.0)]))
+    np.testing.assert_allclose(
+        ground.foot([0, 0, 1], [0.9, 0.1, 0.5]), [[1.0, 1.0, 0.1]] * 2 + [[3.0, 0.0, 2.0]]
+    )
+    np.testing.assert_allclose(ground.foot(0, 0.9), [1.0, 1.0, 0.1])
+
+
+def test_lights_at_one_spot_make_one_stop() -> None:
+    near = SAME_STOP_M * 0.5
+    parts = [[(2.0, 2.0, 0.8)], [(2.0 + near, 2.0, 0.9)], [(2.0, 2.0, 1.05)], [(6.0, 2.0, 1.0)]]
+
+    lamps = lamps_of(lights_at(*parts))
+
+    assert lamps.count == 2  # a device's parts share its placement: one stop
+    np.testing.assert_allclose(lamps.low, [0.8, 1.0])
+    np.testing.assert_allclose(lamps.high, [1.05, 1.0])
+    assert lamps.members.tolist() == [0, 1, 2, 3] and lamps.starts.tolist() == [0, 3, 4]
+
+
+def test_a_zone_with_no_leds_has_no_lamps() -> None:
+    assert lamps_of(lights_at()).count == 0
+    assert Ground.of(lights_at()).lamps.count == 0
+
+
+# Three lights with no map: a lamp at x 1, a lamp at x 3 and a bulb at x 5.
+THREE = lights_at(
+    [(1.0, 1.0, 0.2), (1.0, 1.0, 1.2)],
+    [(3.0, 1.0, 0.5), (3.0, 1.0, 1.0), (3.0, 1.0, 2.5)],
+    [(5.0, 1.0, 1.0)],
+    ceiling=None,
+)
+
+
+def test_a_ground_among_some_leds_has_only_their_lamps_and_lights_every_led() -> None:
+    # The first lamp's LEDs, and the second's two highest: the bulb and the rest are left out.
+    among = np.array([True, True, False, True, True, False])
+
+    ground = Ground.of(THREE, among=among)
+
+    assert ground.leds is THREE  # it lights every LED of the set
+    assert ground.lamps.count == 2
+    assert ground.lamps.members.tolist() == [0, 1, 3, 4]
+    assert ground.lamps.starts.tolist() == [0, 2, 4]
+    np.testing.assert_allclose(ground.lamps.centre, [[1.0, 1.0, 0.7], [3.0, 1.0, 1.75]])
+    np.testing.assert_allclose(ground.lamps.low, [0.2, 1.0])
+    np.testing.assert_allclose(ground.lamps.high, [1.2, 2.5])
+    # The floor and the ceiling are the whole set's, as its frame is.
+    whole = Ground.of(THREE)
+    assert (ground.floor, ground.ceiling) == (whole.floor, whole.ceiling)
+    np.testing.assert_array_equal(ground.low, whole.low)
+    np.testing.assert_array_equal(ground.high, whole.high)
+
+
+def test_a_ground_holds_its_set_and_a_mask_equal_to_its_own() -> None:
+    among = np.array([True, True, False, True, True, False])
+    ground = Ground.of(THREE, among=among)
+
+    assert ground.holds(THREE, among) and ground.holds(THREE, among.copy())
+    assert not ground.holds(THREE, None) and not ground.holds(THREE, ~among)
+    assert not ground.holds(lights_at(*[[tuple(p)] for p in THREE.pos]), among)
+    assert Ground.of(THREE).holds(THREE, None) and not Ground.of(THREE).holds(THREE, among)
+
+
+def test_a_ground_among_no_leds_has_no_lamps_and_among_every_led_is_the_whole_sets() -> None:
+    assert Ground.of(THREE, among=np.zeros(THREE.count, dtype=np.bool_)).lamps.count == 0
+    every = Ground.of(THREE, among=np.ones(THREE.count, dtype=np.bool_)).lamps
+    whole = lamps_of(THREE)
+    for name in ("centre", "low", "high", "members", "starts"):
+        np.testing.assert_array_equal(getattr(every, name), getattr(whole, name))
+
+
+def _lamps_light_by_light(leds: LedSet) -> Lamps:
+    """lamps_of as it was first written: each light's middle measured against each stop's
+    first middle, one at a time. lamps_of must give exactly what this gives."""
+    groups: list[list[NDArray[np.intp]]] = []
+    firsts: list[NDArray[np.float32]] = []
+    for piece in leds.slices:
+        if piece.count == 0:
+            continue
+        middle = leds.pos[piece.start : piece.stop].mean(axis=0)
+        near = next(
+            (i for i, first in enumerate(firsts) if np.linalg.norm(first - middle) <= SAME_STOP_M),
+            None,
+        )
+        which = np.arange(piece.start, piece.stop, dtype=np.intp)
+        if near is None:
+            firsts.append(middle)
+            groups.append([which])
+        else:
+            groups[near].append(which)
+    members = [np.concatenate(group) for group in groups]
+    heights = [leds.pos[which, 2] for which in members]
+    return Lamps(
+        centre=np.array(
+            [np.mean([leds.pos[w].mean(axis=0) for w in group], axis=0) for group in groups],
+            dtype=np.float32,
+        ),
+        low=np.array([z.min() for z in heights], dtype=np.float32),
+        high=np.array([z.max() for z in heights], dtype=np.float32),
+        members=np.concatenate(members),
+        starts=np.cumsum([0, *(len(which) for which in members)]).astype(np.intp),
+    )
+
+
+def _crowded(count: int, seed: int) -> LedSet:
+    """`count` lights of one to four LEDs in a 3 x 3 m corner, so that many stand within
+    SAME_STOP_M of another and join its stop."""
+    rng = np.random.default_rng(seed)
+    return lights_at(
+        *[
+            [
+                tuple(rng.uniform((0.0, 0.0, 0.0), (3.0, 3.0, 2.5)))
+                for _ in range(rng.integers(1, 5))
+            ]
+            for _ in range(count)
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "leds",
+    [*HOMES.values(), lambda: bulbs(300), lambda: _crowded(300, 4)],
+    ids=[*HOMES, "300 bulbs", "300 crowded lights"],
+)
+def test_the_stops_are_the_ones_light_by_light_measuring_makes(leds: Callable[[], LedSet]) -> None:
+    zone = leds()
+    lamps, expected = lamps_of(zone), _lamps_light_by_light(zone)
+
+    assert 0 < lamps.count == expected.count
+    for name in ("centre", "low", "high", "members", "starts"):
+        np.testing.assert_array_equal(getattr(lamps, name), getattr(expected, name))
+
+
+# lamps_of runs inside a render whenever a particle layer's LEDs or modifiers change: for the
+# layer and for each twin of it. Measuring each light against every stop one at a time took
+# 810 ms for 1000 lamps; measuring it against them all at once takes about 6 ms, so the frame
+# that changes a layer of 1000 lamps runs about a frame long, once (this home has 19).
+@pytest.mark.perf
+def test_a_thousand_lamps_make_their_stops_in_about_a_frame() -> None:
+    leds = bulbs(1000)
+    lamps_of(leds)
+    durations = []
+    for _ in range(15):
+        started = time.perf_counter()
+        lamps_of(leds)
+        durations.append(time.perf_counter() - started)
+
+    assert statistics.median(durations) < 2 * FRAME_BUDGET_S
+
+
+def test_around_goes_round_the_middle() -> None:
+    points = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [-1.0, 0.0, 0.0]])
+    assert list(around(points.astype(np.float32), np.zeros(3))) == [2, 1, 0, 3]
+
+
+def test_the_floor_and_ceiling_are_the_maps_or_else_the_leds() -> None:
+    lights = ([(1.0, 1.0, 0.5), (1.0, 1.0, 1.5)],)
+    mapped = Ground.of(lights_at(*lights, ceiling=3.0))
+    unmapped = Ground.of(lights_at(*lights, ceiling=None))
+
+    assert (mapped.floor, mapped.ceiling) == (0.0, 3.0)
+    assert (unmapped.floor, unmapped.ceiling) == pytest.approx((0.5, 1.5 + CEILING_OVER_M))
+
+
+def test_a_box_is_the_frame_widened_and_kept_between_the_floor_and_ceiling() -> None:
+    ground = Ground.of(lights_at([(1.0, 2.0, 0.2), (3.0, 4.0, 2.8)], ceiling=3.0))
+
+    low, high = ground.box(0.5)
+
+    np.testing.assert_allclose(low, [0.5, 1.5, 0.0])  # not below the floor
+    np.testing.assert_allclose(high, [3.5, 4.5, 3.0])  # nor over the ceiling
+    np.testing.assert_allclose(ground.box()[0], [1.0, 2.0, 0.2], atol=1e-6)
+    low, high = ground.box(1.5, around=[2.0, 2.0, 2.0])
+    np.testing.assert_allclose(low, [0.5, 0.5, 0.5])
+    np.testing.assert_allclose(high, [3.5, 3.5, 3.0])
+    low, high = ground.box(1.0, around=[[2.0, 2.0, 0.5], [5.0, 5.0, 2.5]])
+    np.testing.assert_allclose(low, [[1.0, 1.0, 0.0], [4.0, 4.0, 1.5]])
+    np.testing.assert_allclose(high, [[3.0, 3.0, 1.5], [6.0, 6.0, 3.0]])
+
+
+# Five upright lamps under a 3 m ceiling: one under the floor, one over the ceiling, one in
+# between, one straddling the floor and one the ceiling.
+OUTSIDE = lights_at(
+    upright(1.0, 1.0, -1.0, -0.5),
+    upright(2.0, 1.0, 3.2, 3.5),
+    upright(3.0, 1.0, 0.1, 1.4),
+    upright(4.0, 1.0, -0.9, 0.4),
+    upright(5.0, 1.0, 2.5, 3.5),
+    ceiling=3.0,
+)
+
+
+def test_a_lamps_floor_and_ceiling_take_in_its_own_leds() -> None:
+    ground = Ground.of(OUTSIDE)
+    stops = [0, 1, 2, 3, 4]
+
+    np.testing.assert_allclose(ground.floor_for(stops), [-1.0, 0.0, 0.0, -0.9, 0.0], atol=1e-6)
+    np.testing.assert_allclose(ground.ceiling_for(stops), [3.0, 3.5, 3.0, 3.0, 3.5], atol=1e-6)
+    assert ground.floor_for(stops).dtype == np.float64  # the map's own, to the last bit
+    mapped = Ground.of(lights_at([(1.0, 1.0, 0.7), (1.0, 1.0, 2.4)], ceiling=2.45))
+    assert float(mapped.ceiling_for([0])[0]) == 2.45
+    assert float(mapped.floor_for([0])[0]) == 0.0
+
+
+def test_a_lamp_with_no_map_is_never_outside_the_floor_and_ceiling() -> None:
+    ground = Ground.of(lights_at(upright(1.0, 1.0, -1.0, -0.5), upright(3.0, 1.0), ceiling=None))
+    np.testing.assert_allclose(ground.floor_for([0, 1]), [ground.floor] * 2)
+    np.testing.assert_allclose(ground.ceiling_for([0, 1]), [ground.ceiling] * 2)
+
+
+def test_a_height_held_within_a_lamps_band_stops_at_its_floor_and_ceiling() -> None:
+    ground = Ground.of(OUTSIDE)
+    stops = [0, 1, 2, 3, 4]
+
+    np.testing.assert_array_equal(ground.within(stops, [-9.0] * 5), ground.floor_for(stops))
+    np.testing.assert_array_equal(ground.within(stops, [9.0] * 5), ground.ceiling_for(stops))
+    np.testing.assert_allclose(
+        ground.within(stops, [-9.0] * 5), [-1.0, 0.0, 0.0, -0.9, 0.0], atol=1e-6
+    )
+    np.testing.assert_allclose(
+        ground.within(stops, [9.0] * 5), [3.0, 3.5, 3.0, 3.0, 3.5], atol=1e-6
+    )
+    assert ground.within(stops, [0.5] * 5).dtype == np.float64
+
+
+def test_a_height_inside_a_lamps_band_is_left_exactly_as_it_is() -> None:
+    ground = Ground.of(OUTSIDE)
+    stops = np.array([0, 1, 2, 3, 4] * 20)
+    z = np.random.default_rng(3).uniform(ground.floor_for(stops), ground.ceiling_for(stops))
+    np.testing.assert_array_equal(ground.within(stops, z), z)
+
+
+def test_a_height_is_held_to_the_band_of_the_lamp_it_goes_with_not_the_zones() -> None:
+    ground = Ground.of(OUTSIDE)
+    # 3.4 m is over the zone's ceiling and inside the band of lamp 1 (3.2-3.5 m), which stands
+    # over it; -0.5 m is under the floor and inside lamp 0's, which stands under it.
+    held = ground.within([1, 2, 0, 2], [3.4, 3.4, -0.5, -0.5])
+    np.testing.assert_allclose(held, [3.4, 3.0, -0.5, 0.0], atol=1e-6)
+
+
+# Float32 stores 2.45 and 2.7 a little over (2.4500000477, 2.7000000477) and 0.7 a little under
+# (0.69999999), and the LEDs are held in float32. A lamp with an LED exactly at one of these is
+# no further out than float32 can tell, so it keeps the zone's own floor or ceiling, to the bit.
+@pytest.mark.parametrize("ceiling", [2.45, 2.7])
+def test_a_lamp_whose_top_led_is_at_the_ceiling_keeps_the_zones_ceiling_to_the_last_bit(
+    ceiling: float,
+) -> None:
+    leds = lights_at([(1.0, 1.0, 0.7), (1.0, 1.0, ceiling)], ceiling=ceiling)
+    ground = Ground.of(leds)
+
+    assert float(ground.lamps.high[0]) > ceiling  # the LED is held a little over the ceiling
+    assert float(ground.ceiling_for([0])[0]) == ceiling
+    _, high = ground.box(0.5, around=[[1.0, 1.0, ceiling]], stops=[0])
+    assert float(high[0, 2]) == ceiling
+
+
+def test_a_lamp_whose_lowest_led_is_at_the_floor_keeps_the_zones_floor_to_the_last_bit() -> None:
+    floor = 0.7  # a map's floor is 0 and a zone with none takes a float32 LED's, so set by hand
+    leds = lights_at([(1.0, 1.0, floor), (1.0, 1.0, 1.4)])
+    ground = Ground(leds, lamps_of(leds), floor, 3.0)
+
+    assert float(ground.lamps.low[0]) < floor  # the LED is held a little under the floor
+    assert float(ground.floor_for([0])[0]) == floor
+    low, _ = ground.box(0.5, around=[[1.0, 1.0, floor]], stops=[0])
+    assert float(low[0, 2]) == floor
+
+
+@pytest.mark.parametrize("ceiling", [2.45, 2.7])
+def test_a_lamp_one_float32_step_past_the_ceiling_or_the_floor_is_outside_it(
+    ceiling: float,
+) -> None:
+    over = float(np.nextafter(np.float32(ceiling), np.float32(np.inf)))
+    ground = Ground.of(lights_at([(1.0, 1.0, 0.7), (1.0, 1.0, over)], ceiling=ceiling))
+    assert float(ground.ceiling_for([0])[0]) == over
+
+    under = float(np.nextafter(np.float32(0.7), np.float32(-np.inf)))
+    leds = lights_at([(1.0, 1.0, under), (1.0, 1.0, 1.4)])
+    assert float(Ground(leds, lamps_of(leds), 0.7, 3.0).floor_for([0])[0]) == under
+
+
+def test_a_box_round_a_point_outside_the_band_is_the_bands_part_nearest_it() -> None:
+    ground = Ground.of(lights_at([(1.0, 1.0, 0.5), (3.0, 1.0, 2.0)], ceiling=3.0))
+
+    low, high = ground.box(1.5, around=[[2.0, 1.0, 6.0], [2.0, 1.0, -2.0], [2.0, 1.0, 1.0]])
+
+    np.testing.assert_allclose(low[:, 2], [1.5, 0.0, 0.0])  # from the ceiling down
+    np.testing.assert_allclose(high[:, 2], [3.0, 1.5, 2.5])  # or the floor up
+    np.testing.assert_allclose(low[:, :2], [[0.5, -0.5]] * 3)  # the sides are the same
+    assert (low <= high).all()
+
+
+def test_a_box_round_a_lamps_led_outside_the_band_keeps_to_the_lamps_band() -> None:
+    ground = Ground.of(OUTSIDE)
+    # Points far over and under lamps 1 (3.2-3.5 m, over the ceiling) and 0 (-1 to -0.5 m).
+    low, high = ground.box(0.5, around=[[2.0, 1.0, 9.0], [1.0, 1.0, -9.0]], stops=[1, 0])
+
+    np.testing.assert_allclose(low[:, 2], [3.0, -1.0], atol=1e-6)
+    np.testing.assert_allclose(high[:, 2], [3.5, -0.5], atol=1e-6)
+
+
+def test_a_box_takes_in_lamps_only_round_points_it_is_given() -> None:
+    with pytest.raises(ValueError, match="stops.*around"):
+        Ground.of(OUTSIDE).box(1.0, stops=[0, 1])
+
+
+def test_a_box_round_a_lamps_led_takes_in_the_lamp_where_it_stands_outside_the_band() -> None:
+    ground = Ground.of(OUTSIDE)
+    stops = [0, 1, 2, 3, 4]
+    middle = np.array(  # the middle of each lamp
+        [[1.0, 1.0, -0.75], [2.0, 1.0, 3.35], [3.0, 1.0, 0.75], [4.0, 1.0, -0.25], [5.0, 1.0, 3.0]]
+    )
+
+    low, high = ground.box(1.0, around=middle, stops=stops)
+
+    np.testing.assert_allclose(low[:, 2], [-1.0, 2.35, 0.0, -0.9, 2.0], atol=1e-6)
+    np.testing.assert_allclose(high[:, 2], [0.25, 3.5, 1.75, 0.75, 3.5], atol=1e-6)
+    assert (low[:, 2] <= middle[:, 2]).all() and (middle[:, 2] <= high[:, 2]).all()
+    np.testing.assert_allclose(low[:, :2], middle[:, :2] - 1.0)  # the sides are the same
+    np.testing.assert_allclose(high[:, :2], middle[:, :2] + 1.0)
+
+
+def test_newest_keeps_the_last_particles() -> None:
+    particles = swarm(np.arange(15.0).reshape(5, 3), [1.0, 1.0, 1.0], 0.2)
+    newest = particles.newest(2)
+    np.testing.assert_array_equal(newest.pos, particles.pos[3:])
+    assert particles.newest(9) is particles
+
+
+def test_newest_of_none_is_no_particles() -> None:
+    particles = swarm(np.arange(15.0).reshape(5, 3), [1.0, 1.0, 1.0], 0.2)
+
+    for count in (0, -1, -9):  # a slice from -0 is everything, and from -1 all but the first
+        assert particles.newest(count) is NO_PARTICLES
+
+
+def test_joined_keeps_each_swarm_in_order_and_pick_keeps_the_marked() -> None:
+    first = swarm([[0.0, 0.0, 0.0]], [1.0, 0.0, 0.0], 0.1)
+    second = swarm([[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], [0.0, 1.0, 0.0], [0.2, 0.3])
+    both = joined(first, second)
+
+    np.testing.assert_array_equal(both.pos[:, 0], [0.0, 1.0, 2.0])
+    np.testing.assert_allclose(both.radius, [0.1, 0.2, 0.3])
+    picked = both.pick(np.array([True, False, True]))
+    np.testing.assert_array_equal(picked.pos[:, 0], [0.0, 2.0])
+    np.testing.assert_array_equal(picked.colour, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+
+
+def test_pick_also_takes_the_particles_it_names_in_the_order_it_names_them() -> None:
+    particles = swarm([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], [1.0, 0.0, 0.0], 0.1)
+
+    picked = particles.pick(np.array([2, 0, 0]))
+
+    np.testing.assert_array_equal(picked.pos[:, 0], [2.0, 0.0, 0.0])
+    assert picked.count == 3 and particles.pick(np.array([], dtype=np.intp)).count == 0
+
+
+def test_swarms_are_merged_oldest_first_by_when_their_particles_were_born() -> None:
+    first = swarm([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], [1.0, 0.0, 0.0], 0.1)
+    second = swarm([[2.0, 0.0, 0.0], [3.0, 0.0, 0.0]], [0.0, 1.0, 0.0], [0.2, 0.3])
+
+    both = in_birth_order((first, np.array([1.0, 3.0])), (second, np.array([2.0, 3.0])))
+
+    np.testing.assert_array_equal(both.pos[:, 0], [0.0, 2.0, 1.0, 3.0])  # a tie keeps the order
+    np.testing.assert_allclose(both.radius, [0.1, 0.2, 0.1, 0.3])
+    np.testing.assert_array_equal(both.colour[:, 0], [1.0, 0.0, 1.0, 0.0])
+    nothing = in_birth_order((NO_PARTICLES, np.zeros(0)), (first, np.array([5.0, 4.0])))
+    np.testing.assert_array_equal(nothing.pos[:, 0], [1.0, 0.0])  # and with a part with none
+
+
+def _median_seconds(ground: Ground, particles: Particles) -> float:
+    lit(ground, particles)  # a grid is made once for each size
+    durations = []
+    for _ in range(60):
+        started = time.perf_counter()
+        lit(ground, particles)
+        durations.append(time.perf_counter() - started)
+    return statistics.median(durations)
+
+
+def _among_the_leds(count: int, radius: float) -> Particles:
+    """`count` particles of a radius scattered through _scattered()'s home, at the LEDs'
+    heights (0 to 3 m), as the effects place them: on or near LEDs."""
+    rng = np.random.default_rng(7)
+    return swarm(
+        rng.uniform((0.0, 0.0, 0.0), (15.0, 15.0, 3.0), (count, 3)),
+        rng.uniform(0.0, 1.0, (count, 3)),
+        radius,
+    )
+
+
+# Spec §5.3: a transition renders two looks in one frame, so each has half of §4.1's 5 ms. The
+# dense sum costs most on the most LEDs it lights, just under GRID_FROM_LEDS.
+@pytest.mark.perf
+def test_500_particles_light_the_most_leds_the_dense_sum_does_in_half_the_frame_budget() -> None:
+    ground = Ground.of(_scattered(GRID_FROM_LEDS - 1, seed=6))
+
+    assert _median_seconds(ground, _among_the_leds(500, 0.25)) < FRAME_BUDGET_S / 2
+
+
+# Spec §4.1's 5 ms on a big zone: 500 particles on 10k LEDs, by the grid, among the LEDs. The
+# budget holds for small radii only: the grid's cells are REACH radii wide, so a larger radius
+# gathers more LEDs for each particle (lit()'s docstring has the numbers). Measured: 2.0 to
+# 2.6 ms at 0.15 m, and 3.2 to 4.6 ms at 0.2 m from run to run, too near the budget to hold it
+# steadily on this machine, so the test takes 0.15 m.
+@pytest.mark.perf
+def test_500_particles_light_10k_leds_in_the_frame_budget() -> None:
+    ground = Ground.of(_scattered(10_000, seed=6))
+
+    assert _median_seconds(ground, _among_the_leds(500, 0.15)) < FRAME_BUDGET_S

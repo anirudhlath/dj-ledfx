@@ -26,6 +26,7 @@ from dj_ledfx.effects.ledset import (
     Space,
     build_ledset,
 )
+from dj_ledfx.effects.particles import ParticleEffect, drawn
 from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.looks.model import (
     Layer,
@@ -35,7 +36,7 @@ from dj_ledfx.looks.model import (
     TransitionKind,
     firmware_layers,
     make_effect,
-    visible_field_layers,
+    streamed_layers,
 )
 from dj_ledfx.looks.selectors import selects
 from dj_ledfx.scheduling.route import DeviceRoute
@@ -96,7 +97,7 @@ def _finite(colors: FloatRGB) -> FloatRGB:
 
 
 def _opacity(layer: Layer, view: LayerView) -> float | NDArray[np.float32]:
-    """How much of a field layer shows: its opacity, by each LED's weight in its mask."""
+    """How much of a streamed layer shows: its opacity, by each LED's weight in its mask."""
     if view.weight is None:
         return layer.opacity
     return view.weight if layer.opacity == 1.0 else view.weight * np.float32(layer.opacity)
@@ -231,7 +232,7 @@ class ZoneRuntime:
         self._trails = Trails()
         self._transition: _Transition | None = None
         self._handover: set[str] = set()  # see handing_over
-        self._fields: list[tuple[Layer, FieldEffect]] = []  # bottom to top
+        self._streamed: list[tuple[Layer, FieldEffect | ParticleEffect]] = []  # bottom to top
         self._firmware: list[tuple[Layer, FirmwareEffect]] = []  # top layer first
         self._claims: dict[str, int] = {}  # light -> firmware layer it runs itself
         self._copies: dict[str, int] = {}  # light -> firmware layer streamed as a copy
@@ -242,7 +243,7 @@ class ZoneRuntime:
         self._copy_targets: list[tuple[int, NDArray[np.intp], LedSet]] = []
         self._claim_targets: list[tuple[int, NDArray[np.intp], LedSet]] = []
         self._lights: tuple[ZoneLight, ...] = ()
-        # Each field layer's view of the LEDs (its mask, mirror and transform), with the
+        # Each streamed layer's view of the LEDs (its mask, mirror and transform), with the
         # modifiers it was made for; a new LED set clears them (_place).
         self._views: dict[int, tuple[object, LayerView]] = {}  # by the layer's place
         self._rendering = ""
@@ -271,8 +272,10 @@ class ZoneRuntime:
 
     @property
     def field_effect(self) -> FieldEffect | None:
-        """The bottom field layer's effect: a classic look's only one."""
-        return self._fields[0][1] if self._fields else None
+        """The bottom streamed layer's effect when it's a field effect: a classic look's
+        only one."""
+        effect = self._streamed[0][1] if self._streamed else None
+        return None if isinstance(effect, ParticleEffect) else effect
 
     @property
     def waiting_for(self) -> tuple[str, ...]:
@@ -399,7 +402,7 @@ class ZoneRuntime:
     def transition_sources(self) -> tuple[ZoneRuntime, ...]:
         """The runtimes whose looks this one's transition mixes in, while it plays."""
         transition = self._transition
-        return () if transition is None else tuple(drawn.source for drawn in transition.rows)
+        return () if transition is None else tuple(row.source for row in transition.rows)
 
     @property
     def transitioning(self) -> bool:
@@ -414,7 +417,7 @@ class ZoneRuntime:
         if transition is None or self.state != "transition":
             return None
         rows = transition.rows
-        replaced = max(rows, key=lambda drawn: drawn.lights).source.look.name if rows else ""
+        replaced = max(rows, key=lambda row: row.lights).source.look.name if rows else ""
         return TransitionInfo(
             from_name=replaced,
             kind=transition.kind,
@@ -461,11 +464,11 @@ class ZoneRuntime:
         if self.crash is not None or _layout(old) != _layout(look) or old.needs != look.needs:
             self._compile()
             return
-        for index, layer in enumerate(visible_field_layers(look)):
-            old_layer, field_effect = self._fields[index]
+        for index, layer in enumerate(streamed_layers(look)):
+            old_layer, effect = self._streamed[index]
             if old_layer.settings != layer.settings:
-                field_effect.set_params(**layer.settings)
-            self._fields[index] = (layer, field_effect)
+                effect.set_params(**layer.settings)
+            self._streamed[index] = (layer, effect)
         resend = False
         for index, layer in enumerate(reversed(firmware_layers(look))):
             old_layer, firmware = self._firmware[index]
@@ -722,14 +725,19 @@ class ZoneRuntime:
         return frame
 
     def _render_layers(self, ctx: RenderContext) -> FloatRGB:
-        """The field layers blended bottom to top, then each firmware layer's copy drawn on
-        the lights that stream it."""
+        """The streamed layers blended bottom to top, then each firmware layer's copy drawn
+        on the lights that stream it. A particle layer's particles move to the frame's
+        moment among the lamps its mask weighs above 0 (all of its view's, with no mask),
+        and light every LED of its view, which the mask then weighs."""
         count = self.leds.count
         frame: FloatRGB | None = None
-        for index, (layer, field_effect) in enumerate(self._fields):
+        for index, (layer, effect) in enumerate(self._streamed):
             self._rendering = layer.name
             view = self._view(index, layer)
-            colors = _finite(field_effect.render(ctx, view.leds))
+            if isinstance(effect, ParticleEffect):
+                colors = _finite(drawn(effect, ctx, view.leds, view.among))
+            else:
+                colors = _finite(effect.render(ctx, view.leds))
             opacity = _opacity(layer, view)
             if frame is None and layer.blend == "normal":  # over black: its colours, weighed
                 frame = np.multiply(colors, opacity, dtype=np.float32)
@@ -755,9 +763,9 @@ class ZoneRuntime:
             frame[where] = _finite(firmware.emulate(ctx, leds)) * np.float32(layer.opacity)
 
     def _view(self, index: int, layer: Layer) -> LayerView:
-        """The view of the zone's LEDs for the field layer at `index`, made again only when
-        its modifiers or the LED set change, so the effect's per-LED work is kept between
-        frames. Kept by place, not id: a saved look may give two layers one id."""
+        """The view of the zone's LEDs for the streamed layer at `index`, made again only
+        when its modifiers or the LED set change, so the effect's per-LED work is kept
+        between frames. Kept by place, not id: a saved look may give two layers one id."""
         modifiers = layer.modifiers
         kept = self._views.get(index)
         if kept is not None and kept[0] == modifiers:
@@ -770,21 +778,21 @@ class ZoneRuntime:
         self.generation = next(_GENERATIONS)
         self.crash = None
         self._trails.reset()
-        self._fields = []
+        self._streamed = []
         self._firmware = []
-        layers = visible_field_layers(self.look) + list(reversed(firmware_layers(self.look)))
+        layers = streamed_layers(self.look) + list(reversed(firmware_layers(self.look)))
         for position, layer in enumerate(layers):
             try:
                 effect = make_effect(layer)
             except LookError as exc:
-                self._fields, self._firmware = [], []
+                self._streamed, self._firmware = [], []
                 self._fail(layer.name, str(exc))
                 break
             effect.reseed(self._seed + position)
             if isinstance(effect, FirmwareEffect):
                 self._firmware.append((layer, effect))
             else:
-                self._fields.append((layer, effect))
+                self._streamed.append((layer, effect))
         self._plan_claims()
 
     def _place(self, lights: Sequence[ZoneLight], leds: LedSet | None = None) -> None:
@@ -818,7 +826,7 @@ class ZoneRuntime:
     def _plan_claims(self) -> None:
         """Which firmware layer each light runs itself or takes a copy of: the top layer
         that picks the light and that it supports. A light no layer claims takes the copy
-        of the top layer that picks it, but only when there is no field layer to play.
+        of the top layer that picks it, but only when there is no streamed layer to play.
         A light that refuses its effect later (mark_emulated) keeps its layer's copy."""
         self._claims = {}
         self._copies = {}
@@ -830,7 +838,7 @@ class ZoneRuntime:
             picked = [i for i in range(len(self._firmware)) if self._picks(i, light)]
             index = next((i for i in picked if self._firmware[i][1].supports(light.caps)), None)
             if index is None:
-                if not self._fields and picked:
+                if not self._streamed and picked:
                     self._copies[light.device_id] = picked[0]
             elif light.device_id in self._emulated:
                 self._copies[light.device_id] = index
