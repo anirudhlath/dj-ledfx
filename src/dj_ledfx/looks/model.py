@@ -1,7 +1,8 @@
 """The look model, shaped like the web app contract (web spec §12.2; engine spec §5.2).
 
-M2 blends any number of visible field layers under the firmware layers. Everything else
-the contract can describe is refused with the milestone that brings it.
+The runtime blends any number of visible streamed layers, field and particle layers alike,
+under the firmware layers. Everything else the contract can describe is refused with the
+milestone that brings it.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from dj_ledfx.effects.base import StripEffect
 from dj_ledfx.effects.field import FieldEffect
 from dj_ledfx.effects.firmware import FirmwareEffect
 from dj_ledfx.effects.params import EffectParam, check_setting
+from dj_ledfx.effects.particles import ParticleEffect
 from dj_ledfx.effects.registry import get_effect_class
 from dj_ledfx.effects.strip_adapter import PROJECTION_PARAMS, StripAdapter
 from dj_ledfx.looks.selectors import Selector, parse_selector
@@ -285,8 +287,6 @@ def _inputs(values: Any, what: str) -> tuple[Any, ...]:
 def _layer_from_dict(layer: Any, index: int) -> Layer:
     data = _READ.mapping(layer, f"Layer {index + 1}")
     layer_type = _choice(data.get("type"), get_args(LayerType), "layer type")
-    if layer_type == "particles":
-        raise LookError("Particle layers arrive in M5")
     raw_settings = _READ.mapping(data.get("settings") or {}, "Layer settings")
     settings: dict[str, Any] = {}
     for key, setting in raw_settings.items():
@@ -488,7 +488,7 @@ def look_to_dict(
     return data
 
 
-def make_effect(layer: Layer) -> FieldEffect | FirmwareEffect:
+def make_effect(layer: Layer) -> FieldEffect | ParticleEffect | FirmwareEffect:
     """A fresh effect for the layer with its settings applied. Strip effects come wrapped,
     so the adapter takes its projection settings and passes the rest on."""
     try:
@@ -496,10 +496,14 @@ def make_effect(layer: Layer) -> FieldEffect | FirmwareEffect:
     except KeyError:
         raise LookError(f"Layer '{layer.name}' uses an unknown effect '{layer.kind}'") from None
     raw = cls()
-    effect: FieldEffect | FirmwareEffect
+    effect: FieldEffect | ParticleEffect | FirmwareEffect
     if layer.type == "firmware":
         if not isinstance(raw, FirmwareEffect):
             raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a firmware effect")
+        effect = raw
+    elif layer.type == "particles":
+        if not isinstance(raw, ParticleEffect):
+            raise LookError(f"Layer '{layer.name}': '{layer.kind}' isn't a particle effect")
         effect = raw
     elif isinstance(raw, StripEffect):
         effect = StripAdapter(raw)
@@ -514,8 +518,13 @@ def make_effect(layer: Layer) -> FieldEffect | FirmwareEffect:
     return effect
 
 
+def streamed_layers(look: Look) -> list[Layer]:
+    """The layers the runtime blends, field and particle layers alike, bottom to top."""
+    return [layer for layer in look.layers if layer.type != "firmware" and layer.visible]
+
+
 def visible_field_layers(look: Look) -> list[Layer]:
-    """The streamed layers the runtime blends, bottom to top."""
+    """The visible field layers, bottom to top."""
     return [layer for layer in look.layers if layer.type == "field" and layer.visible]
 
 

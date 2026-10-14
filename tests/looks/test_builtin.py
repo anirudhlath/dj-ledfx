@@ -10,6 +10,7 @@ from map_home import DESIGN, handoff_pins, seeded_ledset, tiny_home
 
 from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
 from dj_ledfx.effects.firmware import FirmwareEffect
+from dj_ledfx.effects.particles import ParticleEffect, drawn
 from dj_ledfx.effects.registry import get_strip_effect_classes
 from dj_ledfx.home.model import Home
 from dj_ledfx.home.seed import seed_home
@@ -27,6 +28,7 @@ from dj_ledfx.looks.model import (
     Look,
     firmware_layers,
     make_effect,
+    streamed_layers,
     validate_look,
     visible_field_layers,
 )
@@ -34,11 +36,28 @@ from dj_ledfx.looks.selectors import Selector
 from dj_ledfx.types import FloatRGB
 
 VENDORED = files("dj_ledfx.looks") / "data" / "looks.json"
-SHOWCASE = [
-    *("sunset", "aurora", "lava", "carousel", "ripples", "focus"),  # M2
-    *("shockwave", "scanner", "checker", "speakers"),  # M3
-    FIRMWARE_LOOK_ID,
+M2 = ("sunset", "aurora", "lava", "carousel", "ripples", "focus")
+M3 = ("shockwave", "scanner", "checker", "speakers")
+M5_AMBIENT = ("fireflies", "embers", "rain", "snow", "spotlights")
+M5_TEMPO = ("bursts", "vortex", "comets", "fountain", "flock", "ball")
+SHOWCASE = [  # in looks.json's order
+    look_id
+    for look_id in handoff_looks()
+    if look_id in {*M2, *M3, *M5_AMBIENT, *M5_TEMPO, FIRMWARE_LOOK_ID}
 ]
+PARTICLE_KINDS = {
+    "fireflies": "fireflies",
+    "embers": "embers",
+    "rain": "rain_storm",
+    "snow": "snowfall",
+    "spotlights": "spotlights",
+    "bursts": "beat_bursts",
+    "vortex": "vortex",
+    "comets": "twin_comets",
+    "fountain": "fountain",
+    "flock": "flock",
+    "ball": "bouncing_ball",
+}
 
 
 def test_vendored_looks_json_is_a_byte_copy_of_the_handoff() -> None:
@@ -53,7 +72,7 @@ def test_the_handoff_looks_come_first_in_its_order_with_its_metadata() -> None:
     looks = builtin_looks()[: len(SHOWCASE)]
 
     assert [look.id for look in looks] == SHOWCASE
-    assert SHOWCASE == [look_id for look_id in handoff if look_id in SHOWCASE]  # looks.json order
+    assert len(SHOWCASE) == len(M2) + len(M3) + len(M5_AMBIENT) + len(M5_TEMPO) + 1
     for look in looks:
         entry = handoff[look.id]
         assert (look.name, look.category, look.description) == (
@@ -91,11 +110,41 @@ def test_each_showcase_look_has_its_fields_and_firmware() -> None:
     assert aurora_morph.settings == {"palette": list(AURORA_PALETTE)}  # the curtains' palette
 
 
-@pytest.mark.parametrize("look_id", ["focus", "shockwave", "speakers"])
+@pytest.mark.parametrize("look_id", PARTICLE_KINDS)
+def test_each_particle_look_has_its_particle_layer_named_after_it(look_id: str) -> None:
+    look = builtin_look(look_id)
+
+    particles, *others = look.layers
+    assert (particles.id, particles.type, particles.kind) == (
+        "particles",
+        "particles",
+        PARTICLE_KINDS[look_id],
+    )
+    assert particles.name == handoff_looks()[look_id]["name"]
+    assert isinstance(make_effect(particles), ParticleEffect)
+    # The embers alone have a second layer: LIFX Flame, on the lights that run it.
+    if look_id == "embers":
+        [flame] = others
+        assert (flame.id, flame.name, flame.type, flame.kind) == (
+            "flame",
+            "Flame",
+            "firmware",
+            "lifx_flame",
+        )
+        assert flame.lights == (Selector("type", "candle"), Selector("type", "tube"))
+    else:
+        assert others == []
+    if look_id in M5_AMBIENT:
+        assert look.category == "ambient"
+    else:
+        assert look.needs == ("tempo",)
+
+
+@pytest.mark.parametrize("look_id", ["focus", "shockwave", "speakers", "bursts", "fountain"])
 def test_anchored_looks_start_from_the_anchor_their_description_names(look_id: str) -> None:
     look = builtin_look(look_id)
 
-    [anchor_id] = {layer.settings["anchor"] for layer in visible_field_layers(look)}
+    [anchor_id] = {layer.settings["anchor"] for layer in streamed_layers(look)}
     anchor = seed_home().anchor(anchor_id)
 
     assert anchor is not None
@@ -168,9 +217,7 @@ def test_ids_are_unique_and_every_builtin_validates() -> None:
 def _frames(look: Look, seed: int) -> list[FloatRGB]:
     """Render every streamed layer, and every firmware layer's copy, for 3 s on this home."""
     leds = seeded_ledset()
-    effects = [
-        make_effect(layer) for layer in [*visible_field_layers(look), *firmware_layers(look)]
-    ]
+    effects = [make_effect(layer) for layer in [*streamed_layers(look), *firmware_layers(look)]]
     for effect in effects:
         effect.reseed(seed)
     frames: list[FloatRGB] = []
@@ -179,6 +226,8 @@ def _frames(look: Look, seed: int) -> list[FloatRGB]:
         for effect in effects:
             if isinstance(effect, FirmwareEffect):
                 frames.append(effect.emulate(ctx, leds))
+            elif isinstance(effect, ParticleEffect):
+                frames.append(drawn(effect, ctx, leds))
             else:
                 frames.append(effect.render(ctx, leds))
     return frames
@@ -196,3 +245,8 @@ def test_every_builtin_is_finite_in_range_and_repeats_with_a_fixed_seed(look: Lo
         assert np.isfinite(frame).all()
         assert frame.min() >= 0.0 and frame.max() <= 1.0
         assert np.array_equal(frame, repeat)
+    if look.id in PARTICLE_KINDS:
+        # None of that fails a look that is black everywhere. The particle layer draws the
+        # first frame of each step (the embers' Flame copy comes after it, and could light
+        # the LEDs without it).
+        assert any(frame.any() for frame in first[:: len(look.layers)]), "the particles are dark"

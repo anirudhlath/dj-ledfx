@@ -1,8 +1,9 @@
 """Built-in looks (spec §5.2).
 
 The handoff's looks take their metadata from its looks.json (vendored in data/looks.json,
-byte for byte), in its order: M2's six showcase looks, M3's four tempo looks and the
-Firmware showcase. The handoff has no layers, so they live here. The six classic looks
+byte for byte), in its order: M2's six showcase looks, M3's four tempo looks, M5's eleven
+particle looks and the Firmware showcase. The handoff has no layers, so they live here; a
+particle look's one particle layer takes the look's own name. The six classic looks
 are today's effects; the handoff has no entry for them, so their names and descriptions
 live here too.
 """
@@ -69,6 +70,12 @@ def _field(
     return Layer(id=layer_id, name=name, type="field", kind=kind, blend=blend, settings=settings)
 
 
+def _particles(look_id: str, kind: str, **settings: Any) -> Layer:
+    """The particle layer of a particle look, named as looks.json names the look."""
+    name = str(handoff_looks()[look_id]["name"])
+    return Layer(id="particles", name=name, type="particles", kind=kind, settings=settings)
+
+
 def _anchor_of(look_id: str, anchors: Sequence[Anchor]) -> str:
     """The anchor the look's looks.json description names, among the seeded map's."""
     return anchor_named_in(handoff_looks()[look_id]["description"], anchors)
@@ -92,6 +99,7 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
     anchors = seed_home().anchors
     tv, speakers = _anchor_of("shockwave", anchors), _anchor_of("speakers", anchors)
     focus = _anchor_of("focus", anchors)
+    bursts, fountain = _anchor_of("bursts", anchors), _anchor_of("fountain", anchors)
     return {
         "sunset": (
             _field("sky", "Gradient", "sunset_gradient"),
@@ -107,14 +115,28 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
                 palette=list(AURORA_PALETTE),
             ),
         ),
+        "fireflies": (_particles("fireflies", "fireflies"),),
+        "embers": (
+            _particles("embers", "embers"),
+            _firmware("flame", "Flame", "lifx_flame", lights=["type:candle", "type:tube"]),
+        ),
+        "rain": (_particles("rain", "rain_storm"),),
+        "snow": (_particles("snow", "snowfall"),),
         "lava": (_field("plasma", "Plasma", "lava_plasma"),),
         "carousel": (_field("carousel", "Carousel", "color_carousel"),),
         "ripples": (_field("ripples", "Ripples", "ripples"),),
         "focus": (_field("focus", "Focus", "focus_field", anchor=focus),),
+        "spotlights": (_particles("spotlights", "spotlights"),),
+        "bursts": (_particles("bursts", "beat_bursts", anchor=bursts),),
         "shockwave": (
             _field("shell", "Shockwave", "shockwave_shell", anchor=tv),
             _field("beam", "Beam", "lighthouse_beam", blend="add", anchor=tv),
         ),
+        "vortex": (_particles("vortex", "vortex"),),
+        "comets": (_particles("comets", "twin_comets"),),
+        "fountain": (_particles("fountain", "fountain", anchor=fountain),),
+        "flock": (_particles("flock", "flock"),),
+        "ball": (_particles("ball", "bouncing_ball"),),
         "scanner": (_field("plane", "Plane", "scanner_plane"),),
         "checker": (_field("cubes", "Cubes", "checker_cubes"),),
         "speakers": (_field("waves", "Waves", "speaker_waves", anchor=speakers),),

@@ -87,7 +87,16 @@ def test_classic_effects_are_registered_strip_effects() -> None:
 
 
 def test_abstract_kinds_and_opt_outs_are_not_registered() -> None:
-    for name in ("strip_effect", "field_effect", "firmware_effect", "strip_adapter", "_ramp"):
+    for name in (
+        "strip_effect",
+        "field_effect",
+        "firmware_effect",
+        "particle_effect",
+        "param_settings",
+        "param_particles",
+        "strip_adapter",
+        "_ramp",
+    ):
         assert name not in Effect._registry
 
 

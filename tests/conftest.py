@@ -414,6 +414,32 @@ def beat_ctx(beats: float, *, bpm: float = 120.0) -> BeatContext:
     return to_beat_context(tempo_ctx(beats, bpm=bpm))
 
 
+class CallCounts:
+    """How often the functions it spies on are called, by name, each call going through as
+    before: for a test that says a thing is worked out once for all the particles, not once
+    for each of them."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.calls: dict[str, int] = {}
+        self._monkeypatch = monkeypatch
+
+    def spy(self, owner: object, name: str) -> None:
+        """Count the calls of `owner.name` (a module's function or a class's method) under
+        `name`, until the test ends."""
+        original = getattr(owner, name)
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            self.calls[name] = self.calls.get(name, 0) + 1
+            return original(*args, **kwargs)
+
+        self._monkeypatch.setattr(owner, name, call)
+
+
+@pytest.fixture
+def call_counts(monkeypatch: pytest.MonkeyPatch) -> CallCounts:
+    return CallCounts(monkeypatch)
+
+
 # The app's effects and GlowFirmware. Every test starts from these, and an effect a test
 # (or its module) registers is gone after it.
 _EFFECTS = dict(Effect._registry)
