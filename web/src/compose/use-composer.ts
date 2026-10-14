@@ -23,6 +23,8 @@ import { useCloseComposer } from './use-close-composer'
 export interface ComposeChoice {
   zones: readonly Zone[] | undefined
   looks: readonly Look[] | undefined
+  /** Why the looks couldn't be loaded; null while they load or have. */
+  looksFailed: unknown
   /** The zone the look goes on: undefined until the zones load. */
   zone: Zone | undefined
   look: Look | undefined
@@ -57,7 +59,8 @@ const carried = (id: Id | null, known: readonly { id: Id }[] | undefined): Id | 
 /** `composing` is false for an instance that Live keeps while the composer is shut; the panel's and Where's exist only while it's open. */
 export function useComposeChoice(composing = true): ComposeChoice {
   const zones = useQuery(queries.zones()).data
-  const looks = useQuery(queries.looks()).data
+  const looksQuery = useQuery(queries.looks())
+  const looks = looksQuery.data
   const [params] = useSearchParams()
   const navigate = useNavigate()
   // A choice made in place replaces the entry and keeps its state (COMPOSER_ENTRY, if it has it).
@@ -73,6 +76,7 @@ export function useComposeChoice(composing = true): ComposeChoice {
   return {
     zones,
     looks,
+    looksFailed: looksQuery.isError ? looksQuery.error : null,
     zone,
     look,
     locked,
@@ -124,6 +128,8 @@ export interface Composer extends ComposeChoice {
    * `preview.showing`, which is null while a first choice is starting, so the tag would blink off on every new choice.
    */
   previewed: boolean
+  /** Why there's nothing to choose from, each in its own line: a home with no zones, and looks that couldn't be loaded. */
+  blank: string[]
   /** Start is on its way. */
   starting: boolean
   /**
@@ -192,6 +198,10 @@ export function useComposer(): Composer {
           // A refused Start is newer than its choice's preview, and says the failure that matters now.
           refused: startRefused?.text ?? (refused && look !== undefined ? failureText(`preview ${look.name}`, preview.error) : null),
         })
+  const blank = [
+    ...(choice.zones?.length === 0 ? ['No zones yet.'] : []),
+    ...(choice.looksFailed === null ? [] : [failureText('load the looks', choice.looksFailed)]),
+  ]
   const start = (transition: Transition) => {
     if (zone === undefined || look === undefined || starting || frozen) return
     setStarting(true)
@@ -211,5 +221,18 @@ export function useComposer(): Composer {
       },
     )
   }
-  return { ...choice, running, preview, missing, consequence: said, previewed, starting, frozen, start, forgetStart: () => setStartRefused(null), close }
+  return {
+    ...choice,
+    running,
+    preview,
+    missing,
+    consequence: said,
+    previewed,
+    blank,
+    starting,
+    frozen,
+    start,
+    forgetStart: () => setStartRefused(null),
+    close,
+  }
 }

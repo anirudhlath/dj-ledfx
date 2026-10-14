@@ -82,6 +82,11 @@ export function ComposerSheet({ className }: { className?: string }) {
       <div className="px-4 pt-2 empty:hidden">
         <ReconnectingCard variant="phone" />
       </div>
+      {view.blank.map((line) => (
+        <p key={line} className="px-4 pt-2 text-meta text-text-3">
+          {line}
+        </p>
+      ))}
       {zones !== undefined && looks !== undefined && zone !== undefined && (
         <>
           <div className="px-4">

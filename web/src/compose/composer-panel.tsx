@@ -56,6 +56,11 @@ export function ComposerPanel({ className }: { className?: string }) {
         </h2>
         <IconButton icon="x" label="Close" className="touch-target" onClick={view.close} />
       </div>
+      {view.blank.map((line) => (
+        <p key={line} className="px-5 pb-2 text-meta text-text-3">
+          {line}
+        </p>
+      ))}
       {zone !== undefined && looks !== undefined && (
         <>
           <div className="flex flex-col gap-2.5 px-5 pb-3">

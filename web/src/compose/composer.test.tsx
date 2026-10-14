@@ -534,6 +534,20 @@ describe('Put a look on (§8.2)', () => {
     expect(start).toHaveBeenCalledWith('living', { lookId: 'embers', transition: { kind: 'fade', durationS: 3 } })
   })
 
+  // The composer draws nothing to choose from without zones or looks, and says why rather than stand blank.
+  it('says there are no zones yet, where the home has none', async () => {
+    vi.spyOn(api, 'zones').mockResolvedValue([])
+    await openApp('/next/live/put?look=embers')
+    expect(within(composer()).getByText('No zones yet.')).toBeInTheDocument()
+  })
+
+  it("says the looks couldn't be loaded, and why", async () => {
+    vi.spyOn(api, 'looks').mockRejectedValue(new ApiError(500, 'Internal Server Error', '/api/looks'))
+    await openApp('/next/live/put?zone=living')
+    await settle(3000)
+    expect(within(composer()).getByText("Couldn't load the looks. Internal Server Error")).toBeInTheDocument()
+  })
+
   // §11.3 "The UI must show the consequence before Start": a screen reader hears it with Start, as its description.
   it('describes Start by the consequence line', async () => {
     const { server } = await openApp('/next/live/put?zone=living&look=embers')
@@ -1496,6 +1510,19 @@ describe('Put a look on, on the phone (§8.10)', () => {
     fireEvent.click(category('Tempo'))
     expect(category('Tempo')).toHaveAttribute('aria-pressed', 'true')
     expect(rowsShown()).toEqual(server.state.looks.filter((each) => each.category === 'tempo').map((each) => each.id))
+  })
+
+  it('says there are no zones yet, where the home has none', async () => {
+    vi.spyOn(api, 'zones').mockResolvedValue([])
+    await openApp('/next/live/put?look=embers')
+    expect(within(sheet()).getByText('No zones yet.')).toBeInTheDocument()
+  })
+
+  it("says the looks couldn't be loaded, and why", async () => {
+    vi.spyOn(api, 'looks').mockRejectedValue(new ApiError(500, 'Internal Server Error', '/api/looks'))
+    await openApp('/next/live/put?zone=living')
+    await settle(3000)
+    expect(within(sheet()).getByText("Couldn't load the looks. Internal Server Error")).toBeInTheDocument()
   })
 
   it('describes Start by the consequence line', async () => {
