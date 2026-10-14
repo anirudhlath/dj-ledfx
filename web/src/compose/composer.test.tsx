@@ -534,6 +534,14 @@ describe('Put a look on (§8.2)', () => {
     expect(start).toHaveBeenCalledWith('living', { lookId: 'embers', transition: { kind: 'fade', durationS: 3 } })
   })
 
+  // §11.3 "The UI must show the consequence before Start": a screen reader hears it with Start, as its description.
+  it('describes Start by the consequence line', async () => {
+    const { server } = await openApp('/next/live/put?zone=living&look=embers')
+    expect(consequenceLine().id).not.toBe('')
+    expect(startButton('embers')).toHaveAttribute('aria-describedby', consequenceLine().id)
+    expect(startButton('embers')).toHaveAccessibleDescription(new RegExp(`^Takes over the ${zoneName(server, 'living')} from `))
+  })
+
   // §9.4 Reconnecting: "Controls come back when the link does". The stage's card says so; Start waits for the link, Enter with it, and the
   // choices still move the URL. Once the link is back the preview is asked for again (PreviewSession.resume()), and Start comes back.
   it('holds Start while the link is down, keeps the choices, and previews again once the link is back', async () => {
@@ -1471,6 +1479,15 @@ describe('Put a look on, on the phone (§8.10)', () => {
     fireEvent.click(category('Tempo'))
     expect(category('Tempo')).toHaveAttribute('aria-pressed', 'true')
     expect(rowsShown()).toEqual(server.state.looks.filter((each) => each.category === 'tempo').map((each) => each.id))
+  })
+
+  it('describes Start by the consequence line', async () => {
+    await openApp('/next/live/put?zone=living&look=embers')
+    const line = sheet().querySelector('[data-consequence]')!
+    const start = within(sheet()).getByRole('button', { name: new RegExp(`^Start ${lookName('embers')} on `) })
+    expect(line.id).not.toBe('')
+    expect(start).toHaveAttribute('aria-describedby', line.id)
+    expect(start).toHaveAccessibleDescription(`Takes over from ${lookName('fireflies')}`)
   })
 
   it("says why Start failed in the sheet's consequence line until the next choice", async () => {

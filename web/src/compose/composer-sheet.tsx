@@ -35,6 +35,8 @@ const ROW_STEPS: LookSteps = { ArrowUp: -1, ArrowDown: 1 }
 export function ComposerSheet({ className }: { className?: string }) {
   const rows = useRef<HTMLDivElement>(null)
   const title = useId()
+  // Start is described by the consequence line, so a screen reader hears what it will do with it (§11.3).
+  const consequenceId = useId()
   const view = useComposerView(ROW_STEPS, rows)
   const { zones, looks, zone, look, running, consequence: said } = view
   const chips = useRef<HTMLDivElement>(null)
@@ -134,7 +136,7 @@ export function ComposerSheet({ className }: { className?: string }) {
           <div className="flex flex-col gap-2.5 border-t border-line-soft px-4 pt-3 pb-7.5">
             <div className="flex items-center justify-between gap-2.5 text-data text-text-3">
               {/* Phone-PutLookOn sets the look's name in serif at 15 px, which is --text-section. */}
-              <span data-consequence>{said !== null && <ConsequenceText parts={said.short} lookClassName="font-serif text-section text-text italic" />}</span>
+              <span id={consequenceId} data-consequence>{said !== null && <ConsequenceText parts={said.short} lookClassName="font-serif text-section text-text italic" />}</span>
               <Select
                 label="Transition"
                 value={view.transition}
@@ -143,7 +145,14 @@ export function ComposerSheet({ className }: { className?: string }) {
                 className="h-9! w-37.5 shrink-0 touch-target"
               />
             </div>
-            <Button variant="primary" size="cta" icon="play" disabled={view.blocked || view.starting} onClick={view.startChosen}>
+            <Button
+              variant="primary"
+              size="cta"
+              icon="play"
+              disabled={view.blocked || view.starting}
+              aria-describedby={consequenceId}
+              onClick={view.startChosen}
+            >
               <span className="min-w-0 truncate">{look === undefined ? 'Start' : `Start ${look.name} on ${zone.name}`}</span>
             </Button>
           </div>

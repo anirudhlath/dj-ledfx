@@ -4,7 +4,7 @@
 // stage at once. How: the transition, the consequence line, Cancel and Start <Look>. Keyboard (F4
 // ruling 12): the arrows move through the tiles, previewing each, and Enter starts the look previewed;
 // the page's L and Esc are useComposerKeys()'s.
-import { useRef } from 'react'
+import { useId, useRef } from 'react'
 import { Button, IconButton } from '@/design/button'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
@@ -45,6 +45,8 @@ export function ComposerPanel({ className }: { className?: string }) {
   const grid = useRef<HTMLDivElement>(null)
   const view = useComposerView(GRID_STEPS, grid)
   const { looks, zone, look, consequence: said } = view
+  // Start is described by the consequence line, so a screen reader hears what it will do with it (§11.3).
+  const consequenceId = useId()
 
   return (
     <aside aria-label="Put a look on" className={cx('flex min-h-0 flex-col border-l border-line-soft bg-panel', className)}>
@@ -156,7 +158,7 @@ export function ComposerPanel({ className }: { className?: string }) {
               />
             </div>
             {said !== null && (
-              <p data-consequence className="flex items-start gap-2 text-meta text-text-3">
+              <p id={consequenceId} data-consequence className="flex items-start gap-2 text-meta text-text-3">
                 <Icon name="layers" size={15} />
                 <span>
                   {/* Live-PutLookOn sets the look's name in serif at 14 px, a size tokens.css has no token for. */}
@@ -168,7 +170,15 @@ export function ComposerPanel({ className }: { className?: string }) {
               <Button size="lg" onClick={view.close}>
                 Cancel
               </Button>
-              <Button variant="primary" size="lg" icon="play" className="grow" disabled={view.blocked || view.starting} onClick={view.startChosen}>
+              <Button
+                variant="primary"
+                size="lg"
+                icon="play"
+                className="grow"
+                disabled={view.blocked || view.starting}
+                aria-describedby={said === null ? undefined : consequenceId}
+                onClick={view.startChosen}
+              >
                 {look === undefined ? 'Start' : `Start ${look.name}`}
               </Button>
             </div>
