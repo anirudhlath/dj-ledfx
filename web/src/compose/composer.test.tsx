@@ -1334,6 +1334,23 @@ describe('Put a look on: its stage, keys, grid and layout', () => {
     await settle()
     expect(screen.getByRole('button', { name: 'Running' })).toBeInTheDocument()
   })
+
+  // With the Running panel hidden there's no link to the composer to come back to: the button that shows the panel takes the focus, where
+  // it would otherwise fall to the page.
+  it.each(EXITS)("puts the focus on the Running button after %s, where the narrow layout's panel is hidden", async (_, exit) => {
+    setViewportWidth(1000)
+    await openApp('/next/live')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Running' }))
+    await settle(100)
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle()
+    fireEvent.click(tile(tilesShown()[0]!))
+    await settle()
+    expect(composer()).toContainElement(document.activeElement as HTMLElement)
+    exit()
+    await settle()
+    expect(screen.getByRole('button', { name: 'Running' })).toHaveFocus()
+  })
 })
 
 describe('Put a look on, on the phone (§8.10)', () => {

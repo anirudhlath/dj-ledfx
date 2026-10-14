@@ -16,7 +16,7 @@ interface ButtonLook {
   children: ReactNode
 }
 
-export type ButtonProps = ButtonLook & Omit<ComponentPropsWithoutRef<'button'>, keyof ButtonLook>
+export type ButtonProps = ButtonLook & Omit<ComponentPropsWithoutRef<'button'>, keyof ButtonLook> & { ref?: Ref<HTMLButtonElement> }
 export type ButtonLinkProps = ButtonLook & Omit<LinkProps, keyof ButtonLook> & { ref?: Ref<HTMLAnchorElement> }
 
 // §6.1 Button; sizes from System.png. On phone, sm and md grow to the 44 px touch minimum.

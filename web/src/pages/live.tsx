@@ -66,11 +66,12 @@ export function LivePage() {
   }
   // The focus was in the composer, which goes with it: the page that returns gives it to the link that opens the composer, where it
   // would otherwise fall to the page. That link is the Running panel's on desktop, and on the phone Live's own or Zone detail's, whichever
-  // the exit lands on.
+  // the exit lands on. In the narrow layout with the panel hidden there's no such link, and the button that shows the panel takes it.
   const put = useRef<HTMLAnchorElement>(null)
+  const showPanel = useRef<HTMLButtonElement>(null)
   const wasOpen = useRef(composing)
   useEffect(() => {
-    if (wasOpen.current && !composing) put.current?.focus()
+    if (wasOpen.current && !composing) (put.current ?? showPanel.current)?.focus()
     wasOpen.current = composing
   }, [composing])
   const stage = (
@@ -130,7 +131,13 @@ export function LivePage() {
         />
       )}
       {!composing && narrow && panel === 'hidden' && (
-        <Button icon="left" autoFocus className="absolute top-1/2 right-4 z-20 -translate-y-1/2 shadow-pop" onClick={() => setPanel('reopened')}>
+        <Button
+          ref={showPanel}
+          icon="left"
+          autoFocus
+          className="absolute top-1/2 right-4 z-20 -translate-y-1/2 shadow-pop"
+          onClick={() => setPanel('reopened')}
+        >
           Running
         </Button>
       )}
