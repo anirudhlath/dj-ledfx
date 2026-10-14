@@ -170,6 +170,24 @@ const EXITS = [
   ['Start', () => fireEvent.click(within(composer()).getByRole('button', { name: /^Start / }))],
 ] as const
 
+/**
+ * On top of watchScrolling's stand-in: a category chip's scroll into view leaves its row at `left`, as a browser's would. The array it
+ * returns holds where the row was as each such scroll began.
+ */
+function revealScrollsRowTo(left: number): number[] {
+  const from: number[] = []
+  const watched = Element.prototype.scrollIntoView
+  Element.prototype.scrollIntoView = function (this: Element, options?: ScrollIntoViewOptions | boolean) {
+    watched.call(this, options)
+    const row = this.closest<HTMLElement>('[aria-label="Categories"]')
+    if (row === null) return
+    from.push(row.scrollLeft)
+    row.scrollLeft = left
+  }
+  onTestFinished(() => void (Element.prototype.scrollIntoView = watched))
+  return from
+}
+
 describe('Put a look on (§8.2)', () => {
   // §13.1 F4's exit check: "Start a look in ≤ 3 clicks from Live; lights unchanged until Start (mock asserts)".
   it('starts a look in three clicks from Live, and leaves the lights alone until Start', async () => {
@@ -1724,16 +1742,17 @@ describe('Put a look on, on the phone (§8.10)', () => {
     Object.defineProperty(document, 'fonts', { configurable: true, value: { ready } })
     onTestFinished(() => void Reflect.deleteProperty(document, 'fonts'))
     const scrolled = watchScrolling()
+    const from = revealScrollsRowTo(40)
     const { router } = await openApp('/next/live/put?zone=living&look=goodnight')
     const categories = within(sheet()).getByRole('group', { name: 'Categories' })
     const home = within(categories).getByRole('button', { name: 'Home' })
     expect(scrolled.filter(([element]) => element === home)).toHaveLength(1)
-    // Where the scroll left the row, laid out in the fallback font (jsdom's stand-in scrolls nothing).
-    categories.scrollLeft = 40
+    // The scroll left the row at 40, laid out in the fallback font.
+    expect(categories.scrollLeft).toBe(40)
     fontsIn()
     await settle(100)
     // Back to where it was before, then scrolled again in the font it keeps.
-    expect(categories.scrollLeft).toBe(0)
+    expect(from).toEqual([0, 0])
     expect(scrolled.filter(([element]) => element === home)).toEqual([
       [home, { block: 'nearest', inline: 'nearest' }],
       [home, { block: 'nearest', inline: 'nearest' }],
@@ -1752,6 +1771,24 @@ describe('Put a look on, on the phone (§8.10)', () => {
     later()
     await settle(100)
     expect(scrolled).toEqual([[firmware, { block: 'nearest', inline: 'nearest' }]])
+  })
+
+  // A row the user scrolls themselves while the fonts are on their way is theirs: the fonts coming in leave it where they put it.
+  it('leaves the category row where the user scrolled it before the fonts came in', async () => {
+    let fontsIn = () => {}
+    const ready = new Promise<void>((resolve) => (fontsIn = resolve))
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { ready } })
+    onTestFinished(() => void Reflect.deleteProperty(document, 'fonts'))
+    const scrolled = watchScrolling()
+    revealScrollsRowTo(40)
+    await openApp('/next/live/put?zone=living&look=goodnight')
+    const categories = within(sheet()).getByRole('group', { name: 'Categories' })
+    categories.scrollLeft = 70
+    scrolled.length = 0
+    fontsIn()
+    await settle(100)
+    expect(categories.scrollLeft).toBe(70)
+    expect(scrolled).toEqual([])
   })
 
   // Phone-PutLookOn: the stage keeps Phone-Live's box and the sheet fills the screen under it, over the stage's foot (F4 ruling 16). The

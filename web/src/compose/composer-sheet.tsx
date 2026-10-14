@@ -56,10 +56,11 @@ export function ComposerSheet({ className }: { className?: string }) {
     const reveal = () => row.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     const from = row.scrollLeft
     reveal()
+    const left = row.scrollLeft
     let gone = false
-    // jsdom has no document.fonts.
+    // jsdom has no document.fonts. A row scrolled since (the user's own swipe) is left where it is.
     void document.fonts?.ready.then(() => {
-      if (gone) return
+      if (gone || row.scrollLeft !== left) return
       row.scrollLeft = from
       reveal()
     })
