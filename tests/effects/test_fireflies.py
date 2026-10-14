@@ -62,6 +62,22 @@ def test_fireflies_that_drift_toward_an_anchor_keep_near_it() -> None:
         assert (flies.particles.pos[:, 2] >= 0.0).all()  # never under the floor
 
 
+@pytest.mark.parametrize("height", [6.0, -2.0])
+def test_fireflies_that_drift_toward_an_anchor_outside_the_band_wander_inside_it(
+    height: float,
+) -> None:
+    # An anchor 3 m over the ceiling, or 2 m under the floor: the fireflies wander within
+    # DRIFT_REACH_M of it, but as near as the band lets them, from the ceiling down or the
+    # floor up.
+    leds = lights_at(upright(1.0, 1.0), upright(3.0, 1.0), anchors={"far": (2.0, 1.0, height)})
+    paths = _paths(_flies(count=20, speed=1.0, drift_toward="far"), leds)
+
+    assert paths[..., 2].min() >= 0.0 and paths[..., 2].max() <= 3.0
+    nearest = min(max(height, 0.0), 3.0)  # the band's height nearest the anchor
+    assert np.abs(paths[..., 2] - nearest).max() <= DRIFT_REACH_M + 1e-5
+    assert np.ptp(paths[..., 2]) > 0.5  # wandering up and down, not pressed flat
+
+
 def test_fireflies_drawn_to_an_anchor_that_is_not_there_wander_round_the_lamps() -> None:
     gone, plain = _flies(drift_toward="gone"), _flies()  # THREE has no anchors
     lit = False

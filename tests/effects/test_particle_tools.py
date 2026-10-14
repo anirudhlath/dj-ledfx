@@ -879,6 +879,26 @@ def test_a_lamp_one_float32_step_past_the_ceiling_or_the_floor_is_outside_it(
     assert float(Ground(leds, lamps_of(leds), 0.7, 3.0).floor_for([0])[0]) == under
 
 
+def test_a_box_round_a_point_outside_the_band_is_the_bands_part_nearest_it() -> None:
+    ground = Ground.of(lights_at([(1.0, 1.0, 0.5), (3.0, 1.0, 2.0)], ceiling=3.0))
+
+    low, high = ground.box(1.5, around=[[2.0, 1.0, 6.0], [2.0, 1.0, -2.0], [2.0, 1.0, 1.0]])
+
+    np.testing.assert_allclose(low[:, 2], [1.5, 0.0, 0.0])  # from the ceiling down
+    np.testing.assert_allclose(high[:, 2], [3.0, 1.5, 2.5])  # or the floor up
+    np.testing.assert_allclose(low[:, :2], [[0.5, -0.5]] * 3)  # the sides are the same
+    assert (low <= high).all()
+
+
+def test_a_box_round_a_lamps_led_outside_the_band_keeps_to_the_lamps_band() -> None:
+    ground = Ground.of(OUTSIDE)
+    # Points far over and under lamps 1 (3.2-3.5 m, over the ceiling) and 0 (-1 to -0.5 m).
+    low, high = ground.box(0.5, around=[[2.0, 1.0, 9.0], [1.0, 1.0, -9.0]], stops=[1, 0])
+
+    np.testing.assert_allclose(low[:, 2], [3.0, -1.0], atol=1e-6)
+    np.testing.assert_allclose(high[:, 2], [3.5, -0.5], atol=1e-6)
+
+
 def test_a_box_takes_in_lamps_only_round_points_it_is_given() -> None:
     with pytest.raises(ValueError, match="stops.*around"):
         Ground.of(OUTSIDE).box(1.0, stops=[0, 1])

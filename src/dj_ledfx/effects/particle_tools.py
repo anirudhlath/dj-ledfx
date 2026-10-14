@@ -573,20 +573,21 @@ class Ground:
         or `margin` each way round each point (shape (3,) or (P, 3)), between the floor and
         the ceiling. Round points that are LEDs of lamps (`stops`, a lamp for each point, so
         it needs `around`, the points), a box takes in the whole lamp where it stands outside
-        them (floor_for, ceiling_for)."""
+        them (floor_for, ceiling_for). A point (or a frame) over the ceiling or under the
+        floor is taken at the ceiling or the floor before the box is widened round it, so a
+        box is never upside down: round an anchor 3 m over the ceiling, it is the `margin`
+        under the ceiling."""
         if stops is not None and around is None:
             raise ValueError("box() takes stops only with around, the points they go with")
+        floor = self.floor if stops is None else self.floor_for(stops)
+        ceiling = self.ceiling if stops is None else self.ceiling_for(stops)
         if around is None:
-            low, high = self.low.astype(np.float64), self.high.astype(np.float64)
+            start, end = self.low.astype(np.float64), self.high.astype(np.float64)
         else:
-            low = high = np.asarray(around, dtype=np.float64)
-        low, high = low - margin, high + margin
-        low[..., 2] = np.maximum(
-            low[..., 2], self.floor if stops is None else self.floor_for(stops)
-        )
-        high[..., 2] = np.minimum(
-            high[..., 2], self.ceiling if stops is None else self.ceiling_for(stops)
-        )
+            start = end = np.asarray(around, dtype=np.float64)
+        low, high = start - margin, end + margin
+        low[..., 2] = np.maximum(np.clip(start[..., 2], floor, ceiling) - margin, floor)
+        high[..., 2] = np.minimum(np.clip(end[..., 2], floor, ceiling) + margin, ceiling)
         return low, high
 
     @cached_property
