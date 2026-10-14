@@ -211,6 +211,21 @@ def test_a_particle_with_no_place_or_size_makes_every_led_nan_on_either_path(fla
         assert np.isnan(lit(Ground.of(_scattered(count, seed=9)), particles)).all()
 
 
+# An infinite radius is the falloff's limit: exp(-(d / r)²) is 1 at every distance, so the
+# particle lights every LED with its whole colour. It goes the dense way whatever the LED count
+# (a grid's cell can't be infinitely wide), and the frame stays finite.
+@pytest.mark.filterwarnings("error")
+def test_a_particle_of_an_infinite_radius_lights_every_led_with_its_colour_on_either_path() -> (
+    None
+):
+    particles = swarm([[7.0, 7.0, 1.0]], [0.25, 0.5, 0.75], np.inf)
+
+    for count in (GRID_FROM_LEDS - 1, GRID_FROM_LEDS):  # the dense sum, and the grid's count
+        colours = lit(Ground.of(_scattered(count, seed=9)), particles)
+        assert colours.shape == (count, 3) and np.isfinite(colours).all()
+        np.testing.assert_array_equal(colours, np.tile([0.25, 0.5, 0.75], (count, 1)))
+
+
 def test_a_ground_keeps_a_few_grids_and_reuses_one_for_close_sizes() -> None:
     ground = Ground.of(_scattered(100, seed=3))
 
