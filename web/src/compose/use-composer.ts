@@ -12,6 +12,7 @@ import { useLive, useLiveBy } from '@/api/live-store'
 import type { PreviewState } from '@/api/preview'
 import { queries } from '@/api/queries'
 import { usePreview, usePreviewState } from '@/api/use-preview'
+import { useConnectionStatus } from '@/chrome/hooks'
 import { useAnnounce } from '@/design/announce'
 import type { StageCompose } from '@/stage/stage-view'
 import { consequence, type Consequence } from './consequence'
@@ -125,6 +126,11 @@ export interface Composer extends ComposeChoice {
   previewed: boolean
   /** Start is on its way. */
   starting: boolean
+  /**
+   * The link is down (§9.4 Reconnecting: "Controls come back when the link does"): Start waits for it, and the Reconnecting card says why.
+   * The choices don't wait, and the preview of the last one is asked for again once the link is back (PreviewSession.resume()).
+   */
+  frozen: boolean
   /** Starts the look on the zone with `transition` (F4 ruling 13); a failure is said, and the composer stays. */
   start: (transition: Transition) => void
   /** Cancel and Close: back to Live, the lights as they were. */
@@ -145,6 +151,7 @@ export function useComposer(): Composer {
   const close = useCloseComposer()
   const announce = useAnnounce()
   const [starting, setStarting] = useState(false)
+  const frozen = useConnectionStatus() === 'reconnecting'
   // Whether this composer is still on the page: a Start's answer can come after it was left.
   const mounted = useRef(false)
   useEffect(() => {
@@ -173,7 +180,7 @@ export function useComposer(): Composer {
           refused: refused && look !== undefined ? failureText(`preview ${look.name}`, preview.error) : null,
         })
   const start = (transition: Transition) => {
-    if (zone === undefined || look === undefined || starting) return
+    if (zone === undefined || look === undefined || starting || frozen) return
     setStarting(true)
     startLook(zone.id, look.id, transition).then(
       () => {
@@ -189,5 +196,5 @@ export function useComposer(): Composer {
       },
     )
   }
-  return { ...choice, running, preview, missing, consequence: said, previewed, starting, start, close }
+  return { ...choice, running, preview, missing, consequence: said, previewed, starting, frozen, start, close }
 }

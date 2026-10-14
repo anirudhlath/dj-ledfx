@@ -41,7 +41,7 @@ export interface ComposerView extends Composer {
   /** The transition chosen, by its key: the look's own until another is chosen for it. */
   transition: string
   chooseTransition: (key: string) => void
-  /** Start can't go yet; the consequence line says why. */
+  /** Start can't go yet: the consequence line says why, or the link is down and the Reconnecting card does. */
   blocked: boolean
   /** The looks' one tab stop: the look chosen, else the first shown. */
   tabbable: Id | undefined
@@ -62,7 +62,7 @@ export function useComposerView(steps: LookSteps, list: RefObject<HTMLElement | 
   const shown = looks === undefined ? [] : looksShown(looks, shownCategory, query)
   const transitions = transitionChoices(look)
   const key = chosen !== null && chosen.lookId === (look?.id ?? null) ? chosen.key : transitionKey(lookTransition(look))
-  const blocked = said?.blocked ?? true
+  const blocked = (said?.blocked ?? true) || composer.frozen
   const tabbable = shown.find((each) => each.id === look?.id)?.id ?? shown[0]?.id
   const startChosen = () => composer.start(transitions.find((choice) => choice.key === key)?.transition ?? lookTransition(look))
 

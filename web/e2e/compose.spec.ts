@@ -158,6 +158,22 @@ test('Put a look on: nothing absolutely positioned in <main> escapes a clip', as
   expect(escaped).toEqual([])
 })
 
+// §9.4 Reconnecting: the reconnecting scenario drops the link a second after it connects. Its card shows on the stage on desktop and at the
+// sheet's top on the phone; Start waits for the link, and a choice still moves the URL.
+test('Put a look on holds Start while the link is down, and still takes a choice', async ({ page, isMobile }) => {
+  await open(page, '/next/live/put?scenario=reconnecting&zone=living&look=embers', page.getByRole('group', { name: 'Looks' }))
+  const card = page.getByRole('region', { name: isMobile ? 'Lost the live link' : 'Lost the live link to homeserver' })
+  await expect(card).toBeVisible({ timeout: 5000 })
+  const start = page.getByRole('button', { name: /^Start / })
+  await expect(start).toBeDisabled()
+  if (isMobile) await expect(page.getByRole('region', { name: 'Put a look on' }).getByRole('region', { name: 'Lost the live link' })).toBeVisible()
+  const looks = page.getByRole('group', { name: 'Looks' }).locator('[data-look]')
+  const other = (await looks.evaluateAll((each) => each.map((look) => (look as HTMLElement).dataset.look))).find((id) => id !== 'embers')!
+  await page.locator(`[data-look="${other}"]`).click()
+  await expect(page).toHaveURL(new RegExp(`[?&]look=${other}(&|$)`))
+  await expect(start).toBeDisabled()
+})
+
 test.describe('on desktop', () => {
   test.skip(({ isMobile }) => isMobile)
 

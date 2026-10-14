@@ -5,6 +5,7 @@
 // room tapped there chooses its zone. Its title is the page's h1, since the header that holds one steps
 // aside (a focused task). Keyboard (F4 ruling 12): Up and Down move through the rows, previewing each,
 // and Enter starts the look previewed; the page's Esc closes it. Every way out is view.close (F4 ruling 13).
+// While the link is down the sheet shows the phone's Reconnecting card under its title, and Start waits.
 // Sizes: the render's, from its HTML. The page gives the sheet the screen's height under the stage, so
 // only the look list, which takes what the rest leaves, scrolls; but never less than one whole row, with its
 // padding on top (`box-content`), so a screen too short for that scrolls the sheet too, and every look and
@@ -20,6 +21,7 @@ import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import { Grabber } from '@/design/overlays'
 import { Select } from '@/design/select'
+import { ReconnectingCard } from '@/live/reconnecting'
 import { ConsequenceText } from './consequence-text'
 import { LookRow, ROW_HEIGHT } from './look-row'
 import { CATEGORIES } from './model'
@@ -53,6 +55,11 @@ export function ComposerSheet({ className }: { className?: string }) {
         <button type="button" aria-label="Close" className="inline-flex size-11 shrink-0 items-center justify-center text-text-2" onClick={view.close}>
           <Icon name="x" size={20} />
         </button>
+      </div>
+      {/* §9.4 Reconnecting: the focused task hides Live's list, where the phone's card sits, so the sheet says it, at its top (the card
+          draws nothing while the link is up, and the holder goes with it). Start waits for the link; the choices don't. */}
+      <div className="px-4 pt-2 empty:hidden">
+        <ReconnectingCard variant="phone" />
       </div>
       {zones !== undefined && looks !== undefined && zone !== undefined && (
         <>

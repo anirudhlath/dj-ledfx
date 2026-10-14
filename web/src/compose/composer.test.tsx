@@ -2,6 +2,7 @@ import { act, fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Id, Room } from '@/api/contract'
 import { frames, previewSession } from '@/api/live'
+import { liveStore } from '@/api/live-store'
 import { lookName } from '@/api/mocks/fixtures'
 import type { MockServer, MockServerOptions } from '@/api/mocks/mock-server'
 import { api, ApiError } from '@/api/rest'
@@ -60,6 +61,12 @@ async function openApp(path: string, options: MockServerOptions = {}, held: read
   const router = renderApp(path)
   await settle()
   return { server, router, release }
+}
+
+/** The reconnecting scenario drops the link a second after it connects, and refuses every retry (§9.4 Reconnecting). */
+async function linkDropped() {
+  await settle()
+  expect(liveStore.getState().connection.status).toBe('reconnecting')
 }
 
 const composer = () => screen.getByRole('complementary', { name: 'Put a look on' })
@@ -499,6 +506,47 @@ describe('Put a look on (§8.2)', () => {
     fireEvent.click(startButton('embers'))
     await settle()
     expect(start).toHaveBeenCalledWith('living', { lookId: 'embers', transition: { kind: 'fade', durationS: 3 } })
+  })
+
+  // §9.4 Reconnecting: "Controls come back when the link does". The stage's card says so; Start waits for the link, Enter with it, and the
+  // choices still move the URL. Once the link is back the preview is asked for again (PreviewSession.resume()), and Start comes back.
+  it('holds Start while the link is down, keeps the choices, and previews again once the link is back', async () => {
+    const start = vi.spyOn(api, 'start')
+    const { server, router } = await openApp('/next/live/put?zone=living&look=embers', { scenario: 'reconnecting' })
+    await linkDropped()
+    expect(screen.getByRole('region', { name: 'Lost the live link to homeserver' })).toBeInTheDocument()
+    expect(startButton('embers')).toBeDisabled()
+    fireEvent.keyDown(tile('embers'), { key: 'Enter' })
+
+    const kitchen = zoneName(server, 'kitchen')
+    fireEvent.click(chip(kitchen))
+    fireEvent.click(tile('fireflies'))
+    fireEvent.click(category('Tempo'))
+    fireEvent.change(within(composer()).getByRole('searchbox', { name: 'Search looks' }), { target: { value: lookName('embers') } })
+    await settle(100)
+    expect(router.state.location.search).toBe('?zone=kitchen&look=fireflies')
+    expect(tilesShown()).toContain('embers')
+    expect(startButton('fireflies')).toBeDisabled()
+    expect(start).not.toHaveBeenCalled()
+
+    const ask = vi.spyOn(api, 'startPreview')
+    // The link comes back: a server answers the socket again.
+    restOn(startMockDataLayer())
+    await settle()
+    expect(screen.queryByRole('region', { name: 'Lost the live link to homeserver' })).not.toBeInTheDocument()
+    expect(ask).toHaveBeenCalledWith({ zoneId: 'kitchen', lookId: 'fireflies' })
+    expect(previewSession.snapshot()).toMatchObject({ status: 'on', zoneId: 'kitchen', lookId: 'fireflies' })
+    expect(startButton('fireflies')).toBeEnabled()
+  })
+
+  // Live's own Put a look on goes inert with the cards while the link is down, so L opens nothing either.
+  it('takes no L while the link is down', async () => {
+    const { router } = await openApp('/next/live', { scenario: 'reconnecting' })
+    await linkDropped()
+    expect(screen.getByRole('link', { name: 'Put a look on' }).closest('[inert]')).not.toBeNull()
+    fireEvent.keyDown(document.body, { key: 'l' })
+    await settle(100)
+    expect(router.state.location.pathname).toBe('/next/live')
   })
 
   // Review focus 1: choices outrun the server. The stage and the consequence line follow the look chosen last, and
@@ -1397,6 +1445,28 @@ describe('Put a look on, on the phone (§8.10)', () => {
     fireEvent.click(category('Tempo'))
     expect(category('Tempo')).toHaveAttribute('aria-pressed', 'true')
     expect(rowsShown()).toEqual(server.state.looks.filter((each) => each.category === 'tempo').map((each) => each.id))
+  })
+
+  // §9.4 Reconnecting on the phone: the focused task hides the list its card sits on, so the sheet says it, at its top. Start waits for the
+  // link; the choices don't.
+  it('says the link is down at the top of the sheet, and holds Start but not the choices', async () => {
+    const { server, router } = await openApp('/next/live/put?zone=living&look=embers', { scenario: 'reconnecting' })
+    await linkDropped()
+    const card = within(sheet()).getByRole('region', { name: 'Lost the live link' })
+    expect(card.compareDocumentPosition(within(sheet()).getByRole('group', { name: 'Where' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const kitchen = zoneName(server, 'kitchen')
+    expect(within(sheet()).getByRole('button', { name: `Start ${lookName('embers')} on ${zoneName(server, 'living')}` })).toBeDisabled()
+
+    fireEvent.click(chip(kitchen))
+    fireEvent.click(row('fireflies'))
+    await settle(100)
+    expect(router.state.location.search).toBe('?zone=kitchen&look=fireflies')
+    expect(within(sheet()).getByRole('button', { name: `Start ${lookName('fireflies')} on ${kitchen}` })).toBeDisabled()
+
+    restOn(startMockDataLayer())
+    await settle()
+    expect(within(sheet()).queryByRole('region', { name: 'Lost the live link' })).not.toBeInTheDocument()
+    expect(within(sheet()).getByRole('button', { name: `Start ${lookName('fireflies')} on ${kitchen}` })).toBeEnabled()
   })
 
   // F4 ruling 15: "A room click chooses its zone and keeps the look", on the phone's stage as on the desktop's, in place.
