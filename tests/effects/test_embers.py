@@ -246,3 +246,21 @@ def test_however_the_draws_fall_embers_never_pass_the_cap_on_a_crowded_home(
     each = MAX_PARTICLES // served  # the cap, shared out in whole embers
     assert most == each  # the worst hand fills a lamp's share, and never past it
     assert served * most <= MAX_PARTICLES
+
+
+def test_an_ember_that_has_caught_only_shimmers() -> None:
+    # A deep flicker strobed on the real lamps (#48): once caught, an ember never dims by
+    # more than a fifth.
+    lamps = lamps_of(LAMPS)
+    embers = _embers(palette=["#ffffff", "#ffffff"])
+    swings = []
+    for t in _moments(10.0):
+        drawn(embers, render_ctx(t=t), LAMPS)
+        pos, colour = embers.particles.pos, embers.particles.colour
+        lamp = np.linalg.norm(pos[:, None, :2] - lamps.centre[None, :, :2], axis=2).argmin(axis=1)
+        foot, top = lamps.low[lamp], lamps.high[lamp] + CLIMB_OVER_M
+        share = ((pos[:, 2] - foot) / (top - foot)) ** (1 / 0.8)
+        caught = (share > 0.5) & (share < 0.95)  # well into its climb, so long past CATCH_S
+        swings.extend((colour[caught, 0] / (1.0 - share[caught])).tolist())
+    assert len(swings) > 50
+    assert min(swings) >= 0.8 - 1e-3

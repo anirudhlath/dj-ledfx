@@ -33,8 +33,9 @@ CLIMB_OVER_M = 0.3  # an ember dies this far over its lamp's top (or at the ceil
 WOBBLE_M = 0.06  # how far it wanders from its LED as it climbs
 WOBBLE_S = 2.0  # once round in this long
 LIFE_SPREAD = 0.5  # an ember lives its rise time, give or take a quarter
-FLICKER_HZ = 7.0
-CATCH_S = 0.15  # it brightens over this as it catches
+FLICKER_HZ = 1.5  # a slow shimmer: faster read as strobing on the lamps
+FLICKER_DEPTH = 0.1  # its brightness swings this much either way
+CATCH_S = 0.8  # it brightens over this as it catches, never popping on
 
 
 class Embers(ParamParticles):
@@ -98,7 +99,8 @@ class Embers(ParamParticles):
             ],
             axis=1,
         )
-        flicker = 0.75 + 0.25 * np.sin(2.0 * math.pi * (FLICKER_HZ * age + u[:, 3]))
+        wave = np.sin(2.0 * math.pi * (FLICKER_HZ * age + u[:, 3]))
+        flicker = 1.0 - FLICKER_DEPTH + FLICKER_DEPTH * wave
         glow = flicker * (1.0 - share) * np.minimum(1.0, age / CATCH_S)
         colour = palette_at(self._palette, share) * glow[:, None].astype(np.float32)
         return swarm(pos, colour, float(values["size"]))
