@@ -210,6 +210,24 @@ test.describe('on desktop', () => {
     }
   })
 
+  // Between 768 and 1199 px the composer lies over the stage's right side (§4.4). The card beside the zone is placed in the stage it leaves:
+  // placed in the whole stage, a whole-home look's card sat 174 px under the composer at 768 px and 58 px at 1000, and a room's on the right
+  // up to 232 px.
+  for (const width of [768, 1000]) {
+    for (const [zone, look] of [['home', 'goodnight'], ['bedroom', 'embers']]) {
+      test(`the preview's card stays clear of the composer at ${width} px (${zone})`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 800 })
+        await open(page, still(`/next/live/put?zone=${zone}&look=${look}`), stageCanvas(page))
+        const card = page.locator('[data-preview-card] > div')
+        await expect(card).toBeVisible()
+        const drawn = await restingBox(card)
+        const composer = await box(page.getByRole('complementary', { name: 'Put a look on' }))
+        expect(drawn.x).toBeGreaterThanOrEqual(-SLACK)
+        expect(drawn.x + drawn.width).toBeLessThanOrEqual(composer.x + SLACK)
+      })
+    }
+  }
+
   // The composer's page fits <main>, which never scrolls: Live's page is <main>'s own height, and the panel's grid takes what its header and
   // footer leave. 1000 px is §4.4's narrow layout, where the composer lies over the stage.
   for (const [width, height] of [

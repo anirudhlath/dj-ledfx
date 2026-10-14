@@ -58,6 +58,8 @@ export interface StageCompose {
   previewing: string | null
   /** A click on a room (§6.3: "selects the same zone"): the composer chooses its zone as it does a zone chip's. */
   choose: (zoneId: Id) => void
+  /** The composer lies over the stage's right side, `--live-panel-w` wide (§4.4's narrow layout): the preview's card keeps out from under it. */
+  covered: boolean
 }
 
 export interface StageViewProps {
@@ -224,7 +226,7 @@ export function StageView({ data, variant, route, roomTo, roomState, outlined = 
         <NoWebGL />
       )}
       {webgl && previewWords !== null && behaviour.previewTag === 'card' && zoneBox !== null && (
-        <PreviewCard {...previewWords} zoneBox={zoneBox} stage={size} />
+        <PreviewCard {...previewWords} zoneBox={zoneBox} covered={compose?.covered === true} />
       )}
       {webgl && previewWords !== null && behaviour.previewTag === 'tag' && <PreviewTag />}
       {/* Each render's order: Main.html's tools and readout, its legend, then its zoom; Live-PutLookOn's card before the legend. */}

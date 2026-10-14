@@ -95,12 +95,12 @@ function previewing(preview: PreviewState, zone: Zone, looks: readonly Look[] | 
   return looks?.find((look) => look.id === preview.lookId)?.name ?? null
 }
 
-/** What the stage shows of the composer (§7.6 compose), while it's open. */
-export function useStageCompose(composing: boolean): StageCompose | null {
+/** What the stage shows of the composer (§7.6 compose), while it's open; `covered` while the composer lies over the stage's right side. */
+export function useStageCompose(composing: boolean, covered: boolean): StageCompose | null {
   const { zone, looks, choose } = useComposeChoice(composing)
   const preview = usePreviewState()
   if (!composing || zone === undefined) return null
-  return { zoneId: zone.id, previewing: previewing(preview, zone, looks), choose }
+  return { zoneId: zone.id, previewing: previewing(preview, zone, looks), choose, covered }
 }
 
 type InputsRead = Pick<Inputs, 'music' | 'homeAssistant'> | null

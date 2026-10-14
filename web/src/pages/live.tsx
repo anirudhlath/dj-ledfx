@@ -44,10 +44,11 @@ export function LivePage() {
   usePrefetchQuery(queries.looks())
   const { zoneId } = useParams()
   const composing = useMatch(COMPOSER_ROUTE) !== null
-  const compose = useStageCompose(composing)
-  useComposerKeys(composing)
   const phone = useIsPhone()
   const narrow = useMediaQuery(NARROW_QUERY)
+  // Below the wide breakpoint the desktop's composer lies over the stage's right side.
+  const compose = useStageCompose(composing, narrow && !phone)
+  useComposerKeys(composing)
   const previewOnly = usePreviewOnly() === true
   const [panel, setPanel] = useState<NarrowPanel>('open')
   const [hovered, setHovered] = useState<Id | null>(null)

@@ -358,7 +358,7 @@ describe('the stage in compose (§7.6)', () => {
   /** The composer's stage on what the URL says, as the composer hands it over: ?zone= and the look previewed. */
   function Composing({ variant }: { variant: StageVariant }) {
     const [params] = useSearchParams()
-    const compose = { zoneId: params.get('zone')!, previewing: params.get('previewing'), choose }
+    const compose = { zoneId: params.get('zone')!, previewing: params.get('previewing'), choose, covered: params.has('covered') }
     return <Stage variant={variant} compose={compose} />
   }
 
@@ -485,6 +485,17 @@ describe('the stage in compose (§7.6)', () => {
     const office = state.home.subZones.find((sub) => sub.id === 'office')!
     expect(stage.getByText(office.name)).toHaveClass('fill-text')
     expect(stage.getByText(lookName('comets'))).toHaveClass('fill-text')
+  })
+
+  // Between 768 and 1199 px the composer lies over the stage's right side (§4.4), --live-panel-w wide: the card is placed in what's left.
+  it.each([
+    ['the whole stage', '', 'right-0'],
+    ['the stage left of the composer, where it lies over the stage', '&covered', 'right-(--live-panel-w)'],
+  ])('places the card in %s', async (_, covered, right) => {
+    await openCompose(`?zone=living&look=embers${previewing('embers')}${covered}`)
+    const room = document.querySelector('[data-preview-room]')!
+    expect(room).toHaveClass('absolute', 'inset-y-0', 'left-0', right)
+    expect(room).toContainElement(document.querySelector<HTMLElement>('[data-preview-card]'))
   })
 
   // Live-PutLookOn draws the PREVIEW ON SCREEN card before the legend.

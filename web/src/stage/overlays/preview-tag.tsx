@@ -4,7 +4,8 @@
 // tracking are Live-PutLookOn's measurements, and the tag's are Phone-PutLookOn's.
 import { Fragment } from 'react'
 import { Icon } from '@/design/icon'
-import { useElementSize, type ElementSize } from '@/lib/use-element-size'
+import { cx } from '@/design/cx'
+import { useElementSize } from '@/lib/use-element-size'
 import { besideZone, type StageBox } from '../zone-shape'
 
 export interface PreviewWords {
@@ -25,27 +26,34 @@ function Looks({ names }: { names: readonly string[] }) {
   ))
 }
 
-/** Live-PutLookOn's card, placed beside the zone once it's measured (F4 ruling 15). */
-export function PreviewCard({ zoneBox, stage, look, zone, running }: PreviewWords & { zoneBox: StageBox; stage: ElementSize }) {
+/**
+ * Live-PutLookOn's card, placed beside the zone once it and the stage it can use are measured (F4 ruling 15). That's the stage, but for its
+ * right side where the composer lies over it (`covered`, the narrow layout), whose own width is `--live-panel-w`: measured, as the stage is,
+ * rather than read. The room shares the stage's top left corner, so the zone's box is in its coordinates too.
+ */
+export function PreviewCard({ zoneBox, covered, look, zone, running }: PreviewWords & { zoneBox: StageBox; covered: boolean }) {
+  const [roomRef, room] = useElementSize<HTMLDivElement>()
   const [ref, card] = useElementSize<HTMLDivElement>()
-  const [left, top] = besideZone(zoneBox, stage, card)
+  const [left, top] = besideZone(zoneBox, room, card)
   return (
-    <div ref={ref} data-preview-card className="pointer-events-none absolute" style={{ left, top, visibility: card.width === 0 ? 'hidden' : undefined }}>
-      <div className="flex w-59 flex-col gap-1 rounded-tile border border-text bg-bg/88 px-3 py-2.5">
-        <span className="flex items-center gap-1.5 text-label font-bold tracking-[0.08em] text-text uppercase">
-          <Icon name="eye" size={13} />
-          Preview on screen
-        </span>
-        <p className="text-data leading-[1.4] text-text-2">
-          {look} on {zone}.{' '}
-          {running.length === 0 ? (
-            'The lights are as they were.'
-          ) : (
-            <>
-              The lights are still running <Looks names={running} />.
-            </>
-          )}
-        </p>
+    <div ref={roomRef} data-preview-room className={cx('pointer-events-none absolute inset-y-0 left-0', covered ? 'right-(--live-panel-w)' : 'right-0')}>
+      <div ref={ref} data-preview-card className="absolute" style={{ left, top, visibility: card.width === 0 || room.width === 0 ? 'hidden' : undefined }}>
+        <div className="flex w-59 flex-col gap-1 rounded-tile border border-text bg-bg/88 px-3 py-2.5">
+          <span className="flex items-center gap-1.5 text-label font-bold tracking-[0.08em] text-text uppercase">
+            <Icon name="eye" size={13} />
+            Preview on screen
+          </span>
+          <p className="text-data leading-[1.4] text-text-2">
+            {look} on {zone}.{' '}
+            {running.length === 0 ? (
+              'The lights are as they were.'
+            ) : (
+              <>
+                The lights are still running <Looks names={running} />.
+              </>
+            )}
+          </p>
+        </div>
       </div>
     </div>
   )
