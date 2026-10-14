@@ -297,7 +297,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     const panel = screen.getByRole('complementary', { name: 'Running' })
     const outline = () => document.querySelector('[data-outline]')
     expect(outline()).toBeNull()
-    fireEvent.pointerOver(within(panel).getByRole('article', { name: 'Living room — Fireflies' }))
+    fireEvent.pointerOver(within(panel).getByRole('article', { name: `${roomName('living')} — ${lookName('fireflies')}` }))
     expect(outline()).toHaveAttribute('data-outline', 'living')
     expect(outline()!.querySelectorAll('polygon')).toHaveLength(1)
     fireEvent.pointerLeave(panel)
@@ -310,17 +310,18 @@ describe('the stage on Live (§7, §8.1)', () => {
   it('tags a crashed and a slow zone on the stage, until the link drops', async () => {
     await openLive('problems')
     const stage = screen.getByRole('region', { name: STAGE_LABEL })
-    expect(within(stage).getByText('Lava stopped · 19:12')).toBeInTheDocument()
+    expect(within(stage).getByText(`${lookName('lava')} stopped · 19:12`)).toBeInTheDocument()
     expect(within(stage).getByText('38 fps · target 60')).toBeInTheDocument()
     act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
-    expect(within(stage).queryByText('Lava stopped · 19:12')).toBeNull()
+    expect(within(stage).queryByText(`${lookName('lava')} stopped · 19:12`)).toBeNull()
   })
 
   // State-Transition; F3 decision 16.
   it('tags a transition with its kind and its percentage', async () => {
     await openLive('transition')
     const stage = screen.getByRole('region', { name: STAGE_LABEL })
-    expect(within(stage).getByText(/^Fireflies → Embers · dissolving/)).toHaveTextContent('Fireflies → Embers · dissolving 62%')
+    const dissolving = `${lookName('fireflies')} → ${lookName('embers')} · dissolving`
+    expect(within(stage).getByText((text) => text.startsWith(dissolving))).toHaveTextContent(`${dissolving} 62%`)
   })
 })
 
@@ -528,7 +529,7 @@ describe('the stage in compose (§7.6)', () => {
     expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Zoom in' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
-    expect(stage.queryByText('Lava stopped · 19:12')).not.toBeInTheDocument()
+    expect(stage.queryByText(`${lookName('lava')} stopped · 19:12`)).not.toBeInTheDocument()
     const light = state.lights.find((candidate) => candidate.status === 'streaming' && candidate.shape != null)!
     const [lx, ly] = projectPoint(pose, anchorOf(lightBodies(light)[0]))
     fireEvent.pointerMove(picture(), { clientX: lx, clientY: ly, pointerType: 'mouse' })
