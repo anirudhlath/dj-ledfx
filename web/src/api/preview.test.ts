@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeSockets } from '@/test/fake-socket'
 import { HERO_NOW, pushFrame, restOn, startMockDataLayer } from '@/test/live'
-import { startLook } from './actions'
+import { failureText, startLook } from './actions'
 import type { PreviewStarted } from './contract'
 import { FrameStore } from './frames'
 import { frames, previewSession, startDataLayer } from './live'
 import type { LiveClient } from './live-client'
 import { PreviewSession } from './preview'
-import { api, ApiError } from './rest'
+import { api, ApiError, PREVIEW_ANSWER_MS } from './rest'
 
 const CUT = { kind: 'cut', durationS: 0 } as const
 
@@ -155,6 +155,42 @@ describe('the preview', () => {
     expect(store.preview.size).toBe(0)
     second.resolve(started('p2'))
     await vi.waitFor(() => expect(preview.snapshot()).toMatchObject({ status: 'on', zoneId: 'kitchen' }))
+  })
+
+  // A preview POST the server never answers fails after PREVIEW_ANSWER_MS (rest.ts), so it can't hold the queue: the choice made since is
+  // asked for, and the hold on the preview stream (Review Focus 1) is let go once that is answered.
+  it('moves on to the next choice when a preview request is never answered, and lets the held frames go', async () => {
+    vi.useFakeTimers()
+    const { preview, store } = session()
+    const answers: (Response | null)[] = [null, Response.json(started('p2'))]
+    vi.stubGlobal('fetch', (_: unknown, init?: RequestInit) => {
+      const next = answers.shift()
+      if (next) return Promise.resolve(next)
+      return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+    })
+    preview.show('living', 'embers')
+    preview.show('living', 'aurora')
+    expect(store.previewHeld).toBe(true)
+    await vi.advanceTimersByTimeAsync(PREVIEW_ANSWER_MS - 1)
+    expect(preview.snapshot()).toMatchObject({ status: 'starting', lookId: 'aurora' })
+    expect(store.previewHeld).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(preview.snapshot()).toMatchObject({ status: 'on', zoneId: 'living', lookId: 'aurora', showing: 'living' })
+    expect(store.previewHeld).toBe(false)
+  })
+
+  it('says a preview request never answered is refused for no answer, and lets the held frames go', async () => {
+    vi.useFakeTimers()
+    const { preview, store } = session()
+    vi.stubGlobal('fetch', (_: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))),
+    )
+    preview.show('living', 'embers')
+    await vi.advanceTimersByTimeAsync(PREVIEW_ANSWER_MS)
+    expect(preview.snapshot()).toMatchObject({ status: 'failed', lookId: 'embers', error: expect.objectContaining({ status: 0 }) })
+    expect(failureText('preview it', preview.snapshot().error)).toBe("Couldn't preview it. The server didn't answer.")
+    expect(store.previewHeld).toBe(false)
   })
 
   // The server plays the look of each answer, so the answer to a choice already replaced shows its look on the stage for a round trip, its

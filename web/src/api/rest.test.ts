@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, apiPath } from './rest'
+import { ApiError, api, apiPath, PREVIEW_ANSWER_MS } from './rest'
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -114,6 +114,43 @@ describe('api', () => {
     const error = await api.running().catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ status: 0, detail: 'fetch failed' })
+  })
+})
+
+/** A fetch that never answers, and fails as a browser's does once its signal aborts it. */
+function hangs(_: unknown, init?: RequestInit): Promise<Response> {
+  return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+}
+
+describe('a request with no answer', () => {
+  // A hung preview POST would hold the preview session's queue, and every choice after it. Start has none: one that timed out may still
+  // have started the look, and a scan (scanDevices) takes as long as it takes.
+  it('fails a preview after PREVIEW_ANSWER_MS as no answer (status 0)', async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementation(hangs)
+    const asked = api.startPreview({ zoneId: 'living', lookId: 'embers' })
+    const failed = expect(asked).rejects.toMatchObject({ status: 0, path: '/api/preview' })
+    await vi.advanceTimersByTimeAsync(PREVIEW_ANSWER_MS - 1)
+    expect(fetchMock.mock.calls[0]![1]!.signal!.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await failed
+    await expect(asked).rejects.toBeInstanceOf(ApiError)
+  })
+
+  it('waits as long as it takes for a start or a scan', async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementation(hangs)
+    void api.start('living', { lookId: 'embers' })
+    void api.scanDevices()
+    await vi.advanceTimersByTimeAsync(PREVIEW_ANSWER_MS * 10)
+    for (const [, init] of fetchMock.mock.calls) expect(init?.signal ?? null).toBeNull()
+  })
+
+  it('clears its timer once the preview is answered', async () => {
+    vi.useFakeTimers()
+    answer(200, { previewId: 'p1', lights: [] })
+    await api.startPreview({ zoneId: 'living', lookId: 'embers' })
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
 
