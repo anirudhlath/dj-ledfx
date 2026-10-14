@@ -1522,6 +1522,28 @@ describe('Put a look on, on the phone (§8.10)', () => {
     expect(scrolled).toEqual([[last, { block: 'nearest', inline: 'nearest' }]])
   })
 
+  // As the zone row does (F4 ruling 5): the pressed chip is scrolled wholly into the category row as the sheet opens, and when a choice
+  // changes it (a chip pressed, or a look of another category chosen by an arrow), or Home, say, can sit cut at the row's edge or out of view.
+  // The scroll is the instant kind the zone row's is, so there is no motion to hold back under reduced motion.
+  it('scrolls the pressed category chip wholly into view as the sheet opens, and when a choice changes it', async () => {
+    const scrolled = watchScrolling()
+    await openApp('/next/live/put?zone=living&look=goodnight')
+    const categories = within(sheet()).getByRole('group', { name: 'Categories' })
+    const chip = (name: string) => within(categories).getByRole('button', { name })
+    expect(chip('Home')).toHaveAttribute('aria-pressed', 'true')
+    expect(scrolled.filter(([element]) => element === chip('Home'))).toEqual([[chip('Home'), { block: 'nearest', inline: 'nearest' }]])
+    // A chip pressed.
+    scrolled.length = 0
+    fireEvent.click(chip('Firmware'))
+    await settle(100)
+    expect(scrolled).toEqual([[chip('Firmware'), { block: 'nearest', inline: 'nearest' }]])
+    // A choice that does not change the pressed chip moves nothing.
+    scrolled.length = 0
+    fireEvent.click(row(rowsShown()[0] as Id))
+    await settle(100)
+    expect(scrolled.filter(([element]) => categories.contains(element))).toEqual([])
+  })
+
   // Phone-PutLookOn: the stage keeps Phone-Live's box and the sheet fills the screen under it, over the stage's foot (F4 ruling 16). The
   // page is <main>'s own height, so that only the list scrolls; where the screen is too short for the rest of the sheet and a row of the
   // list, the sheet does.

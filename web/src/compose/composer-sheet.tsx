@@ -12,7 +12,7 @@
 // at 390 wide, 660 at 375 and 700 at 430. <main> never scrolls. The two rows that scroll on their own
 // (the chips, the looks) pad by the reach of a focus ring (tokens.css's outline and offset, 4 px) and pull
 // back by as much, so a ring is never cut at the row's edge and nothing moves; ZonePicker's row does too.
-import { useId, useRef } from 'react'
+import { useId, useLayoutEffect, useRef } from 'react'
 import { Button } from '@/design/button'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
@@ -33,6 +33,15 @@ export function ComposerSheet({ className }: { className?: string }) {
   const title = useId()
   const view = useComposerView(ROW_STEPS, rows)
   const { zones, looks, zone, look, running, consequence: said } = view
+  const chips = useRef<HTMLDivElement>(null)
+  // The pressed chip is scrolled wholly into the row as the sheet opens, and whenever a choice changes it (as ZonePicker's row does for its
+  // zone, F4 ruling 5): a row that scrolls on its own can leave it cut at its edge or out of view. A layout effect, so it moves before the
+  // paint; `nearest` leaves a chip that already shows alone, and the scroll is the instant kind, so reduced motion has nothing to hold back.
+  const pressed = view.category
+  const drawn = zones !== undefined && looks !== undefined && zone !== undefined
+  useLayoutEffect(() => {
+    if (drawn) chips.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [pressed, drawn])
 
   return (
     <section aria-labelledby={title} className={cx('flex flex-col overflow-y-auto rounded-t-sheet border-t border-line bg-panel', className)}>
@@ -52,7 +61,7 @@ export function ComposerSheet({ className }: { className?: string }) {
             <span className="label-caps text-text-3">What</span>
             {/* The chips are drawn smaller than --touch-min; the row's padding keeps their grown hit areas and focus rings in it, and a
                 chip the keyboard focuses is scrolled wholly in (revealKeyboardFocus). */}
-            <div role="group" aria-label="Categories" className="-m-1 flex scroll-px-1 gap-1.5 overflow-x-auto p-1" onFocus={revealKeyboardFocus}>
+            <div ref={chips} role="group" aria-label="Categories" className="-m-1 flex scroll-px-1 gap-1.5 overflow-x-auto p-1" onFocus={revealKeyboardFocus}>
               {CATEGORIES.map(({ id, label }) => (
                 <button
                   key={id}
