@@ -29,10 +29,11 @@ Among: TypeAlias = NDArray[np.bool_] | None  # the LEDs a ground's lamps are mad
 
 REACH = 2.5  # a particle lights nothing past this many radii: under half an 8-bit step
 # From this many LEDs on, lit() looks only near each particle. The spec says "about 2k" (§4.1).
-# Measured with 500 particles, the grid costs no more than the dense sum from 600 LEDs (0.7 ms
-# against 0.9 for radii of 0.2 m, 1.1 against 1.1 for 0.6 m), and the dense sum keeps growing
-# with the LEDs: 2.7 ms at 1800, the half of §4.1's 5 ms that each look of a transition gets
-# (§5.3: both are rendered), and 4.4 ms at 3000.
+# Measured with 500 particles among the LEDs (both scattered through 15 x 15 x 3 m), at 600 LEDs
+# the grid costs less than the dense sum for small particles (1.1 ms against 1.3 for radii of
+# 0.2 m) and more for larger ones (2.0 against 1.2 for 0.6 m), and the dense sum keeps growing
+# with the LEDs: past the half of §4.1's 5 ms that each look of a transition gets (§5.3: both
+# are rendered) by 1800 LEDs (2.7 to 3.7 ms), and past all of it by 3000 (6.5 to 8 ms).
 GRID_FROM_LEDS = 600
 # Where the grid would gather more than this share of every pair of an LED and a particle, the
 # dense sum is cheaper and lit() takes it. A pair costs the grid 6 to 12 times what it costs the
@@ -633,11 +634,16 @@ def lit(ground: Ground, particles: Particles) -> FloatRGB:
     falloff"): the sum of each particle's colour times exp(-(d / r)²), d its distance from
     the LED and r its radius, out to REACH radii, and at most 1. A new float32 array.
 
-    Measured on one core, 500 particles take 0.9 ms on 599 LEDs (the dense sum) and 1.5 ms on
-    10k LEDs when their radius is 0.2 m (the grid): inside spec §4.1's 5 ms. The grid's cells
-    are REACH radii wide, so a larger radius gathers more LEDs for each particle: 500 of
-    0.6 m on 10k LEDs take 8 to 11 ms (the allocator's page faults decide), over it. That is
-    documented, not mended.
+    Measured on one core with 500 particles among the LEDs (the perf tests in
+    tests/effects/test_particle_tools.py): 0.9 ms on 599 LEDs (the dense sum, radius 0.25 m),
+    and on 10k LEDs (the grid) 2.0 to 2.6 ms at 0.15 m and 3.2 to 4.6 ms at 0.2 m, inside spec
+    §4.1's 5 ms. The grid's cells are REACH radii wide, so a larger radius gathers more LEDs
+    for each particle, and the budget holds for small particles only. From about 2k LEDs,
+    particles of 0.4 m and more come near it or go past it: 3 to 5 ms at 0.4 m and 5 to 7 ms
+    from 0.6 m on 2k LEDs, and on 10k LEDs 6 ms at 0.3 m, 12 ms at 0.4 m and 30 to 35 ms from
+    0.6 m, where the dense sum takes over (DENSE_FROM_SHARE). The effects' largest sizes run
+    from 0.4 m (rain's drops) to 3 m (spotlights), so on such a zone their largest settings go
+    past the budget. That is documented, not mended.
 
     A particle with a NaN or infinite place or size sends the frame the dense way whatever the
     LED count, so a NaN reaches the frame (spec §8: a look that produces NaN is crashed) and no
