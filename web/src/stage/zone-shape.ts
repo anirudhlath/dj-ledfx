@@ -1,6 +1,9 @@
 // Where a zone is on the stage: its floor polygons, for §8.1's "Hover a card → its zone outlines on the
-// stage", and the middle of its lights, where its tag goes (F3 decision 18). Plan metres throughout.
+// stage", the rooms it lights and the sub-zones inside it, which §7.6 compose leaves undimmed, and the
+// middle of its lights, where its tag goes (F3 decision 18), in plan metres; and where a card beside it
+// goes, in CSS px.
 import type { Home, Id, Light, Vec2, Vec3, Zone } from '@/api/contract'
+import type { ElementSize } from '@/lib/use-element-size'
 import type { Body } from './bodies'
 import { anchorOf } from './marks'
 
@@ -29,4 +32,68 @@ export function zoneMiddle(bodies: readonly Body[], lights: readonly Id[]): Vec3
   if (anchors.length === 0) return null
   const sum = anchors.reduce<Vec3>((total, at) => [total[0] + at[0], total[1] + at[1], total[2] + at[2]], [0, 0, 0])
   return [sum[0] / anchors.length, sum[1] / anchors.length, sum[2] / anchors.length]
+}
+
+/**
+ * The rooms a zone lights (§7.6 compose: "Rooms outside the chosen zone dimmed"): every room for the
+ * whole home, a room itself, a sub-zone's room, and for a group the rooms its lights stand in.
+ */
+export function zoneRooms(home: Home, zone: Zone, lights: readonly Light[]): Set<Id> {
+  switch (zone.kind) {
+    case 'home':
+      return new Set(home.rooms.map((room) => room.id))
+    case 'room':
+      return new Set([zone.id])
+    case 'sub-zone':
+      return new Set(home.subZones.filter((sub) => sub.id === zone.id).map((sub) => sub.room))
+    case 'group': {
+      const members = new Set(zone.lights)
+      return new Set(lights.flatMap((light) => (members.has(light.id) && light.room != null ? [light.room] : [])))
+    }
+  }
+}
+
+/**
+ * The ids of the sub-zones inside a zone: those whose lights are all the zone's, and which have lights. A
+ * sub-zone's label on the stage is its own (labels.ts), so compose lights it with the zone it is in.
+ */
+export function subZonesIn(zone: Zone, zones: readonly Zone[]): Id[] {
+  const own = new Set(zone.lights)
+  return zones
+    .filter((candidate) => candidate.kind === 'sub-zone' && candidate.lights.length > 0 && candidate.lights.every((id) => own.has(id)))
+    .map((sub) => sub.id)
+}
+
+/** A box round some points on the stage, CSS px. */
+export interface StageBox {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+/** The box round projected polygons; null for none. */
+export function boxOf(polygons: readonly (readonly Vec2[])[]): StageBox | null {
+  const points = polygons.flat()
+  if (points.length === 0) return null
+  const xs = points.map(([x]) => x)
+  const ys = points.map(([, y]) => y)
+  return { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) }
+}
+
+/**
+ * Where a card goes beside a zone (F4 ruling 15; Live-PutLookOn's PREVIEW ON SCREEN): left of the zone
+ * where it fits, else right of it, else over its middle; centred on it from top to bottom; and inside the
+ * stage. Its top-left corner, CSS px.
+ */
+export function besideZone(zone: StageBox, stage: ElementSize, card: ElementSize): Vec2 {
+  const left =
+    zone.left - card.width >= 0
+      ? zone.left - card.width
+      : zone.right + card.width <= stage.width
+        ? zone.right
+        : (zone.left + zone.right - card.width) / 2
+  const top = (zone.top + zone.bottom - card.height) / 2
+  const inside = (value: number, room: number) => Math.min(Math.max(value, 0), Math.max(room, 0))
+  return [inside(left, stage.width - card.width), inside(top, stage.height - card.height)]
 }

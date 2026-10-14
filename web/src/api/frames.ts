@@ -75,9 +75,23 @@ export class FrameStore {
   /** Binary messages dropped as malformed. */
   malformed = 0
   private readonly waiting = new Set<() => void>()
+  private held = false
 
   get(id: Id, stream: FrameStream = 'live'): LightFrame | undefined {
     return (stream === 'live' ? this.live : this.preview).get(id)
+  }
+
+  /** The preview stream's frames are checked but not kept: what is stored stays as it is (holdPreview). */
+  get previewHeld(): boolean {
+    return this.held
+  }
+
+  /**
+   * Holds the preview stream's last frames, or lets new ones in again. The preview session holds them while the server may be playing a
+   * look that was chosen over: the stage draws the zone from them, and would step through that look for a round trip.
+   */
+  holdPreview(on: boolean): void {
+    this.held = on
   }
 
   /** Calls `wake` once, when the version next moves; returns what stops it waiting. */
@@ -124,6 +138,7 @@ export class FrameStore {
     this.version = 0
     this.lastFrameAt = null
     this.malformed = 0
+    this.held = false
   }
 
   /** The preview ended (F4): its frames go. */
@@ -152,6 +167,8 @@ export function decodeFrame(data: ArrayBuffer, version: FrameVersion, frames: Fr
   offset += 4
   const length = bytes.length - offset
   if (length % 3 !== 0) return frames.reject()
+  // A held preview frame is a good one, and let go: the zone keeps the last it drew.
+  if (target === frames.preview && frames.previewHeld) return true
 
   let frame = target.get(id)
   // v1 sends every light at each poll, whether or not it has a new frame.

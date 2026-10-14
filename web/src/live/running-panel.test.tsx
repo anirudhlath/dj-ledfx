@@ -2,7 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Id } from '@/api/contract'
 import { liveStore } from '@/api/live-store'
 import type { ScenarioName } from '@/api/mocks/scenarios'
@@ -12,6 +12,7 @@ import { Announcer } from '@/design/announcer'
 import { HERO_NOW, seedLive } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
 import { seedRest } from '@/test/rest'
+import { watchScrolling } from '@/test/scroll'
 import { RunningPanel } from './running-panel'
 
 function renderPanel(name: ScenarioName | null, selected?: Id) {
@@ -198,12 +199,7 @@ describe('RunningPanel', () => {
   // F3 decision 23: /live/zones/:zoneId outlines its zone, which collapses last and scrolls into view.
   it('outlines the selected zone, keeps it a card, and scrolls it into view', () => {
     // jsdom doesn't scroll.
-    const scrolled: Element[] = []
-    const original = Element.prototype.scrollIntoView
-    Element.prototype.scrollIntoView = function (this: Element) {
-      scrolled.push(this)
-    }
-    onTestFinished(() => void (Element.prototype.scrollIntoView = original))
+    const scrolled = watchScrolling()
     layOut({ height: 600 })
     const panel = renderPanel('problems', 'bedroom')
     settle(4)
@@ -211,7 +207,7 @@ describe('RunningPanel', () => {
     expect(bedroom).toHaveClass('outline-2')
     expect(bedroom.dataset.shape).toBe('compact')
     expect(shapes(panel)['Office desk — Twin comets']).toBe('row')
-    expect(scrolled.at(-1)).toBe(bedroom)
+    expect(scrolled.at(-1)?.[0]).toBe(bedroom)
   })
 
   // Like the chrome's "never All good before the data" (F0's review): never "Nothing running" before it.

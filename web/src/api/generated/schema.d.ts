@@ -672,7 +672,8 @@ export interface paths {
         put?: never;
         /**
          * Start Preview
-         * @description Replaces any previous preview. A request that fails leaves it as it was.
+         * @description Replaces any previous preview. A request that fails leaves it as it was. The answer
+         *     says what each of the zone's lights would do if the look started now.
          */
         post: operations["start_preview_api_preview_post"];
         delete?: never;
@@ -1842,6 +1843,22 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * PreviewLight
+         * @description What one of the preview's lights would do if its look started now (web spec §8.2's
+         *     consequence line). Not in the web spec's contract: F4 adds it (its ruling 1).
+         */
+        PreviewLight: {
+            /** Effect */
+            effect: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "streaming" | "own-effect" | "streamed-copy";
+        };
         /** PreviewRequest */
         PreviewRequest: {
             look?: components["schemas"]["Look"] | null;
@@ -1852,6 +1869,8 @@ export interface components {
         };
         /** PreviewStarted */
         PreviewStarted: {
+            /** Lights */
+            lights: components["schemas"]["PreviewLight"][];
             /** Previewid */
             previewId: string;
         };

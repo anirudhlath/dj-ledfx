@@ -2,7 +2,7 @@
 // with the new state, the action puts it in the live store at once, so a control shows it without
 // waiting for the push (F3 decision 8). A failure rejects; components say it with failureText()
 // through useAnnounce() (Review Focus 1). Components call these, never `api` or the socket (§12).
-import type { Id, RecentLook, RunningZone, TempoInput, TempoLock } from './contract'
+import type { Id, RecentLook, RunningZone, StartResponse, TempoInput, TempoLock, Transition } from './contract'
 import { liveClient } from './live'
 import { liveStore } from './live-store'
 import { queries, queryClient } from './queries'
@@ -13,6 +13,22 @@ function storeZone(zone: RunningZone): void {
   liveStore.setState(({ running }) =>
     running === null ? {} : { running: { ...running, zones: running.zones.map((old) => (old.zoneId === zone.zoneId ? zone : old)) } },
   )
+}
+
+/**
+ * A start's answer in the store (F4 ruling 13): the zone, replaced or added as the newest, and the
+ * lights it took gone from the zones it took them from; a zone left with none stops, as on the server.
+ */
+function storeStarted({ takeOvers, ...zone }: StartResponse): void {
+  const taken = new Set((takeOvers ?? []).flatMap((takeOver) => takeOver.lights))
+  liveStore.setState(({ running }) => {
+    if (running === null) return {}
+    const others = running.zones
+      .filter((other) => other.zoneId !== zone.zoneId)
+      .map((other) => (other.lights.some((id) => taken.has(id)) ? { ...other, lights: other.lights.filter((id) => !taken.has(id)) } : other))
+      .filter((other) => other.lights.length > 0)
+    return { running: { ...running, zones: [...others, zone] } }
+  })
 }
 
 /** The tempo the server answered with, in the inputs the store holds. */
@@ -38,6 +54,11 @@ export async function restartZone(zoneId: Id): Promise<void> {
 /** §11.3 "Stop all does this for every zone after a confirm." The confirm is the caller's. */
 export async function stopAll(): Promise<void> {
   await api.stopAll()
+}
+
+/** §8.2 Start: the look on the zone, with the transition chosen. Live shows it before the push comes. */
+export async function startLook(zoneId: Id, lookId: Id, transition: Transition): Promise<void> {
+  storeStarted(await api.start(zoneId, { lookId, transition }))
 }
 
 /** §9.4 "Start again": one tap plays a recent look on its zone, and the list is read afresh. */

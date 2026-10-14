@@ -41,13 +41,43 @@ function url(path: string): URL {
   return new URL(path, location.origin)
 }
 
-async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+/**
+ * How long a preview's POST waits for an answer before it counts as none (status 0). The preview session asks for one preview at a time,
+ * so a request that hung would hold every choice after it. Only the preview has one: a start that timed out may still have started the
+ * look on the server, and a scan takes as long as it takes.
+ */
+export const PREVIEW_ANSWER_MS = 10_000
+
+interface RequestOptions {
+  /** Gives up after this long, as no answer at all (status 0); none waits as long as the request takes. */
+  timeoutMs?: number
+}
+
+async function request<T>(method: Method, path: string, body?: unknown, { timeoutMs }: RequestOptions = {}): Promise<T> {
+  // A timer of the page's, rather than AbortSignal.timeout(), whose clock no test's fake timers move.
+  const controller = timeoutMs === undefined ? null : new AbortController()
+  const timer = controller === null ? null : setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await send<T>(method, path, body, controller?.signal)
+  } catch (error) {
+    // Aborted on the way, the answer's body included: no answer in time, whatever the browser called it. A status the server sent stands.
+    if (controller?.signal.aborted && !(error instanceof ApiError && error.status !== 0)) {
+      throw new ApiError(0, `No answer in ${(timeoutMs ?? 0) / 1000} s`, path)
+    }
+    throw error
+  } finally {
+    if (timer !== null) clearTimeout(timer)
+  }
+}
+
+async function send<T>(method: Method, path: string, body: unknown, signal: AbortSignal | undefined): Promise<T> {
   let response: Response
   try {
     response = await fetch(url(path), {
       method,
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      ...(signal === undefined ? {} : { signal }),
     })
   } catch (error) {
     throw new ApiError(0, error instanceof Error ? error.message : String(error), path)
@@ -123,7 +153,8 @@ export const api = {
     request<Placement>('POST', apiPath('/api/lights/{light_id}/placement/confirm', light(lightId))),
   /** Places the lights that have no placement, unconfirmed: the placements it made, by light. */
   guessPlacements: () => request<Record<Id, Placement>>('POST', apiPath('/api/lights/placement/guess')),
-  startPreview: (body: PreviewRequest) => request<PreviewStarted>('POST', apiPath('/api/preview'), body),
+  startPreview: (body: PreviewRequest) =>
+    request<PreviewStarted>('POST', apiPath('/api/preview'), body, { timeoutMs: PREVIEW_ANSWER_MS }),
   updatePreview: (id: Id, draft: Look) =>
     request<void>('PUT', apiPath('/api/preview/{preview_id}', { preview_id: id }), { look: draft } satisfies PreviewUpdate),
   stopPreview: (id: Id) => request<void>('DELETE', apiPath('/api/preview/{preview_id}', { preview_id: id })),

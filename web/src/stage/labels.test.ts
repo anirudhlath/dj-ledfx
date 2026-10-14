@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { lookName, OWNER_ROOM_NAMES, roomName } from '@/api/mocks/fixtures'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { HERO_NOW } from '@/test/live'
-import { stageLabels } from './labels'
+import { looksOn, stageLabels } from './labels'
 
 describe('the room labels (§7.6)', () => {
   it("names every room, with the look on its lights beneath, as Main.png does", () => {
@@ -38,11 +38,47 @@ describe('the room labels (§7.6)', () => {
     expect(labels.find((label) => label.key === 'kitchen')!.look).toBe(lookName('homesunset'))
   })
 
+  // Live-PutLookOn: the room's name over the look previewed there.
+  it("names the composer's look on its zone, as the newest there", () => {
+    const hero = buildScenario('hero', HERO_NOW)
+    const zone = (id: string) => hero.zones.find((candidate) => candidate.id === id)!
+    const previewed = (id: string) => ({ zoneId: id, lookName: lookName('embers'), lights: zone(id).lights })
+    const looks = (id: string) =>
+      Object.fromEntries(stageLabels(hero.home, hero.running, hero.lights, previewed(id)).map((label) => [label.key, label.look]))
+    expect(looks('living')).toMatchObject({ living: lookName('embers'), kitchen: lookName('homesunset'), office: lookName('comets') })
+    expect(looks('office')).toMatchObject({ office: lookName('embers'), bedroom: lookName('homesunset') })
+    // The whole home covers the sub-zone's lights: its own label goes, and every lit room shows the preview.
+    const home = looks('home')
+    expect(home).toMatchObject({ living: lookName('embers'), bedroom: lookName('embers'), corridor: lookName('embers') })
+    expect(home).not.toHaveProperty('office')
+  })
+
+  // The whole home runs on the kitchen's lights too, and on rooms the preview leaves alone: it stays there,
+  // and on the kitchen the preview comes before it.
+  it("leaves the rooms a preview doesn't cover to the look running there, and puts the preview first on its own", () => {
+    const hero = buildScenario('hero', HERO_NOW)
+    const kitchen = hero.zones.find((zone) => zone.id === 'kitchen')!
+    const previewed = { zoneId: kitchen.id, lookName: lookName('embers'), lights: kitchen.lights }
+    const looks = Object.fromEntries(stageLabels(hero.home, hero.running, hero.lights, previewed).map((label) => [label.key, label.look]))
+    expect(looks).toMatchObject({ kitchen: lookName('embers'), bedroom: lookName('homesunset'), corridor: lookName('homesunset') })
+  })
+
   it('shows the newest look where two run on one room', () => {
     const hero = buildScenario('hero', HERO_NOW)
     const living = hero.running.find((zone) => zone.zoneId === 'living')!
     const older = { ...living, zoneId: 'kitchen-group', lookName: 'Older', since: '2026-09-23T10:00:00-05:00' }
     const labels = stageLabels(hero.home, [older, ...hero.running], hero.lights)
     expect(labels.find((label) => label.key === 'living')!.look).toBe(lookName('fireflies'))
+  })
+})
+
+describe("the looks a zone's lights still run", () => {
+  it('are its own look first, then the newest of the others on its lights', () => {
+    const hero = buildScenario('hero', HERO_NOW)
+    const zone = (id: string) => hero.zones.find((each) => each.id === id)!
+    expect(looksOn(zone('living'), hero.running)).toEqual([lookName('fireflies')])
+    expect(looksOn(zone('bedroom'), hero.running)).toEqual([lookName('comets'), lookName('homesunset')])
+    const quiet = buildScenario('nothing-running', HERO_NOW)
+    expect(looksOn(quiet.zones.find((each) => each.id === 'kitchen')!, quiet.running)).toEqual([])
   })
 })

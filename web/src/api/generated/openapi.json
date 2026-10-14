@@ -2307,6 +2307,42 @@
         "title": "PresetResponse",
         "type": "object"
       },
+      "PreviewLight": {
+        "description": "What one of the preview's lights would do if its look started now (web spec §8.2's\nconsequence line). Not in the web spec's contract: F4 adds it (its ruling 1).",
+        "properties": {
+          "effect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "streaming",
+              "own-effect",
+              "streamed-copy"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "mode",
+          "effect"
+        ],
+        "title": "PreviewLight",
+        "type": "object"
+      },
       "PreviewRequest": {
         "properties": {
           "look": {
@@ -2343,13 +2379,21 @@
       },
       "PreviewStarted": {
         "properties": {
+          "lights": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewLight"
+            },
+            "title": "Lights",
+            "type": "array"
+          },
           "previewId": {
             "title": "Previewid",
             "type": "string"
           }
         },
         "required": [
-          "previewId"
+          "previewId",
+          "lights"
         ],
         "title": "PreviewStarted",
         "type": "object"
@@ -5438,7 +5482,7 @@
     },
     "/api/preview": {
       "post": {
-        "description": "Replaces any previous preview. A request that fails leaves it as it was.",
+        "description": "Replaces any previous preview. A request that fails leaves it as it was. The answer\nsays what each of the zone's lights would do if the look started now.",
         "operationId": "start_preview_api_preview_post",
         "requestBody": {
           "content": {

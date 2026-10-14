@@ -3,8 +3,9 @@
 // made once, when which bodies are drawn changes (sameLayout()), so a frame allocates nothing, and
 // nor does a `lights` push that changes only colours: setEntries() takes those in place. The light
 // layer hands these very arrays to three. Offline and switched-off lights have no entry (§9.1): their
-// marks are the overlay's.
-import type { Id, Light, Room } from '@/api/contract'
+// marks are the overlay's. In the composer the chosen zone's lights are drawn from the preview stream
+// (§7.6 compose), and every other light from the live one.
+import type { FrameStream, Id, Light, Room } from '@/api/contract'
 import type { FrameStore } from '@/api/frames'
 import { hueOf, isDark, mix, type RGB } from '@/lib/light-colour'
 import { anchorIndex, type Body } from './bodies'
@@ -18,6 +19,8 @@ export interface WriterEntry {
   body: Body
   /** Its light's frames are streamed: drawn from them once one has come. */
   streamed: boolean
+  /** The stream they're drawn from. */
+  stream: FrameStream
   /** The colour drawn without a frame; null draws the light dark. */
   resting: RGB | null
   /** The room whose floor its pools may light: 1-based in home.rooms; 0 lights none. */
@@ -35,6 +38,7 @@ interface Slot {
   body: Body
   room: number
   streamed: boolean
+  stream: FrameStream
   resting: RGB | null
   /** Its first halo and pool. */
   glow: number
@@ -98,11 +102,12 @@ export class FrameWriter {
     let glow = 0
     let core = 0
     const next = { narrow: 0, wide: 0 }
-    for (const { body, room, streamed, resting } of entries) {
+    for (const { body, room, streamed, stream, resting } of entries) {
       const slot: Slot = {
         body,
         room,
         streamed,
+        stream,
         resting,
         glow,
         core: -1,
@@ -136,14 +141,15 @@ export class FrameWriter {
   }
 
   /**
-   * Whether each light streams and the colour it rests on, from entries laid out as this writer's
-   * (sameLayout()): a `lights` push that changes only those reallocates nothing.
+   * Whether each light streams, from which stream, and the colour it rests on, from entries laid out as
+   * this writer's (sameLayout()): a `lights` push or a preview that changes only those reallocates nothing.
    */
   setEntries(entries: readonly WriterEntry[]): void {
     if (entries.length !== this.slots.length) throw new Error('FrameWriter.setEntries: the entries are laid out differently')
     entries.forEach((entry, index) => {
       const slot = this.slots[index]
       slot.streamed = entry.streamed
+      slot.stream = entry.stream
       slot.resting = entry.resting
     })
   }
@@ -158,7 +164,7 @@ export class FrameWriter {
     let leds = 0
     for (const slot of this.slots) {
       const { body, room, resting, strip } = slot
-      const frame = slot.streamed ? frames.get(body.lightId) : undefined
+      const frame = slot.streamed ? frames.get(body.lightId, slot.stream) : undefined
       if (frame !== undefined && slot.counts) leds += Math.min(frame.count, body.ledCount)
       const compact = body.form === 'compact'
       const count = body.samples.length
@@ -242,12 +248,16 @@ export class FrameWriter {
   }
 }
 
-/** Each drawn body with whether its light streams, the colour it rests on, and its room. */
+/**
+ * Each drawn body with whether its light streams and from which stream, the colour it rests on, and its
+ * room. A light in `previewed` is drawn from the preview stream, whatever it does now (§7.6 compose).
+ */
 export function writerEntries(
   bodies: readonly Body[],
   lights: readonly Light[],
   states: ReadonlyMap<Id, LightState>,
   rooms: readonly Room[],
+  previewed: ReadonlySet<Id> | null = null,
 ): WriterEntry[] {
   const byId = new Map(lights.map((light) => [light.id, light]))
   return bodies.flatMap((body) => {
@@ -255,7 +265,8 @@ export function writerEntries(
     const state = states.get(body.lightId)
     if (light === undefined || state === undefined || !isDrawn(state)) return []
     const room = rooms.findIndex((candidate) => candidate.id === light.room) + 1
-    return [{ body, streamed: isStreamed(state), resting: restingColour(state), room }]
+    const preview = previewed?.has(body.lightId) === true
+    return [{ body, streamed: preview || isStreamed(state), stream: preview ? 'preview' : 'live', resting: restingColour(state), room }]
   })
 }
 

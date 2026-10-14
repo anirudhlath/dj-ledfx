@@ -2,6 +2,7 @@ import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { api } from '@/api/rest'
+import { composerEntered } from '@/compose/model'
 import { renderApp } from '@/test/app'
 import { pushFrame, seedLive } from '@/test/live'
 import { seedRest } from '@/test/rest'
@@ -33,6 +34,18 @@ describe("the phone's Zone detail (§8.10)", () => {
     expect(within(lights()).getAllByRole('listitem')).toHaveLength(11)
     expect(row('Rope')).toHaveTextContent('Offline since 17:02')
     expect(row('Candle 2')).toHaveTextContent('Switched off elsewhere · rejoins')
+  })
+
+  // F4 ruling 13, as amended: the composer is stepped into, so that leaving it steps back out to the zone.
+  it.each([
+    ['living', 'Change'],
+    ['kitchen', 'Put a look on'],
+  ])("opens the composer from %s's Zone detail by %s, as a step into it", async (zoneId, link) => {
+    const router = openZone(zoneId)
+    await userEvent.click(within(main()).getByRole('link', { name: link }))
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    expect(router.state.location.search).toBe(`?zone=${zoneId}`)
+    expect(composerEntered(router.state.location.state)).toBe(true)
   })
 
   // F3 decision 24.

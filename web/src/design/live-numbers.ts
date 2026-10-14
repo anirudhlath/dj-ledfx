@@ -33,7 +33,18 @@ export const LIVE_SPEC = {
     "panelBarPx": 6
   },
   "frozenCardsOpacity": 0.45,
-  "attentionPopoverPx": 430
+  "attentionPopoverPx": 430,
+  "lookTile": {
+    "px": 176,
+    "namePx": 19
+  },
+  "phoneComposer": {
+    "zonePx": 52,
+    "thumb": {
+      "width": 84,
+      "height": 54
+    }
+  }
 } as const
 
 export const LIVE_RENDER = {
@@ -54,5 +65,19 @@ export const LIVE_RENDER = {
     "track": "#3a311a",
     "fill": "#ffcf5c"
   },
-  "rowSwatchPx": 11
+  "rowSwatchPx": 11,
+  "lookThumb": {
+    "width": 160,
+    "height": 100,
+    "background": "#0f0e0c"
+  },
+  "selectedZoneNote": {
+    "chip": "#4a4640",
+    "button": "#5a564e"
+  },
+  "phoneOutlinePx": 1.4,
+  "phoneSheet": {
+    "overlapPx": 36,
+    "footerPaddingPx": 30
+  }
 } as const

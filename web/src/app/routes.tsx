@@ -24,6 +24,8 @@ const LIVE: PageMeta = {
 }
 /** Zone detail (Phone-Zone): the zone's name with Back to Live, and no context line or tempo strip. On desktop it's Live (F3 decision 23). */
 const ZONE: PageMeta = { title: LIVE.title, context: LIVE.context, PhoneTitle: ZoneTitle, phoneBack: '/live' }
+/** Put a look on (§8.2): Live, with the composer in the Running panel's place; on the phone, a focused task (Phone-PutLookOn). */
+const PUT: PageMeta = { title: LIVE.title, context: LIVE.context, focusedTask: true }
 const LOOKS: PageMeta = { title: 'Looks' }
 const MAP: PageMeta = {
   title: 'Map',
@@ -53,8 +55,16 @@ export const routes: RouteObject[] = [
           { index: true, element: <Navigate to="/live" replace /> },
           // F3 decision 23: /live/zones/:zoneId is Live, so the stage stays mounted between them. LivePage
           // reads the id: on desktop it outlines the zone's card, and on the phone it draws Zone detail.
-          { path: 'live', handle: LIVE, element: <LivePage />, children: [{ path: 'zones/:zoneId', handle: ZONE, element: null }] },
-          { path: 'live/put', handle: LIVE, element: <Placeholder name="Put a look on" milestone="F4" /> },
+          // /live/put is Live too, with the composer, so the stage goes into `compose` mode in place (F4 ruling 16).
+          {
+            path: 'live',
+            handle: LIVE,
+            element: <LivePage />,
+            children: [
+              { path: 'zones/:zoneId', handle: ZONE, element: null },
+              { path: 'put', handle: PUT, element: null },
+            ],
+          },
           { path: 'looks', handle: LOOKS, element: <Placeholder name="Looks" milestone="F5" /> },
           { path: 'looks/:lookId', handle: LOOKS, element: <Placeholder name="Look editor" milestone="F8" /> },
           { path: 'map', handle: MAP, element: <Placeholder name="Home map" milestone="F7" /> },

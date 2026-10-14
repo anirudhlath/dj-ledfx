@@ -3,10 +3,11 @@
 // each linking to its Zone detail; Nothing running; and the sticky Put a look on over the tab bar. While
 // the link is down the cards are dimmed and inert, and Put a look on goes (Phone-State-Reconnecting draws
 // none). Look: Phone-Live.html and Phone-State-*.html, whose head and banner run up into the stage's foot.
-import { useMemo } from 'react'
+import { useMemo, type Ref } from 'react'
 import type { Overlay } from '@/api/contract'
 import { useLive } from '@/api/live-store'
 import { useConnectionStatus, usePreviewOnly } from '@/chrome/hooks'
+import { composerLink } from '@/compose/model'
 import { ButtonLink } from '@/design/button'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useNow } from '@/lib/use-now'
@@ -23,7 +24,8 @@ import { runningSummary } from './words'
 
 const NO_OVERLAYS: readonly Overlay[] = []
 
-export function PhoneRunning() {
+/** `putRef` is the ref of the link that opens the composer, which the page gives the focus as the composer closes. */
+export function PhoneRunning({ putRef }: { putRef?: Ref<HTMLAnchorElement> }) {
   const world = useZoneWorld()
   const running = useLive((state) => state.running?.zones ?? null)
   const overlays = useLive((state) => state.running?.overlays ?? NO_OVERLAYS)
@@ -68,7 +70,7 @@ export function PhoneRunning() {
       </div>
       {!frozen && (
         <div className="sticky bottom-0 z-20 mt-auto bg-linear-to-t from-bg from-60% to-bg/0 px-4 pt-7 pb-3">
-          <ButtonLink variant="primary" size="cta" icon="plus" to="/live/put" className="w-full">
+          <ButtonLink ref={putRef} variant="primary" size="cta" icon="plus" {...composerLink()} className="w-full">
             Put a look on
           </ButtonLink>
         </div>

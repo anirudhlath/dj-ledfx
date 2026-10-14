@@ -7,13 +7,13 @@ import {
   STREAMED,
   type AnchorIn, type ApiPath, type CreateGroup, type FrameStream, type HomeSettings, type Id, type Inputs, type InternalTempo,
   type Light, type LightShape, type LightUpdate, type Look, type PendingPath, type Placement, type PlacementIn,
-  type PreviewRequest, type PreviewUpdate, type RecentLook, type RunningZone, type StartRequest, type SubZoneIn, type TakeOver,
+  type PreviewLight, type PreviewRequest, type PreviewUpdate, type RecentLook, type RunningZone, type StartRequest, type SubZoneIn, type TakeOver,
   type TempoLock, type TempoSource, type Transition, type UpdateGroup, type Zone,
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import { PATH_PARAM } from '../rest'
 import type { BeatV1, BeatV2, ServerMessage, StatsMessage } from '../ws-messages'
-import { coversOf, partId, runningZone } from './fixtures'
+import { coversOf, lightPlan, partId, runningZone } from './fixtures'
 import { motifFor, paint, type MotifSpec } from './frame-generator'
 import { asEngineM1, buildScenario, type ScenarioBeat, type ScenarioName, type ScenarioState } from './scenarios'
 
@@ -770,6 +770,11 @@ export class MockServer {
     return withOne(this.state.zones, (zone) => zone.id === id, `No zone '${id}'`, then)
   }
 
+  /** Engine M2 neither starts nor previews a look on a zone with no lights (ZoneError, 400): the zone must have some. */
+  private withLights(zone: Zone, then: () => MockReply): MockReply {
+    return zone.lights.length === 0 ? badRequest(`${zone.name} has no lights`) : then()
+  }
+
   private withGroup(id: Id, then: (zone: Zone) => MockReply): MockReply {
     return withOne(this.state.zones, (zone) => zone.id === id && zone.kind === 'group', `No zone '${id}'`, then)
   }
@@ -860,7 +865,9 @@ export class MockServer {
     ]
     if (problems.length > 0) return { status: 422, body: { detail: problems } }
     return this.withZone(zoneId, (zone) =>
-      this.withLookFor(body, (look) => this.takeOver(zone, look, body.transition ?? look.transition)),
+      this.withLookFor(body, (look) =>
+        this.withLights(zone, () => this.takeOver(zone, look, body.transition ?? look.transition)),
+      ),
     )
   }
 
@@ -1112,20 +1119,29 @@ export class MockServer {
     return ok(guessed)
   }
 
-  /** One preview at a time (§12.3): its frames go on the preview stream, and the lights are left alone. */
+  /**
+   * One preview at a time (§12.3): its frames go on the preview stream, and the lights are left alone. It
+   * answers what each light would do if the look started, as the engine does since F4 (its ruling 1).
+   */
   private startPreview(body: PreviewRequest): MockReply {
     return this.withZone(body.zoneId, (zone) =>
-      this.withLookFor(body, (look) => {
-        const lights = new Map(this.state.lights.map((light) => [light.id, light]))
-        const spec = motifFor(look)
-        const id = this.newId('preview')
-        this.preview = {
-          id,
-          lights: zone.lights.map((lightId) => this.painted(lightId, lights.get(lightId)?.leds ?? 0, spec, 1, false)),
-          watchedAt: this.clock(),
-        }
-        return created({ previewId: id })
-      }),
+      this.withLookFor(body, (look) =>
+        this.withLights(zone, () => {
+          const lights = new Map(this.state.lights.map((light) => [light.id, light]))
+          const spec = motifFor(look)
+          const id = this.newId('preview')
+          this.preview = {
+            id,
+            lights: zone.lights.map((lightId) => this.painted(lightId, lights.get(lightId)?.leds ?? 0, spec, 1, false)),
+            watchedAt: this.clock(),
+          }
+          const plans = zone.lights.map((lightId): PreviewLight => {
+            const light = lights.get(lightId)
+            return { id: lightId, ...(light === undefined ? { mode: 'streaming', effect: null } : lightPlan(look, light)) }
+          })
+          return created({ previewId: id, lights: plans })
+        }),
+      ),
     )
   }
 

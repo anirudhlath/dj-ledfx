@@ -189,6 +189,16 @@ const LIVE_ENTRIES: Record<string, Entry> = {
     pattern: /`AttentionPopover` \(desktop, (\d+) px, anchored under the button\)/,
     take: (m) => n(m[1]),
   },
+  lookTile: {
+    where: '§6.4 LookTile',
+    pattern: /\*\*`LookTile`\*\* \(composer, (\d+) px\): thumb, serif (\d+) name/,
+    take: (m) => ({ px: n(m[1]), namePx: n(m[2]) }),
+  },
+  phoneComposer: {
+    where: '§8.10 Put a look on',
+    pattern: /sheet: Where \((\d+) px zone buttons, horizontal scroll\), What \(category chips, look rows with (\d+) × (\d+) thumbs\)/,
+    take: (m) => ({ zonePx: n(m[1]), thumb: { width: n(m[2]), height: n(m[3]) } }),
+  },
 }
 
 /** Each entry's number, from the spec's text. Each sentence must say it once. */
@@ -249,7 +259,13 @@ const luminance = (hex: string) => [1, 3, 5].reduce((sum, at) => sum + parseInt(
 /** The renders RENDER reads. */
 const RENDERS = ['reference/Main.html', 'reference/State-Firmware.html']
 /** The renders LIVE_RENDER reads. */
-const LIVE_RENDERS = ['reference/Main.html', 'reference/State-Sheet.html', 'reference/State-Problems.html']
+const LIVE_RENDERS = [
+  'reference/Main.html',
+  'reference/State-Sheet.html',
+  'reference/State-Problems.html',
+  'reference/Live-PutLookOn.html',
+  'reference/Phone-PutLookOn.html',
+]
 
 /** Fails unless each named file of docs/design/web-app is the one HANDOFF.sha256 (`pins`) pins. */
 export function checkPins(pins: string, names: readonly string[], readBytes: (name: string) => Uint8Array): void {
@@ -436,13 +452,20 @@ export function extractRender(read: ReadText): Record<string, unknown> {
  * `@keyframes pip`, is turned from a cycle's percentages into beats: the four pips share one animation,
  * each a beat behind the last, so a cycle is as many beats as the delays' step goes into it. An overlay's
  * gold is State-Sheet.html's: tokens.css has no colour for it. A ZoneRow's small swatches are State-Problems.html's
- * size: §6.3 gives them none (F3 decision 34).
+ * size: §6.3 gives them none (F3 decision 34). The composer's (Live-PutLookOn.html, Phone-PutLookOn.html): a
+ * LookThumb's scene, its viewBox and background, read in each render and the same in both; and the note beside the
+ * chosen zone's name on the desktop's chip, and under it on the phone's zone button: tokens.css has no colour for it.
+ * The phone's stage outlines the chosen zone in a narrower stroke than the spec's number, which Live-PutLookOn.html's
+ * matches: the phone's render isn't scaled (its floor strokes are as wide as the desktop's). The phone's sheet: how far it lies over
+ * the stage's foot, and the padding under Start.
  */
 export function extractLiveRender(read: ReadText): Record<string, unknown> {
   const tokens = read('tokens.css')
   const main = read('reference/Main.html')
   const sheet = read('reference/State-Sheet.html')
   const problems = read('reference/State-Problems.html')
+  const put = read('reference/Live-PutLookOn.html')
+  const phonePut = read('reference/Phone-PutLookOn.html')
   const curve = same(main, {
     where: 'Main.html @keyframes pip',
     pattern:
@@ -467,6 +490,45 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     pattern:
       /font-size: 20px; white-space: nowrap">[^<]*<\/span><span style="font-size: 12px; color: #[0-9a-f]{6}; white-space: nowrap">[^<]*<\/span><\/div><div style="display: flex; align-items: center; flex-wrap: wrap; gap: \d+px"><span title="[^"]*" style="display: inline-block; width: (\d+)px; height: \1px; border-radius: 50%/,
   })
+  // One scene in both renders, each read on its own: a render whose thumbs moved fails here by its name, and never
+  // leaves the other's to stand for both.
+  const thumbPattern =
+    /<svg class="tb " viewBox="0 0 (\d+) (\d+)" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: block; background: (#[0-9a-f]{6}); ">/
+  const thumb = same(put, { where: "Live-PutLookOn.html's thumb", pattern: thumbPattern })
+  const phoneThumb = same(phonePut, { where: "Phone-PutLookOn.html's thumb", pattern: thumbPattern })
+  const [scene, phoneScene] = [thumb, phoneThumb].map((m) => JSON.stringify(m.slice(1)))
+  if (scene !== phoneScene) {
+    throw new Error(`design numbers: Live-PutLookOn.html's thumb and Phone-PutLookOn.html's thumb draw the scene two ways: ${scene} and ${phoneScene}`)
+  }
+  const chipNote = same(put, {
+    where: "Live-PutLookOn.html, the selected zone chip's note",
+    pattern:
+      /<button type="button" aria-pressed="true" style="display: inline-flex;[^"]*">[^<]*<span style="font-size: [\d.]+px; color: (#[0-9a-f]{6}); font-weight: 500; font-style: normal">/,
+  })
+  const buttonNote = same(phonePut, {
+    where: "Phone-PutLookOn.html, the selected zone button's note",
+    pattern:
+      /<button type="button" aria-pressed="true" style="display: flex; flex-direction: column;[^"]*"><span style="[^"]*">[^<]*<\/span><span style="font-size: [\d.]+px; color: (#[0-9a-f]{6}); white-space: nowrap">/,
+  })
+  // The zone's outline on the phone's stage: the one closed path stroked in `text` and not filled.
+  const phoneOutline = same(phonePut, {
+    where: "Phone-PutLookOn.html's zone outline",
+    pattern: /<path d="M[\d. L]+ Z" fill="none" stroke="#[0-9a-f]{6}" stroke-width="([\d.]+)"/,
+  })
+  // The phone's sheet lies over the stage's foot: Phone-PutLookOn.html places the stage and the sheet by their tops, so the overlap is the
+  // stage's bottom less the sheet's top, and the sheet's footer pads its bottom (under Start) by the last of its four numbers.
+  const phoneStage = same(phonePut, {
+    where: "Phone-PutLookOn.html's stage",
+    pattern: /position: absolute; left: 0px; top: (\d+)px; width: \d+px; height: (\d+)px/,
+  })
+  const phoneSheet = same(phonePut, {
+    where: "Phone-PutLookOn.html's sheet",
+    pattern: /<section aria-label="Put a look on" style="position: absolute; left: 0; top: (\d+)px;/,
+  })
+  const phoneFooter = same(phonePut, {
+    where: "Phone-PutLookOn.html's sheet footer",
+    pattern: /padding: 12px 16px (\d+)px; border-top: 1px solid #[0-9a-f]{6}; display: flex; flex-direction: column; gap: 10px/,
+  })
   return {
     pip: {
       rest: colour(tokens, curve[1]),
@@ -480,6 +542,10 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     },
     overlay: { background: card[1], border: card[2], ink: card[3], track: card[4], fill: card[5] },
     rowSwatchPx: n(row[1]),
+    lookThumb: { width: n(thumb[1]), height: n(thumb[2]), background: colour(tokens, thumb[3]) },
+    selectedZoneNote: { chip: colour(tokens, chipNote[1]), button: colour(tokens, buttonNote[1]) },
+    phoneOutlinePx: n(phoneOutline[1]),
+    phoneSheet: { overlapPx: n(phoneStage[1]) + n(phoneStage[2]) - n(phoneSheet[1]), footerPaddingPx: n(phoneFooter[1]) },
   }
 }
 

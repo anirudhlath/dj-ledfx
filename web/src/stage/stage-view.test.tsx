@@ -1,10 +1,13 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useSearchParams } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { applyMessage, liveStore } from '@/api/live-store'
-import { roomName } from '@/api/mocks/fixtures'
+import { queries, queryClient } from '@/api/queries'
+import { lookName, roomName } from '@/api/mocks/fixtures'
 import type { ScenarioName } from '@/api/mocks/scenarios'
-import { LIVE_SPEC } from '@/design/live-numbers'
+import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
+import type { ElementSize } from '@/lib/use-element-size'
 import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
 import { pushFrame } from '@/test/live'
@@ -15,9 +18,11 @@ import { lightBodies } from './bodies'
 import { FIT_VIEW, fitPose, projectPoint } from './camera'
 import { SPEC } from './design-numbers'
 import { anchorOf } from './marks'
+import { cssColour } from './palette'
 import { STAGE_LABEL } from './stage-pending'
 import { sunPosition, sunScene } from './sun'
 import Stage from './stage'
+import type { StageVariant } from './stage-view'
 import { readStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
 import { zonePolygons } from './zone-shape'
@@ -60,6 +65,20 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(stage.getByText(sunScene(state.home, sun)!.label!)).toBeInTheDocument()
     expect(stage.getByText(sunPosition(sun)!)).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'What the lights show' })).getAllByRole('listitem')).toHaveLength(4)
+  })
+
+  // Main.html's markup: the tools, the sun's readout, the legend, then the view controls.
+  it("lays the overlays out in Main.html's order", async () => {
+    const { state } = await openLive()
+    const overlays = [
+      screen.getByRole('switch', { name: 'Labels' }),
+      screen.getByText(sunPosition(state.inputs.sun)!),
+      screen.getByRole('list', { name: 'What the lights show' }),
+      screen.getByRole('button', { name: 'Zoom in' }),
+    ]
+    overlays.slice(1).forEach((overlay, index) => {
+      expect(overlays[index].compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
   })
 
   // I1: the engine pushes `lights` every 5 s while a look plays, with the colours it read back. Only a
@@ -186,6 +205,17 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent(light.name)
   })
 
+  // The link drops with the mouse over a room: the frozen picture does nothing there, and its cursor says so.
+  it('takes the pointer cursor off a room when the link drops', async () => {
+    const { state, pose } = await openLive()
+    const lit = state.home.rooms.find((room) => room.hasLights)!
+    const [x, y] = projectPoint(pose, [...lit.labelAt, 0])
+    fireEvent.pointerMove(picture(), { clientX: x, clientY: y, pointerType: 'mouse' })
+    expect(picture().style.cursor).toBe('pointer')
+    act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
+    expect(picture().style.cursor).toBe('')
+  })
+
   it('opens the composer for a room with lights, and not for one without', async () => {
     const { state, pose, router } = await openLive()
     const lit = state.home.rooms.find((room) => room.hasLights)!
@@ -193,6 +223,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     fireEvent.click(picture(), { clientX: x, clientY: y })
     expect(router.state.location.pathname).toBe('/next/live/put')
     expect(router.state.location.search).toBe(`?zone=${lit.id}`)
+    expect(router.state.historyAction).toBe('PUSH')
     await act(() => router.navigate('/live'))
     await loadedStage()
     act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
@@ -266,7 +297,7 @@ describe('the stage on Live (§7, §8.1)', () => {
     const panel = screen.getByRole('complementary', { name: 'Running' })
     const outline = () => document.querySelector('[data-outline]')
     expect(outline()).toBeNull()
-    fireEvent.pointerOver(within(panel).getByRole('article', { name: 'Living room — Fireflies' }))
+    fireEvent.pointerOver(within(panel).getByRole('article', { name: `${roomName('living')} — ${lookName('fireflies')}` }))
     expect(outline()).toHaveAttribute('data-outline', 'living')
     expect(outline()!.querySelectorAll('polygon')).toHaveLength(1)
     fireEvent.pointerLeave(panel)
@@ -279,17 +310,18 @@ describe('the stage on Live (§7, §8.1)', () => {
   it('tags a crashed and a slow zone on the stage, until the link drops', async () => {
     await openLive('problems')
     const stage = screen.getByRole('region', { name: STAGE_LABEL })
-    expect(within(stage).getByText('Lava stopped · 19:12')).toBeInTheDocument()
+    expect(within(stage).getByText(`${lookName('lava')} stopped · 19:12`)).toBeInTheDocument()
     expect(within(stage).getByText('38 fps · target 60')).toBeInTheDocument()
     act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
-    expect(within(stage).queryByText('Lava stopped · 19:12')).toBeNull()
+    expect(within(stage).queryByText(`${lookName('lava')} stopped · 19:12`)).toBeNull()
   })
 
   // State-Transition; F3 decision 16.
   it('tags a transition with its kind and its percentage', async () => {
     await openLive('transition')
     const stage = screen.getByRole('region', { name: STAGE_LABEL })
-    expect(within(stage).getByText(/^Fireflies → Embers · dissolving/)).toHaveTextContent('Fireflies → Embers · dissolving 62%')
+    const dissolving = `${lookName('fireflies')} → ${lookName('embers')} · dissolving`
+    expect(within(stage).getByText((text) => text.startsWith(dissolving))).toHaveTextContent(`${dissolving} 62%`)
   })
 })
 
@@ -317,5 +349,229 @@ describe('the stage in focus (§7.6)', () => {
     act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
     expect(drawn.props!.pose).toEqual(framed)
     expect(picture().style.filter).toBe(`grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`)
+  })
+})
+
+describe('the stage in compose (§7.6)', () => {
+  /** The zone a click on a room chose, as the composer would hear of it. */
+  const choose = vi.fn()
+  beforeEach(() => choose.mockClear())
+  /** The composer's stage on what the URL says, as the composer hands it over: ?zone= and the look previewed. */
+  function Composing({ variant }: { variant: StageVariant }) {
+    const [params] = useSearchParams()
+    const compose = { zoneId: params.get('zone')!, previewing: params.get('previewing'), choose, covered: params.has('covered') }
+    return <Stage variant={variant} compose={compose} />
+  }
+
+  async function openCompose(
+    search: string,
+    {
+      variant = 'desktop',
+      size = MAIN_STAGE,
+      scenario = 'hero',
+      zonesLoaded = true,
+    }: { variant?: StageVariant; size?: ElementSize; scenario?: ScenarioName; zonesLoaded?: boolean } = {},
+  ) {
+    const state = seedStage(scenario)
+    if (!zonesLoaded) {
+      // The home and the lights are in, and the zones are still on their way: a request that never answers.
+      queryClient.removeQueries({ queryKey: queries.zones().queryKey })
+      vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    }
+    const router = renderApp(`/next/live/put${search}`, { routes: [{ path: '/live/put', element: <Composing variant={variant} /> }] })
+    await loadedStage()
+    act(() => resizeObserved(size.width, size.height))
+    return { state, router, pose: heroPose() }
+  }
+  const previewing = (id: string) => `&previewing=${encodeURIComponent(lookName(id))}`
+  /** The streams the canvas draws the zone's lights from, and the rest of the lights. */
+  const streams = (lights: readonly string[]) => {
+    const ids = new Set(lights)
+    const of = (inZone: boolean) => new Set(drawn.props!.entries.filter((entry) => ids.has(entry.body.lightId) === inZone).map((entry) => entry.stream))
+    return { zone: of(true), rest: of(false) }
+  }
+
+  // Live-PutLookOn: the other rooms dimmed under the zone's outline, the zone's labels bright, and a card.
+  it("dims the rooms outside the zone, outlines it, and draws the preview there with a card beside it", async () => {
+    const { state, router } = await openCompose(`?zone=living&look=embers${previewing('embers')}`)
+    const zone = state.zones.find((each) => each.id === 'living')!
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    const dims = document.querySelector('[data-dims]')!
+    const outline = document.querySelector('[data-outline]')!
+    expect(dims.querySelectorAll('polygon')).toHaveLength(state.home.rooms.length - 1)
+    expect(outline).toHaveAttribute('data-outline', 'living')
+    // Over the labels, as the render layers them: the labels, then the dims, then the outline.
+    const label = stage.getByText(zone.name)
+    expect(label.compareDocumentPosition(dims) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(dims.compareDocumentPosition(outline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(label).toHaveClass('fill-text')
+    const other = state.home.rooms.find((room) => room.id !== 'living' && room.hasLights)!
+    expect(stage.getByText(other.name)).toHaveClass('fill-text-3')
+    // The zone's label names the look previewed, and its lights draw the preview stream.
+    expect(stage.getByText(lookName('embers'))).toHaveClass('fill-text')
+    expect(streams(zone.lights)).toEqual({ zone: new Set(['preview']), rest: new Set(['live']) })
+    expect(document.querySelector('[data-preview-card]')).toHaveTextContent(
+      `Preview on screen${lookName('embers')} on ${zone.name}. The lights are still running ${lookName('fireflies')}.`,
+    )
+    // The legend and the sun stay; Live's tools, readout, tags and links don't.
+    expect(screen.getByRole('list', { name: 'What the lights show' })).toBeInTheDocument()
+    expect(stage.getByText(sunScene(state.home, state.inputs.sun)!.label!)).toBeInTheDocument()
+    expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
+    expect(screen.queryByText(sunPosition(state.inputs.sun)!)).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
+
+    // The preview ends: the lights draw the live stream again, and the card goes.
+    await act(() => router.navigate('/live/put?zone=living&look=embers', { replace: true }))
+    expect(streams(zone.lights)).toEqual({ zone: new Set(['live']), rest: new Set(['live']) })
+    expect(stage.getByText(lookName('fireflies'))).toHaveClass('fill-text')
+    expect(document.querySelector('[data-preview-card]')).toBeNull()
+    expect(document.querySelector('[data-outline]')).toHaveAttribute('data-outline', 'living')
+  })
+
+  it('says the lights are as they were where nothing runs', async () => {
+    await openCompose(`?zone=kitchen&look=embers${previewing('embers')}`, { scenario: 'nothing-running' })
+    expect(document.querySelector('[data-preview-card]')).toHaveTextContent(/\. The lights are as they were\.$/)
+  })
+
+  // The whole home's lights run three looks in the hero: the card names each, the last after an "and".
+  it("names every look the zone's lights still run", async () => {
+    const { state } = await openCompose(`?zone=home&look=embers${previewing('embers')}`)
+    const zone = state.zones.find((each) => each.id === 'home')!
+    expect(document.querySelector('[data-preview-card]')).toHaveTextContent(
+      `Preview on screen${lookName('embers')} on ${zone.name}. The lights are still running ${lookName('homesunset')}, ${lookName('comets')} and ${lookName('fireflies')}.`,
+    )
+  })
+
+  // The card is placed from its own size, so it stays hidden until it has one rather than show in the wrong place.
+  it('keeps the card hidden until it has been measured', async () => {
+    await openCompose(`?zone=living&look=embers${previewing('embers')}`)
+    const card = document.querySelector<HTMLElement>('[data-preview-card]')!
+    expect(card.style.visibility).toBe('hidden')
+    act(() => resizeObserved(MAIN_STAGE.width, MAIN_STAGE.height))
+    expect(card.style.visibility).toBe('')
+  })
+
+  // §7.6 compose: the rooms outside the zone dimmed to SPEC.compose.dimmed: the background over them, at the rest.
+  it('dims the rooms outside the zone with the background', async () => {
+    await openCompose('?zone=living&look=embers')
+    const dims = document.querySelector('[data-dims]')!
+    expect(dims).toHaveAttribute('fill', cssColour('--color-bg'))
+    expect(dims).toHaveAttribute('fill-opacity', String(1 - SPEC.compose.dimmed))
+  })
+
+  // Live-PutLookOn: the looks beneath the other rooms' names are dimmed with them, and a sub-zone's own label is lit with its room's.
+  it("dims the looks of the other rooms' labels with their names", async () => {
+    await openCompose('?zone=living&look=embers')
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    // The whole home's look on its rooms, and the office desk's own.
+    for (const look of [...stage.getAllByText(lookName('homesunset')), stage.getByText(lookName('comets'))]) expect(look).toHaveClass('fill-text-3')
+  })
+
+  it("lights a sub-zone's own label and its room's, and dims the other rooms", async () => {
+    const { state } = await openCompose('?zone=office&look=embers')
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    const office = state.home.subZones.find((sub) => sub.id === 'office')!
+    const room = state.home.rooms.find((candidate) => candidate.id === office.room)!
+    const other = state.home.rooms.find((candidate) => candidate.id !== room.id && candidate.hasLights)!
+    expect(stage.getByText(office.name)).toHaveClass('fill-text')
+    expect(stage.getByText(room.name)).toHaveClass('fill-text')
+    expect(stage.getByText(other.name)).toHaveClass('fill-text-3')
+    expect(document.querySelector('[data-dims]')!.querySelectorAll('polygon')).toHaveLength(state.home.rooms.length - 1)
+  })
+
+  // The zone's floor is lit and outlined, so its running sub-zones' labels are lit: the whole home's and a room's hold the office desk's.
+  it.each(['home', 'bedroom'])('lights the label of a running sub-zone inside the chosen %s', async (zoneId) => {
+    const { state } = await openCompose(`?zone=${zoneId}&look=embers`)
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    const office = state.home.subZones.find((sub) => sub.id === 'office')!
+    expect(stage.getByText(office.name)).toHaveClass('fill-text')
+    expect(stage.getByText(lookName('comets'))).toHaveClass('fill-text')
+  })
+
+  // Between 768 and 1199 px the composer lies over the stage's right side (§4.4), --live-panel-w wide: the card is placed in what's left.
+  it.each([
+    ['the whole stage', '', 'right-0'],
+    ['the stage left of the composer, where it lies over the stage', '&covered', 'right-(--live-panel-w)'],
+  ])('places the card in %s', async (_, covered, right) => {
+    await openCompose(`?zone=living&look=embers${previewing('embers')}${covered}`)
+    const room = document.querySelector('[data-preview-room]')!
+    expect(room).toHaveClass('absolute', 'inset-y-0', 'left-0', right)
+    expect(room).toContainElement(document.querySelector<HTMLElement>('[data-preview-card]'))
+  })
+
+  // Live-PutLookOn draws the PREVIEW ON SCREEN card before the legend.
+  it('puts the card before the legend', async () => {
+    await openCompose(`?zone=living&look=embers${previewing('embers')}`)
+    const card = document.querySelector('[data-preview-card]')!
+    const legend = screen.getByRole('list', { name: 'What the lights show' })
+    expect(card.compareDocumentPosition(legend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  // Live-PutLookOn draws the outline at the spec's width and Phone-PutLookOn at its own narrower one, each with no join.
+  it.each([
+    ['desktop', MAIN_STAGE, SPEC.compose.outlinePx],
+    ['phone', LIVE_SPEC.phoneStage, LIVE_RENDER.phoneOutlinePx],
+  ] as const)('outlines the zone as the %s render does', async (variant, size, widthPx) => {
+    await openCompose('?zone=living&look=embers', { variant, size })
+    const outline = document.querySelector('[data-outline]')!
+    expect(outline).toHaveAttribute('stroke-width', String(widthPx))
+    expect(outline).not.toHaveAttribute('stroke-linejoin')
+  })
+
+  // Composing is the stage's mode whenever the composer asks for it: before the zones load, or for a zone that isn't there, the stage
+  // is still the composer's, with none of Live's tools, links, tags or tooltip, and a room still hands its zone to the composer.
+  it.each([
+    ['are still loading', 'living', false],
+    ['have no zone of that id', 'gone', true],
+  ] as const)("stays the composer's stage while the zones %s", async (_, zoneId, zonesLoaded) => {
+    const { state, router, pose } = await openCompose(`?zone=${zoneId}&look=embers`, { scenario: 'problems', zonesLoaded })
+    const stage = within(screen.getByRole('region', { name: STAGE_LABEL }))
+    expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Zoom in' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
+    expect(stage.queryByText(`${lookName('lava')} stopped · 19:12`)).not.toBeInTheDocument()
+    const light = state.lights.find((candidate) => candidate.status === 'streaming' && candidate.shape != null)!
+    const [lx, ly] = projectPoint(pose, anchorOf(lightBodies(light)[0]))
+    fireEvent.pointerMove(picture(), { clientX: lx, clientY: ly, pointerType: 'mouse' })
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    const room = state.home.rooms.find((candidate) => candidate.hasLights)!
+    const [x, y] = projectPoint(pose, [...room.labelAt, 0])
+    fireEvent.click(picture(), { clientX: x, clientY: y })
+    expect(choose).toHaveBeenCalledExactlyOnceWith(room.id)
+    // The composer chooses: the stage navigates nowhere itself.
+    expect(router.state.location.search).toBe(`?zone=${zoneId}&look=embers`)
+    expect(router.state.historyAction).toBe('POP')
+  })
+
+  // §6.3 ZonePicker: "Clicking a room on the stage selects the same zone": the room is the zone the composer is told to choose, and no tooltip.
+  it('hands the zone of a room clicked to the composer, and shows no tooltip', async () => {
+    const { state, router, pose } = await openCompose('?zone=living&look=embers')
+    const room = state.home.rooms.find((candidate) => candidate.hasLights && candidate.id !== 'living')!
+    const [x, y] = projectPoint(pose, [...room.labelAt, 0])
+    fireEvent.click(picture(), { clientX: x, clientY: y })
+    expect(choose).toHaveBeenCalledExactlyOnceWith(room.id)
+    expect(router.state.location.search).toBe('?zone=living&look=embers')
+    const light = state.lights.find((candidate) => candidate.shape != null)!
+    const [lx, ly] = projectPoint(pose, anchorOf(lightBodies(light)[0]))
+    fireEvent.pointerMove(picture(), { clientX: lx, clientY: ly, pointerType: 'mouse' })
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  // Phone-PutLookOn: framed on the zone as focus frames one, the lights round it kept, and a tag.
+  it("frames the phone's zone, keeps the lights round it, tags the preview, and keeps the frame through a drop", async () => {
+    const size = LIVE_SPEC.phoneStage
+    const { state } = await openCompose(`?zone=living&look=embers${previewing('embers')}`, { variant: 'phone', size })
+    const zone = state.zones.find((each) => each.id === 'living')!
+    const framed = fitPose(zonePolygons(state.home, zone, state.lights).flat(), size, FIT_VIEW, SPEC.focus.tiltDeg)
+    expect(drawn.props!.pose).toEqual(framed)
+    expect(drawn.props!.entries).toHaveLength(stageWriter(state.lights, { rooms: state.home.rooms }).entries.length)
+    expect(picture().querySelector('[data-vignette]')).toBeNull()
+    expect(screen.getByText('Preview on screen · lights unchanged')).toBeInTheDocument()
+    expect(document.querySelector('[data-preview-card]')).toBeNull()
+    expect(screen.queryByRole('list', { name: 'What the lights show' })).not.toBeInTheDocument()
+    act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
+    expect(drawn.props!.pose).toEqual(framed)
+    expect(document.querySelector('[data-dims]')).not.toBeNull()
+    expect(screen.queryByText('Preview on screen · lights unchanged')).not.toBeInTheDocument()
   })
 })

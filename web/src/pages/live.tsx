@@ -1,15 +1,24 @@
 // Live (§8.1, §8.10): the stage, and beside it the Running panel. The stage's code loads on demand,
 // keeping three.js out of the first load (§14); its place keeps the stage's background meanwhile, and
 // its REST reads start at once rather than when its code arrives. /live/zones/:zoneId is Live with that
-// zone's card outlined (F3 decision 23). Between 768 and 1199 px the panel lies over the stage's right
-// side and can hide (§4.4, F3 decision 22).
+// zone's card outlined (F3 decision 23); /live/put is Live with the composer in the panel's place and the
+// stage in `compose` mode (§8.2), which `L` opens and Esc closes. Between 768 and 1199 px the panel lies
+// over the stage's right side and can hide (§4.4, F3 decision 22); the composer lies there too. On the
+// phone the composer is a sheet that fills the screen under the stage (§8.10, F4 ruling 16), the page's own
+// height so that <main> never scrolls, and every exit gives the focus to the phone's own link to it.
 import { usePrefetchQuery } from '@tanstack/react-query'
-import { lazy, Suspense, useState, type CSSProperties } from 'react'
-import { useParams } from 'react-router'
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useMatch, useParams } from 'react-router'
 import type { Id } from '@/api/contract'
 import { queries } from '@/api/queries'
 import { usePreviewOnly } from '@/chrome/hooks'
+import { ComposerPanel, ComposerWhere } from '@/compose/composer-panel'
+import { ComposerSheet } from '@/compose/composer-sheet'
+import { COMPOSER_ROUTE } from '@/compose/model'
+import { useStageCompose } from '@/compose/use-composer'
+import { useComposerKeys } from '@/compose/use-composer-keys'
 import { Button } from '@/design/button'
+import { cx } from '@/design/cx'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { useIsPhone, useMediaQuery } from '@/lib/use-media-query'
 import { EmptyHome } from '@/live/empty-home'
@@ -34,8 +43,12 @@ export function LivePage() {
   usePrefetchQuery(queries.zones())
   usePrefetchQuery(queries.looks())
   const { zoneId } = useParams()
+  const composing = useMatch(COMPOSER_ROUTE) !== null
   const phone = useIsPhone()
   const narrow = useMediaQuery(NARROW_QUERY)
+  // Below the wide breakpoint the desktop's composer lies over the stage's right side.
+  const compose = useStageCompose(composing, narrow && !phone)
+  useComposerKeys(composing)
   const previewOnly = usePreviewOnly() === true
   const [panel, setPanel] = useState<NarrowPanel>('open')
   const [hovered, setHovered] = useState<Id | null>(null)
@@ -45,18 +58,47 @@ export function LivePage() {
     setNamed(zoneId)
     if (zoneId !== undefined && panel === 'hidden') setPanel('open')
   }
+  const [wasComposing, setWasComposing] = useState(composing)
+  if (composing !== wasComposing) {
+    // The composer takes the Running panel's place, so no card stays under the pointer.
+    setWasComposing(composing)
+    setHovered(null)
+  }
+  // The focus was in the composer, which goes with it: the page that returns gives it to the link that opens the composer, where it
+  // would otherwise fall to the page. That link is the Running panel's on desktop, and on the phone Live's own or Zone detail's, whichever
+  // the exit lands on. In the narrow layout with the panel hidden there's no such link, and the button that shows the panel takes it.
+  const put = useRef<HTMLAnchorElement>(null)
+  const showPanel = useRef<HTMLButtonElement>(null)
+  const wasOpen = useRef(composing)
+  useEffect(() => {
+    if (wasOpen.current && !composing) (put.current ?? showPanel.current)?.focus()
+    wasOpen.current = composing
+  }, [composing])
   const stage = (
     <Suspense fallback={<StagePending />}>
-      <Stage variant={phone ? 'phone' : 'desktop'} outlined={phone ? null : (hovered ?? zoneId ?? null)} focus={phone ? (zoneId ?? null) : null} />
+      <Stage
+        variant={phone ? 'phone' : 'desktop'}
+        outlined={phone ? null : (hovered ?? zoneId ?? null)}
+        focus={phone ? (zoneId ?? null) : null}
+        compose={compose}
+      />
     </Suspense>
   )
   if (phone) {
+    // Phone-PutLookOn: the composer's sheet fills the screen under the stage, over the stage's foot, so the page is <main>'s height and
+    // only the sheet's look list scrolls.
     return (
-      <div className="flex min-h-full flex-col">
+      <div className={cx('flex flex-col', composing ? 'h-full' : 'min-h-full')}>
         <div className="relative shrink-0" style={{ aspectRatio: `${LIVE_SPEC.phoneStage.width} / ${LIVE_SPEC.phoneStage.height}` }}>
           {stage}
         </div>
-        {zoneId === undefined ? <PhoneRunning /> : <ZoneDetail zoneId={zoneId} />}
+        {composing ? (
+          <ComposerSheet className="relative z-10 -mt-9 min-h-0 flex-1" />
+        ) : zoneId === undefined ? (
+          <PhoneRunning putRef={put} />
+        ) : (
+          <ZoneDetail zoneId={zoneId} putRef={put} />
+        )}
       </div>
     )
   }
@@ -67,22 +109,35 @@ export function LivePage() {
         style={previewOnly ? ({ '--stage-top-shift': `${PREVIEW_LABEL_FOOT_PX}px` } as CSSProperties) : undefined}
       >
         {stage}
+        {composing && <ComposerWhere narrow={narrow} />}
         {previewOnly && <PreviewOnlyLabel />}
         <ReconnectingCard variant="desktop" />
         <EmptyHome variant="desktop" />
       </div>
-      {!narrow && <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} />}
-      {narrow && panel !== 'hidden' && (
+      {composing && (
+        <ComposerPanel className={narrow ? 'absolute inset-y-0 right-0 z-20 w-(--live-panel-w) shadow-pop' : 'w-(--live-panel-w) shrink-0'} />
+      )}
+      {!composing && !narrow && (
+        <RunningPanel selected={zoneId} className="w-(--live-panel-w) shrink-0" onZoneHover={setHovered} putRef={put} />
+      )}
+      {!composing && narrow && panel !== 'hidden' && (
         <RunningPanel
           selected={zoneId}
           className="absolute inset-y-0 right-0 z-20 w-(--live-panel-w) shadow-pop"
           onHide={() => setPanel('hidden')}
           onZoneHover={setHovered}
           focusHide={panel === 'reopened'}
+          putRef={put}
         />
       )}
-      {narrow && panel === 'hidden' && (
-        <Button icon="left" autoFocus className="absolute top-1/2 right-4 z-20 -translate-y-1/2 shadow-pop" onClick={() => setPanel('reopened')}>
+      {!composing && narrow && panel === 'hidden' && (
+        <Button
+          ref={showPanel}
+          icon="left"
+          autoFocus
+          className="absolute top-1/2 right-4 z-20 -translate-y-1/2 shadow-pop"
+          onClick={() => setPanel('reopened')}
+        >
           Running
         </Button>
       )}

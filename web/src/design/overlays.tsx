@@ -3,6 +3,7 @@ import { Popover as BasePopover } from '@base-ui/react/popover'
 import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip'
 import type { ReactElement, ReactNode } from 'react'
 import { IconButton } from './button'
+import { cx } from './cx'
 import { Icon } from './icon'
 
 interface OverlayProps {
@@ -112,6 +113,11 @@ export function Dialog({ title, children, ...modal }: OverlayProps) {
   )
 }
 
+/** §6.1 Sheet's grabber, which the phone's composer sheet draws too (Phone-PutLookOn). */
+export function Grabber({ className }: { className?: string }) {
+  return <span aria-hidden="true" className={cx('mx-auto h-1.25 w-10 shrink-0 rounded-[3px] bg-line-strong', className)} />
+}
+
 /**
  * §6.1 Sheet: the phone's bottom sheet, with a grabber, its title (Phone-State-Problems: `aside` beside
  * it, the count) and a Close at the row's end, bare as Phone-State-Problems and Phone-PutLookOn draw it:
@@ -123,7 +129,7 @@ export function Sheet({ title, aside, children, ...modal }: OverlayProps & { asi
       {...modal}
       className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] flex-col gap-1 overflow-y-auto rounded-t-sheet border-t border-line bg-panel px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-sheet outline-none"
     >
-      <span aria-hidden="true" className="mx-auto mb-1.5 h-1.25 w-10 shrink-0 rounded-[3px] bg-line-strong" />
+      <Grabber className="mb-1.5" />
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-baseline gap-1">
           <BaseDialog.Title className="text-title font-semibold text-text">{title}</BaseDialog.Title>

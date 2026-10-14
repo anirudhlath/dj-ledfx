@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { seedLive } from '@/test/live'
-import { failureText, setBrightness, setTempoLock, startAgain, tapTempo } from './actions'
+import { failureText, setBrightness, setTempoLock, startAgain, startLook, tapTempo } from './actions'
 import { liveStore } from './live-store'
 import { queries, queryClient } from './queries'
 import { api, ApiError } from './rest'
@@ -33,6 +33,37 @@ describe('actions', () => {
     vi.spyOn(api, 'tap').mockResolvedValue(liveStore.getState().inputs!.tempo)
     await tapTempo()
     expect(api.tap).toHaveBeenCalledWith(Date.now() / 1000)
+  })
+
+  // F4 ruling 13: Live shows the started look before the push comes.
+  it('puts a started look in the store as the newest, without the lights it took', async () => {
+    seedLive()
+    const home = zone('home')
+    const taken = home.lights.slice(0, 2)
+    vi.spyOn(api, 'start').mockResolvedValue({
+      ...zone('living'),
+      lookId: 'embers',
+      takeOvers: [{ zoneId: 'home', zoneName: 'home', lookName: home.lookName, lights: taken, stopped: false }],
+    })
+    await startLook('living', 'embers', { kind: 'dissolve', durationS: 3 })
+    expect(api.start).toHaveBeenCalledWith('living', { lookId: 'embers', transition: { kind: 'dissolve', durationS: 3 } })
+    const zones = liveStore.getState().running!.zones
+    expect(zones.map((candidate) => candidate.zoneId)).toEqual(['home', 'office', 'living'])
+    expect(zone('living').lookId).toBe('embers')
+    expect(zone('home').lights).toEqual(home.lights.filter((id) => !taken.includes(id)))
+  })
+
+  it('stops a zone in the store when a start takes all its lights', async () => {
+    seedLive()
+    const office = zone('office')
+    vi.spyOn(api, 'start').mockResolvedValue({
+      ...office,
+      zoneId: 'bedroom',
+      lookId: 'embers',
+      takeOvers: [{ zoneId: 'office', zoneName: 'office', lookName: office.lookName, lights: office.lights, stopped: true }],
+    })
+    await startLook('bedroom', 'embers', { kind: 'cut', durationS: 0 })
+    expect(liveStore.getState().running!.zones.map((candidate) => candidate.zoneId)).toEqual(['home', 'living', 'bedroom'])
   })
 
   it('reads "Start again" afresh after starting a look from it', async () => {

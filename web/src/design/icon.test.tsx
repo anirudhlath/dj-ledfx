@@ -1,13 +1,8 @@
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { payload } from '@/test/icons'
 import { Icon } from './icon'
 import { ICONS, type IconName } from './icons'
-
-function payload(name: IconName): string {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  svg.innerHTML = ICONS[name]
-  return svg.innerHTML
-}
 
 describe('Icon', () => {
   it('draws the payload for its name, hidden from assistive tech', () => {

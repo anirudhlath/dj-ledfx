@@ -52,7 +52,7 @@ from dj_ledfx.tempo.model import (
     TempoSource,
 )
 from dj_ledfx.types import RGB, DeviceStats
-from dj_ledfx.zones import attention
+from dj_ledfx.zones import attention, preview
 from dj_ledfx.zones.attention import AttentionAction, AttentionKind, Severity, SubjectType
 from dj_ledfx.zones.lights import LightState, LightStatus
 from dj_ledfx.zones.model import (
@@ -62,7 +62,7 @@ from dj_ledfx.zones.model import (
     ZoneKind,
     ZoneRecord,
 )
-from dj_ledfx.zones.runtime import ZoneState
+from dj_ledfx.zones.runtime import LightMode, ZoneState
 
 if TYPE_CHECKING:
     from dj_ledfx.devices.govee.output import LampOutputReport
@@ -413,12 +413,48 @@ class PreviewRequest(ContractModel):
     look: Look | None = None  # an unsaved draft
 
 
+class PreviewLight(ContractModel):
+    """What one of the preview's lights would do if its look started now (web spec §8.2's
+    consequence line). Not in the web spec's contract: F4 adds it (its ruling 1)."""
+
+    id: str
+    mode: LightMode
+    effect: str | None  # the firmware effect it would run, or stream a copy of
+
+
 class PreviewStarted(ContractModel):
     preview_id: str
+    lights: list[PreviewLight]  # the zone's lights, the PC as one
 
 
 class PreviewUpdate(ContractModel):
     look: Look  # the editor's look as it is now, saved or not
+
+
+# The PC answers as its most active part: one that runs the effect itself over one that
+# streams a copy, and either over one that streams the look.
+_ACTIVITY: dict[LightMode, int] = {"own-effect": 2, "streamed-copy": 1, "streaming": 0}
+
+
+def preview_started(
+    preview_id: str, lights: Iterable[preview.PreviewLight], index: LightIndex
+) -> PreviewStarted:
+    """The preview's answer, each light once: the PC answers as its most active part
+    (`_ACTIVITY`). Between parts equally active, the first in the runtime's light order (a
+    deterministic one) names the PC's effect."""
+    chosen: dict[str, preview.PreviewLight] = {}
+    for light in lights:
+        light_id = index.light_of(light.device_id)
+        known = chosen.get(light_id)
+        if known is None or _ACTIVITY[light.mode] > _ACTIVITY[known.mode]:
+            chosen[light_id] = light
+    return PreviewStarted(
+        preview_id=preview_id,
+        lights=[
+            PreviewLight(id=light_id, mode=light.mode, effect=light.effect)
+            for light_id, light in chosen.items()
+        ],
+    )
 
 
 # --- the home map (web spec §12.2) ------------------------------------------------------

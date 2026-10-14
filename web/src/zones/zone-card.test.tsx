@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import type { Id } from '@/api/contract'
+import { lookName } from '@/api/mocks/fixtures'
 import { liveStore } from '@/api/live-store'
 import type { ScenarioName, ScenarioState } from '@/api/mocks/scenarios'
 import { api, ApiError } from '@/api/rest'
@@ -44,7 +45,7 @@ describe('ZoneCard', () => {
     const card = renderCard('hero', 'living')
     expect(card).toHaveClass('border-line')
     expect(within(card).getByText('11 lights')).toBeInTheDocument()
-    expect(within(card).getByRole('heading', { name: 'Fireflies' })).toHaveClass('text-display-md')
+    expect(within(card).getByRole('heading', { name: lookName('fireflies') })).toHaveClass('text-display-md')
     expect(within(card).getByText('No inputs')).toBeInTheDocument()
     expect(within(card).getByText('since 19:05 · 9 m')).toBeInTheDocument()
     expect(within(card).getAllByRole('img')).toHaveLength(11)
@@ -57,11 +58,21 @@ describe('ZoneCard', () => {
   // State-Transition's living room card.
   it('draws a transition: the old look struck through, its kind and its progress', () => {
     const card = renderCard('transition', 'living')
-    const heading = within(card).getByRole('heading', { name: 'from Fireflies to Embers' })
-    expect(within(heading).getByText('Fireflies').tagName).toBe('S')
+    const heading = within(card).getByRole('heading', { name: `from ${lookName('fireflies')} to ${lookName('embers')}` })
+    expect(within(heading).getByText(lookName('fireflies')).tagName).toBe('S')
     expect(within(card).getByText('Dissolve · 3 s')).toBeInTheDocument()
     expect(within(card).getByText('62%')).toBeInTheDocument()
     expect(within(card).getByRole('progressbar', { name: 'Dissolve · 3 s' })).toHaveAttribute('aria-valuenow', '62')
+  })
+
+  // The heading's "from" and "to" are `sr-only`, which is absolutely positioned: with no positioned ancestor inside the Running panel's
+  // scroller they escape its clip and stretch <main>'s scroll area (measured: 27 px at 1440 x 400), so the heading holds them with `relative`.
+  it("holds a transition heading's hidden words in the positioned heading, so they can't reach out of a scroller", () => {
+    const card = renderCard('transition', 'living')
+    const heading = within(card).getByRole('heading', { name: `from ${lookName('fireflies')} to ${lookName('embers')}` })
+    const hidden = heading.querySelectorAll('.sr-only')
+    expect([...hidden].map((each) => each.textContent)).toEqual(['from', 'to'])
+    for (const each of hidden) expect(each.closest('.relative')).toBe(heading)
   })
 
   // F3 decision 16: the server pushes a transition only as it starts, passes its midpoint and ends.
@@ -76,7 +87,7 @@ describe('ZoneCard', () => {
     expect(within(card).getByText('100%')).toBeInTheDocument()
     cleanup()
     const held = renderCard('transition', 'living', {
-      change: (state) => (runningIn(state, 'living').transition = { from: 'Fireflies', kind: 'fade', progress: 0.25, durationS: 0 }),
+      change: (state) => (runningIn(state, 'living').transition = { from: lookName('fireflies'), kind: 'fade', progress: 0.25, durationS: 0 }),
     })
     act(() => vi.advanceTimersByTime(600))
     expect(within(held).getByText('25%')).toBeInTheDocument()
@@ -87,7 +98,7 @@ describe('ZoneCard', () => {
     const restart = vi.spyOn(api, 'restart').mockImplementation(answer)
     const card = renderCard('problems', 'kitchen', { compact: true })
     expect(card).toHaveClass('border-signal-line')
-    expect(within(card).getByRole('heading', { name: 'Lava' })).toHaveClass('text-display-sm')
+    expect(within(card).getByRole('heading', { name: lookName('lava') })).toHaveClass('text-display-sm')
     expect(within(card).getByText('stopped at 19:12')).toBeInTheDocument()
     const note = within(card).getByText('Layer “Plasma” raised an error at 19:12. The Kitchen lights are holding the last frame.')
     expect(note.closest('p')).toHaveClass('text-signal')

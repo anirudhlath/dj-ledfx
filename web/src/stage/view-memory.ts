@@ -2,6 +2,7 @@
 // storage that is missing, full, blocked or holding junk only costs the remembered view: every read
 // and write is guarded, and every field is checked on the way in.
 import { useCallback, useState } from 'react'
+import { browserStorage } from '@/lib/storage'
 import { FIT_VIEW, type View } from './camera'
 import { SPEC } from './design-numbers'
 
@@ -17,15 +18,6 @@ export const DEFAULT_STAGE_VIEW: StoredView = { view: FIT_VIEW, labels: true }
 export const ZOOM_STEPS = [1, 1.25, 1.5, 2] as const
 
 const KEY = 'dj-ledfx:stage-view:'
-
-/** localStorage, or null where reaching it throws (a sandboxed frame, blocked site data). */
-export function browserStorage(): Storage | null {
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
-}
 
 const isRotation = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value / SPEC.rotate.stepDeg) && Math.abs(value) <= SPEC.rotate.maxDeg

@@ -134,6 +134,17 @@ export const TRANSITION: Record<RunningZoneTransition['kind'], { label: string; 
 /** §6.3: "Nothing playing on Music Assistant. The look waits dark and starts with the music." */
 const WAITING_FOR_MUSIC = 'Nothing playing on Music Assistant. The look waits dark and starts with the music.'
 
+/** What a look waiting for an input does: a waiting zone's note, and the composer's consequence line (§8.2). */
+export function waitingText(kind: InputKind): string {
+  return kind === 'music' ? WAITING_FOR_MUSIC : `Waiting for ${INPUTS[kind].label}. The look waits dark and starts when it's there.`
+}
+
+/** A transition as the card, the stage's tag and the composer's select say it: "Dissolve · 3 s", or "Cut" with no duration. */
+export function transitionLabel(kind: RunningZoneTransition['kind'], durationS: number | null): string {
+  const { label } = TRANSITION[kind]
+  return durationS === null ? label : `${label} · ${Math.round(durationS * 10) / 10} s`
+}
+
 const clamp01 = (value: number) => Math.min(Math.max(value, 0), 1)
 const lightCount = (count: number) => (count === 1 ? '1 light' : `${count} lights`)
 const timeOf = (at: string) => formatTime(new Date(at))
@@ -209,9 +220,7 @@ function stateNote(running: RunningZone, world: ZoneWorld, name: string, now: Da
       const waitingFor = running.waitingFor ?? []
       const first = INPUT_ORDER.find((kind) => waitingFor.includes(kind))
       if (first === undefined) return null
-      const text =
-        first === 'music' ? WAITING_FOR_MUSIC : `Waiting for ${INPUTS[first].label}. The look waits dark and starts when it's there.`
-      return { tone: 'quiet', parts: [{ text }] }
+      return { tone: 'quiet', parts: [{ text: waitingText(first) }] }
     }
     default:
       return null
@@ -264,11 +273,9 @@ function firmwareNote(lights: readonly SwatchLight[]): ZoneNote | null {
 /** A served transition as the card and the stage's tag say it; null without one. */
 export function transitionView(transition: RunningZoneTransition | null | undefined): TransitionView | null {
   if (transition == null) return null
-  const { label } = TRANSITION[transition.kind]
   // A duration that isn't above zero (or isn't a number) says nothing.
   const durationS = transition.durationS != null && transition.durationS > 0 ? transition.durationS : null
-  const said = durationS === null ? label : `${label} · ${Math.round(durationS * 10) / 10} s`
-  return { from: transition.from, label: said, progress: clamp01(transition.progress), durationS }
+  return { from: transition.from, label: transitionLabel(transition.kind, durationS), progress: clamp01(transition.progress), durationS }
 }
 
 /** A running zone's lights that REST knows, each with its state, in the zone's order. */

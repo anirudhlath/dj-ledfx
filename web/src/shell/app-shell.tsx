@@ -14,7 +14,8 @@ import { TabBar } from './tab-bar'
 import { TopBar } from './top-bar'
 
 /**
- * §4.1–4.2: rail and top bar on desktop; header (with the tempo strip on Live) and tab bar on phone.
+ * §4.1–4.2: rail and top bar on desktop; header (with the tempo strip on Live) and tab bar on phone,
+ * except around a focused task (§8.10), which has the phone's screen to itself.
  * `<main>` keeps its place in the tree, so crossing the breakpoint swaps the chrome without
  * remounting the page. The root alone keeps everything out of the safe-area insets (index.html
  * sets viewport-fit=cover): a notch, a home indicator, a phone turned sideways, in either layout.
@@ -26,6 +27,7 @@ export function AppShell() {
   const isPhone = useIsPhone()
   const meta = usePageMeta()
   const { PhoneTitle } = meta
+  const focused = isPhone && meta.focusedTask === true
   const news = useConnectionNews(useConnectionStatus())
   const server = useServerName()
 
@@ -39,7 +41,7 @@ export function AppShell() {
         )}
       >
         <title>{documentTitle(meta.title)}</title>
-        {isPhone ? (
+        {focused ? null : isPhone ? (
           <PhoneHeader
             title={PhoneTitle ? <PhoneTitle /> : (meta.phoneTitle ?? meta.title)}
             back={meta.phoneBack}
@@ -58,7 +60,7 @@ export function AppShell() {
         <main className="min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </main>
-        {isPhone && <TabBar />}
+        {isPhone && !focused && <TabBar />}
       </div>
       <TapeFrame />
     </Announcer>

@@ -40,6 +40,16 @@ describe('Slider', () => {
     render(<Slider label="Height" value={1.5} min={1} max={3} step={0.1} onValueChange={() => {}} />)
     expect(screen.getByRole('slider', { name: 'Height' })).toHaveStyle({ '--v': '25%' })
   })
+
+  // The label is `sr-only`, which is absolutely positioned: with no positioned ancestor inside a scroller it escapes the scroller's clip and
+  // stretches <main>'s scroll area (measured: 27 to 39 px on a short screen), so the root holds it with `relative`, whatever class it is given.
+  it("holds its hidden label in a positioned root, so the label can't reach out of a scroller", () => {
+    const { container } = render(<Slider label="Brightness" value={70} onValueChange={() => {}} className="flex-1" />)
+    const label = container.querySelector('.sr-only')!
+    expect(label).toHaveTextContent('Brightness')
+    expect(container.firstElementChild).toHaveClass('relative', 'flex-1')
+    expect(label.closest('.relative')).toBe(container.firstElementChild)
+  })
 })
 
 function View() {

@@ -46,9 +46,10 @@ function LookName({ view, compact }: { view: ZoneView; compact: boolean }) {
     return <h3 className={cx('font-serif tracking-[-0.005em]', compact ? 'text-display-sm' : 'text-display-md')}>{view.lookName}</h3>
   }
   // The spaces sit between the parts, where the name is read whole ("from Fireflies to Embers"); a flex
-  // container draws no whitespace-only text, so they change nothing on screen.
+  // container draws no whitespace-only text, so they change nothing on screen. The heading is `relative` for the `sr-only` words, which
+  // are absolutely positioned: with no positioned ancestor inside a scroller they escape its clip and stretch <main>'s scroll area.
   return (
-    <h3 className="flex flex-wrap items-baseline gap-2.5 font-serif">
+    <h3 className="relative flex flex-wrap items-baseline gap-2.5 font-serif">
       <span className="sr-only">from</span>{' '}
       <s className="text-[24px] leading-[1.05] text-text-3 decoration-1">{view.transition.from}</s>{' '}
       <Icon name="right" className="self-center text-text-3" />

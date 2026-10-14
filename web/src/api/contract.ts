@@ -73,6 +73,8 @@ export type PlacementIn = Schemas['PlacementIn']
 export type Placement = Schemas['Placement']
 export type PreviewRequest = Schemas['PreviewRequest']
 export type PreviewStarted = Schemas['PreviewStarted']
+/** What one of a preview's lights would do if its look started now: F4's consequence line reads it (F4 ruling 1). */
+export type PreviewLight = Schemas['PreviewLight']
 /** PUT /preview/{id}: the editor's look as it is now, saved or not. */
 export type PreviewUpdate = Schemas['PreviewUpdate']
 /** The binary frame's stream byte (§12.4): 0x01 live, 0x02 preview. */

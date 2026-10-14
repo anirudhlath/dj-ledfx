@@ -12,11 +12,13 @@ let beatClock: BeatClock
 let sockets: FakeSocket[]
 let client: LiveClient
 const onResync = vi.fn()
+const onLive = vi.fn()
 
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(HERO_NOW)
   onResync.mockClear()
+  onLive.mockClear()
   store = createLiveStore()
   frames = new FrameStore()
   beatClock = new BeatClock()
@@ -29,6 +31,7 @@ beforeEach(() => {
     beatClock,
     openSocket: fake.open,
     onResync,
+    onLive,
     clock: () => Date.now() / 1000,
   })
 })
@@ -229,6 +232,25 @@ describe('LiveClient', () => {
     // M7: the restarted server's count has reached 500 again, a seq the client last saw.
     latest().sayRaw(encodeFrame(2, 'rope', 500, rgb(2, 2, 2)))
     expect(frames.get('rope')).toMatchObject({ seq: 500, rgb: rgb(2, 2, 2) })
+  })
+
+  // F4: the preview asks again whenever the link comes up, the first time too: a deep link can open before the server is there.
+  it('says the link is up when the server first speaks and again after each drop, and resyncs only after a drop', () => {
+    client.start()
+    latest().open()
+    expect(onLive).not.toHaveBeenCalled()
+    latest().say({ channel: 'transport', state: 'playing' })
+    expect(onLive).toHaveBeenCalledTimes(1)
+    expect(connection().status).toBe('live')
+    expect(onResync).not.toHaveBeenCalled()
+
+    latest().drop()
+    vi.advanceTimersByTime(1000)
+    latest().open()
+    expect(onLive).toHaveBeenCalledTimes(1)
+    latest().say({ channel: 'transport', state: 'playing' })
+    expect(onLive).toHaveBeenCalledTimes(2)
+    expect(onResync).toHaveBeenCalledTimes(1)
   })
 
   // Review focus 3: engine M1 acks without a protocol and sends v1 frames.

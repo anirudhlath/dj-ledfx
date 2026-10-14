@@ -1,8 +1,11 @@
 // The stage's SVG layer, over the canvas: the lights' marks (§7.3, §9.1), the room labels (§7.6) and
-// the sun (§7.4). It depends on the pose, the lights' status, what runs and the sun, never on frames,
-// so React draws it only when one of those changes (memo). Every size and colour is SPEC's or RENDER's.
+// the sun (§7.4), and in the composer the other rooms dimmed and the chosen zone outlined over them all
+// (§7.6 compose, as Live-PutLookOn layers them). It depends on the pose, the lights' status, what runs
+// and the sun, never on frames, so React draws it only when one of those changes (memo). Every size and
+// colour is SPEC's or RENDER's.
 import { memo, useId } from 'react'
 import type { Vec2 } from '@/api/contract'
+import { cx } from '@/design/cx'
 import { LIVE_SPEC } from '@/design/live-numbers'
 import { projectPoint, type CameraPose } from '../camera'
 import { RENDER, SPEC } from '../design-numbers'
@@ -10,7 +13,15 @@ import type { StageLabel } from '../labels'
 import type { Mark } from '../marks'
 import { cssColour, cssSize } from '../palette'
 import type { SunScene } from '../sun'
-import { ZoneOutline, type ZoneOutlineShape } from './zone-outline'
+import { ZoneDims, ZoneOutline, type ZoneOutlineShape } from './zone-outline'
+
+/** §7.6 compose on the stage: the rooms outside the chosen zone, and which labels are the zone's. */
+export interface ComposeShape {
+  /** The other rooms' floors, on the stage in CSS px. */
+  dims: readonly (readonly Vec2[])[]
+  /** The keys of the labels in the chosen zone: its rooms, the sub-zones inside it, and itself where it's a sub-zone. */
+  chosen: ReadonlySet<string>
+}
 
 export interface StageSvgProps {
   pose: CameraPose
@@ -19,21 +30,30 @@ export interface StageSvgProps {
   labels: readonly StageLabel[] | null
   /** The sun, with its label where the stage has labels (behaviour.ts). */
   sun: SunScene | null
-  /** The zone a card is hovered over, or /live/zones/:zoneId names; null for none. */
+  /** The zone a card is hovered over, /live/zones/:zoneId names, or the composer chose; null for none. */
   outline?: ZoneOutlineShape | null
+  /** The composer's dims and chosen labels; null outside it. */
+  compose?: ComposeShape | null
 }
 
-export const StageSvg = memo(function StageSvg({ pose, marks, labels, sun, outline = null }: StageSvgProps) {
+export const StageSvg = memo(function StageSvg({ pose, marks, labels, sun, outline = null, compose = null }: StageSvgProps) {
   return (
     <svg aria-hidden="true" className="pointer-events-none absolute inset-0" width={pose.width} height={pose.height}>
       {sun !== null && <SunMark pose={pose} sun={sun} />}
-      {outline !== null && <ZoneOutline outline={outline} />}
+      {outline !== null && compose === null && <ZoneOutline outline={outline} />}
       {marks.map((mark) => (
         <MarkShape key={mark.key} mark={mark} />
       ))}
       {labels?.map((label) => (
-        <RoomLabel key={label.key} label={label} at={projectPoint(pose, label.at)} />
+        <RoomLabel
+          key={label.key}
+          label={label}
+          at={projectPoint(pose, label.at)}
+          chosen={compose === null ? null : compose.chosen.has(label.key)}
+        />
       ))}
+      {compose !== null && <ZoneDims polygons={compose.dims} />}
+      {outline !== null && compose !== null && <ZoneOutline outline={outline} />}
     </svg>
   )
 })
@@ -90,15 +110,31 @@ function MarkShape({ mark }: { mark: Mark }) {
   }
 }
 
-/** Room caps, and the look running there beneath in serif italic (§7.6, §5.2). */
-function RoomLabel({ label, at }: { label: StageLabel; at: Vec2 }) {
+/**
+ * Room caps, and the look running there beneath in serif italic (§7.6, §5.2). In the composer the chosen
+ * zone's label is all `text` and the others' all `text-3`, as Live-PutLookOn draws them; `chosen` is null
+ * outside it.
+ */
+function RoomLabel({ label, at, chosen }: { label: StageLabel; at: Vec2; chosen: boolean | null }) {
   return (
     <g>
-      <text x={at[0]} y={at[1]} textAnchor="middle" className="label-caps fill-text-3" style={{ fontSize: SPEC.label.capsPx }}>
+      <text
+        x={at[0]}
+        y={at[1]}
+        textAnchor="middle"
+        className={cx('label-caps', chosen === true ? 'fill-text' : 'fill-text-3')}
+        style={{ fontSize: SPEC.label.capsPx }}
+      >
         {label.name}
       </text>
       {label.look !== null && (
-        <text x={at[0]} y={at[1] + RENDER.label.lineGapPx} textAnchor="middle" className="fill-text font-serif italic" style={{ fontSize: SPEC.label.lookPx }}>
+        <text
+          x={at[0]}
+          y={at[1] + RENDER.label.lineGapPx}
+          textAnchor="middle"
+          className={cx('font-serif italic', chosen === false ? 'fill-text-3' : 'fill-text')}
+          style={{ fontSize: SPEC.label.lookPx }}
+        >
           {label.look}
         </text>
       )}

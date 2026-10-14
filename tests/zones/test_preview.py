@@ -6,11 +6,12 @@ from typing import Any
 
 import pytest
 from conftest import FakeLight
-from zone_home import FakeHome, Home, HomeFactory, zone_record
+from runtime_fakes import LAMP, TILE
+from zone_home import BREATHE_AND_GLOW, GLOW, FakeHome, Home, HomeFactory, zone_record
 
 from dj_ledfx.looks.model import LookError
 from dj_ledfx.zones.model import ZoneError, ZoneNotFoundError
-from dj_ledfx.zones.preview import PreviewManager, PreviewNotFoundError
+from dj_ledfx.zones.preview import PreviewLight, PreviewManager, PreviewNotFoundError
 
 
 class Watch:
@@ -157,3 +158,30 @@ async def test_a_preview_follows_the_map_a_backup_brings(make_home: HomeFactory)
     await home.manager.replace_state(restore)
 
     assert previews.runtimes() == [] and home.host.hosted == []
+
+
+# F4 ruling 1: the composer's consequence line names the lights that would run a firmware
+# effect, and the ones that would stream a copy of it, before anything reaches a light.
+async def test_a_preview_says_what_each_light_would_do(make_home: HomeFactory) -> None:
+    tile, lamp = FakeLight("tile", caps=TILE), FakeLight("lamp", caps=LAMP)
+    home = await make_home([tile, lamp], [zone_record("z", "tile", "lamp")])
+    tile.calls.clear()
+    lamp.calls.clear()
+    previews = _previews(home, Watch())
+
+    glow = previews.start("z", GLOW)
+
+    assert previews.lights(glow) == (
+        PreviewLight("tile", "own-effect", "Glow"),
+        PreviewLight("lamp", "streamed-copy", "Glow"),  # no field layer: it streams a copy
+    )
+    with_field = previews.start("z", BREATHE_AND_GLOW)
+    assert previews.lights(with_field) == (
+        PreviewLight("tile", "own-effect", "Glow"),
+        PreviewLight("lamp", "streaming", None),  # it plays the field layer
+    )
+    waiting = previews.start("z", replace(GLOW, needs=("music",)))
+    assert [light.mode for light in previews.lights(waiting)] == ["streaming"] * 2  # dark
+    with pytest.raises(PreviewNotFoundError):
+        previews.lights(glow)  # replaced
+    assert tile.calls == [] and lamp.calls == []

@@ -58,6 +58,11 @@ export interface LiveClientOptions {
   openSocket?: OpenSocket
   /** After a reconnect: fetch again what REST loaded (resync() in queries.ts). */
   onResync?: () => void
+  /**
+   * Every time the link comes up, the first time too, and after onResync on a reconnect: for what the
+   * server forgets with the link (a preview) to be asked for again.
+   */
+  onLive?: () => void
   /** Seconds on a clock that only moves forward (clientNow). Tests pass their own. */
   clock?: () => number
 }
@@ -71,6 +76,7 @@ export class LiveClient {
   private readonly beatClock: BeatClock
   private readonly openSocket: OpenSocket
   private readonly onResync: () => void
+  private readonly onLive: () => void
   private readonly clock: () => number
   private readonly offset = new ClockOffset()
   private socket: LiveSocket | null = null
@@ -103,6 +109,7 @@ export class LiveClient {
     this.beatClock = options.beatClock
     this.openSocket = options.openSocket ?? openWebSocket
     this.onResync = options.onResync ?? (() => {})
+    this.onLive = options.onLive ?? (() => {})
     this.clock = options.clock ?? clientNow
   }
 
@@ -229,6 +236,7 @@ export class LiveClient {
     this.everLive = true
     this.lastWindow = null
     this.store.setState({ connection: { status: 'live', fps: null } })
+    this.onLive()
   }
 
   private receiveText(text: string, now: number): void {

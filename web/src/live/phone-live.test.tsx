@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { liveStore } from '@/api/live-store'
 import type { ScenarioName } from '@/api/mocks/scenarios'
 import { api, ApiError } from '@/api/rest'
+import { composerEntered } from '@/compose/model'
 import { renderApp } from '@/test/app'
 import { HERO_NOW, seedLive } from '@/test/live'
 import { seedRest } from '@/test/rest'
@@ -35,6 +36,14 @@ describe("the phone's Live (§8.10)", () => {
     expect(within(main()).getByRole('link', { name: 'Put a look on' })).toHaveAttribute('href', '/next/live/put')
     await userEvent.click(within(cards[1]).getAllByRole('link')[0])
     expect(router.state.location.pathname).toBe('/next/live/zones/living')
+  })
+
+  // F4 ruling 13, as amended: the composer is stepped into, so that leaving it steps back out of it.
+  it('puts the composer on as a step into it', async () => {
+    const router = openPhone()
+    await userEvent.click(within(main()).getByRole('link', { name: 'Put a look on' }))
+    expect(router.state.location.pathname).toBe('/next/live/put')
+    expect(composerEntered(router.state.location.state)).toBe(true)
   })
 
   // The desktop card's controls (use-zone-controls.ts), at the touch size; Review Focus 1.
