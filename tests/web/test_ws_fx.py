@@ -178,12 +178,36 @@ async def test_every_subscribe_sends_the_whole_picture_however_fast_the_commands
     assert after_again == [] and quiet == []
 
 
+class CountedSubscription(ClientSubscription):
+    """A subscription that counts the poll's wake-ups: it asks wants_fx once each time."""
+
+    asked = 0
+
+    @property
+    def wants_fx(self) -> bool:
+        self.asked += 1
+        return super().wants_fx
+
+
 async def test_the_poll_sleeps_while_the_session_doesnt_ask_and_wakes_when_it_does() -> None:
     feed = FxFeed(ZoneFx("live", "z", _dot(), 1.0))
-    sub = ClientSubscription(frame_protocol=2, fx=False)
-
-    asleep, woken = await _polled(feed, sub, lambda: sub.set_fx(True))  # _polled checks reads
-    assert asleep == [] and len(woken) == 1
+    sub = CountedSubscription(frame_protocol=2, fx=False)
+    socket = Socket()
+    task = asyncio.create_task(_fx_poll(socket, _app(feed), sub))  # type: ignore[arg-type]
+    try:
+        await _until(lambda: sub.asked >= 1)  # its first tick: then it sleeps
+        await asyncio.sleep(0.3)  # nine ticks of a loop that polled at FX_FPS
+        assert sub.asked == 1 and feed.reads == 0
+        sub.set_fx(True)
+        await _until(lambda: len(socket.texts) == 1)  # woken: the picture at once
+        sub.set_fx(False)
+        await _until(lambda: not sub.fx_changed.is_set())  # asleep again
+        asked = sub.asked
+        await asyncio.sleep(0.3)
+        assert sub.asked == asked
+    finally:
+        task.cancel()
+        await asyncio.wait([task])
 
 
 async def test_fx_go_out_at_most_30_times_a_second() -> None:
@@ -229,13 +253,13 @@ async def test_one_sessions_failed_send_ends_its_poll_alone() -> None:
     assert any("The fx channel ended" in message for message in messages)
 
 
-def test_every_session_shares_one_message_until_a_frame_changes() -> None:
+def test_polls_within_one_engine_frame_share_one_message() -> None:
     dot = _dot()
     feed = FxFeed(ZoneFx("live", "z", dot, 1.0))
     app = _app(feed)
     text = fx_text(app)
-    assert text is not None and fx_text(app) is text  # made once
-    feed.shown = [ZoneFx("live", "z", _dot(), 1.0)]  # the same place, another frame
+    assert text is not None and fx_text(app) is text  # made once for the frame
+    feed.shown = [ZoneFx("live", "z", _dot(), 1.0)]  # the same place, another frame: again
     assert fx_text(app) is not text
     assert fx_text(SimpleNamespace(state=SimpleNamespace(frame_feed=None, fx_cache=None))) is None
 

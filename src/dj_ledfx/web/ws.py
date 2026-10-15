@@ -425,8 +425,11 @@ async def _fx_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
 
 
 def fx_text(app: Any) -> str | None:
-    """The fx message for now, as JSON text: made once for every session, and again only
-    when a zone's frame for now, or its brightness, is another one. None: no frame feed."""
+    """The fx message for now, as JSON text, cached for one engine frame: made again when a
+    zone's frame for now, or its brightness, is another one. So sessions whose polls land
+    within the same frame share one text, and a session polling on another phase makes
+    its own (each poll runs at FX_FPS on its own phase, the frames change at the engine's
+    rate). None: no frame feed."""
     feed = getattr(app.state, "frame_feed", None)
     if feed is None:
         return None
