@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeSockets } from '@/test/fake-socket'
 import { HERO_NOW, startMockDataLayer } from '@/test/live'
-import { frames, liveClient, resetDataLayer, startDataLayer, wantFx } from './live'
+import { frames, fx, liveClient, resetDataLayer, startDataLayer, wantFx } from './live'
 import { liveStore } from './live-store'
 import { buildScenario } from './mocks/scenarios'
 import { queries, queryClient } from './queries'
@@ -77,6 +77,14 @@ describe('wantFx', () => {
     const release = wantFx()
     stale()
     expect(fxCommands(sockets[0])).toEqual([expect.objectContaining({ on: true })])
+    release()
+  })
+
+  it("hears the mock hero's picture once asked", async () => {
+    const release = wantFx()
+    startMockDataLayer()
+    await vi.advanceTimersByTimeAsync(1100)
+    expect([...fx.live.keys()].sort()).toEqual(['living', 'office'])
     release()
   })
 })

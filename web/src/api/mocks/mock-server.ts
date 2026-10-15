@@ -15,6 +15,7 @@ import { PATH_PARAM } from '../rest'
 import type { BeatV1, BeatV2, ServerMessage, StatsMessage } from '../ws-messages'
 import { coversOf, lightPlan, partId, runningZone } from './fixtures'
 import { motifFor, paint, type MotifSpec } from './frame-generator'
+import { zoneFx, type FxZone } from './mock-fx'
 import { asEngineM1, buildScenario, type ScenarioBeat, type ScenarioName, type ScenarioState } from './scenarios'
 
 const FRAME_MS = 1000 / 60
@@ -24,6 +25,8 @@ const STATS_MS = 1000
 const LIGHTS_MS = 5000
 const STATUS_MS = 10_000
 const SIGNALS_MS = 100
+/** §12.4: the fx channel sends at most 30 a second. */
+const FX_MS = 1000 / 30
 /** After a stall longer than this (a hidden tab), frames pick up from now rather than catch up. */
 const STALL_MS = 100
 /** How many looks "Start again" keeps, as engine M2 does (its Spec Ruling 19). */
@@ -71,6 +74,9 @@ interface Session extends MockSession {
   beatMs: number | null
   nextBeatAt: number
   signals: string[] | null
+  /** Whether it asked for the fx channel (`subscribe_fx {on: true}`), and the last picture it was sent, as sent. */
+  fx: boolean
+  lastFx: string | null
 }
 
 /** A light the mock streams, and the buffer it paints into. */
@@ -290,7 +296,7 @@ export class MockServer {
   private nextId = 0
   private timer: ReturnType<typeof setInterval> | null = null
   private live: Painted[] = []
-  private preview: { id: Id; lights: Painted[]; watchedAt: number } | null = null
+  private preview: { id: Id; zoneId: Id; look: Pick<Look, 'id' | 'category'>; lights: Painted[]; watchedAt: number } | null = null
   /** Each light's last seq, per stream: they run on across a replan, as the engine's do. */
   private readonly seqs: Record<FrameStream, Map<Id, number>> = { live: new Map(), preview: new Map() }
   /** When each light's placement was confirmed; the seed's confirmed lights have no time. */
@@ -303,6 +309,7 @@ export class MockServer {
   private nextLightsAt: number
   private nextStatusAt: number
   private nextSignalsAt: number
+  private nextFxAt: number
   private firstConnectAt: number | null = null
   private refusing = false
   /** The scenario's own beat: the source it plays, which drives the clock whenever nothing holds it. */
@@ -331,6 +338,7 @@ export class MockServer {
     this.nextLightsAt = this.startedAt + LIGHTS_MS
     this.nextStatusAt = this.startedAt + STATUS_MS
     this.nextSignalsAt = this.startedAt
+    this.nextFxAt = this.startedAt
     this.plan()
   }
 
@@ -357,6 +365,8 @@ export class MockServer {
       beatMs: null,
       nextBeatAt: 0,
       signals: null,
+      fx: false,
+      lastFx: null,
     }
     this.sessions.add(session)
     this.firstConnectAt ??= this.clock()
@@ -407,6 +417,8 @@ export class MockServer {
       return
     }
     if (this.protocol === 2 && action === 'subscribe_fx') {
+      session.fx = command.on === true
+      session.lastFx = null // a new subscription hears the picture as it is, unchanged or not
       this.ack(session, id, action)
       return
     }
@@ -471,6 +483,10 @@ export class MockServer {
     if (now >= this.nextSignalsAt) {
       this.nextSignalsAt += SIGNALS_MS
       for (const session of this.sessions) if (session.signals !== null) this.sendJson(session, this.signals(now, session.signals))
+    }
+    if (now >= this.nextFxAt) {
+      this.nextFxAt = Math.max(this.nextFxAt + FX_MS, now)
+      this.sendFx(now)
     }
     if (now >= this.nextStatsAt) {
       this.nextStatsAt += STATS_MS
@@ -601,6 +617,52 @@ export class MockServer {
       if (session.version === 2) session.link.send((v2 ??= encodeFrame(2, light.id, seq, light.rgb, stream)))
       else session.link.send((v1 ??= encodeFrame(1, light.id, seq, light.rgb)))
     }
+  }
+
+  // ── Effects in space ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * The fx channel (§12.4): the whole picture, live and preview, to each session that asked for it, and
+   * only when it changed since the last one that session heard. Under ?still the picture holds, so it
+   * goes out once.
+   */
+  private sendFx(now: number): void {
+    let wanted = false
+    for (const session of this.sessions) wanted ||= session.fx
+    if (!wanted) return
+    const t = this.beatElapsedS(now)
+    const beats = position(this.state, t)
+    const zones = this.fxZones().flatMap((zone) => zoneFx(zone, t, beats) ?? [])
+    const text = JSON.stringify({ channel: 'fx', zones })
+    for (const session of this.sessions) {
+      if (!session.fx || session.lastFx === text) continue
+      session.lastFx = text
+      session.link.send(text)
+    }
+  }
+
+  /** What each running zone, and the preview, would draw: a zone waiting for its input waits dark, and a crashed one holds. */
+  private fxZones(): FxZone[] {
+    const shapes = (ids: readonly Id[]) =>
+      ids.flatMap((id) => {
+        const light = this.state.lights.find((candidate) => candidate.id === id)
+        return light?.shape != null && STREAMED.has(light.status) ? [light.shape] : []
+      })
+    const zones: FxZone[] = this.state.running.map((zone) => ({
+      zoneId: zone.zoneId,
+      stream: 'live',
+      look: this.state.looks.find((candidate) => candidate.id === zone.lookId) ?? { id: zone.lookId, category: 'ambient' },
+      shapes: shapes(zone.lights),
+      brightness: zone.state === 'waiting' ? 0 : zone.brightness,
+      frozen: zone.state === 'crashed',
+    }))
+    if (this.preview !== null) {
+      const { zoneId, look, lights } = this.preview
+      const lightIds = lights.map((light) => light.id)
+      const previewShapes = lightIds.flatMap((id) => this.state.lights.find((light) => light.id === id)?.shape ?? [])
+      zones.push({ zoneId, stream: 'preview', look, shapes: previewShapes, brightness: 1, frozen: false })
+    }
+    return zones
   }
 
   // ── REST ─────────────────────────────────────────────────────────────────────────────────
@@ -1132,6 +1194,8 @@ export class MockServer {
           const id = this.newId('preview')
           this.preview = {
             id,
+            zoneId: zone.id,
+            look,
             lights: zone.lights.map((lightId) => this.painted(lightId, lights.get(lightId)?.leds ?? 0, spec, 1, false)),
             watchedAt: this.clock(),
           }
@@ -1150,6 +1214,7 @@ export class MockServer {
     if (body.look !== undefined) {
       const spec = motifFor(body.look)
       for (const light of this.preview.lights) light.spec = spec
+      this.preview.look = body.look
     }
     return noContent
   }

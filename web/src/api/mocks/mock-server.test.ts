@@ -5,7 +5,7 @@ import type { Deck, Home, Inputs, Light, Look, Placement, PreviewStarted, Recent
 import { FrameStore, decodeFrame } from '../frames'
 import { LiveClient } from '../live-client'
 import { createLiveStore } from '../live-store'
-import type { ClientCommand, RunningMessage } from '../ws-messages'
+import type { ClientCommand, FxMessage, RunningMessage } from '../ws-messages'
 import { inMemorySockets } from './in-memory-socket'
 import { RECENT_LIMIT, beatMessage, snapshotMessages, statsMessage, type MockServer } from './mock-server'
 import { COPIED_EFFECT, HOME_TOTALS } from './fixtures'
@@ -204,6 +204,80 @@ describe('a connection', () => {
     vi.advanceTimersByTime(20)
     expect(socket.closed()).toBe(true)
     expect(connect(server).session).toBeNull()
+  })
+})
+
+// F10: the mock draws in space, so "Effects in space" is built and tested with no engine.
+describe('the fx channel', () => {
+  const pictures = (socket: ReturnType<typeof connect>): FxMessage[] => socket.json().filter((message) => message.channel === 'fx')
+  const drawn = (picture: FxMessage | undefined) => picture?.zones.map((zone) => [zone.zoneId, zone.stream])
+
+  it("sends nothing until it's asked, then the hero's fireflies and comets, at most 30 a second", () => {
+    const socket = connect(startMockServer())
+    vi.advanceTimersByTime(500)
+    expect(pictures(socket)).toEqual([])
+    socket.send({ action: 'subscribe_fx', on: true })
+    expect(socket.json().at(-1)).toEqual({ channel: 'ack', id: 1, action: 'subscribe_fx' })
+    vi.advanceTimersByTime(1000)
+    const heard = pictures(socket)
+    expect(heard.length).toBeGreaterThan(20)
+    expect(heard.length).toBeLessThanOrEqual(31)
+    // The whole home's sunset draws nothing in space (§12.4: a zone with nothing to draw is left out).
+    expect(drawn(heard.at(-1))).toEqual([['living', 'live'], ['office', 'live']])
+    expect(heard.at(-1)!.zones.every((zone) => zone.particles!.length > 0)).toBe(true)
+  })
+
+  it('stops when asked to, and starts again with the picture as it is', () => {
+    const socket = connect(startMockServer({ still: true }))
+    socket.send({ action: 'subscribe_fx', on: true })
+    vi.advanceTimersByTime(200)
+    socket.send({ action: 'subscribe_fx', on: false })
+    socket.clear()
+    vi.advanceTimersByTime(500)
+    expect(pictures(socket)).toEqual([])
+    socket.send({ action: 'subscribe_fx', on: true })
+    vi.advanceTimersByTime(200)
+    expect(pictures(socket)).toHaveLength(1)
+  })
+
+  // §12.4: nothing while nothing changes. ?still holds the picture, so it goes out once.
+  it('sends a held picture once under ?still', () => {
+    const socket = connect(startMockServer({ still: true }))
+    socket.send({ action: 'subscribe_fx', on: true })
+    vi.advanceTimersByTime(1000)
+    expect(pictures(socket)).toHaveLength(1)
+  })
+
+  it("draws the preview's look on the preview stream while it's on, and nothing for it after", () => {
+    const server = startMockServer({ still: true })
+    const socket = connect(server)
+    socket.send({ action: 'subscribe_fx', on: true })
+    const { previewId } = server.handle('POST', '/api/preview', { zoneId: 'bedroom', lookId: 'scanner' }).body as PreviewStarted
+    vi.advanceTimersByTime(200)
+    const preview = pictures(socket).at(-1)!.zones.find((zone) => zone.stream === 'preview')!
+    expect(preview.zoneId).toBe('bedroom')
+    expect(preview.planes).toHaveLength(1)
+    server.handle('PUT', `/api/preview/${previewId}`, { look: { id: 'shockwave', category: 'tempo' } })
+    vi.advanceTimersByTime(200)
+    expect(pictures(socket).at(-1)!.zones.find((zone) => zone.stream === 'preview')!.rings).toHaveLength(1)
+    server.handle('DELETE', `/api/preview/${previewId}`)
+    vi.advanceTimersByTime(200)
+    expect(drawn(pictures(socket).at(-1))).toEqual([['living', 'live'], ['office', 'live']])
+  })
+
+  it("draws a started look's rings and planes, and nothing for a zone waiting for its input", () => {
+    const server = startMockServer({ still: true })
+    const socket = connect(server)
+    socket.send({ action: 'subscribe_fx', on: true })
+    server.handle('POST', '/api/zones/office/start', { lookId: 'shockwave' })
+    vi.advanceTimersByTime(200)
+    const office = pictures(socket).at(-1)!.zones.find((zone) => zone.zoneId === 'office')!
+    expect([office.rings?.length, office.planes?.length, office.particles]).toEqual([1, 1, undefined])
+    const waiting = connect(startMockServer({ scenario: 'waiting', still: true }))
+    waiting.send({ action: 'subscribe_fx', on: true })
+    vi.advanceTimersByTime(200)
+    const sleeping = buildScenario('waiting', HERO_NOW).running.filter((zone) => zone.state === 'waiting').map((zone) => zone.zoneId)
+    expect(pictures(waiting).at(-1)!.zones.map((zone) => zone.zoneId)).not.toEqual(expect.arrayContaining(sleeping))
   })
 })
 
