@@ -57,9 +57,10 @@ const EVERY_KIND: ZoneFx = {
  * KHR_parallel_shader_compile but never says a program has finished linking, so compileAsync would wait for ever: here,
  * as on a GPU done linking, every program has.
  */
-async function renderScene(element: ReactNode) {
+async function renderScene(element: ReactNode, prepare?: (gl: WebGLRenderer) => void) {
   const camera = Object.assign(new OrthographicCamera(), { manual: true })
   const onCreated = ({ gl }: { gl: WebGLRenderer }) => {
+    prepare?.(gl)
     const context = gl.getContext()
     const asked = context.getProgramParameter.bind(context)
     context.getProgramParameter = (program, name) => (name === COMPLETION_STATUS_KHR ? true : asked(program, name))
@@ -387,6 +388,24 @@ describe('the stage scene (§7.2, §7.5)', () => {
     // They go with the stage.
     await renderer.unmount()
     expect(disposed).toHaveBeenCalledOnce()
+  })
+
+  // Compiling ahead is only to keep a link off the main thread: if it fails, the programs link on first draw, as before it
+  // was done, so the effects still mount, and the failure is reported (e2e's shader check is what catches a broken shader).
+  it("draws the effects in space even if compiling their programs ahead fails, and says so", async () => {
+    const failure = new Error('compile failed')
+    const reported = vi.fn()
+    vi.stubGlobal('reportError', reported)
+    const props = sceneProps('hero', { cadenceMs: 1000 / SPEC.target.fps, fx: LIVE_ONLY })
+    const { renderer } = await renderScene(<StageScene {...props} />, (gl) => {
+      gl.compileAsync = vi.fn().mockRejectedValue(failure)
+    })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(reported).toHaveBeenCalledExactlyOnceWith(failure)
+    fx.apply({ channel: 'fx', zones: [EVERY_KIND] })
+    await vi.advanceTimersByTimeAsync(100)
+    const scene = renderer.scene.instance as Object3D
+    expect(['pxPerM', 'lift', 'homeCentre'].map((uniform) => fxMesh(scene, uniform)?.count)).toEqual([1, 2, 2])
   })
 
   it('lets go of the home when the stage goes', async () => {

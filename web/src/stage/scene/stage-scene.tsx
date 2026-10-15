@@ -45,7 +45,13 @@ export function StageScene({ home, writer, entries, mask, pose, cadenceMs, fx }:
   useEffect(() => () => fxMaterials.dispose(), [fxMaterials])
   useEffect(() => {
     let current = true
-    void compileFx(gl, fxMaterials, camera, scene).then(() => current && setFxCompiled(fxMaterials))
+    const done = () => current && setFxCompiled(fxMaterials)
+    // Compiling ahead only keeps a link off the main thread: if it fails, the programs link on first draw, so the layer
+    // comes all the same, and the failure is reported as an uncaught error, which e2e's shader check listens for.
+    void compileFx(gl, fxMaterials, camera, scene).then(done, (error: unknown) => {
+      if (current) reportError(error)
+      done()
+    })
     return () => void (current = false)
   }, [gl, fxMaterials, camera, scene])
   useLayoutEffect(() => {
