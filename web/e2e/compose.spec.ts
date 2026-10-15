@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { LIVE_RENDER, LIVE_SPEC } from '../src/design/live-numbers'
-import { absoluteEscapes, expectRingWhole, mainScroll, notch, open, SLACK, settled, stageCanvas, walkLooks, type Insets } from './helpers'
+import { absoluteEscapes, expectRingWhole, fxPictured, mainScroll, notch, open, SLACK, settled, stageCanvas, walkLooks, type Insets } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in the home's time zone (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -133,6 +133,7 @@ for (const size of ['desktop', 'phone'] as const) {
       test(`${state.name}${state.render === null ? '' : `, as ${size === 'desktop' ? 'Live' : 'Phone'}-${state.render}`}`, async ({ page }) => {
         await open(page, still(state.path))
         await expect(stageCanvas(page)).toBeVisible()
+        await fxPictured(page)
         await expect(state.ready(page)).toBeVisible()
         // As live.spec.ts: on desktop, the banner's frame rate settled.
         if (size === 'desktop') await expect(page.getByRole('banner').getByText('60 fps')).toBeVisible({ timeout: 10_000 })

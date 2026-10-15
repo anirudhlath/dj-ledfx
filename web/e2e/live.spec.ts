@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { absoluteEscapes, mainScroll, open, settled, stageCanvas } from './helpers'
+import { absoluteEscapes, fxPictured, mainScroll, open, settled, stageCanvas } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in Dallas (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -72,6 +72,7 @@ for (const [size, states] of [['desktop', DESKTOP], ['phone', PHONE]] as const) 
       test(`${state.name}${state.render === null ? '' : `, as ${state.render}`}`, async ({ page }) => {
         await open(page, still(state.path), state.quiet && state.ready(page))
         if (state.path.startsWith('/next/live')) await expect(stageCanvas(page)).toBeVisible()
+        if (state.path.startsWith('/next/live') && state.name !== 'reconnecting') await fxPictured(page)
         await expect(state.ready(page)).toBeVisible()
         // As shell.spec.ts's openStill: Live's tempo drawn, and on desktop the frame rate settled where the banner has one.
         if (state.path.startsWith('/next/live?')) await expect(page.getByRole('banner').getByRole('group', { name: 'Tempo' })).toBeVisible()

@@ -240,12 +240,14 @@ describe('the fx channel', () => {
     expect(pictures(socket)).toHaveLength(1)
   })
 
-  // §12.4: nothing while nothing changes. ?still holds the picture, so it goes out once.
-  it('sends a held picture once under ?still', () => {
-    const socket = connect(startMockServer({ still: true }))
+  // §12.4: nothing while nothing changes. ?still holds the picture, so it goes out once, and says so (browser.ts marks the page for e2e).
+  it('sends a held picture once under ?still, and says when it does', () => {
+    const onFx = vi.fn()
+    const socket = connect(startMockServer({ still: true, onFx }))
     socket.send({ action: 'subscribe_fx', on: true })
     vi.advanceTimersByTime(1000)
     expect(pictures(socket)).toHaveLength(1)
+    expect(onFx).toHaveBeenCalledOnce()
   })
 
   it("draws the preview's look on the preview stream while it's on, and nothing for it after", () => {

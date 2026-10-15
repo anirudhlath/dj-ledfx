@@ -63,6 +63,8 @@ export interface MockServerOptions {
   clock?: () => number
   /** Epoch ms: the API's times and the beat's server_time. */
   wallClock?: () => number
+  /** Called whenever a picture of the effects in space goes out: the mock build marks the page for e2e (browser.ts). */
+  onFx?: () => void
 }
 
 interface Session extends MockSession {
@@ -291,6 +293,7 @@ export class MockServer {
   private readonly still: boolean
   private readonly clock: () => number
   private readonly wallClock: () => number
+  private readonly onFx: () => void
   private readonly startedAt: number
   private readonly sessions = new Set<Session>()
   private nextId = 0
@@ -325,6 +328,7 @@ export class MockServer {
     this.still = options.still ?? false
     this.clock = options.clock ?? (() => performance.now())
     this.wallClock = options.wallClock ?? (() => Date.now())
+    this.onFx = options.onFx ?? (() => {})
     const state = buildScenario(options.scenario ?? 'hero', new Date(this.wallClock()))
     this.state = this.protocol === 1 ? asEngineM1(state) : state
     this.ownBeat = { ...this.state.beat }
@@ -638,6 +642,7 @@ export class MockServer {
       if (!session.fx || session.lastFx === text) continue
       session.lastFx = text
       session.link.send(text)
+      this.onFx()
     }
   }
 

@@ -27,6 +27,27 @@ export function stageCanvas(page: Page): Locator {
   return stageOf(page).locator('canvas')
 }
 
+/**
+ * The mock has sent the stage a picture of the effects in space (src/api/mocks/browser.ts marks the page),
+ * which it draws in the next animation frame: a screenshot of a stage that draws them waits for it, or it
+ * can settle before the picture lands. A stage frozen before it asked for one never gets one.
+ *
+ * The mark goes up as the picture is sent, before the page has stored it, and the stage draws it on its cadence: on the phone's
+ * 30 fps, a frame or two later. A screenshot shot sooner matches a baseline drawn without the picture, and passes on it, so this
+ * waits six animation frames more, which cover both.
+ */
+export async function fxPictured(page: Page): Promise<void> {
+  await expect(page.locator('html[data-mock-fx]')).toHaveCount(1)
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        let left = 6
+        const frame = () => (--left === 0 ? resolve() : requestAnimationFrame(frame))
+        requestAnimationFrame(frame)
+      }),
+  )
+}
+
 /** open(), then Live's stage once its canvas shows. */
 export async function openStage(page: Page, path = '/next/live'): Promise<Locator> {
   await open(page, path)
