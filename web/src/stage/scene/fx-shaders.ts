@@ -5,9 +5,10 @@
 //   in metres, so the reach drawn is the reach it lights the lamps with, falling off as the render's
 //   gradient does, round a core of a share of the glow's radius in CSS px, held between the render's
 //   smallest and largest cores, its colour lifted towards white at its own intensity.
-// - A ring's `sphere` is a shell seen through: a disc facing the camera, as bright at each point as
-//   the shell is thick along the line of sight there, so its rim is brightest. A `circle` lies level,
-//   an annulus `width` across, on the floor's pools' lift.
+// - A ring's light falls off as a Gaussian from its radius, to 1/e at half its `width` either side
+//   (§12.4). A `sphere` is a shell seen through: a disc facing the camera, as bright at each point as the
+//   shell's light summed along the line of sight there, so its rim is brightest. A `circle` lies level on
+//   the floor's pools' lift.
 // - A plane is a sheet through the home, clipped to its outline and between its floor and ceiling;
 //   with a `ray`, only the half on that side of its point.
 // Their brightness is the stage's one number for a translucent surface, SPEC.window.glassAlpha (§7.1's
@@ -50,7 +51,7 @@ export function particleMaterial(): ShaderMaterial {
       varying vec3 vColour;
       varying float vSize;
       void main() {
-        float quad = max(size, ${glsl(maxPx)} / pxPerM);
+        float quad = max(size, ${glsl(maxPx + 0.5)} / pxPerM);
         vec4 view = modelViewMatrix * vec4(centre, 1.0);
         view.xy += position.xy * quad;
         gl_Position = projectionMatrix * view;
@@ -80,7 +81,20 @@ export function particleMaterial(): ShaderMaterial {
   })
 }
 
-/** Rings: a sphere's disc faces the camera, and a circle's lies level; `shape` is radius, width and form (1 a circle). */
+/** A ring's quad reaches this many widths past its radius: three half-widths, where its light is under e^-9 of its peak. */
+export const RING_REACH_WIDTHS = 1.5
+/** Steps along the line of sight through a sphere's shell. */
+export const RING_SAMPLES = 16
+/** The narrowest width a ring is drawn with, metres: a width of 0 would divide by zero. */
+export const MIN_RING_WIDTH_M = 1e-4
+
+/**
+ * Rings: a sphere's disc faces the camera, and a circle's lies level; `shape` is radius, width and form (1 a circle).
+ * `width` is the ring's full thickness where its light falls to 1/e (§12.4), so its half-width h = width / 2 and
+ * its light is exp(-(d/h)^2) at d metres from the radius. A circle is that profile on the floor, d = |rho - radius|.
+ * A sphere's is the profile summed along the line of sight, d being the distance from the shell there, and
+ * normalised so that one crossing of the shell face on is glassAlpha: a pass through its front and back is twice that.
+ */
 export function ringMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     uniforms: { glassAlpha: { value: SPEC.window.glassAlpha }, lift: { value: POOL_LIFT_M } },
@@ -93,8 +107,9 @@ export function ringMaterial(): ShaderMaterial {
       varying vec3 vColour;
       varying vec3 vShape;
       void main() {
-        float outer = shape.x + shape.y * 0.5;
-        vOffsetM = position.xy * outer;
+        float width = max(shape.y, ${glsl(MIN_RING_WIDTH_M)});
+        float reach = shape.x + ${glsl(RING_REACH_WIDTHS)} * width;
+        vOffsetM = position.xy * reach;
         if (shape.z > 0.5) {
           vec3 world = centre + vec3(vOffsetM.x, lift, vOffsetM.y);
           gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
@@ -104,7 +119,7 @@ export function ringMaterial(): ShaderMaterial {
           gl_Position = projectionMatrix * view;
         }
         vColour = colour;
-        vShape = shape;
+        vShape = vec3(shape.x, width, shape.z);
       }
     `,
     fragmentShader: /* glsl */ `
@@ -113,18 +128,29 @@ export function ringMaterial(): ShaderMaterial {
       varying vec3 vColour;
       varying vec3 vShape;
       void main() {
+        float radius = vShape.x;
+        float hw = vShape.y * 0.5;
+        float reach = radius + ${glsl(RING_REACH_WIDTHS)} * vShape.y;
         float rho = length(vOffsetM);
-        float outer = vShape.x + vShape.y * 0.5;
-        float inner = max(0.0, vShape.x - vShape.y * 0.5);
-        if (rho > outer) discard;
+        if (rho > reach) discard;
         float alpha;
         if (vShape.z > 0.5) {
-          if (rho < inner) discard;
-          alpha = glassAlpha;
+          float t = (rho - radius) / hw;
+          alpha = glassAlpha * exp(-t * t);
         } else {
-          // The shell's thickness along the line of sight here, as a share of its width.
-          float chord = 2.0 * (sqrt(max(outer * outer - rho * rho, 0.0)) - sqrt(max(inner * inner - rho * rho, 0.0)));
-          alpha = min(1.0, glassAlpha * chord / vShape.y);
+          // The shell's light summed along the line of sight, s metres from the disc's plane, over the
+          // stretch where it is bright: from where the sight enters the shell's inner reach to where it leaves its outer.
+          float inner = max(radius - ${glsl(RING_REACH_WIDTHS)} * vShape.y, 0.0);
+          float s0 = sqrt(max(inner * inner - rho * rho, 0.0));
+          float ds = (sqrt(max(reach * reach - rho * rho, 0.0)) - s0) / ${glsl(RING_SAMPLES)};
+          float sum = 0.0;
+          for (int i = 0; i < ${RING_SAMPLES}; i++) {
+            float s = s0 + (float(i) + 0.5) * ds;
+            float t = (sqrt(rho * rho + s * s) - radius) / hw;
+            sum += exp(-t * t);
+          }
+          // Both sides of the disc's plane, over the integral of one crossing, hw * sqrt(pi).
+          alpha = min(1.0, glassAlpha * 2.0 * sum * ds / (hw * 1.7724538509));
         }
         gl_FragColor = vec4(vColour * alpha, 1.0);
       }

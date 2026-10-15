@@ -1,7 +1,7 @@
 // "Effects in space"'s three objects (§7.4): one InstancedMesh each for the particles, the rings and
 // the planes. Their attributes are the fx writer's own arrays, so a picture is written once and only
-// flagged here; each mesh draws as many instances as the writer wrote, and is made again only when the
-// writer's arrays grow. Their materials, and the outline's mask, are FxMaterials: made once per home.
+// flagged here, the part that's drawn; each mesh draws as many instances as the writer wrote, and is
+// made again only when the writer's arrays grow. Their materials, and the outline's mask, are FxMaterials: made once per home.
 import { DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, PlaneGeometry, type DataTexture, type ShaderMaterial } from 'three'
 import type { Home } from '@/api/contract'
 import type { CameraPose } from '../camera'
@@ -86,7 +86,13 @@ export class FxMeshes {
     if (drawn.mesh === null) return
     drawn.mesh.count = batch.count
     drawn.mesh.visible = batch.count > 0
-    for (const attribute of drawn.attributes) attribute.needsUpdate = true
+    if (batch.count === 0) return
+    // Only what's drawn goes up, not the arrays' spare room.
+    for (const attribute of drawn.attributes) {
+      attribute.clearUpdateRanges()
+      attribute.addUpdateRange(0, batch.count * attribute.itemSize)
+      attribute.needsUpdate = true
+    }
   }
 
   /** New arrays, larger ones: a new mesh over them. */
@@ -114,6 +120,7 @@ export class FxMeshes {
     drawn.mesh.geometry.dispose()
     drawn.mesh.dispose()
     drawn.mesh = null
+    drawn.generation = -1
     drawn.attributes = []
   }
 

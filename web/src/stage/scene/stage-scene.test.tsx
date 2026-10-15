@@ -1,7 +1,7 @@
 import { useThree } from '@react-three/fiber'
 import ReactThreeTestRenderer from '@react-three/test-renderer'
 import { Profiler, type ReactNode } from 'react'
-import { InstancedMesh, type Object3D, OrthographicCamera, type WebGLRenderer } from 'three'
+import { InstancedMesh, type Object3D, OrthographicCamera, ShaderMaterial, type WebGLRenderer } from 'three'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fx, wantFx } from '@/api/live'
@@ -168,8 +168,22 @@ describe('the stage scene (§7.2, §7.5)', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(fx.live.size).toBeGreaterThan(0)
     const scene = renderer.scene.instance as Object3D
-    const fxMeshes = () => scene.children.at(-1)!.children as InstancedMesh[]
-    expect(fxMeshes()[0].count).toBeGreaterThan(0)
+    // The fx layer's own meshes, found by their materials' uniforms: the light layer has none of these.
+    const fxMesh = (uniform: string) => {
+      let found: InstancedMesh | undefined
+      scene.traverse((object) => {
+        if (object instanceof InstancedMesh && object.material instanceof ShaderMaterial && uniform in object.material.uniforms) found = object
+      })
+      return found
+    }
+    const pictured = [...fx.live.values()]
+    const total = (key: 'particles' | 'rings' | 'planes') => pictured.reduce((sum, zone) => sum + (zone[key]?.length ?? 0), 0)
+    const particles = fxMesh('pxPerM')
+    expect(total('particles')).toBeGreaterThan(0)
+    expect(particles?.count).toBe(total('particles'))
+    expect(particles?.visible).toBe(true)
+    if (total('rings') > 0) expect(fxMesh('lift')?.count).toBe(total('rings'))
+    if (total('planes') > 0) expect(fxMesh('homeCentre')?.count).toBe(total('planes'))
     const render = vi.spyOn(gl!, 'render')
     const draws = vi.spyOn(props.writer, 'write')
     await vi.advanceTimersByTimeAsync(1000)
