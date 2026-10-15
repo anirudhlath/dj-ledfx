@@ -15,7 +15,6 @@ from conftest import builtin_look, nearest_frame
 from map_home import seeded_space, seeded_zone_lights
 
 from dj_ledfx.effects.base import Effect
-from dj_ledfx.effects.particles import ParticleEffect
 from dj_ledfx.effects.registry import get_effect_class
 from dj_ledfx.home.model import Location
 from dj_ledfx.home.seed import handoff_home_json
@@ -201,8 +200,9 @@ def test_a_start_taking_lights_from_two_zones_mid_transition_renders_in_under_5_
 
 # M8: what a zone draws in space is worked out with every frame, inside the same budget.
 # Each look that draws anything in space, at its layers' largest settings and with every
-# modifier, its mirror doubling its particles; and the hook's whole share, against the same
-# look with every effect saying nothing.
+# modifier, its mirror doubling its particles; and the whole share of M8's work in the
+# frame (the hooks, in_home(), the join and the look's modifiers on the fx), against the
+# same look with the runtime asking no layer what it draws.
 FX_SHARE_S = 0.0005  # a tenth of the budget
 
 
@@ -244,8 +244,8 @@ def test_what_a_zone_draws_in_space_keeps_its_frame_under_5_ms(
         drawn += nearest_frame(runtime.ring, 1e9).fx is not None
     assert drawn > 0
 
-    monkeypatch.setattr(Effect, "in_space", lambda self, ctx, leds: None)
-    monkeypatch.setattr(ParticleEffect, "in_space", lambda self, ctx, leds: None)
+    # Without any of it: no layer asked, so no in_home(), no join, no evening or cap on fx.
+    monkeypatch.setattr(ZoneRuntime, "_in_space", lambda self, *args: None)
     without = home_runtime(dressed, evening=lambda: 0.5)
     share = statistics.median(durations) - statistics.median(tick_times(without))
     assert share < FX_SHARE_S
