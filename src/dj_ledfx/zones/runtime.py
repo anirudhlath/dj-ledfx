@@ -17,6 +17,7 @@ from loguru import logger
 from dj_ledfx.effects.blend import blend_into
 from dj_ledfx.effects.context import render_context
 from dj_ledfx.effects.firmware import FirmwareEffect
+from dj_ledfx.effects.fx import Fx, fx_joined
 from dj_ledfx.effects.ledset import (
     NO_ROOM,
     NO_SPACE,
@@ -60,7 +61,7 @@ if TYPE_CHECKING:
 FRAME_BUDGET_S = 0.005
 SLOW_RATIO = 0.8
 SLOW_AFTER_S = 30.0
-CRASH_LOG_INTERVAL_S = 60.0
+CRASH_LOG_INTERVAL_S = 60.0  # a crash, or a layer's fx failing, is logged at most this often
 ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5.2)
 # How far ahead a zone renders at most. A light slower than this gets the newest frame and
 # runs late by the difference. A dozing Govee lamp's latency is its whole round trip, up to
@@ -248,6 +249,8 @@ class ZoneRuntime:
         self._views: dict[int, tuple[object, LayerView]] = {}  # by the layer's place
         self._rendering = ""
         self._last_crash_log = float("-inf")
+        self._last_fx_log = float("-inf")
+        self._fx: Fx | None = None  # what the look's newest frame draws in space, on the map
         self._render_s = 0.0  # moving average of the render time
         self._stride = 1
         self._ticks = 0
@@ -632,6 +635,7 @@ class ZoneRuntime:
                 target_time=target,
                 beat_phase=ctx.beat_phase,
                 bar_phase=ctx.bar_phase,
+                fx=self._fx,
             )
         )
         self._track_speed(now, elapsed)
@@ -706,7 +710,9 @@ class ZoneRuntime:
         flash leaves one) and the evening. The lights that run their own effect are drawn
         after those, as they show (for the preview, while it's watched), and the brightness
         cap goes over every LED. The trails keep their own copy of what they showed.
-        Waiting, it's dark."""
+        Waiting, it's dark. What the layers draw in space is kept in self._fx, under the
+        evening and the cap; a flash and trails are the LEDs' alone."""
+        self._fx = None
         count = self.leds.count
         if self.waiting_for or count == 0:
             return np.zeros((count, 3), dtype=np.float32)
@@ -718,19 +724,26 @@ class ZoneRuntime:
             frame = self._trails.apply(frame, ctx.t, modifiers.trails_s)
         if modifiers.evening:
             frame = warmed(frame, ctx)
+            if self._fx is not None:
+                self._fx = self._fx.recoloured(lambda colours: warmed(colours, ctx))
         if self._claim_targets and self._env.watched():
             self._draw_firmware(frame, ctx, self._claim_targets)
         if modifiers.brightness_cap is not None:
-            frame = capped(frame, modifiers.brightness_cap)
+            cap = modifiers.brightness_cap
+            frame = capped(frame, cap)
+            if self._fx is not None:
+                self._fx = self._fx.recoloured(lambda colours: capped(colours, cap))
         return frame
 
     def _render_layers(self, ctx: RenderContext) -> FloatRGB:
         """The streamed layers blended bottom to top, then each firmware layer's copy drawn
         on the lights that stream it. A particle layer's particles move to the frame's
         moment among the lamps its mask weighs above 0 (all of its view's, with no mask),
-        and light every LED of its view, which the mask then weighs."""
+        and light every LED of its view, which the mask then weighs. What each layer draws
+        in space is gathered into self._fx, on the map."""
         count = self.leds.count
         frame: FloatRGB | None = None
+        drawn_in_space: list[Fx] = []
         for index, (layer, effect) in enumerate(self._streamed):
             self._rendering = layer.name
             view = self._view(index, layer)
@@ -738,6 +751,9 @@ class ZoneRuntime:
                 colors = _finite(drawn(effect, ctx, view.leds, view.among))
             else:
                 colors = _finite(effect.render(ctx, view.leds))
+            fx = self._in_space(layer, effect, ctx, view)
+            if fx is not None:
+                drawn_in_space.append(fx)
             opacity = _opacity(layer, view)
             if frame is None and layer.blend == "normal":  # over black: its colours, weighed
                 frame = np.multiply(colors, opacity, dtype=np.float32)
@@ -748,7 +764,40 @@ class ZoneRuntime:
         if frame is None:
             frame = np.zeros((count, 3), dtype=np.float32)
         self._draw_firmware(frame, ctx, self._copy_targets)
+        self._fx = fx_joined(drawn_in_space)
         return frame
+
+    def _in_space(
+        self,
+        layer: Layer,
+        effect: FieldEffect | ParticleEffect,
+        ctx: RenderContext,
+        view: LayerView,
+    ) -> Fx | None:
+        """What the layer draws in space, on the map at its opacity (the view's in_home());
+        None: nothing. An effect that fails to say loses its fx, logged at most once a
+        minute, never its frame: the lights come first."""
+        try:
+            fx = effect.in_space(ctx, view.leds)
+            if fx is None or fx.empty:
+                return None
+            placed = view.in_home(fx)
+        except Exception as exc:
+            stamp = time.monotonic()
+            if stamp - self._last_fx_log >= CRASH_LOG_INTERVAL_S:
+                self._last_fx_log = stamp
+                logger.warning(
+                    "Zone {}: layer '{}' couldn't say what it draws in space ({}: {})",
+                    self.zone_id,
+                    layer.name,
+                    type(exc).__name__,
+                    exc,
+                )
+            return None
+        if layer.opacity != 1.0:
+            opacity = np.float32(layer.opacity)
+            placed = placed.recoloured(lambda colours: colours * opacity)
+        return None if placed.empty else placed
 
     def _draw_firmware(
         self,

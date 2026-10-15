@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TypeGuard
+from typing import TYPE_CHECKING, TypeGuard
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from dj_ledfx.effects.fx import Fx
 
 RGB = tuple[int, int, int]
 FloatRGB = NDArray[np.float32]  # shape (n_leds, 3), linear 0..1 per channel
@@ -49,6 +52,7 @@ class RenderedFrame:
     target_time: float  # monotonic time when this should be displayed
     beat_phase: float
     bar_phase: float
+    fx: Fx | None = None  # what the frame draws in space, on the map, before brightness
 
 
 @dataclass(frozen=True, slots=True)
