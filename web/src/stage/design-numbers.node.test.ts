@@ -68,6 +68,23 @@ describe('the design numbers', () => {
     expect(LIVE_RENDER.selectedZoneNote.button).toMatch(/^#/)
   })
 
+  // §7.4: "firefly and ember particles (tiny glowing points)". F10 draws every particle as Main.html draws a firefly.
+  it('draw a particle as a glow fading to nothing at its edge, round a smaller, whiter core', () => {
+    const { glow, core } = RENDER.particle
+    expect(glow.stops.map((stop) => stop.at)).toEqual([0, ...glow.stops.slice(1, -1).map((stop) => stop.at), 1])
+    expect(glow.stops.at(-1)!.alpha).toBe(0)
+    expect(core.lift).toBeGreaterThan(0)
+    expect(core.lift).toBeLessThan(1)
+    expect(core.share).toBeLessThan(glow.stops[1].at)
+    expect(core.minPx).toBeLessThan(core.maxPx)
+  })
+
+  // A firefly whose core no longer keeps the rule is named, with its sizes.
+  it.runIf(handoff.read !== null)('name the firefly drawn off the rule', () => {
+    const swollen = (html: string) => html.replace(/(<g class="ff0"><circle [^>]+><\/circle><circle cx="[\d.]+" cy="[\d.]+" r=")[\d.]+"/, '$13"')
+    expect(() => extractRender(edited('Main', swollen))).toThrow(/fireflies: each a glow and a core draw a core of [\d.]+ px on a glow of [\d.]+ px, off the rule/)
+  })
+
   it('name the sentence that moved', () => {
     expect(() => extractSpec('')).toThrow(/§7\.1 Floors/)
     expect(() => extractLive('')).toThrow(/§4\.4/)
