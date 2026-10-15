@@ -5,15 +5,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 from loguru import logger
 
 from dj_ledfx.effects.fx import Fx
 from dj_ledfx.effects.particle_tools import swarm
+from dj_ledfx.web import ws as ws_module
 from dj_ledfx.web.app import create_app
 from dj_ledfx.web.fx import FX_FPS
 from dj_ledfx.web.state import ClientSubscription
@@ -27,45 +31,68 @@ def _dot(x: float = 1.0) -> Fx:
 
 
 class FxFeed:
-    """A FrameFeed whose zones draw what a test sets in `shown`."""
+    """A FrameFeed whose zones draw what a test sets in `shown`; `reads` counts the poll's
+    ticks that reached it."""
 
     def __init__(self, *shown: ZoneFx) -> None:
         self.shown = list(shown)
+        self.reads = 0
 
     def frames(self, stream: str, wanted: Any = None) -> dict[str, Any]:
         return {}
 
     def fx(self) -> list[ZoneFx]:
+        self.reads += 1
         return list(self.shown)
 
 
 class Socket:
-    """A session's socket: the texts sent to it."""
+    """A session's socket: the texts sent to it, and when."""
 
     def __init__(self) -> None:
         self.texts: list[dict[str, Any]] = []
+        self.times: list[float] = []
 
     async def send_text(self, text: str) -> None:
         self.texts.append(json.loads(text))
+        self.times.append(time.perf_counter())
+
+
+class BrokenSocket(Socket):
+    async def send_text(self, text: str) -> None:
+        raise ConnectionError("gone")
 
 
 def _app(feed: FxFeed) -> Any:
     return SimpleNamespace(state=SimpleNamespace(frame_feed=feed, fx_cache=None))
 
 
+async def _until(condition: Callable[[], bool], deadline_s: float = 10.0) -> None:
+    """Wait for a condition, as long as a loaded machine needs: a deadline, not a duration."""
+    end = time.monotonic() + deadline_s
+    while not condition():
+        assert time.monotonic() < end, "timed out waiting"
+        await asyncio.sleep(0.005)
+
+
 async def _polled(
-    feed: FxFeed, sub: ClientSubscription, *steps: Any, each_s: float = 0.1
+    feed: FxFeed, sub: ClientSubscription, *steps: Callable[[], None]
 ) -> list[list[dict[str, Any]]]:
-    """Run the session's fx poll; between steps (callables), wait `each_s`. The messages
-    sent during each wait, in order."""
+    """Run the session's fx poll; after each step (callables, the first doing nothing), wait
+    for three ticks of the poll to reach the feed, or, when the session doesn't ask for fx,
+    a moment in which the poll must not touch it. The messages sent during each wait."""
     socket = Socket()
     task = asyncio.create_task(_fx_poll(socket, _app(feed), sub))  # type: ignore[arg-type]
     sent: list[list[dict[str, Any]]] = []
     try:
         for step in (lambda: None, *steps):
             step()
-            seen = len(socket.texts)
-            await asyncio.sleep(each_s)
+            seen, reads = len(socket.texts), feed.reads
+            if sub.wants_fx:
+                await _until(lambda reads=reads: feed.reads >= reads + 3)
+            else:
+                await asyncio.sleep(0.15)
+                assert feed.reads == reads, "the poll woke for a session that doesn't ask"
             sent.append(socket.texts[seen:])
     finally:
         task.cancel()
@@ -110,13 +137,13 @@ async def test_only_a_protocol_2_session_that_asked_gets_fx_and_turning_on_resen
     sub = ClientSubscription(frame_protocol=1, fx=True)
 
     def speaks_2() -> None:
-        sub.frame_protocol = 2
+        sub.set_frame_protocol(2)
 
     def off() -> None:
-        sub.fx = False
+        sub.set_fx(False)
 
     def on() -> None:
-        sub.fx = True
+        sub.set_fx(True)
 
     v1, v2, after_off, after_on = await _polled(feed, sub, speaks_2, off, on)
 
@@ -126,21 +153,80 @@ async def test_only_a_protocol_2_session_that_asked_gets_fx_and_turning_on_resen
     assert len(after_on) == 1  # the whole picture again, though nothing changed
 
 
-async def test_fx_go_out_at_most_30_times_a_second() -> None:
-    feed = FxFeed()
+async def test_every_subscribe_sends_the_whole_picture_however_fast_the_commands_came() -> None:
+    feed = FxFeed(ZoneFx("live", "z", _dot(), 1.0))
     sub = ClientSubscription(frame_protocol=2, fx=True)
-    socket = Socket()
 
+    def off_and_on() -> None:  # both handled between two ticks
+        sub.set_fx(False)
+        sub.set_fx(True)
+
+    def on_again() -> None:
+        sub.set_fx(True)
+
+    def protocol_2_1_2() -> None:
+        sub.set_frame_protocol(1)
+        sub.set_frame_protocol(2)
+
+    def protocol_2_again() -> None:  # not a switch: nothing to resend
+        sub.set_frame_protocol(2)
+
+    first, after_off_on, after_on_again, after_switch, after_again, quiet = await _polled(
+        feed, sub, off_and_on, on_again, protocol_2_1_2, protocol_2_again, lambda: None
+    )
+    assert [len(first), len(after_off_on), len(after_on_again), len(after_switch)] == [1] * 4
+    assert after_again == [] and quiet == []
+
+
+async def test_the_poll_sleeps_while_the_session_doesnt_ask_and_wakes_when_it_does() -> None:
+    feed = FxFeed(ZoneFx("live", "z", _dot(), 1.0))
+    sub = ClientSubscription(frame_protocol=2, fx=False)
+
+    asleep, woken = await _polled(feed, sub, lambda: sub.set_fx(True))  # _polled checks reads
+    assert asleep == [] and len(woken) == 1
+
+
+async def test_fx_go_out_at_most_30_times_a_second() -> None:
     class Moving(FxFeed):
-        def fx(self) -> list[ZoneFx]:  # a new frame every time it's asked
-            return [ZoneFx("live", "z", _dot(), 1.0)]
+        def fx(self) -> list[ZoneFx]:  # another picture every time it's asked
+            self.reads += 1
+            return [ZoneFx("live", "z", _dot(self.reads / 1000.0), 1.0)]
 
-    del feed
+    socket = Socket()
+    sub = ClientSubscription(frame_protocol=2, fx=True)
     task = asyncio.create_task(_fx_poll(socket, _app(Moving()), sub))  # type: ignore[arg-type]
-    await asyncio.sleep(0.5)
-    task.cancel()
-    await asyncio.wait([task])
-    assert 0 < len(socket.texts) <= 0.5 * FX_FPS + 1
+    try:
+        await _until(lambda: len(socket.texts) >= 8)
+    finally:
+        task.cancel()
+        await asyncio.wait([task])
+    gaps = [b - a for a, b in zip(socket.times, socket.times[1:], strict=False)]
+    assert min(gaps) >= 1.0 / FX_FPS - 0.005  # a loaded machine only widens the gaps
+
+
+async def test_one_sessions_failed_send_ends_its_poll_alone() -> None:
+    feed = FxFeed(ZoneFx("live", "z", _dot(), 1.0))
+    app = _app(feed)
+    broken, good = BrokenSocket(), Socket()
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    bad_task = asyncio.create_task(
+        _fx_poll(broken, app, ClientSubscription(frame_protocol=2, fx=True))  # type: ignore[arg-type]
+    )
+    good_task = asyncio.create_task(
+        _fx_poll(good, app, ClientSubscription(frame_protocol=2, fx=True))  # type: ignore[arg-type]
+    )
+    try:
+        await _until(lambda: bad_task.done() and len(good.texts) == 1)
+        feed.shown = [ZoneFx("live", "z", _dot(2.0), 1.0)]
+        await _until(lambda: len(good.texts) == 2)  # fx_cache is shared, the good poll goes on
+        assert not good_task.done()
+    finally:
+        good_task.cancel()
+        await asyncio.wait([good_task])
+        logger.remove(sink)
+    assert bad_task.exception() is None
+    assert any("The fx channel ended" in message for message in messages)
 
 
 def test_every_session_shares_one_message_until_a_frame_changes() -> None:
@@ -198,3 +284,43 @@ async def test_a_message_that_cant_be_made_ends_the_channel_once_with_a_log() ->
     finally:
         logger.remove(sink)
     assert socket.texts == [] and len(errors) == 1 and "RuntimeError: no fx" in errors[0]
+
+
+def _recording_polls(monkeypatch: pytest.MonkeyPatch) -> list[asyncio.Task[Any]]:
+    """The fx poll tasks the app starts, as they start."""
+    started: list[asyncio.Task[Any]] = []
+    real = ws_module._fx_poll
+
+    async def recording(ws: Any, app: Any, sub: Any) -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        started.append(task)
+        await real(ws, app, sub)
+
+    monkeypatch.setattr(ws_module, "_fx_poll", recording)
+    return started
+
+
+def _fx_app() -> Any:
+    scheduler = MagicMock()
+    scheduler.get_device_stats.return_value = []
+    feed = FxFeed(ZoneFx("live", "z", _dot(), 1.0))
+    return create_app(**mock_deps(scheduler=scheduler, frame_feed=feed, frame_watchers=Watchers()))
+
+
+def test_repeated_toggles_keep_one_poll_task_and_closing_the_socket_ends_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = _recording_polls(monkeypatch)
+    with TestClient(_fx_app()) as client:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"action": "subscribe_frames", "protocol": 2, "id": 1})
+            until(ws, "ack")
+            for n, on in enumerate([True, False, True, True, False, True], start=2):
+                ws.send_json({"action": "subscribe_fx", "on": on, "id": n})
+                assert until(ws, "ack")["on"] is on
+            assert len(started) == 1 and not started[0].done()
+        deadline = time.monotonic() + 10
+        while not started[0].done() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert started[0].done()  # cancelled with the session, the app still running
