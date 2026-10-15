@@ -18,6 +18,7 @@ from numpy.typing import NDArray
 from dj_ledfx.effects.color import palette_at
 from dj_ledfx.effects.field import ParamField
 from dj_ledfx.effects.field_tools import band, distances
+from dj_ledfx.effects.fx import Fx, rings
 from dj_ledfx.effects.params import EffectParam, level_param
 
 if TYPE_CHECKING:
@@ -95,21 +96,48 @@ class Ripples(ParamField):
         return when, where
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
-        values = self._values
-        interval, fade = self._interval(), float(values["fade_s"])
-        speed, life = float(values["speed"]), LIFE_FADES * fade
+        wave = np.zeros(leds.count, dtype=np.float32)
+        for where, radius, strength in self._alive(ctx, leds):
+            ring = band(distances(leds, where), radius, RING_WIDTH_M)
+            ring *= np.float32(strength)
+            np.maximum(wave, ring, out=wave)
+        colours = palette_at(self._palette, wave)
+        return (colours * np.float32(self._values["level"])).astype(np.float32)
+
+    def in_space(self, ctx: RenderContext, leds: LedSet) -> Fx | None:
+        """Each live drop's ring: a level circle on the floor where it landed, as far out as
+        it has travelled, in the colour its crest lights an LED."""
+        alive = self._alive(ctx, leds)
+        if not alive:
+            return None
+        strength = np.array([each for _, _, each in alive], dtype=np.float32)
+        crest = palette_at(self._palette, strength) * np.float32(self._values["level"])
+        return Fx(
+            rings=rings(
+                [where for where, _, _ in alive],
+                [radius for _, radius, _ in alive],
+                2.0 * RING_WIDTH_M,
+                crest,
+                circle=True,
+            )
+        )
+
+    def _alive(
+        self, ctx: RenderContext, leds: LedSet
+    ) -> list[tuple[NDArray[np.float32], float, float]]:
+        """Each drop still alive at ctx's moment: where it landed, how far its ring has
+        travelled, and how strong it still is (1 as it lands, fading). Draws of drops gone
+        are let go."""
+        interval, fade = self._interval(), float(self._values["fade_s"])
+        speed, life = float(self._values["speed"]), LIFE_FADES * fade
         first = math.floor((ctx.t - life) / interval) - 1  # the oldest drop that may be alive
         last = math.floor(ctx.t / interval)  # no later drop has landed yet
         for gone in [k for k in self._draws if k < first]:
             del self._draws[gone]
-        wave = np.zeros(leds.count, dtype=np.float32)
+        alive = []
         for k in range(first, last + 1):
             when, where = self.drop(k, leds)
             age = ctx.t - when
-            if not 0.0 <= age <= life:
-                continue
-            ring = band(distances(leds, where), speed * age, RING_WIDTH_M)
-            ring *= np.float32(math.exp(-age / fade))
-            np.maximum(wave, ring, out=wave)
-        colours = palette_at(self._palette, wave)
-        return (colours * np.float32(values["level"])).astype(np.float32)
+            if 0.0 <= age <= life:
+                alive.append((where, speed * age, math.exp(-age / fade)))
+        return alive
