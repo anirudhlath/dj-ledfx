@@ -12,23 +12,23 @@ import { motifFor } from './frame-generator'
 type FxKind = 'wander' | 'orbit' | 'shockwave' | 'speakers' | 'ripples' | 'scanner'
 
 // M5's eleven particle looks, and M3's four tempo looks and Ripples that send rings and planes.
-const KIND_OF: Partial<Record<Id, FxKind>> = {
-  fireflies: 'wander',
-  embers: 'wander',
-  rain: 'wander',
-  snow: 'wander',
-  spotlights: 'wander',
-  bursts: 'wander',
-  fountain: 'wander',
-  flock: 'wander',
-  vortex: 'orbit',
-  comets: 'orbit',
-  ball: 'orbit',
-  shockwave: 'shockwave',
-  speakers: 'speakers',
-  ripples: 'ripples',
-  scanner: 'scanner',
-}
+const KIND_OF = new Map<Id, FxKind>([
+  ['fireflies', 'wander'],
+  ['embers', 'wander'],
+  ['rain', 'wander'],
+  ['snow', 'wander'],
+  ['spotlights', 'wander'],
+  ['bursts', 'wander'],
+  ['fountain', 'wander'],
+  ['flock', 'wander'],
+  ['vortex', 'orbit'],
+  ['comets', 'orbit'],
+  ['ball', 'orbit'],
+  ['shockwave', 'shockwave'],
+  ['speakers', 'speakers'],
+  ['ripples', 'ripples'],
+  ['scanner', 'scanner'],
+])
 
 /** How many particles a wandering look draws, and how many each orbiting head trails. */
 const WANDERERS = 12
@@ -36,23 +36,23 @@ const TRAIL = 6
 /** A particle's glow, metres: about Fireflies' default glow size. */
 const WANDER_SIZE = 0.4
 const ORBIT_SIZE = 0.3
-/** How thick a shell, a ring or a plane is drawn, metres. */
+/** How thick a shell, a ring or a level plane is drawn, metres. */
 const SHELL_WIDTH = 0.3
 const PLANE_WIDTH = 0.15
+/** How wide a beam (a plane with a `ray`) is drawn: §12.4 gives its width as an angle, radians (its width 1 m out). */
+export const BEAM_WIDTH_RAD = 0.2
 
-/** One zone of the picture: the look it runs (or previews), on which lights, how bright, and whether it's held. */
+/** One zone of the picture: the look it runs (or previews), on which lights, and how bright. */
 export interface FxZone {
   zoneId: Id
   stream: ZoneFx['stream']
   look: Pick<Look, 'id' | 'category'>
   shapes: readonly LightShape[]
   brightness: number
-  /** A crashed zone holds its picture, as it holds its last frame. */
-  frozen: boolean
 }
 
 /** Whether a look draws anything in space. */
-export const drawsInSpace = (look: Pick<Look, 'id'>): boolean => KIND_OF[look.id ?? ''] !== undefined
+export const drawsInSpace = (look: Pick<Look, 'id'>): boolean => KIND_OF.has(look.id ?? '')
 
 /** §12.4: numbers rounded to 3 decimals. */
 const round3 = (value: number): number => Math.round(value * 1000) / 1000
@@ -80,8 +80,15 @@ function shapePoints(shape: LightShape): Vec3[] {
       const [x, y, z] = shape.base
       return [shape.base, [x, y, z + shape.height]]
     }
-    case 'grid':
-      return [shape.center]
+    case 'grid': {
+      // Its corners, unturned: enough for the box.
+      const [x, y, z] = shape.center
+      const [w, d] = [shape.width / 2, shape.depth / 2]
+      return [
+        [x - w, y - d, z],
+        [x + w, y + d, z],
+      ]
+    }
   }
 }
 
@@ -104,16 +111,14 @@ function boxOf(shapes: readonly LightShape[]): { centre: Vec3; reach: number; lo
 }
 
 /**
- * What one zone draws at `t` seconds and `beats` beats into the music, or null for nothing (§12.4: a zone
+ * What one zone draws at `at` seconds and `beat` beats into the music, or null for nothing (§12.4: a zone
  * with nothing to draw is left out): a look that draws nothing in space, a zone with no placed lights, or
  * one at no brightness (a zone waiting for its input waits dark).
  */
-export function zoneFx(zone: FxZone, t: number, beats: number): ZoneFx | null {
-  const kind = KIND_OF[zone.look.id ?? '']
+export function zoneFx(zone: FxZone, at: number, beat: number): ZoneFx | null {
+  const kind = KIND_OF.get(zone.look.id ?? '')
   const box = boxOf(zone.shapes)
   if (kind === undefined || box === null || zone.brightness <= 0) return null
-  const at = zone.frozen ? 0 : t
-  const beat = zone.frozen ? 0 : beats
   const { hue, spread } = motifFor(zone.look)
   const level = Math.min(1, zone.brightness)
   const [cx, cy, cz] = box.centre
@@ -153,7 +158,7 @@ export function zoneFx(zone: FxZone, t: number, beats: number): ZoneFx | null {
         {
           point: rounded(box.centre),
           normal: rounded([-Math.sin(turn), Math.cos(turn), 0]),
-          width: PLANE_WIDTH,
+          width: BEAM_WIDTH_RAD,
           rgb: hueRgb(hue + spread, level),
           ray: rounded([Math.cos(turn), Math.sin(turn), 0]),
         } satisfies FxPlane,

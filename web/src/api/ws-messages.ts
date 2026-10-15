@@ -59,8 +59,8 @@ export interface LightStat {
 /** `devices` is per device, the PC's parts included; `lights` (engine M2) is per light. */
 export interface StatsMessage { channel: 'stats'; devices: DeviceStat[]; lights?: LightStat[] }
 export interface StatusMessage { channel: 'status'; ok: boolean; device_count: number; avg_render_ms: number; transport: string }
-/** A command's answer. `protocol: 2` switches the session's frames to v2 (decision 1). */
-export interface AckMessage { channel: 'ack'; id: number | null; action: string; protocol?: number; fps?: number }
+/** A command's answer. `protocol: 2` switches the session's frames to v2 (decision 1); `on` is subscribe_fx's (engine M8). */
+export interface AckMessage { channel: 'ack'; id: number | null; action: string; protocol?: number; fps?: number; on?: boolean }
 export interface ErrorMessage { channel: 'error'; id?: number | null; detail: string }
 export interface InputsMessage { channel: 'inputs'; inputs: Inputs }
 export interface SignalsMessage { channel: 'signals'; values: Record<string, SignalValue> }

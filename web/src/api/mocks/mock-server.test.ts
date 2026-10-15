@@ -217,7 +217,7 @@ describe('the fx channel', () => {
     vi.advanceTimersByTime(500)
     expect(pictures(socket)).toEqual([])
     socket.send({ action: 'subscribe_fx', on: true })
-    expect(socket.json().at(-1)).toEqual({ channel: 'ack', id: 1, action: 'subscribe_fx' })
+    expect(socket.json().at(-1)).toEqual({ channel: 'ack', id: 1, action: 'subscribe_fx', on: true })
     vi.advanceTimersByTime(1000)
     const heard = pictures(socket)
     expect(heard.length).toBeGreaterThan(20)
@@ -225,6 +225,22 @@ describe('the fx channel', () => {
     // The whole home's sunset draws nothing in space (§12.4: a zone with nothing to draw is left out).
     expect(drawn(heard.at(-1))).toEqual([['living', 'live'], ['office', 'live']])
     expect(heard.at(-1)!.zones.every((zone) => zone.particles!.length > 0)).toBe(true)
+  })
+
+  // Engine M8's ws.py: the ack says which way it went, and anything but true or false is refused with its error.
+  it("acks as the engine does, and refuses an `on` that isn't true or false with the engine's error", () => {
+    const socket = connect(startMockServer())
+    socket.send({ action: 'subscribe_fx', on: false })
+    expect(socket.json().at(-1)).toEqual({ channel: 'ack', id: 1, action: 'subscribe_fx', on: false })
+    for (const on of ['yes', 1, null, undefined]) {
+      socket.send({ action: 'subscribe_fx', on })
+      expect(socket.json().at(-1)).toEqual({ channel: 'error', id: expect.any(Number), detail: 'subscribe_fx takes on: true or false' })
+    }
+    socket.send({ action: 'subscribe_fx', on: true })
+    socket.send({ action: 'subscribe_fx', on: 'no' })
+    vi.advanceTimersByTime(200)
+    // A refused command changes nothing: still on.
+    expect(pictures(socket).length).toBeGreaterThan(0)
   })
 
   it('stops when asked to, and starts again with the picture as it is', () => {
@@ -278,6 +294,52 @@ describe('the fx channel', () => {
     expect(onFx).toHaveBeenCalledTimes(pictures(socket).length)
   })
 
+  // Task 8's re-review (a): e2e waits, before a compose screenshot, for a picture with the preview's in it to have gone out.
+  it('says whether the picture that went out has a preview in it', () => {
+    const onFx = vi.fn()
+    const server = startMockServer({ still: true, onFx })
+    const socket = connect(server)
+    socket.send({ action: 'subscribe_fx', on: true })
+    vi.advanceTimersByTime(200)
+    expect(onFx).toHaveBeenLastCalledWith(false)
+    const { previewId } = server.handle('POST', '/api/preview', { zoneId: 'bedroom', lookId: 'scanner' }).body as PreviewStarted
+    vi.advanceTimersByTime(200)
+    expect(onFx).toHaveBeenLastCalledWith(true)
+    server.handle('DELETE', `/api/preview/${previewId}`)
+    vi.advanceTimersByTime(200)
+    expect(onFx).toHaveBeenLastCalledWith(false)
+  })
+
+  // §12.4: what a zone sends is what its lights show. A crashed zone's lights hold their last frame, so its picture holds the
+  // last it sent; a zone crashed before it was ever drawn holds the moment its frames hold (the frame generator's t = 0).
+  it('holds the picture a zone last drew once it crashes, while the rest move on', () => {
+    const server = startMockServer()
+    const socket = connect(server)
+    socket.send({ action: 'subscribe_fx', on: true })
+    vi.advanceTimersByTime(500)
+    const office = (picture: FxMessage) => picture.zones.find((zone) => zone.zoneId === 'office')
+    const last = office(pictures(socket).at(-1)!)
+    expect(last).toBeDefined()
+    server.state.running.find((zone) => zone.zoneId === 'office')!.state = 'crashed'
+    socket.clear()
+    vi.advanceTimersByTime(500)
+    const after = pictures(socket)
+    expect(after.length).toBeGreaterThan(5)
+    for (const picture of after) expect(office(picture)).toEqual(last)
+    expect(new Set(after.map((picture) => JSON.stringify(picture.zones.find((zone) => zone.zoneId === 'living')))).size).toBeGreaterThan(1)
+  })
+
+  // The preview's frames paint every light of its zone, streaming or not (startPreview), so its picture spans them all: on a
+  // home where nothing runs, every light is idle, and the preview still draws.
+  it("draws a preview over lights that stream nothing live, as its frames paint them", () => {
+    const server = startMockServer({ scenario: 'nothing-running', still: true })
+    const socket = connect(server)
+    socket.send({ action: 'subscribe_fx', on: true })
+    server.handle('POST', '/api/preview', { zoneId: 'living', lookId: 'scanner' })
+    vi.advanceTimersByTime(200)
+    expect(drawn(pictures(socket).at(-1))).toEqual([['living', 'preview']])
+  })
+
   it("draws the preview's look on the preview stream while it's on, and nothing for it after", () => {
     const server = startMockServer({ still: true })
     const socket = connect(server)
@@ -307,7 +369,9 @@ describe('the fx channel', () => {
     waiting.send({ action: 'subscribe_fx', on: true })
     vi.advanceTimersByTime(200)
     const sleeping = buildScenario('waiting', HERO_NOW).running.filter((zone) => zone.state === 'waiting').map((zone) => zone.zoneId)
-    expect(pictures(waiting).at(-1)!.zones.map((zone) => zone.zoneId)).not.toEqual(expect.arrayContaining(sleeping))
+    expect(sleeping.length).toBeGreaterThan(0)
+    const pictured = pictures(waiting).at(-1)!.zones.map((zone) => zone.zoneId)
+    expect(pictured.filter((zoneId) => sleeping.includes(zoneId))).toEqual([])
   })
 })
 

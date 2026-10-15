@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { LightShape } from '../contract'
 import { parseMessage } from '../ws-messages'
 import { lookFixtures } from './fixtures'
-import { drawsInSpace, zoneFx, type FxZone } from './mock-fx'
+import { BEAM_WIDTH_RAD, drawsInSpace, zoneFx, type FxZone } from './mock-fx'
 
 const SHAPES: LightShape[] = [
   { kind: 'point', position: [1, 1, 1] },
@@ -14,7 +14,6 @@ const zone = (lookId: string, extra: Partial<FxZone> = {}): FxZone => ({
   look: lookFixtures.find((look) => look.id === lookId)!,
   shapes: SHAPES,
   brightness: 1,
-  frozen: false,
   ...extra,
 })
 
@@ -33,6 +32,8 @@ describe('zoneFx', () => {
     const shockwave = zoneFx(zone('shockwave'), 3, 6.5)!
     expect(shockwave.rings!.map((ring) => ring.form)).toEqual(['sphere'])
     expect(shockwave.planes![0].ray).toBeDefined()
+    // §12.4: a beam's width is its angle, radians; a level plane's, metres.
+    expect(shockwave.planes![0].width).toBe(BEAM_WIDTH_RAD)
     expect(zoneFx(zone('speakers'), 3, 6.5)!.rings!.map((ring) => ring.form)).toEqual(['sphere'])
     const ripples = zoneFx(zone('ripples'), 3, 6.5)!
     expect(ripples.rings!.map((ring) => [ring.form, ring.center[2]])).toEqual([['circle', 0], ['circle', 0]])
@@ -50,10 +51,25 @@ describe('zoneFx', () => {
     expect(zoneFx(zone('fireflies', { brightness: 0 }), 3, 6)).toBeNull()
   })
 
-  it('moves with time and the beat, holds a crashed zone, and scales its colours by the brightness', () => {
+  // A look id that names something every object has is no look of the mock's.
+  it('draws nothing for an id it has no picture for', () => {
+    for (const id of ['constructor', 'toString', '__proto__']) {
+      expect(drawsInSpace({ id })).toBe(false)
+      expect(zoneFx(zone('fireflies', { look: { id, category: 'ambient' } }), 3, 6)).toBeNull()
+    }
+  })
+
+  // A grid's box is its width across and its depth, not its centre alone.
+  it("spans a grid's width and depth", () => {
+    const grid: LightShape = { kind: 'grid', center: [2, 2, 1], width: 6, depth: 2, rotation: [0, 0, 0] }
+    const heads = zoneFx(zone('comets', { shapes: [grid] }), 3, 0)!.particles!
+    const [x, y] = heads[0]
+    expect(Math.hypot(x - 2, y - 2)).toBeCloseTo(Math.hypot(6, 2) / 2, 2)
+  })
+
+  it('moves with time and the beat, and scales its colours by the brightness', () => {
     expect(zoneFx(zone('fireflies'), 3, 6)).not.toEqual(zoneFx(zone('fireflies'), 3.5, 6))
     expect(zoneFx(zone('scanner'), 3, 6)).not.toEqual(zoneFx(zone('scanner'), 3, 6.5))
-    expect(zoneFx(zone('comets', { frozen: true }), 3, 6)).toEqual(zoneFx(zone('comets', { frozen: true }), 9, 13))
     const full = zoneFx(zone('scanner'), 3, 6)!.planes![0].rgb
     const half = zoneFx(zone('scanner', { brightness: 0.5 }), 3, 6)!.planes![0].rgb
     half.forEach((channel, i) => expect(channel).toBeCloseTo(full[i] / 2, 2))

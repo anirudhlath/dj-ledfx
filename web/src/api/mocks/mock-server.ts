@@ -12,7 +12,7 @@ import {
 } from '../contract'
 import { encodeFrame, type FrameVersion } from '../frames'
 import { PATH_PARAM } from '../rest'
-import type { BeatV1, BeatV2, ServerMessage, StatsMessage } from '../ws-messages'
+import type { BeatV1, BeatV2, ServerMessage, StatsMessage, ZoneFx } from '../ws-messages'
 import { coversOf, lightPlan, partId, runningZone } from './fixtures'
 import { motifFor, paint, type MotifSpec } from './frame-generator'
 import { zoneFx, type FxZone } from './mock-fx'
@@ -63,8 +63,11 @@ export interface MockServerOptions {
   clock?: () => number
   /** Epoch ms: the API's times and the beat's server_time. */
   wallClock?: () => number
-  /** Called whenever a picture of the effects in space goes out: the mock build marks the page for e2e (browser.ts). */
-  onFx?: () => void
+  /**
+   * Called whenever a picture of the effects in space goes out, saying whether a preview's is in it: the mock build marks
+   * the page for e2e (browser.ts).
+   */
+  onFx?: (preview: boolean) => void
 }
 
 interface Session extends MockSession {
@@ -293,7 +296,9 @@ export class MockServer {
   private readonly still: boolean
   private readonly clock: () => number
   private readonly wallClock: () => number
-  private readonly onFx: () => void
+  private readonly onFx: (preview: boolean) => void
+  /** What each running zone last drew, while anyone asks: a crashed zone holds it, as its lights hold their last frame. */
+  private readonly drawnFx = new Map<Id, ZoneFx | null>()
   private readonly startedAt: number
   private readonly sessions = new Set<Session>()
   private nextId = 0
@@ -421,9 +426,15 @@ export class MockServer {
       return
     }
     if (this.protocol === 2 && action === 'subscribe_fx') {
-      session.fx = command.on === true
+      // Engine M8's ws.py: anything but true or false is refused, and the ack says which way it went.
+      const on = command.on
+      if (typeof on !== 'boolean') {
+        this.sendJson(session, { channel: 'error', id, detail: 'subscribe_fx takes on: true or false' })
+        return
+      }
+      session.fx = on
       session.lastFx = null // a new subscription hears the picture as it is, unchanged or not
-      this.ack(session, id, action)
+      this.ack(session, id, action, { on })
       return
     }
     if (this.protocol === 2 && action === 'tap') {
@@ -633,41 +644,69 @@ export class MockServer {
   private sendFx(now: number): void {
     let wanted = false
     for (const session of this.sessions) wanted ||= session.fx
-    if (!wanted) return
+    if (!wanted) {
+      // Nobody watches: what was drawn is of a moment nobody saw, and a zone that crashes meanwhile holds its frames' moment.
+      this.drawnFx.clear()
+      return
+    }
     const t = this.beatElapsedS(now)
     const beats = position(this.state, t)
-    const zones = this.fxZones().flatMap((zone) => zoneFx(zone, t, beats) ?? [])
+    const zones = this.livePictures(t, beats)
+    const previewed = this.previewPicture(t, beats)
+    if (previewed !== null) zones.push(previewed)
     const text = JSON.stringify({ channel: 'fx', zones })
     for (const session of this.sessions) {
       if (!session.fx || session.lastFx === text) continue
       session.lastFx = text
       session.link.send(text)
-      this.onFx()
+      this.onFx(previewed !== null)
     }
   }
 
-  /** What each running zone, and the preview, would draw: a zone waiting for its input waits dark, and a crashed one holds. */
-  private fxZones(): FxZone[] {
-    const shapes = (ids: readonly Id[]) =>
-      ids.flatMap((id) => {
-        const light = this.state.lights.find((candidate) => candidate.id === id)
-        return light?.shape != null && STREAMED.has(light.status) ? [light.shape] : []
-      })
-    const zones: FxZone[] = this.state.running.map((zone) => ({
-      zoneId: zone.zoneId,
-      stream: 'live',
-      look: this.state.looks.find((candidate) => candidate.id === zone.lookId) ?? { id: zone.lookId, category: 'ambient' },
-      shapes: shapes(zone.lights),
-      brightness: zone.state === 'waiting' ? 0 : zone.brightness,
-      frozen: zone.state === 'crashed',
-    }))
-    if (this.preview !== null) {
-      const { zoneId, look, lights } = this.preview
-      const lightIds = lights.map((light) => light.id)
-      const previewShapes = lightIds.flatMap((id) => this.state.lights.find((light) => light.id === id)?.shape ?? [])
-      zones.push({ zoneId, stream: 'preview', look, shapes: previewShapes, brightness: 1, frozen: false })
+  /**
+   * What each running zone draws, over the lights its live frames paint (plan()): a zone waiting for its input waits dark,
+   * and a crashed one holds the picture it last drew, or, never drawn, its frames' moment (t = 0, as plan()'s `frozen`).
+   */
+  private livePictures(t: number, beats: number): ZoneFx[] {
+    const zones: ZoneFx[] = []
+    for (const zone of this.state.running) {
+      const crashed = zone.state === 'crashed'
+      if (crashed && this.drawnFx.has(zone.zoneId)) {
+        const held = this.drawnFx.get(zone.zoneId)!
+        if (held !== null) zones.push(held)
+        continue
+      }
+      const fxZone: FxZone = {
+        zoneId: zone.zoneId,
+        stream: 'live',
+        look: this.state.looks.find((candidate) => candidate.id === zone.lookId) ?? { id: zone.lookId, category: 'ambient' },
+        shapes: this.shapes(zone.lights, (light) => STREAMED.has(light.status)),
+        brightness: zone.state === 'waiting' ? 0 : zone.brightness,
+      }
+      const picture = crashed ? zoneFx(fxZone, 0, 0) : zoneFx(fxZone, t, beats)
+      this.drawnFx.set(zone.zoneId, picture)
+      if (picture !== null) zones.push(picture)
     }
     return zones
+  }
+
+  /** What the preview draws, over every light of its zone: its frames paint them all, streaming or not (startPreview()). */
+  private previewPicture(t: number, beats: number): ZoneFx | null {
+    if (this.preview === null) return null
+    const { zoneId, look, lights } = this.preview
+    const shapes = this.shapes(
+      lights.map((light) => light.id),
+      () => true,
+    )
+    return zoneFx({ zoneId, stream: 'preview', look, shapes, brightness: 1 }, t, beats)
+  }
+
+  /** The placements of the lights `ids` names that `paints` takes. */
+  private shapes(ids: readonly Id[], paints: (light: Light) => boolean): LightShape[] {
+    return ids.flatMap((id) => {
+      const light = this.state.lights.find((candidate) => candidate.id === id)
+      return light?.shape != null && paints(light) ? [light.shape] : []
+    })
   }
 
   // ── REST ─────────────────────────────────────────────────────────────────────────────────
