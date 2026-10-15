@@ -18,6 +18,13 @@ export interface FxPick {
 
 export const LIVE_ONLY: FxPick = { preview: null, hidden: new Set() }
 
+/** Two picks naming the same zones: `FxWriter.write()` rewrites its arrays for a new object, so a caller keeps one. */
+export function sameFxPick(a: FxPick, b: FxPick): boolean {
+  if (a.preview !== b.preview || a.hidden.size !== b.hidden.size) return false
+  for (const id of a.hidden) if (!b.hidden.has(id)) return false
+  return true
+}
+
 const MIN_CAPACITY = 16
 const NONE: readonly never[] = []
 

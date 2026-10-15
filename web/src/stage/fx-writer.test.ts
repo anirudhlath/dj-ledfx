@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FxStore } from '@/api/fx'
 import type { ZoneFx } from '@/api/ws-messages'
-import { FxWriter, LIVE_ONLY, type FxPick } from './fx-writer'
+import { FxWriter, LIVE_ONLY, sameFxPick, type FxPick } from './fx-writer'
 
 const living: ZoneFx = {
   zoneId: 'living',
@@ -92,5 +92,16 @@ describe('FxWriter', () => {
     fx.apply({ channel: 'fx', zones: [many(2)] })
     writer.write(fx, LIVE_ONLY)
     expect(writer.particles.capacity).toBe(40)
+  })
+})
+
+describe('sameFxPick', () => {
+  it('takes picks that name the same preview and the same hidden zones for the same', () => {
+    const pick = (previewed: string | null, ...hidden: string[]): FxPick => ({ preview: previewed, hidden: new Set(hidden) })
+    expect(sameFxPick(pick(null, 'a', 'b'), pick(null, 'b', 'a'))).toBe(true)
+    expect(sameFxPick(pick('a'), pick('a'))).toBe(true)
+    expect(sameFxPick(pick(null, 'a'), pick('a', 'a'))).toBe(false)
+    expect(sameFxPick(pick(null, 'a'), pick(null, 'b'))).toBe(false)
+    expect(sameFxPick(pick(null, 'a'), pick(null, 'a', 'b'))).toBe(false)
   })
 })
