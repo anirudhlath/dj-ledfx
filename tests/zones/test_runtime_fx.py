@@ -3,6 +3,8 @@ ring beside its colours, on the map."""
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from conftest import nearest_frame
@@ -158,3 +160,20 @@ def test_an_effect_that_cant_say_what_it_draws_loses_its_fx_not_its_frame(
     assert latest(runtime)[UNDER_THE_DOT, 0] == pytest.approx(1.0)
     assert _fx(runtime) is None
     assert len(warnings) == 1 and "RuntimeError: no fx" in warnings[0]
+
+
+def test_a_beam_under_a_scaled_transform_keeps_its_angle_in_the_frame() -> None:
+    beam = Layer(
+        id="beam",
+        name="Beam",
+        type="field",
+        kind="lighthouse_beam",
+        settings={"width_deg": 30.0},
+        transform=Transform(scale=2.0),
+    )
+    runtime = runtime_of(look_of(beam), [ROW_LIGHT])
+    runtime.tick(100.0)
+
+    fx = _fx(runtime)
+    assert fx is not None and fx.planes.count == 1 and fx.planes.ray.any()
+    assert fx.planes.width.tolist() == pytest.approx([math.radians(30.0)])

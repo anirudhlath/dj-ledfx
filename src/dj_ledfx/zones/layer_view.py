@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from dj_ledfx.effects.field_tools import anchor_or_centre, smoothstep
+from dj_ledfx.effects.field_tools import anchor_or_centre, distances_at, smoothstep
 from dj_ledfx.effects.fx import NO_PLANES, NO_RINGS, Fx, Planes, Rings
 from dj_ledfx.effects.particle_tools import Particles
 from dj_ledfx.home.geometry import points_in_polygon
@@ -67,10 +67,11 @@ class LayerView:
         """What the layer's effect draws, moved from the effect's space onto the map: back
         through the transform, then at every place the mirror shows it. A particle the
         mirror doesn't show (past its plane) is left out, and one in both halves is drawn
-        in both; a ring or a plane is drawn whole at its place and at its reflection. The
+        in both (once, on the plane); a ring or a plane is drawn whole at its place and at
+        its reflection. The
         mask weighs each particle's colour where it lands, and one it weighs 0 is left out;
         a ring or a plane is drawn whole while the mask weighs any LED, else not at all."""
-        zone = self.zone or self.leds
+        zone = self.zone if self.zone is not None else self.leds
         centre = zone.centre.astype(np.float64)
         particles, rings, planes = fx.particles, fx.rings, fx.planes
         if self.transform is not None:
@@ -119,8 +120,7 @@ def mask_weights_at(mask: Mask, pos: NDArray[np.float32], leds: LedSet) -> NDArr
             weights: NDArray[np.float32] = inside.astype(np.float32)
             return weights
         case AnchorMask(anchor, radius):
-            point = anchor_or_centre(leds, anchor)
-            reach = np.asarray(np.linalg.norm(pos - point, axis=1), dtype=np.float32)
+            reach = distances_at(pos, anchor_or_centre(leds, anchor))
             near: NDArray[np.float32] = (
                 1.0 - smoothstep(radius - half, radius + half, reach)
             ).astype(np.float32)
@@ -170,7 +170,8 @@ def _unmoved(
 ) -> tuple[Particles, Rings, Planes]:
     """Things in the effect's space where the transform shows them on the map: transformed()
     undone. Places go back through the turn, the scale and the offset; directions through
-    the turn alone; lengths grow by the scale."""
+    the turn alone; lengths grow by the scale, angles don't (a plane with a ray, a beam,
+    gives its width in radians)."""
     turn = rotation_matrix((transform.rotate_deg, 0.0, 0.0))
     offset = np.asarray(transform.offset, dtype=np.float64)
     scale = transform.scale
@@ -183,6 +184,7 @@ def _unmoved(
         return (directions.astype(np.float64) @ turn.T).astype(np.float32)
 
     grown = np.float32(scale)
+    beams = (planes.ray != 0.0).any(axis=1)
     return (
         Particles(place(particles.pos), particles.colour, particles.radius * grown),
         Rings(
@@ -195,7 +197,7 @@ def _unmoved(
         Planes(
             place(planes.point),
             turned(planes.normal),
-            planes.width * grown,
+            np.where(beams, planes.width, planes.width * grown).astype(np.float32),
             planes.colour,
             turned(planes.ray),
         ),
@@ -217,15 +219,19 @@ def _flipped(directions: NDArray[np.float32], axis: int) -> NDArray[np.float32]:
 def _particle_images(particles: Particles, axis: int, at: float) -> Particles:
     """The particles the mirror shows, each at its place and then at its reflection, so the
     two stay side by side, oldest first: those on its low side, since an LED on the high
-    side sees the field at its own reflection."""
+    side sees the field at its own reflection. One on the plane is its own reflection, and
+    is drawn once."""
     shown = particles.pick(particles.pos[:, axis] <= at)
+    across = _reflected(shown.pos, axis, at)
+    drawn = np.ones(2 * shown.count, dtype=np.bool_)
+    drawn[1::2] = across[:, axis] != shown.pos[:, axis]
 
     def twice(values: NDArray[np.float32]) -> NDArray[np.float32]:
         return np.repeat(values, 2, axis=0)
 
     pos = twice(shown.pos)
-    pos[1::2] = _reflected(shown.pos, axis, at)
-    return Particles(pos, twice(shown.colour), twice(shown.radius))
+    pos[1::2] = across
+    return Particles(pos[drawn], twice(shown.colour)[drawn], twice(shown.radius)[drawn])
 
 
 def _ring_images(rings: Rings, axis: int, at: float) -> Rings:
