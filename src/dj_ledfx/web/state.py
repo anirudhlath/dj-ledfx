@@ -32,6 +32,7 @@ class ClientSubscription:
     frame_devices: list[str] = field(default_factory=list)  # v1: device ids; empty = all
     frame_lights: list[str] = field(default_factory=list)  # v2: light ids; empty = all
     frame_streams: list[str] = field(default_factory=lambda: ["live"])  # v1: live only
+    fx: bool = False  # subscribe_fx {on}: the fx channel, while it speaks frame protocol 2
 
 
 def get_db(request: Request) -> StateDB:
