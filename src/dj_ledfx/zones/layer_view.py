@@ -68,9 +68,9 @@ class LayerView:
         through the transform, then at every place the mirror shows it. A particle the
         mirror doesn't show (past its plane) is left out, and one in both halves is drawn
         in both (once, on the plane); a ring or a plane is drawn whole at its place and at
-        its reflection. The
-        mask weighs each particle's colour where it lands, and one it weighs 0 is left out;
-        a ring or a plane is drawn whole while the mask weighs any LED, else not at all."""
+        its reflection. The mask weighs each particle's colour where it lands, and one it
+        weighs 0 is left out; a ring or a plane is drawn whole while the mask weighs any
+        LED, else not at all. A kind the effect draws none of is passed over."""
         zone = self.zone if self.zone is not None else self.leds
         centre = zone.centre.astype(np.float64)
         particles, rings, planes = fx.particles, fx.rings, fx.planes
@@ -79,10 +79,15 @@ class LayerView:
         if self.mirror is not None:
             axis = _AXIS[self.mirror.axis]
             at = float(centre[axis]) if self.mirror.at is None else self.mirror.at
-            particles = _particle_images(particles, axis, at)
-            rings, planes = _ring_images(rings, axis, at), _plane_images(planes, axis, at)
+            if particles.count:
+                particles = _particle_images(particles, axis, at)
+            if rings.count:
+                rings = _ring_images(rings, axis, at)
+            if planes.count:
+                planes = _plane_images(planes, axis, at)
         if self.mask is not None:
-            particles = _weighed(particles, mask_weights_at(self.mask, particles.pos, zone))
+            if particles.count:
+                particles = _weighed(particles, mask_weights_at(self.mask, particles.pos, zone))
             if not bool(self.among is not None and self.among.any()):
                 rings, planes = NO_RINGS, NO_PLANES
         return Fx(particles, rings, planes)
