@@ -6,13 +6,15 @@ import { browserStorage } from '@/lib/storage'
 import { FIT_VIEW, type View } from './camera'
 import { SPEC } from './design-numbers'
 
-/** What the stage remembers per route: the camera's view, and whether the room labels show. */
+/** What the stage remembers per route: the camera's view, and whether the room labels and the effects in space show. */
 export interface StoredView {
   view: View
   labels: boolean
+  /** §7.4: "This is the "Effects in space" toggle (default on)". */
+  effects: boolean
 }
 
-export const DEFAULT_STAGE_VIEW: StoredView = { view: FIT_VIEW, labels: true }
+export const DEFAULT_STAGE_VIEW: StoredView = { view: FIT_VIEW, labels: true, effects: true }
 
 /** "Zoom in" steps through these; Fit goes back to the first (decision 5). */
 export const ZOOM_STEPS = [1, 1.25, 1.5, 2] as const
@@ -32,7 +34,7 @@ export function readStageView(storage: Storage | null, route: string): StoredVie
     return DEFAULT_STAGE_VIEW
   }
   if (typeof stored !== 'object' || stored === null) return DEFAULT_STAGE_VIEW
-  const { mode, rotateDeg, zoom, labels } = stored as Record<string, unknown>
+  const { mode, rotateDeg, zoom, labels, effects } = stored as Record<string, unknown>
   return {
     view: {
       mode: mode === 'plan' || mode === '3d' ? mode : FIT_VIEW.mode,
@@ -40,13 +42,14 @@ export function readStageView(storage: Storage | null, route: string): StoredVie
       zoom: isZoom(zoom) ? zoom : FIT_VIEW.zoom,
     },
     labels: typeof labels === 'boolean' ? labels : DEFAULT_STAGE_VIEW.labels,
+    effects: typeof effects === 'boolean' ? effects : DEFAULT_STAGE_VIEW.effects,
   }
 }
 
 /** Stores the view for `route`; a storage that refuses is ignored. */
-export function writeStageView(storage: Storage | null, route: string, { view, labels }: StoredView): void {
+export function writeStageView(storage: Storage | null, route: string, { view, labels, effects }: StoredView): void {
   try {
-    storage?.setItem(KEY + route, JSON.stringify({ ...view, labels }))
+    storage?.setItem(KEY + route, JSON.stringify({ ...view, labels, effects }))
   } catch {
     // Full, or blocked: the view just isn't remembered.
   }

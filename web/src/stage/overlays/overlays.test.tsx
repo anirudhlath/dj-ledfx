@@ -151,8 +151,8 @@ describe('the light tooltip (§8.1)', () => {
     return null
   }
 
-  function renderOnStage(options: Omit<StageOptions, 'mode' | 'labels'>) {
-    const { cadenceMs } = stageBehaviour({ mode: 'live', labels: true, ...options })
+  function renderOnStage(options: Omit<StageOptions, 'mode' | 'labels' | 'effects'>) {
+    const { cadenceMs } = stageBehaviour({ mode: 'live', labels: true, effects: true, ...options })
     render(
       <>
         <DrawTick cadenceMs={cadenceMs} />

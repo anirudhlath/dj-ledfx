@@ -1,10 +1,12 @@
 // The one link to the server (spec §12.4, §9.4). It subscribes once per connection, stores what the
-// server says (the live store) and the frames it streams (the FrameStore), and feeds the beat clock.
+// server says (the live store), the frames it streams (the FrameStore) and, while the stage asks for them,
+// its effects in space (the FxStore), and feeds the beat clock.
 // When the link drops it says so at once and retries after 1, 2, 4 and 8 s, then every 10 s. On
 // the way back it resyncs: frame seqs, the beat clock, and REST data through onResync.
 import { ClockOffset, clientNow, normaliseBeat, type BeatClock } from './beat'
 import type { FrameStream } from './contract'
 import { decodeFrame, type FrameStore, type FrameVersion } from './frames'
+import type { FxStore } from './fx'
 import { applyMessage, type LiveStore } from './live-store'
 import { ApiError } from './rest'
 import { parseMessage, type Command } from './ws-messages'
@@ -55,6 +57,8 @@ export interface LiveClientOptions {
   store: LiveStore
   frames: FrameStore
   beatClock: BeatClock
+  /** Where the `fx` channel's pictures go, while subscribeFx() has them on. */
+  fx?: FxStore
   openSocket?: OpenSocket
   /** After a reconnect: fetch again what REST loaded (resync() in queries.ts). */
   onResync?: () => void
@@ -74,6 +78,7 @@ export class LiveClient {
   private readonly store: LiveStore
   private readonly frames: FrameStore
   private readonly beatClock: BeatClock
+  private readonly fx: FxStore | null
   private readonly openSocket: OpenSocket
   private readonly onResync: () => void
   private readonly onLive: () => void
@@ -97,6 +102,8 @@ export class LiveClient {
   private nextId = 1
   private streams: FrameStream[] = ['live']
   private signals: string[] | null = null
+  /** Whether the stage wants the `fx` channel (F10): asked for at every link-up while it does. */
+  private fxOn = false
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private tickTimer: ReturnType<typeof setInterval> | null = null
   /** Taps sent and not yet answered, by command id: the server's ack settles one, its error refuses it. */
@@ -107,6 +114,7 @@ export class LiveClient {
     this.store = options.store
     this.frames = options.frames
     this.beatClock = options.beatClock
+    this.fx = options.fx ?? null
     this.openSocket = options.openSocket ?? openWebSocket
     this.onResync = options.onResync ?? (() => {})
     this.onLive = options.onLive ?? (() => {})
@@ -154,6 +162,18 @@ export class LiveClient {
   }
 
   /**
+   * "Effects in space" (§7.4): the `fx` channel on or off (§12.4's `subscribe_fx`), sent again after a
+   * reconnect while on. The server sends nothing until asked, so the first link-up asks only while on. Off
+   * clears the store: the stage draws nothing it was sent before, and a picture still on its way is ignored.
+   */
+  subscribeFx(on: boolean): void {
+    if (on === this.fxOn) return
+    this.fxOn = on
+    if (!on) this.fx?.clear()
+    if (this.opened) this.send({ action: 'subscribe_fx', on })
+  }
+
+  /**
    * §6.2's TAP over the socket (§12.4), timed by the client's clock in epoch seconds. Null while the link
    * isn't open, so the caller uses REST. The promise settles on the server's answer; a drop before it
    * counts as no answer.
@@ -188,6 +208,7 @@ export class LiveClient {
     this.send({ action: 'subscribe_beat', fps: BEAT_FPS })
     this.sendFrames()
     if (this.signals !== null) this.sendSignals(this.signals)
+    if (this.fxOn) this.send({ action: 'subscribe_fx', on: true })
   }
 
   private sendFrames(): void {
@@ -263,6 +284,10 @@ export class LiveClient {
       else tap.reject(new Error(message.detail))
       return
     }
+    if (message.channel === 'fx') {
+      if (this.fxOn) this.fx?.apply(message)
+      return
+    }
     if (message.channel === 'beat') {
       // The store and the clock share the one Beat.
       const beat = normaliseBeat(message, now)
@@ -278,6 +303,8 @@ export class LiveClient {
     if (this.socket !== socket) return // an old socket's late close
     this.detach()
     socket.close()
+    // The server forgets the subscription with the link, and its picture is of a moment that's gone.
+    this.fx?.clear()
     if (this.tickTimer === null) return
     this.attempt += 1
     const wasLive = this.store.getState().connection.status === 'live'

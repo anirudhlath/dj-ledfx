@@ -76,9 +76,20 @@ function p95Gap(renders: readonly number[]): number {
   return gaps[Math.floor(0.95 * (gaps.length - 1))]
 }
 
-test('the stage keeps its frame rate with every LED streaming, and the main thread stays idle', async ({ page, isMobile }) => {
-  const { renderer, renders, busy } = await measure(page, '/next/live?scenario=firmware', isMobile ? PHONE_CPU_SLOWDOWN : 1)
-  console.log(JSON.stringify({ project: isMobile ? 'phone' : 'desktop', renderer, fps: renders.length / (WINDOW_MS / 1000), p95GapMs: p95Gap(renders), busy }))
+// The firmware scenario streams every LED in the home; the hero draws its effects in space beside its
+// frames (§7.4: the fx channel at up to 30 Hz), so both stores wake the stage's one cadence.
+for (const [what, scenario] of [
+  ['with every LED streaming', 'firmware'],
+  ['with the effects in space drawn', 'hero'],
+] as const) {
+  test(`the stage keeps its frame rate ${what}, and the main thread stays idle`, async ({ page, isMobile }) => {
+    await measured(page, isMobile, scenario)
+  })
+}
+
+async function measured(page: Page, isMobile: boolean, scenario: string) {
+  const { renderer, renders, busy } = await measure(page, `/next/live?scenario=${scenario}`, isMobile ? PHONE_CPU_SLOWDOWN : 1)
+  console.log(JSON.stringify({ project: isMobile ? 'phone' : 'desktop', scenario, renderer, fps: renders.length / (WINDOW_MS / 1000), p95GapMs: p95Gap(renders), busy }))
   expect(renderer, 'measured on the GPU, not the software renderer').not.toMatch(/SwiftShader|llvmpipe|none/i)
   if (isMobile) {
     // The phone draws at most SPEC.phoneFps (§7.5): every one of those, give or take the window's ends.
@@ -87,4 +98,4 @@ test('the stage keeps its frame rate with every LED streaming, and the main thre
     expect(1000 / p95Gap(renders)).toBeGreaterThanOrEqual(SPEC.quality.desktopFps)
   }
   expect(busy).toBeLessThanOrEqual(1 - SPEC.quality.idle)
-})
+}

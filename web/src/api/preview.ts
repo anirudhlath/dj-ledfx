@@ -5,10 +5,12 @@
 // the answer to a choice already replaced would show its look on the stage for a round trip: from the
 // replacement until the choice made last is answered, the preview stream's frames are held (the zone keeps
 // the last it drew). The preview stream is watched while one is open (engine M2 ends a preview nobody
-// watches, its Spec Ruling 9), and asked for again when the link comes back. Components read it through
+// watches, its Spec Ruling 9), and asked for again when the link comes back. The preview's effects in space
+// (F10) are of the look its frames are, so they're let go whenever its frames are. Components read it through
 // usePreview() (use-preview.ts).
 import type { Id, PreviewLight } from './contract'
 import type { FrameStore } from './frames'
+import type { FxStore } from './fx'
 import type { LiveClient } from './live-client'
 import { api } from './rest'
 
@@ -44,6 +46,7 @@ export class PreviewSession {
   private state: PreviewState = PREVIEW_IDLE
   private readonly listeners = new Set<() => void>()
   private readonly frames: FrameStore
+  private readonly fx: FxStore | null
   private readonly client: () => LiveClient | null
   /** What the composer wants previewed now; null for nothing. */
   private wanted: Choice | null = null
@@ -56,8 +59,9 @@ export class PreviewSession {
   /** Moves on at reset(): an answer to a request from before it is dropped. */
   private generation = 0
 
-  constructor(options: { frames: FrameStore; client: () => LiveClient | null }) {
+  constructor(options: { frames: FrameStore; fx?: FxStore; client: () => LiveClient | null }) {
     this.frames = options.frames
+    this.fx = options.fx ?? null
     this.client = options.client
   }
 
@@ -79,7 +83,7 @@ export class PreviewSession {
     // frame it drew; another zone, or one not drawn yet, starts from none.
     const replaces = this.asking && !same(this.asked, choice)
     const within = this.state.showing === zoneId
-    if (!within && (this.state.showing !== null || replaces)) this.frames.clearPreview()
+    if (!within && (this.state.showing !== null || replaces)) this.clearPreview()
     if (replaces) this.frames.holdPreview(true)
     this.watch(true)
     this.set({ ...PREVIEW_IDLE, status: 'starting', zoneId, lookId, showing: within ? zoneId : null })
@@ -159,9 +163,15 @@ export class PreviewSession {
     this.asked = null
     // A preview already gone (it ended unwatched, or the server restarted) has nothing left to end.
     if (id !== null) void api.stopPreview(id).catch(() => undefined)
-    this.frames.clearPreview()
+    this.clearPreview()
     this.frames.holdPreview(false)
     this.watch(false)
+  }
+
+  /** The preview stream's frames go, and its picture of the effects in space with them. */
+  private clearPreview(): void {
+    this.frames.clearPreview()
+    this.fx?.clearPreview()
   }
 
   private watch(on: boolean): void {

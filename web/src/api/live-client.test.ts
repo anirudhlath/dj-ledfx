@@ -3,12 +3,14 @@ import { fakeSockets, type FakeSocket } from '@/test/fake-socket'
 import { HERO_NOW } from '@/test/live'
 import { BeatClock } from './beat'
 import { FrameStore, encodeFrame } from './frames'
+import { FxStore } from './fx'
 import { LiveClient, backoffMs, liveSocketUrl, measuredFps } from './live-client'
 import { createLiveStore, type LiveStore } from './live-store'
 
 let store: LiveStore
 let frames: FrameStore
 let beatClock: BeatClock
+let fx: FxStore
 let sockets: FakeSocket[]
 let client: LiveClient
 const onResync = vi.fn()
@@ -22,6 +24,7 @@ beforeEach(() => {
   store = createLiveStore()
   frames = new FrameStore()
   beatClock = new BeatClock()
+  fx = new FxStore()
   const fake = fakeSockets()
   sockets = fake.sockets
   client = new LiveClient({
@@ -29,6 +32,7 @@ beforeEach(() => {
     store,
     frames,
     beatClock,
+    fx,
     openSocket: fake.open,
     onResync,
     onLive,
@@ -387,6 +391,77 @@ describe('LiveClient', () => {
   it('leaves a tap to REST while the link is down', () => {
     client.start()
     expect(client.tap(1)).toBeNull()
+  })
+
+  // F10 decision 2: the stage asks for the fx channel while it draws effects; a reconnect asks again.
+  describe('effects in space', () => {
+    const picture = { channel: 'fx', zones: [{ zoneId: 'living', stream: 'live', particles: [[1, 2, 1, 1, 1, 1, 0.2]] }] }
+    const fxCommands = (socket = latest()) => socket.sent.filter((command) => command.action === 'subscribe_fx')
+
+    it("doesn't ask for the fx channel until the stage does", () => {
+      client.start()
+      welcome()
+      expect(fxCommands()).toEqual([])
+    })
+
+    it('asks for it when the stage does and lets go when it stops, once each', () => {
+      client.start()
+      welcome()
+      client.subscribeFx(true)
+      client.subscribeFx(true)
+      client.subscribeFx(false)
+      expect(fxCommands()).toEqual([expect.objectContaining({ on: true }), expect.objectContaining({ on: false })])
+    })
+
+    // Review focus 1: no duplicate subscriptions (§14 Resilience).
+    it('asks again at every link-up while it wants the channel, once each', () => {
+      client.subscribeFx(true)
+      client.start()
+      welcome()
+      expect(fxCommands()).toEqual([expect.objectContaining({ action: 'subscribe_fx', on: true })])
+      latest().drop()
+      vi.advanceTimersByTime(backoffMs(1))
+      welcome()
+      expect(fxCommands()).toEqual([expect.objectContaining({ on: true })])
+      client.subscribeFx(false)
+      latest().drop()
+      vi.advanceTimersByTime(backoffMs(2))
+      welcome()
+      expect(fxCommands()).toEqual([])
+    })
+
+    it('stores each picture while it wants them, and none after', () => {
+      client.subscribeFx(true)
+      client.start()
+      welcome()
+      latest().say(picture)
+      expect([...fx.live.keys()]).toEqual(['living'])
+      client.subscribeFx(false)
+      expect(fx.empty).toBe(true)
+      // One the server sent before it heard the off.
+      latest().say(picture)
+      expect(fx.empty).toBe(true)
+      expect(store.getState()).not.toHaveProperty('fx')
+    })
+
+    // Review focus 2: the picture is of a moment before the drop, and the stage is frozen.
+    it('forgets the picture when the link drops', () => {
+      client.subscribeFx(true)
+      client.start()
+      welcome()
+      latest().say(picture)
+      latest().drop()
+      expect(fx.empty).toBe(true)
+    })
+
+    it('ignores a malformed picture, and counts it', () => {
+      client.subscribeFx(true)
+      client.start()
+      welcome()
+      latest().say({ channel: 'fx', zones: 'living' })
+      expect(client.malformedJson).toBe(1)
+      expect(fx.empty).toBe(true)
+    })
   })
 
   it('stops for good: it closes the socket and never retries', () => {

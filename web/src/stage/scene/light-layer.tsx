@@ -3,14 +3,15 @@
 // a light shows is written into them in place, and drawn at once. Frames never pass through React:
 // the light layer draws on the stage's cadence (cadence.ts), writing the frame store's latest bytes
 // into the meshes' own arrays, then drawing the canvas in that animation frame — unless the write
-// changed nothing (frames with the same bytes), when there's nothing to upload or draw.
+// changed nothing (frames with the same bytes), when there's nothing to upload or draw. The cadence
+// is StageScene's, which the effects in space draw on too (draw-list.ts).
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
 import { frames } from '@/api/live'
-import { useCadence } from '../cadence'
 import type { CameraPose } from '../camera'
 import type { FrameWriter, WriterEntry } from '../frame-writer'
 import type { RoomMask } from '../room-mask'
+import type { DrawList } from './draw-list'
 import { LightMaterials, LightMeshes } from './light-meshes'
 
 export interface LightLayerProps {
@@ -19,15 +20,14 @@ export interface LightLayerProps {
   entries: readonly WriterEntry[]
   mask: RoomMask
   pose: CameraPose
-  /** The stage behaviour's (behaviour.ts): null while frames don't redraw the stage. */
-  cadenceMs: number | null
+  /** The stage's cadence's layers: this one writes the newest frames there. */
+  drawList: DrawList
 }
 
-export function LightLayer({ writer, entries, mask, pose, cadenceMs }: LightLayerProps) {
+export function LightLayer({ writer, entries, mask, pose, drawList }: LightLayerProps) {
   const materials = useMemo(() => new LightMaterials(mask), [mask])
   const meshes = useMemo(() => new LightMeshes(writer, materials), [writer, materials])
   const invalidate = useThree((state) => state.invalidate)
-  const advance = useThree((state) => state.advance)
   useEffect(() => () => materials.dispose(), [materials])
   useEffect(() => () => meshes.dispose(), [meshes])
   useLayoutEffect(() => {
@@ -41,11 +41,15 @@ export function LightLayer({ writer, entries, mask, pose, cadenceMs }: LightLaye
     meshes.update()
     invalidate()
   }, [writer, meshes, entries, invalidate])
-  useCadence(cadenceMs, (now) => {
-    if (!writer.write(frames)) return
-    meshes.update()
-    advance(now)
-  })
+  useLayoutEffect(
+    () =>
+      drawList.add(() => {
+        if (!writer.write(frames)) return false
+        meshes.update()
+        return true
+      }),
+    [drawList, writer, meshes],
+  )
   return (
     <>
       {meshes.pools !== null && <primitive object={meshes.pools} />}

@@ -68,6 +68,58 @@ describe('the design numbers', () => {
     expect(LIVE_RENDER.selectedZoneNote.button).toMatch(/^#/)
   })
 
+  // §7.4: "firefly and ember particles (tiny glowing points)". F10 draws every particle as Main.html draws a firefly.
+  it('draw a particle as a glow fading to nothing at its edge, round a smaller, whiter core', () => {
+    const { glow, core } = RENDER.particle
+    expect(glow.stops.map((stop) => stop.at)).toEqual([0, ...glow.stops.slice(1, -1).map((stop) => stop.at), 1])
+    expect(glow.stops.at(-1)!.alpha).toBe(0)
+    expect(core.lift).toBeGreaterThan(0)
+    expect(core.lift).toBeLessThan(1)
+    expect(core.share).toBeLessThan(glow.stops[1].at)
+    expect(core.minPx).toBeLessThan(core.maxPx)
+  })
+
+  // A firefly whose core no longer keeps the rule is named, with its sizes.
+  it.runIf(handoff.read !== null)('name the firefly drawn off the rule', () => {
+    const swollen = (html: string) => html.replace(/(<g class="ff0"><circle [^>]+><\/circle><circle cx="[\d.]+" cy="[\d.]+" r=")[\d.]+"/, '$13"')
+    expect(() => extractRender(edited('Main', swollen))).toThrow(/fireflies: each a glow and a core draw a core of [\d.]+ px on a glow of [\d.]+ px, off the rule/)
+  })
+
+  // Task 4's review: each of the extractor's other checks on the fireflies fails by name too.
+  describe.runIf(handoff.read !== null)('name the fireflies that', () => {
+    /** The first firefly's gradient, edited by `edit`. */
+    const glow = (edit: (gradient: string) => string) => (html: string) => {
+      const id = /<g class="ff0"><circle [^>]*fill="url\(#([\w-]+)\)"/.exec(html)![1]
+      return html.replace(new RegExp(String.raw`<radialGradient id="${id}">[\s\S]*?</radialGradient>`), edit)
+    }
+    const fails = (edit: (html: string) => string) => () => extractRender(edited('Main', edit))
+
+    it('fall off more ways than one', () => {
+      const steeper = glow((gradient) => gradient.replace(/(<stop offset="0\.[\d]+" stop-color="#[0-9a-f]{6}" stop-opacity=")[\d.]+/, '$10.5'))
+      expect(fails(steeper)).toThrow(/fireflies: each a glow and a core fall off 2 ways, not one/)
+    })
+
+    it('change colour along a glow', () => {
+      const shaded = glow((gradient) => gradient.replace(/(<stop offset="0\.[\d]+" stop-color=")#[0-9a-f]{6}/, '$1#000000'))
+      expect(fails(shaded)).toThrow(/fireflies: each a glow and a core: the gradient #[\w-]+ changes colour/)
+    })
+
+    it('glow white, so no core can be lifted from it', () => {
+      const white = glow((gradient) => gradient.replaceAll(/stop-color="#[0-9a-f]{6}"/g, 'stop-color="#ffffff"'))
+      expect(fails(white)).toThrow(/fireflies: each a glow and a core: a white glow has no room to lift a core towards white/)
+    })
+
+    it('lift a core off the share the others keep', () => {
+      // The first firefly's core, drawn in its glow's colour: not lifted at all.
+      const unlifted = (html: string) => {
+        const id = /<g class="ff0"><circle [^>]*fill="url\(#([\w-]+)\)"/.exec(html)![1]
+        const colour = new RegExp(String.raw`<radialGradient id="${id}"><stop offset="0" stop-color="(#[0-9a-f]{6})"`).exec(html)![1]
+        return html.replace(/(<g class="ff0"><circle [^>]+><\/circle><circle [^>]*fill=")#[0-9a-f]{6}/, `$1${colour}`)
+      }
+      expect(fails(unlifted)).toThrow(/fireflies: each a glow and a core lift their cores by more than one share/)
+    })
+  })
+
   it('name the sentence that moved', () => {
     expect(() => extractSpec('')).toThrow(/§7\.1 Floors/)
     expect(() => extractLive('')).toThrow(/§4\.4/)

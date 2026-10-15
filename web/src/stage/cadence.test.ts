@@ -1,5 +1,6 @@
 import { renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fx } from '@/api/live'
 import { pushFrame } from '@/test/live'
 import { Cadence, useCadence } from './cadence'
 import { SPEC } from './design-numbers'
@@ -75,6 +76,22 @@ describe('useCadence', () => {
     expect(vi.getTimerCount()).toBe(1)
     vi.advanceTimersToNextFrame()
     expect(draw).toHaveBeenCalledTimes(2)
+  })
+
+  // F10: a picture of the effects in space is something new to draw, as a frame is.
+  it('wakes for a new picture of the effects in space, as for a frame', () => {
+    const draw = vi.fn()
+    renderHook(() => useCadence(1000 / SPEC.target.fps, draw))
+    nextFrame()
+    vi.advanceTimersToNextFrame()
+    expect(vi.getTimerCount()).toBe(0)
+    fx.apply({ channel: 'fx', zones: [{ zoneId: 'living', stream: 'live', particles: [[1, 1, 1, 1, 1, 1, 0.2]] }] })
+    expect(vi.getTimerCount()).toBe(1)
+    vi.advanceTimersToNextFrame()
+    expect(draw).toHaveBeenCalledTimes(2)
+    // Woken once: the frame store's wait went with the picture's.
+    pushFrame('rope', (seq += 1), [7, 8, 9])
+    expect(vi.getTimerCount()).toBe(1)
   })
 
   it('stops when the stage goes', () => {

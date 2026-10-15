@@ -278,6 +278,63 @@ export function checkPins(pins: string, names: readonly string[], readBytes: (na
 const RGBA = String.raw`rgba\((\d+),(\d+),(\d+),([\d.]+)\)`
 const re = (source: string) => new RegExp(source)
 
+const channels = (hex: string) => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16))
+/** Two decimals: the renders' own colours are rounded to whole bytes, so a share read from them is good to about that. */
+const hundredths = (value: number) => Math.round(value * 100) / 100
+
+/**
+ * Main.html's fireflies (§7.4: "firefly and ember particles (tiny glowing points)"), each a glow and a
+ * core: the glow's radial falloff, the same for every firefly, in one colour from its centre to its edge;
+ * how far the core's colour is lifted from the glow's towards white; and the core's size, a share of the
+ * glow's radius held between the smallest and largest cores the render draws. The share is the largest
+ * firefly's, and every core the render draws must come within 0.05 px of that rule, or this fails.
+ */
+function fireflies(mainHtml: string, main: string) {
+  const where = 'Main.html, the fireflies: each a glow and a core'
+  const flies = matches(main, {
+    where,
+    pattern: new RegExp(
+      String.raw`<g class="ff\d+"><circle cx="[\d.]+" cy="[\d.]+" r="([\d.]+)" fill="url\(#([\w-]+)\)"></circle>` +
+        String.raw`<circle cx="[\d.]+" cy="[\d.]+" r="([\d.]+)" fill="(#[0-9a-f]{6})"></circle></g>`,
+    ),
+  })
+  const gradients = new Map(
+    [...new Set(flies.map((fly) => fly[2]))].map((id) => {
+      const body = same(mainHtml, {
+        where: `Main.html, a firefly's gradient #${id}`,
+        pattern: re(String.raw`<radialGradient id="${id}">([\s\S]*?)</radialGradient>`),
+      })[1]
+      const stops = matches(body, {
+        where: `Main.html, the stops of a firefly's gradient #${id}`,
+        pattern: /<stop offset="([\d.]+)" stop-color="(#[0-9a-f]{6})" stop-opacity="([\d.]+)"><\/stop>/,
+      })
+      if (new Set(stops.map((stop) => stop[2])).size !== 1) throw new Error(`design numbers: ${where}: the gradient #${id} changes colour`)
+      return [id, { colour: stops[0][2], stops: stops.map((stop) => ({ at: n(stop[1]), alpha: n(stop[3]) })) }] as const
+    }),
+  )
+  const falloffs = [...new Set([...gradients.values()].map((gradient) => JSON.stringify(gradient.stops)))]
+  if (falloffs.length !== 1) throw new Error(`design numbers: ${where} fall off ${falloffs.length} ways, not one`)
+  const lifts = flies.map((fly) => {
+    const glow = channels(gradients.get(fly[2])!.colour)
+    const core = channels(fly[4])
+    const room = glow.reduce((sum, g) => sum + 255 - g, 0)
+    if (room === 0) throw new Error(`design numbers: ${where}: a white glow has no room to lift a core towards white`)
+    return core.reduce((sum, c, i) => sum + c - glow[i], 0) / room
+  })
+  const lift = hundredths(lifts.reduce((sum, value) => sum + value, 0) / lifts.length)
+  if (lifts.some((value) => Math.abs(value - lift) > 0.02)) {
+    throw new Error(`design numbers: ${where} lift their cores by more than one share`)
+  }
+  const sizes = flies.map((fly) => ({ glow: n(fly[1]), core: n(fly[3]) }))
+  const largest = sizes.reduce((a, b) => (b.glow > a.glow ? b : a))
+  const share = Math.round((largest.core / largest.glow) * 1000) / 1000
+  const minPx = Math.min(...sizes.map((size) => size.core))
+  const maxPx = Math.max(...sizes.map((size) => size.core))
+  const off = sizes.find(({ glow, core }) => Math.abs(Math.min(maxPx, Math.max(minPx, glow * share)) - core) > 0.05)
+  if (off !== undefined) throw new Error(`design numbers: ${where} draw a core of ${off.core} px on a glow of ${off.glow} px, off the rule`)
+  return { glow: { stops: JSON.parse(falloffs[0]) as { at: number; alpha: number }[] }, core: { lift, share, minPx, maxPx } }
+}
+
 /** RENDER: what the stage takes from the renders, where neither the spec nor tokens.css says it. */
 export function extractRender(read: ReadText): Record<string, unknown> {
   const tokens = read('tokens.css')
@@ -365,6 +422,8 @@ export function extractRender(read: ReadText): Record<string, unknown> {
     pattern: re(String.raw`<path d="M[\d.]+ [\d.]+ L([\d.]+) ([\d.]+)"[^>]*></path><path d="M([\d.]+) ([\d.]+) q([\d.]+) (-?[\d.]+) ([\d.]+) 0 t([\d.]+) 0 M[\d.]+ ([\d.]+) q[^"]*" stroke="${RGBA}" stroke-width="([\d.]+)"`),
   })
 
+  const particle = fireflies(mainHtml, main)
+
   // The strips' segments are drawn in their colour; the dark ones in a token (§7.3: "visible even when dark").
   const strokes = matches(main, {
     where: "Main.html, the strips' segments",
@@ -434,6 +493,7 @@ export function extractRender(read: ReadText): Record<string, unknown> {
       swatchGlowPx: n(tip[6]),
       leader: { lengthPx: n(leader[3]), widthPx: n(leader[4]), colour: colour(tokens, leader[5]), angleDeg: n(leader[6]) },
     },
+    particle,
     ownEffect: { ringPx: n(ring[1]), ...rgba(tokens, ring, 2), widthPx: n(ring[6]), dashPx: n(ring[7]), gapPx: n(ring[8]) },
     streamedCopy: {
       dxPx: n(waves[3]) - n(waves[1]),

@@ -7,6 +7,7 @@
 import { useMemo, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useNavigate } from 'react-router'
 import type { Id, Room } from '@/api/contract'
+import { useFxStream } from '@/api/use-fx'
 import { useElementSize } from '@/lib/use-element-size'
 import { sameEntries, useStable } from '@/lib/use-stable'
 import { useReducedMotion } from '@/lib/use-media-query'
@@ -15,6 +16,7 @@ import { stageBodies } from './bodies'
 import { FIT_VIEW, fitPose, projectPoint } from './camera'
 import { SPEC } from './design-numbers'
 import { FrameWriter, sameLayout, writerEntries } from './frame-writer'
+import { sameFxPick, type FxPick } from './fx-writer'
 import { looksOn, stageLabels } from './labels'
 import { anchorOf, lightMarks, statusesOf } from './marks'
 import { Legend } from './overlays/legend'
@@ -92,7 +94,7 @@ export function StageView({ data, variant, route, roomTo, roomState, outlined = 
   const previewing = composeZone === undefined ? null : (compose?.previewing ?? null)
   // The composer's stage is the composer's before its zone is known too: not Live's, for a moment, while the zones load.
   const mode = frozen ? 'frozen' : focusZone !== undefined ? 'focus' : compose !== null ? 'compose' : 'live'
-  const behaviour = stageBehaviour({ mode, variant, reducedMotion, labels: stored.labels })
+  const behaviour = stageBehaviour({ mode, variant, reducedMotion, labels: stored.labels, effects: stored.effects })
   // The phone's stage has no view controls, so it shows the fitted view (§8.10).
   const view = behaviour.overlays ? stored.view : FIT_VIEW
   const [webgl] = useState(hasWebGL2)
@@ -124,6 +126,21 @@ export function StageView({ data, variant, route, roomTo, roomState, outlined = 
   // §7.6 compose: "the chosen zone renders the preview stream instead of live", while it draws a look there.
   const previewedLights = previewing === null || composeZone === undefined ? null : composeZone.lights
   const previewed = useMemo(() => (previewedLights === null ? null : new Set(previewedLights)), [previewedLights])
+  // §7.4's effects in space, of the zones whose lights the stage draws from the live stream: in compose, not
+  // those under the preview, whose own fx it draws instead; in focus, only those with a light in the zone.
+  const picked = useMemo((): FxPick => {
+    const among = previewed ?? (focusZone === undefined ? null : new Set(focusZone.lights))
+    const hidden = new Set<Id>()
+    for (const zone of running) {
+      const inside = among !== null && zone.lights.some((id) => among.has(id))
+      if (previewed !== null ? inside : among !== null && !inside) hidden.add(zone.zoneId)
+    }
+    return { preview: previewed === null || composeZone === undefined ? null : composeZone.id, hidden }
+  }, [previewed, focusZone, running, composeZone])
+  // FxWriter looks the picture over again for a new object: this is the same one while the zones it names are the same.
+  const fxPick = useStable(picked, sameFxPick)
+  const drawsFx = webgl && pose !== null && behaviour.effects
+  useFxStream(drawsFx)
   // The engine pushes `lights` every few seconds while a look plays. The writer's arrays (and the
   // meshes over them) are made from which bodies are drawn alone, and take each push's colours (and
   // a preview's stream) in place; the marks, from each light's status alone (I1).
@@ -214,6 +231,7 @@ export function StageView({ data, variant, route, roomTo, roomState, outlined = 
                 mask={mask}
                 pose={pose}
                 cadenceMs={behaviour.cadenceMs}
+                fx={drawsFx ? fxPick : null}
               />
               <StageSvg pose={pose} marks={marks} labels={labels} sun={sunDrawn} outline={outline} compose={composeShape} />
               {focusZone !== undefined && framing !== null && (
@@ -235,6 +253,8 @@ export function StageView({ data, variant, route, roomTo, roomState, outlined = 
           <StageTools
             mode={view.mode}
             onMode={(mode) => store({ ...stored, view: { ...view, mode } })}
+            effects={stored.effects}
+            onEffects={(on) => store({ ...stored, effects: on })}
             labels={stored.labels}
             onLabels={(on) => store({ ...stored, labels: on })}
           />

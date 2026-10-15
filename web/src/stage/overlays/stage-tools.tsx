@@ -1,6 +1,7 @@
-// §8.1 top left: `3D | Plan` and the Labels switch. "Effects in space" waits for the fx stream
-// (§7.4: "until that exists the toggle is hidden"). Live's preview-only label takes the stage's top and
-// sets `--stage-top-shift` to its foot, so the tools start under it.
+// §8.1 top left: `3D | Plan`, the "Effects in space" switch (§7.4) and the Labels switch, in Main.html's
+// order. The switch shows now the fx stream exists (§7.4: "until that exists the toggle is hidden").
+// Live's preview-only label takes the stage's top and sets `--stage-top-shift` to its foot, so the
+// tools start under it.
 import { Segmented } from '@/design/segmented'
 import { Switch } from '@/design/switch'
 import type { ViewMode } from '../camera'
@@ -14,15 +15,18 @@ const MODES = [
 export interface StageToolsProps {
   mode: ViewMode
   onMode: (mode: ViewMode) => void
+  effects: boolean
+  onEffects: (effects: boolean) => void
   labels: boolean
   onLabels: (labels: boolean) => void
 }
 
-export function StageTools({ mode, onMode, labels, onLabels }: StageToolsProps) {
+export function StageTools({ mode, onMode, effects, onEffects, labels, onLabels }: StageToolsProps) {
   const { leftPx, topPx, gapPx } = RENDER.tools
   return (
     <div className="absolute flex items-center" style={{ left: leftPx, top: `calc(var(--stage-top-shift, 0px) + ${topPx}px)`, gap: gapPx }}>
       <Segmented label="View" value={mode} options={MODES} onValueChange={onMode} />
+      <Switch label="Effects in space" checked={effects} onCheckedChange={onEffects} />
       <Switch label="Labels" checked={labels} onCheckedChange={onLabels} />
     </div>
   )

@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { notch, open, stageCanvas, type Insets } from './helpers'
+import { fxPictured, notch, open, stageCanvas, type Insets } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in Dallas (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -101,6 +101,7 @@ test.beforeEach(async ({ page }) => {
 test('Live', async ({ page }) => {
   await openStill(page, '/next/live')
   await expect(stageCanvas(page)).toBeVisible()
+  await fxPictured(page)
   await expect(page).toHaveScreenshot('live.png')
 })
 
