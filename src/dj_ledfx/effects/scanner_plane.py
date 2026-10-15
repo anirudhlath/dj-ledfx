@@ -55,15 +55,19 @@ class ScannerPlane(ParamField):
         frame *= np.float32(values["level"])
         return frame
 
-    def in_space(self, ctx: RenderContext, leds: LedSet) -> Fx:
+    def in_space(self, ctx: RenderContext, leds: LedSet) -> Fx | None:
         """The plane: level, at its height between the floor and the ceiling (with no
-        ceiling, the zone's bottom and top, as height01 has them), in its own colour."""
+        ceiling, the zone's bottom and top, as height01 has them), in its own colour. None
+        when that span is nothing (no ceiling, and every LED at one height): a plane of no
+        thickness isn't drawn."""
         ceiling = leds.space.ceiling
         if ceiling is None or ceiling <= 0.0:
             low, high = (float(corner[2]) for corner in leds.bounds)
         else:
             low, high = 0.0, ceiling
         span = high - low
+        if span <= 0.0:
+            return None
         point = (*leds.centre[:2], low + _height(ctx) * span)
         colour = self._ramp[-1] * np.float32(self._values["level"])
         return Fx(

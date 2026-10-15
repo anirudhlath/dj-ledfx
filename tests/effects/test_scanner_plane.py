@@ -40,3 +40,23 @@ def test_the_plane_is_drawn_level_at_the_height_it_lights() -> None:
         assert np.isclose(point[2], (low + high) / 2) and normal.tolist() == [0.0, 0.0, 1.0]
         assert np.isclose(width, 2 * 0.12 * (high - low)) and not fx.planes.ray.any()
         assert np.allclose(fx.planes.colour[0], frame[2])  # the middle LED is lit full
+
+
+def test_with_a_ceiling_the_plane_sweeps_the_room_not_the_leds() -> None:
+    effect = ScannerPlane(width=0.12)
+    leds = leds_at([(0.0, 0.0, metres) for metres in (0.5, 1.0, 1.5)], ceiling=3.0)
+
+    for beats, height in ((0.0, 0.0), (0.5, 1.5), (1.0, 3.0)):
+        fx = effect.in_space(tempo_ctx(beats), leds)
+
+        assert fx is not None
+        [point], [width] = fx.planes.point, fx.planes.width
+        assert np.isclose(point[2], height)  # the floor to the ceiling, not 0.5 m to 1.5 m
+        assert np.isclose(width, 2 * 0.12 * 3.0)
+
+
+def test_with_no_ceiling_and_every_led_at_one_height_no_plane_is_drawn() -> None:
+    effect = ScannerPlane()
+    leds = leds_at([(x, 0.0, 1.0) for x in (0.0, 1.0, 2.0)], ceiling=None)
+
+    assert effect.in_space(tempo_ctx(0.5), leds) is None
