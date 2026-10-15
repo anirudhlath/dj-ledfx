@@ -4,11 +4,13 @@ import { Profiler, type ReactNode } from 'react'
 import { InstancedMesh, type Object3D, OrthographicCamera, type WebGLRenderer } from 'three'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fx, wantFx } from '@/api/live'
 import { liveStore } from '@/api/live-store'
 import { HERO_NOW, pushFrame, startMockDataLayer } from '@/test/live'
 import { sceneProps } from '@/test/stage'
 import { SPEC } from '../design-numbers'
 import { FrameWriter } from '../frame-writer'
+import { LIVE_ONLY } from '../fx-writer'
 import type { RGB } from '@/lib/light-colour'
 import { HomeScene } from './home-scene'
 import { StageScene } from './stage-scene'
@@ -145,6 +147,47 @@ describe('the stage scene (§7.2, §7.5)', () => {
     const after = lightLayer(scene)
     expect(after.objects[0] === before.objects[0]).toBe(false)
     expect(after.materials.every((material) => before.materials.includes(material))).toBe(true)
+  })
+
+  // F10: the effects in space draw on the lights' cadence, so the canvas renders once a draw for both.
+  it("draws the hero's effects in space beside its lights, rendering once a draw", async () => {
+    startMockDataLayer()
+    const release = wantFx()
+    const props = sceneProps('hero', { cadenceMs: 1000 / SPEC.target.fps, fx: LIVE_ONLY })
+    let gl: WebGLRenderer | undefined
+    function Renderer() {
+      gl = useThree((state) => state.gl)
+      return null
+    }
+    const { renderer } = await renderScene(
+      <>
+        <StageScene {...props} />
+        <Renderer />
+      </>,
+    )
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(fx.live.size).toBeGreaterThan(0)
+    const scene = renderer.scene.instance as Object3D
+    const fxMeshes = () => scene.children.at(-1)!.children as InstancedMesh[]
+    expect(fxMeshes()[0].count).toBeGreaterThan(0)
+    const render = vi.spyOn(gl!, 'render')
+    const draws = vi.spyOn(props.writer, 'write')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(render.mock.calls.length).toBeGreaterThan(0)
+    expect(render.mock.calls.length).toBeLessThanOrEqual(draws.mock.calls.length)
+    release()
+  })
+
+  it('draws no effects in space while it picks none, and lets them go when it stops', async () => {
+    startMockDataLayer()
+    const release = wantFx()
+    const props = sceneProps('hero', { cadenceMs: 1000 / SPEC.target.fps })
+    const { renderer } = await renderScene(<StageScene {...props} fx={LIVE_ONLY} />)
+    const scene = renderer.scene.instance as Object3D
+    const count = scene.children.length
+    await renderer.update(<StageScene {...props} />)
+    expect(scene.children.length).toBe(count - 1)
+    release()
   })
 
   it('lets go of the home when the stage goes', async () => {

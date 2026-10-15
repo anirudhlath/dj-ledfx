@@ -214,6 +214,7 @@ export function StageView({ data, variant, route, roomTo, roomState, outlined = 
                 mask={mask}
                 pose={pose}
                 cadenceMs={behaviour.cadenceMs}
+                fx={null}
               />
               <StageSvg pose={pose} marks={marks} labels={labels} sun={sunDrawn} outline={outline} compose={composeShape} />
               {focusZone !== undefined && framing !== null && (
