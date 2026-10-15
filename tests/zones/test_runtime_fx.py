@@ -26,7 +26,9 @@ from dj_ledfx.effects.context import RenderContext
 from dj_ledfx.effects.fx import Fx
 from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.looks.model import Layer, LookModifiers, Mirror, Transform
-from dj_ledfx.zones.runtime import ZoneRuntime
+from dj_ledfx.zones import runtime as runtime_module
+from dj_ledfx.zones.frames import FrameFeed
+from dj_ledfx.zones.runtime import CRASH_LOG_INTERVAL_S, ZoneRuntime
 
 pytestmark = pytest.mark.usefixtures("_fields")
 
@@ -123,7 +125,9 @@ def test_a_waiting_look_and_a_dark_dot_draw_nothing_in_space() -> None:
     waiting.tick(100.0)
     dark.tick(100.0)
     assert waiting.state == "waiting" and _fx(waiting) is None
-    fx = _fx(dark)  # a black particle is still a particle: the channel leaves it out
+    # The runtime keeps a black particle in the frame's fx; only the fx channel's message
+    # leaves it out (tests/web/test_fx_message.py).
+    fx = _fx(dark)
     assert fx is not None and fx.particles.count == 1
 
 
@@ -177,3 +181,102 @@ def test_a_beam_under_a_scaled_transform_keeps_its_angle_in_the_frame() -> None:
     fx = _fx(runtime)
     assert fx is not None and fx.planes.count == 1 and fx.planes.ray.any()
     assert fx.planes.width.tolist() == pytest.approx([math.radians(30.0)])
+
+
+def test_mid_transition_the_looks_it_replaces_arent_asked_what_they_draw_in_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[float] = []
+    real = DotParticles.in_space
+
+    def recording(self: DotParticles, ctx: RenderContext, leds: LedSet) -> Fx | None:
+        asked.append(float(self._values["x"]))
+        return real(self, ctx, leds)
+
+    monkeypatch.setattr(DotParticles, "in_space", recording)
+    old = runtime_of(look_of(dot_layer(x=1.0)), [ROW_LIGHT])
+    new = runtime_of(look_of(dot_layer(x=3.0)), [ROW_LIGHT])
+    new.begin_transition(FADE, [old])
+
+    new.tick(1000.0)
+
+    assert new.state == "transition" and latest(new)[2, 0] > 0.0  # the old look still lights
+    assert asked == [3.0]  # but only the new look's fx are worked out
+
+
+@pytest.mark.parametrize("failing", ["recoloured", "fx_joined"])
+def test_a_look_whose_fx_cant_be_finished_loses_its_fx_not_its_frame(
+    failing: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*args: object, **kwargs: object) -> Fx:
+        raise RuntimeError("no fx")
+
+    if failing == "recoloured":  # the evening's and the cap's, on the joined fx
+        monkeypatch.setattr(Fx, "recoloured", broken)
+    else:
+        monkeypatch.setattr(runtime_module, "fx_joined", broken)
+    modifiers = LookModifiers(evening=True, brightness_cap=0.4)
+    runtime = runtime_of(
+        look_of(dot_layer(x=2.0), modifiers=modifiers), [ROW_LIGHT], evening=lambda: 1.0
+    )
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        runtime.tick(100.0)
+    finally:
+        logger.remove(sink)
+
+    assert runtime.state == "running"
+    assert latest(runtime)[UNDER_THE_DOT].max() == pytest.approx(0.4)  # the lights go on
+    assert _fx(runtime) is None
+    assert len(warnings) == 1 and "RuntimeError: no fx" in warnings[0]
+
+
+def test_each_failing_layer_is_logged_once_a_minute_on_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(self: DotParticles, ctx: RenderContext, leds: LedSet) -> Fx | None:
+        raise RuntimeError(f"no fx at {self._values['x']}")
+
+    monkeypatch.setattr(DotParticles, "in_space", broken)
+    now = [500.0]
+    runtime = runtime_of(
+        look_of(
+            dot_layer(x=1.0, id="low", name="Low"),
+            dot_layer(x=3.0, id="high", name="High", blend="add"),
+        ),
+        [ROW_LIGHT],
+        log_clock=lambda: now[0],
+    )
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        runtime.tick(100.0)  # both layers fail: each is logged
+        now[0] += CRASH_LOG_INTERVAL_S - 1.0
+        runtime.tick(100.1)  # within the minute: neither again
+        logged_first = list(warnings)
+        now[0] += 1.0
+        runtime.tick(100.2)  # a minute on: each again
+    finally:
+        logger.remove(sink)
+
+    assert ["'Low'" in w and "at 1.0" in w for w in logged_first] == [True, False]
+    assert ["'High'" in w and "at 3.0" in w for w in logged_first] == [False, True]
+    assert len(warnings) == 4 and "'Low'" in warnings[2] and "'High'" in warnings[3]
+    assert runtime.state == "running" and _fx(runtime) is None
+
+
+def test_a_zone_whose_lights_change_keeps_its_fx_until_its_new_ring_has_a_frame() -> None:
+    runtime = runtime_of(look_of(dot_layer(x=2.0)), [ROW_LIGHT])
+    feed = FrameFeed(lambda: [runtime], clock=lambda: 100.0)
+    runtime.tick(100.0)
+    [before] = feed.fx()
+
+    runtime.set_lights([ROW_LIGHT, placed_light("bulb", (5.0, 0.0, 1.0))])  # a new ring
+
+    assert runtime.ring.count == 0
+    [held] = feed.fx()  # never blinks out on the stage
+    assert (held.zone_id, held.fx) == ("zone", before.fx)
+    runtime.tick(100.0)
+    [after] = feed.fx()
+    assert after.fx is not before.fx and after.fx is _fx(runtime)

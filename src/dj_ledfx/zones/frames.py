@@ -102,13 +102,16 @@ class FrameFeed:
 
     def fx(self) -> list[ZoneFx]:
         """What each zone draws in space now, live zones first, then the preview: the newest
-        frame's fx at or before now (RingBuffer.frame_at), never blended. A zone whose frame
-        draws nothing is left out."""
+        frame's fx at or before now (RingBuffer.frame_at), never blended. A zone whose ring
+        has no frame yet, having just started a new one as its lights changed, shows the
+        last fx it wrote (ZoneRuntime.last_fx) until it has. A zone whose frame draws
+        nothing is left out."""
         now = self._clock()
         out: list[ZoneFx] = []
         for stream in STREAMS:
             for runtime in self._runtimes[stream]():
                 frame = runtime.ring.frame_at(now)
-                if frame is not None and frame.fx is not None:
-                    out.append(ZoneFx(stream, runtime.zone_id, frame.fx, runtime.brightness))
+                fx = runtime.last_fx if frame is None else frame.fx
+                if fx is not None:
+                    out.append(ZoneFx(stream, runtime.zone_id, fx, runtime.brightness))
         return out
