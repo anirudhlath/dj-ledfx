@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { FxStore } from './fx'
-import type { ZoneFx } from './ws-messages'
+import type { FxPlane, FxRing, ZoneFx } from './ws-messages'
 
 const zone = (zoneId: string, stream: ZoneFx['stream'] = 'live', size = 0.2): ZoneFx => ({ zoneId, stream, particles: [[1, 2, 1, 1, 1, 1, size]] })
 
@@ -41,6 +41,37 @@ describe('the fx store (§12.4)', () => {
     held = false
     fx.apply({ channel: 'fx', zones: [zone('living', 'preview', 0.4)] })
     expect(fx.get('living', 'preview')).toEqual(zone('living', 'preview', 0.4))
+  })
+
+  // FxWriter tells a zone that changed by its object (final review 2): a picture that sends a zone as it was keeps the stored one.
+  it('keeps the stored zone for one sent again unchanged, and takes a changed one', () => {
+    const fx = new FxStore()
+    const ring = (): FxRing => ({ center: [1, 2, 0], radius: 1, width: 0.2, rgb: [1, 0, 0], form: 'circle' })
+    const plane = (): FxPlane => ({ point: [1, 2, 3], normal: [0, 0, 1], width: 0.1, rgb: [0, 1, 0] })
+    const office = (): ZoneFx => ({ zoneId: 'office', stream: 'live', rings: [ring()], planes: [plane()] })
+    fx.apply({ channel: 'fx', zones: [zone('living'), office(), zone('living', 'preview')] })
+    const [living, offices, preview] = [fx.get('living'), fx.get('office'), fx.get('living', 'preview')]
+    fx.apply({ channel: 'fx', zones: [zone('living'), office(), zone('living', 'preview')] })
+    expect([fx.get('living'), fx.get('office'), fx.get('living', 'preview')]).toEqual([living, offices, preview])
+    expect(fx.get('living')).toBe(living)
+    expect(fx.get('office')).toBe(offices)
+    expect(fx.get('living', 'preview')).toBe(preview)
+    const changes: ZoneFx[] = [
+      zone('office', 'live', 0.3),
+      { ...office(), rings: [{ ...ring(), radius: 2 }] },
+      { ...office(), rings: [{ ...ring(), form: 'sphere' }] },
+      { ...office(), rings: [] },
+      { ...office(), planes: [{ ...plane(), ray: [1, 0, 0] }] },
+      { ...office(), planes: [{ ...plane(), rgb: [0, 1, 0.5] }] },
+      { zoneId: 'office', stream: 'live', rings: office().rings },
+    ]
+    for (const changed of changes) {
+      fx.apply({ channel: 'fx', zones: [office()] })
+      const before = fx.get('office')
+      fx.apply({ channel: 'fx', zones: [changed] })
+      expect(fx.get('office')).not.toBe(before)
+      expect(fx.get('office')).toBe(changed)
+    }
   })
 
   it('moves its version with every picture, and wakes whoever waits once', () => {
