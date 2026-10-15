@@ -3,6 +3,8 @@ and the hook every effect has."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 from conftest import tempo_ctx
@@ -78,3 +80,36 @@ def test_a_particle_effect_draws_its_last_steps_particles_in_space() -> None:
 def test_other_field_strip_and_firmware_effects_draw_nothing_in_space(kind: str) -> None:
     effect: Effect = get_effect_classes()[kind]()
     assert effect.in_space(tempo_ctx(8.0), leds_at(ROW)) is None
+
+
+def test_an_fxs_arrays_are_read_only_so_a_joined_one_can_share_them() -> None:
+    fx = Fx(
+        particles=swarm([[0.0, 0.0, 1.0]], (1.0, 1.0, 1.0), 0.2),
+        rings=rings([0.0, 0.0, 0.0], 1.0, 0.1, (1.0, 0.0, 0.0)),
+        planes=planes([0.0, 0.0, 1.0], (0.0, 0.0, 1.0), 0.2, (0.0, 1.0, 0.0)),
+    )
+    joined = fx_joined([fx])
+    assert joined is fx  # the very arrays: none can be written
+    kinds = (fx.particles, fx.rings, fx.planes)
+    arrays = [getattr(kind, name) for kind in kinds for name in kind.__slots__]
+    assert len(arrays) == 13 and not any(array.flags.writeable for array in arrays)
+    with pytest.raises(ValueError, match="read-only"):
+        fx.rings.radius[0] = 2.0
+    both = fx_joined([fx, fx])
+    assert both is not None and not both.planes.point.flags.writeable
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: rings([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], [1.0, 2.0, 3.0], 0.1, (1.0, 1.0, 1.0)),
+        lambda: rings([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], 1.0, 0.1, [(1.0, 1.0, 1.0)] * 3),
+        lambda: planes([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], [(0.0, 0.0, 1.0)] * 3, 0.1, (1, 1, 1)),
+        lambda: planes([[0.0, 0.0, 0.0]], (0.0, 0.0, 1.0), [0.1, 0.2], (1.0, 1.0, 1.0)),
+        lambda: planes([[0.0, 0.0, 0.0]], (0.0, 0.0, 1.0), 0.1, (1.0, 1.0, 1.0), ray=(1.0, 0.0)),
+    ],
+    ids=["radius", "colour", "normal", "width", "ray"],
+)
+def test_rings_and_planes_refuse_values_that_dont_match_their_count(make: Any) -> None:
+    with pytest.raises(ValueError, match=r"one for all or one for each of the \d items"):
+        make()

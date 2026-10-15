@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -27,10 +28,23 @@ F32 = NDArray[np.float32]
 Recolour = Callable[[F32], F32]  # (K, 3) colours to (K, 3) colours, in an array of its own
 
 
-def _rows(values: ArrayLike, count: int, width: int) -> F32:
-    """One row of `width` floats for each of `count` items: given for each, or one for all."""
-    shape = (count, width) if width > 1 else (count,)
-    return np.broadcast_to(np.asarray(values, dtype=np.float32), shape).astype(np.float32)
+def _rows(name: str, values: ArrayLike, count: int, width: int) -> F32:
+    """One row of `width` floats for each of `count` items: given for each, or one for all.
+    Any other shape raises a ValueError that names the value."""
+    one = (width,) if width > 1 else ()
+    array = np.asarray(values, dtype=np.float32)
+    if array.shape not in (one, (count, *one)):
+        raise ValueError(
+            f"{name} takes one for all or one for each of the {count} items, "
+            f"not an array of shape {array.shape}"
+        )
+    return np.broadcast_to(array, (count, *one)).astype(np.float32)
+
+
+def _read_only(*arrays: NDArray[Any]) -> None:
+    """Frozen in place: an Fx is never changed, so one shared (fx_joined of one) is safe."""
+    for array in arrays:
+        array.flags.writeable = False
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -44,6 +58,9 @@ class Rings:
     width: F32  # (K,)
     colour: F32  # (K, 3)
     circle: NDArray[np.bool_]  # (K,)
+
+    def __post_init__(self) -> None:
+        _read_only(self.centre, self.radius, self.width, self.colour, self.circle)
 
     @property
     def count(self) -> int:
@@ -62,11 +79,11 @@ def rings(
     where = np.array(centre, dtype=np.float32).reshape(-1, 3)
     count = len(where)
     return Rings(
-        where,
-        _rows(radius, count, 1),
-        _rows(width, count, 1),
-        _rows(colour, count, 3),
-        np.full(count, circle, dtype=np.bool_),
+        centre=where,
+        radius=_rows("radius", radius, count, 1),
+        width=_rows("width", width, count, 1),
+        colour=_rows("colour", colour, count, 3),
+        circle=np.full(count, circle, dtype=np.bool_),
     )
 
 
@@ -82,6 +99,9 @@ class Planes:
     width: F32  # (K,)
     colour: F32  # (K, 3)
     ray: F32  # (K, 3)
+
+    def __post_init__(self) -> None:
+        _read_only(self.point, self.normal, self.width, self.colour, self.ray)
 
     @property
     def count(self) -> int:
@@ -100,11 +120,11 @@ def planes(
     where = np.array(point, dtype=np.float32).reshape(-1, 3)
     count = len(where)
     return Planes(
-        where,
-        _rows(normal, count, 3),
-        _rows(width, count, 1),
-        _rows(colour, count, 3),
-        _rows(ray, count, 3),
+        point=where,
+        normal=_rows("normal", normal, count, 3),
+        width=_rows("width", width, count, 1),
+        colour=_rows("colour", colour, count, 3),
+        ray=_rows("ray", ray, count, 3),
     )
 
 
@@ -114,11 +134,16 @@ NO_PLANES = planes(np.zeros((0, 3)), (0.0, 0.0, 1.0), 0.0, (0.0, 0.0, 0.0))
 
 @dataclass(frozen=True, eq=False, slots=True)
 class Fx:
-    """What one layer, or a zone's frame, draws in space."""
+    """What one layer, or a zone's frame, draws in space. Its arrays are read-only, the
+    particles' too (a particle effect's own last step's): every change makes a new Fx."""
 
     particles: Particles = NO_PARTICLES
     rings: Rings = NO_RINGS
     planes: Planes = NO_PLANES
+
+    def __post_init__(self) -> None:
+        particles = self.particles
+        _read_only(particles.pos, particles.colour, particles.radius)
 
     @property
     def empty(self) -> bool:
@@ -138,23 +163,28 @@ NO_FX = Fx()
 
 
 def fx_joined(parts: list[Fx]) -> Fx | None:
-    """Several layers' fx as one, bottom layer first; None for none."""
+    """Several layers' fx as one, bottom layer first; None for none. One alone is handed
+    back as it is: its arrays are read-only, so sharing them is safe."""
     if not parts:
         return None
     if len(parts) == 1:
         return parts[0]
+    ring_parts = [part.rings for part in parts]
+    plane_parts = [part.planes for part in parts]
     return Fx(
-        joined(*(part.particles for part in parts)),
-        Rings(
-            *(
-                np.concatenate([getattr(part.rings, name) for part in parts])
-                for name in ("centre", "radius", "width", "colour", "circle")
-            )
+        particles=joined(*(part.particles for part in parts)),
+        rings=Rings(
+            centre=np.concatenate([each.centre for each in ring_parts]),
+            radius=np.concatenate([each.radius for each in ring_parts]),
+            width=np.concatenate([each.width for each in ring_parts]),
+            colour=np.concatenate([each.colour for each in ring_parts]),
+            circle=np.concatenate([each.circle for each in ring_parts]),
         ),
-        Planes(
-            *(
-                np.concatenate([getattr(part.planes, name) for part in parts])
-                for name in ("point", "normal", "width", "colour", "ray")
-            )
+        planes=Planes(
+            point=np.concatenate([each.point for each in plane_parts]),
+            normal=np.concatenate([each.normal for each in plane_parts]),
+            width=np.concatenate([each.width for each in plane_parts]),
+            colour=np.concatenate([each.colour for each in plane_parts]),
+            ray=np.concatenate([each.ray for each in plane_parts]),
         ),
     )
