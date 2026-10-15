@@ -28,24 +28,21 @@ export function stageCanvas(page: Page): Locator {
 }
 
 /**
- * The mock has sent the stage a picture of the effects in space (src/api/mocks/browser.ts marks the page),
- * which it draws in the next animation frame: a screenshot of a stage that draws them waits for it, or it
- * can settle before the picture lands. A stage frozen before it asked for one never gets one.
- *
- * The mark goes up as the picture is sent, before the page has stored it, and the stage draws it on its cadence: on the phone's
- * 30 fps, a frame or two later. A screenshot shot sooner matches a baseline drawn without the picture, and passes on it, so this
- * waits six animation frames more, which cover both.
+ * The stage has drawn the mock's pictures of the effects in space, so a screenshot of a stage that draws them can't
+ * settle before the picture lands. The mock counts the pictures it sends (src/api/mocks/browser.ts marks the page), and
+ * the stage's canvas names the fx store's version it last drew (scene/fx-layer.tsx), which moves at least once a
+ * picture stored: this waits for the first, then for the second to catch up with it. A stage frozen before it asked
+ * for a picture never gets one, and a stage that draws none never marks its canvas.
  */
 export async function fxPictured(page: Page): Promise<void> {
-  await expect(page.locator('html[data-mock-fx]')).toHaveCount(1)
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        let left = 6
-        const frame = () => (--left === 0 ? resolve() : requestAnimationFrame(frame))
-        requestAnimationFrame(frame)
-      }),
-  )
+  const sent = page.locator('html[data-mock-fx]')
+  await expect(sent).toHaveCount(1)
+  await expect
+    .poll(async () => {
+      const [count, drawn] = [await sent.getAttribute('data-mock-fx'), await stageCanvas(page).getAttribute('data-fx-drawn')]
+      return drawn !== null && Number(drawn) >= Number(count)
+    })
+    .toBe(true)
 }
 
 /** open(), then Live's stage once its canvas shows. */

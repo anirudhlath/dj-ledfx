@@ -31,6 +31,8 @@ interface State {
   quiet?: true
   /** The desktop banner draws no frame rate: nothing runs, or the link is down. */
   rateless?: true
+  /** The link drops, so the stage freezes (§7.6) and may never get a picture of the effects in space to draw. */
+  frozen?: true
 }
 
 // §13.1 F3 ("M3" there): every Live state from §9, from a mock scenario. The hero is shell.spec.ts's `Live`.
@@ -43,7 +45,7 @@ const DESKTOP: State[] = [
   { name: 'inputs-down', path: '/next/live?scenario=inputs-down', render: 'State-Inputs-Down', ready: (page) => page.getByRole('banner').getByRole('button', { name: '3 need attention' }) },
   { name: 'nothing-running', path: '/next/live?scenario=nothing-running', render: 'State-Nothing-Running', ready: (page) => page.getByRole('heading', { name: 'Nothing running' }), rateless: true },
   { name: 'no-lights', path: '/next/live?scenario=no-lights', render: 'State-No-Lights-Placed', ready: (page) => page.getByRole('region', { name: 'Place your 19 lights' }) },
-  { name: 'reconnecting', path: '/next/live?scenario=reconnecting', render: 'State-Reconnecting', ready: (page) => page.getByRole('region', { name: 'Lost the live link to homeserver' }), mask: reconnectingMask, rateless: true },
+  { name: 'reconnecting', path: '/next/live?scenario=reconnecting', render: 'State-Reconnecting', ready: (page) => page.getByRole('region', { name: 'Lost the live link to homeserver' }), mask: reconnectingMask, rateless: true, frozen: true },
   { name: 'preview-only', path: '/next/live?scenario=preview-only', render: 'State-Preview-Only', ready: (page) => page.getByText('Everything renders here. Nothing is sent to the lights.') },
   { name: 'waiting', path: '/next/live?scenario=waiting', render: null, ready: (page) => page.getByText('Nothing playing on Music Assistant. The look waits dark and starts with the music.') },
   { name: 'first-run', path: '/next/live?scenario=first-run', render: null, ready: (page) => page.getByRole('region', { name: 'No lights yet' }), rateless: true },
@@ -52,7 +54,7 @@ const DESKTOP: State[] = [
 const PHONE: State[] = [
   { name: 'preview-only', path: '/next/live?scenario=preview-only', render: 'Phone-State-Preview-Only', ready: (page) => page.getByRole('button', { name: 'Turn off preview only' }) },
   { name: 'problems', path: '/next/live?scenario=problems', render: 'Phone-State-Problems', ready: (page) => page.getByRole('article', { name: 'Kitchen — Lava' }), then: openAttention },
-  { name: 'reconnecting', path: '/next/live?scenario=reconnecting', render: 'Phone-State-Reconnecting', ready: (page) => page.getByRole('region', { name: 'Lost the live link' }), mask: reconnectingMask },
+  { name: 'reconnecting', path: '/next/live?scenario=reconnecting', render: 'Phone-State-Reconnecting', ready: (page) => page.getByRole('region', { name: 'Lost the live link' }), mask: reconnectingMask, frozen: true },
   { name: 'nothing-running', path: '/next/live?scenario=nothing-running', render: 'Phone-State-Nothing-Running', ready: (page) => page.getByRole('heading', { name: 'Nothing running' }), quiet: true },
   { name: 'zone', path: '/next/live/zones/living', render: 'Phone-Zone', ready: (page) => page.getByRole('region', { name: 'Lights · live' }) },
   { name: 'tempo', path: '/next/inputs?scenario=dj-playing', render: 'Phone-Tempo', ready: (page) => page.getByRole('region', { name: 'Decks' }) },
@@ -72,7 +74,7 @@ for (const [size, states] of [['desktop', DESKTOP], ['phone', PHONE]] as const) 
       test(`${state.name}${state.render === null ? '' : `, as ${state.render}`}`, async ({ page }) => {
         await open(page, still(state.path), state.quiet && state.ready(page))
         if (state.path.startsWith('/next/live')) await expect(stageCanvas(page)).toBeVisible()
-        if (state.path.startsWith('/next/live') && state.name !== 'reconnecting') await fxPictured(page)
+        if (state.path.startsWith('/next/live') && !state.frozen) await fxPictured(page)
         await expect(state.ready(page)).toBeVisible()
         // As shell.spec.ts's openStill: Live's tempo drawn, and on desktop the frame rate settled where the banner has one.
         if (state.path.startsWith('/next/live?')) await expect(page.getByRole('banner').getByRole('group', { name: 'Tempo' })).toBeVisible()

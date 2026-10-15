@@ -7,9 +7,11 @@ import { MockServer } from './mock-server'
 
 /**
  * e2e's sign that the stage has a picture of the effects in space to draw (e2e/helpers.ts, fxPictured()):
- * a screenshot waits for it, or it races the picture's arrival.
+ * how many have gone out. A screenshot waits until the stage has drawn that many (its canvas's
+ * `data-fx-drawn`, the fx store's version), or it races the picture's arrival.
  */
-const markFx = () => document.documentElement.setAttribute('data-mock-fx', '')
+let fxSent = 0
+const markFx = () => document.documentElement.setAttribute('data-mock-fx', String(++fxSent))
 
 export async function startMocks(choice: MockChoice): Promise<MockServer> {
   const server = new MockServer({ ...choice, onFx: markFx })

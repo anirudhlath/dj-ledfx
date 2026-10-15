@@ -192,6 +192,37 @@ describe('the stage scene (§7.2, §7.5)', () => {
     release()
   })
 
+  // e2e's sign that a picture is on the canvas (e2e/helpers.ts, fxPictured()): the canvas names the fx store's
+  // version it drew. It's written once a picture drawn, never once an animation frame (§7.5): the mock
+  // sends at most 30 pictures a second, and the animation frames come every 16 ms.
+  it('marks the canvas with the picture it drew, once a picture and not once a frame', async () => {
+    startMockDataLayer()
+    const release = wantFx()
+    const props = sceneProps('hero', { cadenceMs: 1000 / SPEC.target.fps, fx: LIVE_ONLY })
+    let canvas: HTMLCanvasElement | undefined
+    function Canvas() {
+      canvas = useThree((state) => state.gl.domElement)
+      return null
+    }
+    await renderScene(
+      <>
+        <StageScene {...props} />
+        <Canvas />
+      </>,
+    )
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(fx.version).toBeGreaterThan(0)
+    expect(canvas!.getAttribute('data-fx-drawn')).toBe(String(fx.version))
+    const marks = vi.spyOn(canvas!, 'setAttribute')
+    const before = fx.version
+    await vi.advanceTimersByTimeAsync(1000)
+    const drawn = marks.mock.calls.filter(([name]) => name === 'data-fx-drawn').length
+    expect(drawn).toBeGreaterThan(0)
+    expect(drawn).toBeLessThanOrEqual(fx.version - before)
+    expect(canvas!.getAttribute('data-fx-drawn')).toBe(String(fx.version))
+    release()
+  })
+
   it('draws no effects in space while it picks none, and lets them go when it stops', async () => {
     startMockDataLayer()
     const release = wantFx()

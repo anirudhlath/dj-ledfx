@@ -133,8 +133,9 @@ for (const size of ['desktop', 'phone'] as const) {
       test(`${state.name}${state.render === null ? '' : `, as ${size === 'desktop' ? 'Live' : 'Phone'}-${state.render}`}`, async ({ page }) => {
         await open(page, still(state.path))
         await expect(stageCanvas(page)).toBeVisible()
-        await fxPictured(page)
         await expect(state.ready(page)).toBeVisible()
+        // Once the composer is ready, not before: the preview's own picture goes out only after the preview has started.
+        await fxPictured(page)
         // As live.spec.ts: on desktop, the banner's frame rate settled.
         if (size === 'desktop') await expect(page.getByRole('banner').getByText('60 fps')).toBeVisible({ timeout: 10_000 })
         // The composer gives a look the focus as it opens (F4 ruling 12), in a passive effect after the first paint: wait for it, or it

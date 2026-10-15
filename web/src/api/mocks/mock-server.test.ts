@@ -250,6 +250,34 @@ describe('the fx channel', () => {
     expect(onFx).toHaveBeenCalledOnce()
   })
 
+  // browser.ts counts onFx's calls as the pictures sent (e2e's fxPictured() waits for the stage to draw that many),
+  // so it says nothing while nobody asks, or after they stop, and nothing for a picture that hasn't changed.
+  it('says a picture went out only when one did', () => {
+    const onFx = vi.fn()
+    const socket = connect(startMockServer({ still: true, onFx }))
+    vi.advanceTimersByTime(1000)
+    expect(onFx).not.toHaveBeenCalled()
+    socket.send({ action: 'subscribe_fx', on: true })
+    vi.advanceTimersByTime(200)
+    expect(onFx).toHaveBeenCalledOnce()
+    // Held under ?still: the picture is unchanged, so nothing more goes out.
+    vi.advanceTimersByTime(2000)
+    expect(onFx).toHaveBeenCalledOnce()
+    socket.send({ action: 'subscribe_fx', on: false })
+    vi.advanceTimersByTime(1000)
+    expect(onFx).toHaveBeenCalledOnce()
+    expect(pictures(socket)).toHaveLength(onFx.mock.calls.length)
+  })
+
+  it('says so once for each picture that goes out while pictures move', () => {
+    const onFx = vi.fn()
+    const socket = connect(startMockServer({ onFx }))
+    socket.send({ action: 'subscribe_fx', on: true })
+    vi.advanceTimersByTime(1000)
+    expect(onFx.mock.calls.length).toBeGreaterThan(20)
+    expect(onFx).toHaveBeenCalledTimes(pictures(socket).length)
+  })
+
   it("draws the preview's look on the preview stream while it's on, and nothing for it after", () => {
     const server = startMockServer({ still: true })
     const socket = connect(server)
