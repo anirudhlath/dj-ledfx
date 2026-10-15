@@ -709,6 +709,28 @@ JSON envelope `{ "channel": string, ... }` as today, plus:
 
 Commands (client → server): `subscribe_beat {fps}`, `subscribe_frames {fps ≤ 60, lights?: Id[], streams?: ['live'|'preview']}`, `subscribe_signals {names?}`, `subscribe_fx {on}`, `tap {client_time}`.
 
+**The `fx` payload** (engine M8, fixed 2026-10-14 so the engine and the web app build against one shape):
+
+```ts
+interface FxMessage { channel: 'fx'; zones: ZoneFx[] }      // the whole picture: each message replaces the last
+interface ZoneFx {
+  zoneId: Id
+  stream: 'live' | 'preview'                                 // which frames it belongs with, as frame v2's stream byte
+  particles?: [x: number, y: number, z: number, r: number, g: number, b: number, size: number][]
+  rings?: { center: Vec3; radius: number; width: number; rgb: Vec3; form: 'sphere' | 'circle' }[]
+  planes?: { point: Vec3; normal: Vec3; width: number; rgb: Vec3; ray?: Vec3 }[]
+}
+type Vec3 = [number, number, number]
+```
+
+- Positions and lengths are metres in the home map's frame (z up), the frame the stage places the LEDs in: an effect's own space (a layer's transform, its mirror) is mapped back, and a mirrored layer sends each thing at every place the mirror shows it. Colours are linear 0–1, after the zone's brightness. Numbers are rounded to 3 decimals.
+- What a zone sends is what its lights show at now: the engine keeps each rendered frame's `fx` beside its colours and sends the newest at or before now, the moment the live and preview frames are read at.
+- A `circle` lies level (its axis is z); a `sphere` is a shell. A plane is infinite unless it has a `ray`, a direction in the plane: then it is the half on that side of `point` (a lighthouse beam). `width` is how thick the shell, ring or plane is drawn.
+- A zone with nothing to draw is left out, and a message with no zones clears the stage. The server sends at most 30 a second and only to a session that sent `subscribe_fx {on: true}`, until `{on: false}`; it sends nothing while nothing changes.
+- **Extending it:** a later kind (M6's sun `shafts`, the doorbell's ring) is a new optional key on `ZoneFx`, or a new optional field on an item. The client ignores keys it doesn't know, and the server never renames or removes one, so neither side bumps a version.
+- **What draws what (M8's first slice):** every particle effect (M5's eleven looks) sends `particles`; Shockwave's shell and Speaker waves' kick fronts send `sphere` rings, Ripples' drops `circle` rings; Scanner sends a level plane and Shockwave's beam a plane with a `ray`. Firmware layers send nothing. Sun shafts wait for M6's sun.
+
+
 **Binary frame v2:** `[1B stream: 0x01 live | 0x02 preview][2B id_len LE][id UTF-8 (stable id)][4B seq LE][RGB × leds]`. Keep v1 behind a version handshake until the old UI is deleted.
 
 Beat extrapolation: client computes `phase(t) = beat_phase + (t − server_time − offset) · bpm / 60`, with `offset` estimated from ping round-trips; snap softly (< 5 ms) or hard (≥ 5 ms), mirroring `BeatClock` drift correction.

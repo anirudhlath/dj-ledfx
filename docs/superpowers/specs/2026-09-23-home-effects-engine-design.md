@@ -43,7 +43,7 @@ Easy to hard. M2 is the foundation for everything after it. Each milestone also 
 | M5 | Particles | Particle API; emitters, paths and targets that know where the lamps are | Fireflies, Embers, Rain storm, Snow, Spotlights, Beat bursts, Fountain, Vortex, Twin comets, Bouncing ball, Flock |
 | M6 | Whole home | Whole-home zone; overlays; sun position; bedtime flow | Home sunset, Wisp, Goodnight |
 | M7 | Live inputs | Sendspin visualizer; Home Assistant signals, triggers and control API; signal catalogue; parameter bindings | Room spectrum, Tide, Drop moment, Doorbell ripple; Speaker waves moves to real audio |
-| M8 | Effects in space | The `fx` stream: particles, rings, planes and sun shafts drawn on the web app's stage | — |
+| M8 | Effects in space | The `fx` stream: particles, rings, planes and sun shafts drawn on the web app's stage (brought forward on 2026-10-14, after M5, so the particle looks can be tuned on the stage; sun shafts follow M6's sun) | — |
 
 That is 29 looks: 1 + 6 + 4 + 11 + 3 + 4.
 
