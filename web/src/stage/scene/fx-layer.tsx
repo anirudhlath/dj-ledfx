@@ -7,29 +7,26 @@
 // write a picture or a pick, none an idle frame (§7.5).
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
-import type { Home } from '@/api/contract'
 import { fx } from '@/api/live'
 import type { CameraPose } from '../camera'
 import { FxWriter, type FxPick } from '../fx-writer'
 import type { DrawList } from './draw-list'
-import { FxMaterials, FxMeshes } from './fx-meshes'
+import { FxMeshes, type FxMaterials } from './fx-meshes'
 
 export interface FxLayerProps {
-  home: Pick<Home, 'outline' | 'ceiling'>
+  /** The stage's, compiled already: they outlive the layer, so the switch going on links no program (stage-scene.tsx). */
+  materials: FxMaterials
   /** Which zones' fx it draws. */
   pick: FxPick
   pose: CameraPose
   drawList: DrawList
 }
 
-export function FxLayer({ home, pick, pose, drawList }: FxLayerProps) {
-  const { outline, ceiling } = home
-  const materials = useMemo(() => new FxMaterials({ outline, ceiling }), [outline, ceiling])
+export function FxLayer({ materials, pick, pose, drawList }: FxLayerProps) {
   const writer = useMemo(() => new FxWriter(), [])
   const meshes = useMemo(() => new FxMeshes(writer, materials), [writer, materials])
   const invalidate = useThree((state) => state.invalidate)
   const canvas = useThree((state) => state.gl.domElement)
-  useEffect(() => () => materials.dispose(), [materials])
   // Gone, the picture goes with it: the canvas draws once more without it.
   useEffect(
     () => () => {

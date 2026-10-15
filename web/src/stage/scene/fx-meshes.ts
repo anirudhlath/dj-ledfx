@@ -1,8 +1,12 @@
 // "Effects in space"'s three objects (§7.4): one InstancedMesh each for the particles, the rings and
 // the planes. Their attributes are the fx writer's own arrays, so a picture is written once and only
 // flagged here, the part that's drawn; each mesh draws as many instances as the writer wrote, and is
-// made again only when the writer's arrays grow. Their materials, and the outline's mask, are FxMaterials: made once per home.
-import { DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, PlaneGeometry, type DataTexture, type ShaderMaterial } from 'three'
+// made again only when the writer's arrays grow. Their materials, and the outline's mask, are FxMaterials: made once per home
+// by the stage's scene, which keeps them while the fx layer comes and goes and has them compiled ahead (compileFx).
+import {
+  DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, PlaneGeometry, Scene,
+  type Camera, type DataTexture, type ShaderMaterial, type WebGLRenderer,
+} from 'three'
 import type { Home } from '@/api/contract'
 import type { CameraPose } from '../camera'
 import type { FxBatch, FxWriter } from '../fx-writer'
@@ -42,6 +46,24 @@ export class FxMaterials {
 
   dispose(): void {
     for (const item of [this.particle, this.ring, this.plane, this.texture]) item.dispose()
+  }
+}
+
+/**
+ * Has the renderer link the materials' programs off the main thread, before anything draws with them: three links a
+ * draw's programs synchronously otherwise, mid-draw, as the first picture or the first ring or plane lands
+ * (stage-canvas.tsx holds the scene's own to the same rule). Each is compiled on one instance of a mesh like the one
+ * FxMeshes draws it on, so the program is the one its draws use, for `scene`, the stage's.
+ */
+export async function compileFx(gl: Pick<WebGLRenderer, 'compileAsync'>, materials: FxMaterials, camera: Camera, scene: Scene): Promise<void> {
+  const geometry = new PlaneGeometry(2, 2)
+  const meshes = [materials.particle, materials.ring, materials.plane].map((material) => new InstancedMesh(geometry, material, 1))
+  const ahead = new Scene().add(...meshes)
+  try {
+    await gl.compileAsync(ahead, camera, scene)
+  } finally {
+    geometry.dispose()
+    for (const mesh of meshes) mesh.dispose()
   }
 }
 

@@ -12,6 +12,8 @@ import { SPEC } from '../design-numbers'
 import { FrameWriter } from '../frame-writer'
 import { LIVE_ONLY } from '../fx-writer'
 import type { RGB } from '@/lib/light-colour'
+import type { ZoneFx } from '@/api/ws-messages'
+import { FxMaterials } from './fx-meshes'
 import { HomeScene } from './home-scene'
 import { StageScene } from './stage-scene'
 
@@ -26,12 +28,48 @@ function lightLayer(scene: Object3D) {
   return { objects, materials: objects.map((object) => object.material) }
 }
 
-/** The stage's scene on test-renderer's canvas, with the camera the test can look at. */
+/** The fx layer's mesh of one kind, found by its material's uniforms: the light layer has none of these. */
+function fxMesh(scene: Object3D, uniform: string): InstancedMesh | undefined {
+  let found: InstancedMesh | undefined
+  scene.traverse((object) => {
+    if (object instanceof InstancedMesh && object.material instanceof ShaderMaterial && uniform in object.material.uniforms) found = object
+  })
+  return found
+}
+
+/** A picture with every kind the effects in space draw: a particle, both forms of ring, and a plane with and without a ray. */
+const EVERY_KIND: ZoneFx = {
+  zoneId: 'living',
+  stream: 'live',
+  particles: [[1, 1, 1, 1, 1, 1, 0.3]],
+  rings: [
+    { center: [1, 1, 1], radius: 1, width: 0.2, rgb: [1, 0, 0], form: 'sphere' },
+    { center: [1, 1, 0], radius: 1, width: 0.2, rgb: [0, 1, 0], form: 'circle' },
+  ],
+  planes: [
+    { point: [1, 1, 1], normal: [0, 0, 1], width: 0.1, rgb: [0, 0, 1] },
+    { point: [1, 1, 1], normal: [0, 1, 0], width: 0.1, rgb: [0, 0, 1], ray: [1, 0, 0] },
+  ],
+}
+
+/**
+ * The stage's scene on test-renderer's canvas, with the camera the test can look at. test-renderer's WebGL stand-in offers
+ * KHR_parallel_shader_compile but never says a program has finished linking, so compileAsync would wait for ever: here,
+ * as on a GPU done linking, every program has.
+ */
 async function renderScene(element: ReactNode) {
   const camera = Object.assign(new OrthographicCamera(), { manual: true })
-  const renderer = await ReactThreeTestRenderer.create(element, { camera, frameloop: 'demand', linear: true, flat: true })
+  const onCreated = ({ gl }: { gl: WebGLRenderer }) => {
+    const context = gl.getContext()
+    const asked = context.getProgramParameter.bind(context)
+    context.getProgramParameter = (program, name) => (name === COMPLETION_STATUS_KHR ? true : asked(program, name))
+  }
+  const renderer = await ReactThreeTestRenderer.create(element, { camera, frameloop: 'demand', linear: true, flat: true, onCreated })
   return { renderer, camera }
 }
+
+/** KHR_parallel_shader_compile's COMPLETION_STATUS_KHR. */
+const COMPLETION_STATUS_KHR = 0x91b1
 
 // From HERO_NOW, so the animation frames (every 16 ms from the fake clock's start) keep one phase
 // against the mock's ticks, run after run.
@@ -149,9 +187,11 @@ describe('the stage scene (§7.2, §7.5)', () => {
     expect(after.materials.every((material) => before.materials.includes(material))).toBe(true)
   })
 
-  // F10: the effects in space draw on the lights' cadence, so the canvas renders once a draw for both.
+  // F10: the effects in space draw on the lights' cadence, so the canvas renders once a draw for both. The hero's
+  // fireflies and comets send particles, and Shockwave started on the office a ring and a plane.
   it("draws the hero's effects in space beside its lights, rendering once a draw", async () => {
-    startMockDataLayer()
+    const server = startMockDataLayer()
+    server.handle('POST', '/api/zones/office/start', { lookId: 'shockwave' })
     const release = wantFx()
     const props = sceneProps('hero', { cadenceMs: 1000 / SPEC.target.fps, fx: LIVE_ONLY })
     let gl: WebGLRenderer | undefined
@@ -168,22 +208,14 @@ describe('the stage scene (§7.2, §7.5)', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(fx.live.size).toBeGreaterThan(0)
     const scene = renderer.scene.instance as Object3D
-    // The fx layer's own meshes, found by their materials' uniforms: the light layer has none of these.
-    const fxMesh = (uniform: string) => {
-      let found: InstancedMesh | undefined
-      scene.traverse((object) => {
-        if (object instanceof InstancedMesh && object.material instanceof ShaderMaterial && uniform in object.material.uniforms) found = object
-      })
-      return found
-    }
     const pictured = [...fx.live.values()]
     const total = (key: 'particles' | 'rings' | 'planes') => pictured.reduce((sum, zone) => sum + (zone[key]?.length ?? 0), 0)
-    const particles = fxMesh('pxPerM')
-    expect(total('particles')).toBeGreaterThan(0)
+    expect([total('particles'), total('rings'), total('planes')].every((count) => count > 0)).toBe(true)
+    const particles = fxMesh(scene, 'pxPerM')
     expect(particles?.count).toBe(total('particles'))
     expect(particles?.visible).toBe(true)
-    if (total('rings') > 0) expect(fxMesh('lift')?.count).toBe(total('rings'))
-    if (total('planes') > 0) expect(fxMesh('homeCentre')?.count).toBe(total('planes'))
+    expect(fxMesh(scene, 'lift')?.count).toBe(total('rings'))
+    expect(fxMesh(scene, 'homeCentre')?.count).toBe(total('planes'))
     const render = vi.spyOn(gl!, 'render')
     const draws = vi.spyOn(props.writer, 'write')
     await vi.advanceTimersByTimeAsync(1000)
@@ -228,11 +260,67 @@ describe('the stage scene (§7.2, §7.5)', () => {
     const release = wantFx()
     const props = sceneProps('hero', { cadenceMs: 1000 / SPEC.target.fps })
     const { renderer } = await renderScene(<StageScene {...props} fx={LIVE_ONLY} />)
+    await vi.advanceTimersByTimeAsync(100)
     const scene = renderer.scene.instance as Object3D
     const count = scene.children.length
     await renderer.update(<StageScene {...props} />)
     expect(scene.children.length).toBe(count - 1)
     release()
+  })
+
+  // Final review 1: three links a program on the main thread the first time it draws with it. The effects' programs are linked
+  // ahead (compileAsync) while the stage's scene comes up, so neither the first picture nor the first ring or plane, nor the
+  // switch going on again, makes a new one mid-draw.
+  it("links the effects' programs before the first picture, and keeps them across the switch", async () => {
+    const props = sceneProps('hero', { cadenceMs: 1000 / SPEC.target.fps, fx: LIVE_ONLY })
+    let gl: WebGLRenderer | undefined
+    function Renderer() {
+      gl = useThree((state) => state.gl)
+      return null
+    }
+    const disposed = vi.spyOn(FxMaterials.prototype, 'dispose')
+    const { renderer, camera } = await renderScene(
+      <>
+        <StageScene {...props} />
+        <Renderer />
+      </>,
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    // The stage's first draw, with no picture yet.
+    gl!.render(renderer.scene.instance as Object3D, camera)
+    const programs = gl!.info.programs!.length
+    expect(programs).toBeGreaterThan(0)
+    const render = vi.spyOn(gl!, 'render')
+    fx.apply({ channel: 'fx', zones: [EVERY_KIND] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(render).toHaveBeenCalled()
+    const scene = renderer.scene.instance as Object3D
+    const meshes = ['pxPerM', 'lift', 'homeCentre'].map((uniform) => fxMesh(scene, uniform))
+    expect(meshes.map((mesh) => mesh?.count)).toEqual([1, 2, 2])
+    expect(gl!.info.programs!.length).toBe(programs)
+
+    // Off and on again: the same materials, so the same programs.
+    await renderer.update(
+      <>
+        <StageScene {...props} fx={null} />
+        <Renderer />
+      </>,
+    )
+    await renderer.update(
+      <>
+        <StageScene {...props} />
+        <Renderer />
+      </>,
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    const again = ['pxPerM', 'lift', 'homeCentre'].map((uniform) => fxMesh(scene, uniform))
+    expect(again.map((mesh) => mesh?.material)).toEqual(meshes.map((mesh) => mesh?.material))
+    expect(again.every((mesh, i) => mesh?.material === meshes[i]?.material)).toBe(true)
+    expect(gl!.info.programs!.length).toBe(programs)
+    expect(disposed).not.toHaveBeenCalled()
+    // They go with the stage.
+    await renderer.unmount()
+    expect(disposed).toHaveBeenCalledOnce()
   })
 
   it('lets go of the home when the stage goes', async () => {

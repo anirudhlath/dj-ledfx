@@ -1,4 +1,4 @@
-import { type InstancedBufferAttribute, InstancedMesh, ShaderMaterial } from 'three'
+import { type InstancedBufferAttribute, InstancedMesh, type Object3D, OrthographicCamera, PlaneGeometry, Scene, ShaderMaterial } from 'three'
 import { describe, expect, it, vi } from 'vitest'
 import { FxStore } from '@/api/fx'
 import type { ZoneFx } from '@/api/ws-messages'
@@ -7,7 +7,7 @@ import { buildScenario } from '@/api/mocks/scenarios'
 import { HERO_NOW } from '@/test/live'
 import { RENDER, SPEC } from '../design-numbers'
 import { FxWriter, LIVE_ONLY } from '../fx-writer'
-import { FxMaterials, FxMeshes } from './fx-meshes'
+import { compileFx, FxMaterials, FxMeshes } from './fx-meshes'
 import { MIN_RING_WIDTH_M, RING_REACH_WIDTHS, RING_SAMPLES } from './fx-shaders'
 
 const { home } = buildScenario('hero', HERO_NOW)
@@ -85,6 +85,30 @@ describe('the effects in space (§7.4)', () => {
     const disposed = [materials.particle, materials.ring, materials.plane].map((material) => vi.spyOn(material, 'dispose'))
     materials.dispose()
     for (const dispose of disposed) expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  // Final review 1: the programs a draw uses are linked ahead, on meshes like the ones that draw, for the stage's scene.
+  it('compiles each material ahead on one instance of an instanced mesh, for the stage, then lets that mesh go', async () => {
+    const materials = new FxMaterials(home)
+    const camera = new OrthographicCamera()
+    const stage = new Scene()
+    let compiled: Object3D[] = []
+    const compileAsync = vi.fn(async (ahead: Object3D) => {
+      compiled = [...ahead.children]
+      return ahead
+    })
+    await compileFx({ compileAsync }, materials, camera, stage)
+    expect(compileAsync).toHaveBeenCalledExactlyOnceWith(expect.any(Scene), camera, stage)
+    const meshes = compiled as InstancedMesh[]
+    expect(meshes.map((mesh) => [mesh instanceof InstancedMesh, mesh.count, mesh.instanceColor])).toEqual(Array(3).fill([true, 1, null]))
+    expect(meshes.map((mesh) => mesh.material)).toEqual([materials.particle, materials.ring, materials.plane])
+    expect(meshes[0].geometry).toBeInstanceOf(PlaneGeometry)
+    const drawnOn = drawn(particles(1)).first[0].geometry as PlaneGeometry
+    expect((meshes[0].geometry as PlaneGeometry).parameters).toEqual(drawnOn.parameters)
+    // Its geometry goes once the compile is done.
+    const geometry = vi.spyOn(PlaneGeometry.prototype, 'dispose')
+    await compileFx({ compileAsync }, materials, camera, stage)
+    expect(geometry).toHaveBeenCalledOnce()
   })
 
   it("draws the particles as the render's fireflies, and planes and rings at the glass's alpha", () => {
