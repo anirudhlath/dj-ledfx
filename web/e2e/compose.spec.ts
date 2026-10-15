@@ -86,13 +86,21 @@ interface State {
   then?: (page: Page) => Promise<void>
   /** Desktop only: the phone's composer has no search (Phone-PutLookOn). */
   desktop?: true
+  /** The stage draws the preview's effects in space: the screenshot waits for that picture (fxPictured()). */
+  previews?: true
 }
 
 // §13.1 F4: Put a look on, in each state the composer has, on both sizes. Names come from the mock, so
 // none is written here: the ids are in the paths, and what's waited for is the composer's own words.
 const STATES: State[] = [
   // Live-PutLookOn and Phone-PutLookOn: a look previewed on a room that runs another.
-  { name: 'preview', path: '/next/live/put?zone=living&look=embers', render: 'PutLookOn', ready: (page) => page.getByText(/^Preview on screen/) },
+  {
+    name: 'preview',
+    path: '/next/live/put?zone=living&look=embers',
+    render: 'PutLookOn',
+    ready: (page) => page.getByText(/^Preview on screen/),
+    previews: true,
+  },
   { name: 'no-look', path: '/next/live/put?zone=living', render: null, ready: (page) => page.getByText('Choose a look to see it on the stage first.') },
   {
     name: 'waits-for-music',
@@ -118,6 +126,7 @@ const STATES: State[] = [
       await expect(page.getByText('No looks match “zzzz”.')).toBeVisible()
     },
     desktop: true,
+    previews: true,
   },
 ]
 
@@ -135,7 +144,7 @@ for (const size of ['desktop', 'phone'] as const) {
         await expect(stageCanvas(page)).toBeVisible()
         await expect(state.ready(page)).toBeVisible()
         // Once the composer is ready, not before: the preview's own picture goes out only after the preview has started.
-        await fxPictured(page)
+        await fxPictured(page, { preview: state.previews === true })
         // As live.spec.ts: on desktop, the banner's frame rate settled.
         if (size === 'desktop') await expect(page.getByRole('banner').getByText('60 fps')).toBeVisible({ timeout: 10_000 })
         // The composer gives a look the focus as it opens (F4 ruling 12), in a passive effect after the first paint: wait for it, or it

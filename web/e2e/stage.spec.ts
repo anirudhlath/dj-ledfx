@@ -53,9 +53,11 @@ test.describe('the stage', () => {
   // room with lights, in a scenario where nothing else runs, so the preview's picture is all the stage draws in space: with
   // reduced motion it draws none (§5.4, F10 ruling 4), so a canvas that differs between the two has drawn the picture. A look
   // that draws nothing in space is the control: reduced motion alone changes nothing on the canvas. three logs a shader that
-  // fails to compile or link to the console and draws nothing, so the console is checked as well.
+  // fails to compile or link to the console and draws nothing, so the console is checked first. Speaker waves sends a sphere
+  // alone, so a sphere that draws nothing fails it, where Shockwave's plane would hide it.
   for (const [look, kinds] of [
     ['shockwave', 'a sphere ring and a plane with a ray'],
+    ['speakers', 'a sphere ring alone'],
     ['ripples', 'circle rings'],
     ['scanner', 'a level plane'],
     ['lava', 'nothing (the control)'],
@@ -71,7 +73,7 @@ test.describe('the stage', () => {
       const canvas = stageCanvas(page)
       await expect(canvas).toBeVisible()
       await expect(page.getByText(/^Preview on screen/)).toBeVisible()
-      await fxPictured(page)
+      await fxPictured(page, { preview: look !== 'lava' })
       const shot = () => canvas.screenshot({ animations: 'disabled' })
       // The canvas at rest: unchanged over a second, past the preview's first frames and reduced motion's one draw a second (§5.4).
       const steady = async () => {
@@ -93,11 +95,13 @@ test.describe('the stage', () => {
       const drawn = await steady()
       await page.emulateMedia({ reducedMotion: 'reduce' })
       const gone = await changed(page, drawn, await steady())
-      if (look === 'lava') expect(gone).toBe(0)
-      else expect(gone).toBeGreaterThan(MANY_PIXELS)
-      // Two warnings every SwiftShader run gives, which say nothing about the stage's shaders.
+      // Two warnings every SwiftShader run gives, which say nothing about the stage's shaders. Checked before the canvas, so a
+      // shader that fails says why.
       const benign = /KHR_parallel_shader_compile extension not supported|GPU stall due to ReadPixels/
       expect(messages.filter((text) => /WebGLProgram|Shader Error|WebGL/.test(text) && !benign.test(text))).toEqual([])
+      console.log(`${look}: ${gone} pixels differ with the effects in space gone`)
+      if (look === 'lava') expect(gone).toBe(0)
+      else expect(gone).toBeGreaterThan(MANY_PIXELS)
     })
   }
 
@@ -119,9 +123,10 @@ const MANY_PIXELS = 200
 
 /**
  * How many pixels of two PNG screenshots of one size differ by more than `by` levels in a channel, counted in the page. The
- * software renderer can draw the same picture a level apart from one draw to the next, so an exact comparison would see a change.
+ * software renderer can draw the same picture a level apart from one draw to the next, so an exact comparison would see a change;
+ * a ring drawn faintly at the glass's alpha is only some levels above the floor, so the margin is no wider than that noise needs.
  */
-function changed(page: Page, a: Buffer, b: Buffer, by = 8): Promise<number> {
+function changed(page: Page, a: Buffer, b: Buffer, by = 2): Promise<number> {
   return page.evaluate(
     async ([a, b, by]) => {
       const pixels = async (base64: string) => {
