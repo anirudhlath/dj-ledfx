@@ -284,24 +284,31 @@ const hundredths = (value: number) => Math.round(value * 100) / 100
 
 /**
  * Main.html's fireflies (§7.4: "firefly and ember particles (tiny glowing points)"), each a glow and a
- * core: the glow's radial falloff, the same for every firefly; how far the core's colour is lifted from
- * the glow's towards white; and the core's size, a share of the glow's radius held between the smallest
- * and largest cores the render draws. The share is the largest firefly's, and every core the render
- * draws must come within 0.05 px of that rule, or this fails.
+ * core: the glow's radial falloff, the same for every firefly, in one colour from its centre to its edge;
+ * how far the core's colour is lifted from the glow's towards white; and the core's size, a share of the
+ * glow's radius held between the smallest and largest cores the render draws. The share is the largest
+ * firefly's, and every core the render draws must come within 0.05 px of that rule, or this fails.
  */
 function fireflies(mainHtml: string, main: string) {
   const where = 'Main.html, the fireflies: each a glow and a core'
   const flies = matches(main, {
     where,
-    pattern: /<g class="ff\d+"><circle cx="[\d.]+" cy="[\d.]+" r="([\d.]+)" fill="url\(#([\w-]+)\)"><\/circle><circle cx="[\d.]+" cy="[\d.]+" r="([\d.]+)" fill="(#[0-9a-f]{6})"><\/circle><\/g>/,
+    pattern: new RegExp(
+      String.raw`<g class="ff\d+"><circle cx="[\d.]+" cy="[\d.]+" r="([\d.]+)" fill="url\(#([\w-]+)\)"></circle>` +
+        String.raw`<circle cx="[\d.]+" cy="[\d.]+" r="([\d.]+)" fill="(#[0-9a-f]{6})"></circle></g>`,
+    ),
   })
   const gradients = new Map(
     [...new Set(flies.map((fly) => fly[2]))].map((id) => {
-      const body = same(mainHtml, { where: `Main.html, a firefly's gradient #${id}`, pattern: re(String.raw`<radialGradient id="${id}">([\s\S]*?)</radialGradient>`) })[1]
+      const body = same(mainHtml, {
+        where: `Main.html, a firefly's gradient #${id}`,
+        pattern: re(String.raw`<radialGradient id="${id}">([\s\S]*?)</radialGradient>`),
+      })[1]
       const stops = matches(body, {
         where: `Main.html, the stops of a firefly's gradient #${id}`,
         pattern: /<stop offset="([\d.]+)" stop-color="(#[0-9a-f]{6})" stop-opacity="([\d.]+)"><\/stop>/,
       })
+      if (new Set(stops.map((stop) => stop[2])).size !== 1) throw new Error(`design numbers: ${where}: the gradient #${id} changes colour`)
       return [id, { colour: stops[0][2], stops: stops.map((stop) => ({ at: n(stop[1]), alpha: n(stop[3]) })) }] as const
     }),
   )
@@ -310,10 +317,14 @@ function fireflies(mainHtml: string, main: string) {
   const lifts = flies.map((fly) => {
     const glow = channels(gradients.get(fly[2])!.colour)
     const core = channels(fly[4])
-    return core.reduce((sum, c, i) => sum + c - glow[i], 0) / glow.reduce((sum, g) => sum + 255 - g, 0)
+    const room = glow.reduce((sum, g) => sum + 255 - g, 0)
+    if (room === 0) throw new Error(`design numbers: ${where}: a white glow has no room to lift a core towards white`)
+    return core.reduce((sum, c, i) => sum + c - glow[i], 0) / room
   })
   const lift = hundredths(lifts.reduce((sum, value) => sum + value, 0) / lifts.length)
-  if (lifts.some((value) => Math.abs(value - lift) > 0.02)) throw new Error(`design numbers: ${where} lift their cores by more than one share`)
+  if (lifts.some((value) => Math.abs(value - lift) > 0.02)) {
+    throw new Error(`design numbers: ${where} lift their cores by more than one share`)
+  }
   const sizes = flies.map((fly) => ({ glow: n(fly[1]), core: n(fly[3]) }))
   const largest = sizes.reduce((a, b) => (b.glow > a.glow ? b : a))
   const share = Math.round((largest.core / largest.glow) * 1000) / 1000
