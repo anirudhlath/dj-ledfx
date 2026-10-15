@@ -7,6 +7,8 @@ import numpy as np
 import pytest
 from map_home import DESK_CORNER, leds_at, tiny_space
 
+from dj_ledfx.effects.fx import Fx, planes, rings
+from dj_ledfx.effects.particle_tools import swarm
 from dj_ledfx.looks.model import (
     AnchorMask,
     HeightMask,
@@ -16,7 +18,14 @@ from dj_ledfx.looks.model import (
     SubZoneMask,
     Transform,
 )
-from dj_ledfx.zones.layer_view import layer_view, mask_weights, mirrored, transformed
+from dj_ledfx.zones.layer_view import (
+    LayerView,
+    layer_view,
+    mask_weights,
+    mask_weights_at,
+    mirrored,
+    transformed,
+)
 
 
 def test_a_height_mask_shows_the_layer_between_its_heights_with_a_soft_edge() -> None:
@@ -94,3 +103,232 @@ def test_a_moved_view_keeps_the_zones_bounds_and_weighs_by_where_the_leds_are() 
     assert np.allclose(view.leds.pos[:, 0], [1.0, 1.0])  # the east LED sees the west side
     assert all(np.allclose(a, b) for a, b in zip(view.leds.bounds, leds.bounds, strict=True))
     assert view.weight is not None and view.weight.tolist() == [[1.0], [0.0]]  # where it is
+
+
+# What a layer draws in space, on the map (M8): in_home().
+
+
+def _dots(*places: list[float]) -> Fx:
+    return Fx(particles=swarm(places, (1.0, 0.5, 0.25), 0.2))
+
+
+def test_in_home_undoes_the_transform_so_what_an_led_sees_lands_on_the_led() -> None:
+    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 3.0, 2.0], [4.0, 2.0, 0.5]], space=tiny_space())
+    layer = Layer(
+        id="a",
+        name="A",
+        type="field",
+        kind="breathe",
+        transform=Transform(offset=(0.5, -1.0, 0.25), rotate_deg=30.0, scale=1.5),
+    )
+    view = layer_view(layer, leds)
+    seen = view.leds.pos.tolist()  # where in the effect's space each LED looks
+
+    home = view.in_home(Fx(particles=swarm(seen, (1.0, 1.0, 1.0), 0.2)))
+
+    assert np.allclose(home.particles.pos, leds.pos, atol=1e-5)
+    assert np.allclose(home.particles.radius, 0.3)  # grown by the scale
+
+
+def _scaled_view(scale: float = 2.0) -> LayerView:
+    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 3.0, 1.0]], space=tiny_space())
+    layer = Layer(
+        id="a",
+        name="A",
+        type="field",
+        kind="breathe",
+        transform=Transform(offset=(1.0, 0.0, 0.0), rotate_deg=90.0, scale=scale),
+    )
+    return layer_view(layer, leds)
+
+
+def test_in_home_turns_a_whole_planes_directions_and_grows_lengths_by_the_scale() -> None:
+    view = _scaled_view()
+    at, normal = [3.0, 2.0, 1.0], [0.0, 1.0, 0.0]
+    fx = Fx(
+        rings=rings(at, 1.0, 0.1, (1.0, 0.0, 0.0)),
+        planes=planes(at, normal, 0.2, (0.0, 1.0, 0.0)),
+    )
+    # Where the map shows the effect's point, and the point a metre along its normal.
+    along = view.in_home(_dots(at, list(np.add(at, normal))))
+
+    home = view.in_home(fx)
+
+    there, up = along.particles.pos.astype(np.float64)
+    assert np.allclose(home.rings.centre, [there]) and np.allclose(home.planes.point, [there])
+    assert home.rings.radius.tolist() == [2.0]
+    assert home.rings.width.tolist() == pytest.approx([0.2])
+    assert home.planes.width.tolist() == pytest.approx([0.4])  # a thickness: a length
+    assert np.allclose(home.planes.normal[0] * 2.0, up - there, atol=1e-5)
+    assert not home.planes.ray.any()
+
+
+def test_in_home_turns_a_beams_ray_and_keeps_its_angle_whatever_the_scale() -> None:
+    view = _scaled_view()
+    at, ray, normal = [3.0, 2.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]
+    beam = planes(at, normal, 0.5, (0.0, 1.0, 0.0), ray=ray)  # 0.5 rad wide
+    along = view.in_home(_dots(at, list(np.add(at, ray))))
+
+    home = view.in_home(Fx(planes=beam))
+
+    there, ahead = along.particles.pos.astype(np.float64)
+    assert np.allclose(home.planes.point, [there])
+    assert home.planes.width.tolist() == pytest.approx([0.5])  # an angle: a scale keeps it
+    assert np.allclose(home.planes.ray[0] * 2.0, ahead - there, atol=1e-5)
+    # Both at once: each by its own rule.
+    both = view.in_home(Fx(planes=planes([at, at], normal, [0.2, 0.5], (0, 1, 0), [[0] * 3, ray])))
+    assert both.planes.width.tolist() == pytest.approx([0.4, 0.5])
+
+
+def test_in_home_draws_a_particle_on_the_mirrors_low_side_at_both_its_images() -> None:
+    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 1.0, 1.0]], space=tiny_space())
+    view = layer_view(
+        Layer(id="a", name="A", type="field", kind="breathe", mirror=Mirror("x", 4.0)), leds
+    )
+
+    home = view.in_home(_dots([1.0, 1.0, 1.0], [6.0, 2.0, 1.0], [3.0, 2.0, 1.0]))
+
+    # The particle at x 6 is on the high side, which no LED sees: left out. Each of the
+    # others is drawn where it is and at its reflection, side by side, oldest first.
+    assert home.particles.pos.tolist() == [
+        [1.0, 1.0, 1.0],
+        [7.0, 1.0, 1.0],
+        [3.0, 2.0, 1.0],
+        [5.0, 2.0, 1.0],
+    ]
+    # Every LED's own place is among the images of what it sees.
+    seen = view.in_home(Fx(particles=swarm(view.leds.pos.tolist(), (1.0, 1.0, 1.0), 0.2)))
+    for place in leds.pos:
+        assert np.isclose(seen.particles.pos, place).all(axis=1).any()
+
+
+def test_in_home_draws_a_particle_on_the_mirror_once() -> None:
+    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 1.0, 1.0]], space=tiny_space())
+    view = layer_view(
+        Layer(id="a", name="A", type="field", kind="breathe", mirror=Mirror("x", 4.0)), leds
+    )
+
+    home = view.in_home(_dots([1.0, 1.0, 1.0], [4.0, 2.0, 1.0], [3.0, 2.0, 1.0]))
+
+    # On the plane, its reflection is itself: drawn once, in its place among the others.
+    assert home.particles.pos.tolist() == [
+        [1.0, 1.0, 1.0],
+        [7.0, 1.0, 1.0],
+        [4.0, 2.0, 1.0],
+        [3.0, 2.0, 1.0],
+        [5.0, 2.0, 1.0],
+    ]
+    assert home.particles.colour.shape == (5, 3) and home.particles.radius.shape == (5,)
+
+
+def test_in_home_undoes_the_transform_then_draws_every_image_of_the_mirror() -> None:
+    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 1.0, 1.0]], space=tiny_space())
+    layer = Layer(
+        id="a",
+        name="A",
+        type="field",
+        kind="breathe",
+        mirror=Mirror("x", 4.0),
+        transform=Transform(offset=(0.5, 0.0, 0.0), scale=2.0),
+    )
+    view = layer_view(layer, leds)
+    seen = view.leds.pos.tolist()  # both LEDs look at one place in the effect's space
+    assert np.allclose(seen[0], seen[1])
+
+    home = view.in_home(
+        Fx(
+            particles=swarm(seen[:1], (1.0, 1.0, 1.0), 0.2),
+            rings=rings(seen[0], 1.0, 0.1, (1.0, 0.0, 0.0)),
+        )
+    )
+
+    # Back through the transform onto the low side's LED, then at its reflection too.
+    assert np.allclose(home.particles.pos, leds.pos, atol=1e-5)
+    assert np.allclose(home.particles.radius, [0.4, 0.4])  # grown by the scale
+    assert np.allclose(home.rings.centre, leds.pos, atol=1e-5)
+    assert home.rings.radius.tolist() == [2.0, 2.0]
+
+
+def test_in_home_weighs_a_mirrors_images_by_the_mask_where_each_lands() -> None:
+    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 1.0, 1.0]], space=tiny_space())
+    layer = Layer(
+        id="a",
+        name="A",
+        type="field",
+        kind="breathe",
+        mask=RoomMask("west"),
+        mirror=Mirror("x", 4.0),
+    )
+    view = layer_view(layer, leds)
+
+    home = view.in_home(
+        Fx(
+            particles=swarm([[1.0, 1.0, 1.0]], (1.0, 1.0, 1.0), 0.2),
+            rings=rings([2.0, 1.0, 1.0], 3.0, 0.1, (1.0, 0.0, 0.0)),
+        )
+    )
+
+    # The particle's reflection lands in the east room, which the mask hides; a ring is
+    # drawn whole at both images while the mask shows any LED.
+    assert home.particles.pos.tolist() == [[1.0, 1.0, 1.0]]
+    assert home.rings.centre.tolist() == [[2.0, 1.0, 1.0], [6.0, 1.0, 1.0]]
+
+
+def test_in_home_draws_rings_and_planes_whole_at_both_images_of_a_mirror() -> None:
+    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 1.0, 1.0]], space=tiny_space())
+    view = layer_view(
+        Layer(id="a", name="A", type="field", kind="breathe", mirror=Mirror("x", 4.0)), leds
+    )
+    fx = Fx(
+        rings=rings([2.0, 1.0, 1.0], 3.0, 0.1, (1.0, 0.0, 0.0)),
+        planes=planes(
+            [2.0, 1.0, 1.0], (0.6, 0.8, 0.0), 0.2, (0.0, 1.0, 0.0), ray=(0.8, -0.6, 0.0)
+        ),
+    )
+
+    home = view.in_home(fx)
+
+    assert home.rings.centre.tolist() == [[2.0, 1.0, 1.0], [6.0, 1.0, 1.0]]
+    assert home.rings.radius.tolist() == [3.0, 3.0]  # whole: a ring crossing the plane too
+    assert home.planes.point.tolist() == [[2.0, 1.0, 1.0], [6.0, 1.0, 1.0]]
+    assert np.allclose(home.planes.normal, [[0.6, 0.8, 0.0], [-0.6, 0.8, 0.0]])
+    assert np.allclose(home.planes.ray, [[0.8, -0.6, 0.0], [-0.8, -0.6, 0.0]])
+
+
+def test_in_home_weighs_particles_by_the_mask_where_they_land_and_drops_those_it_hides() -> None:
+    leds = leds_at([[1.0, 1.0, 1.0], [1.0, 1.0, 2.0]], space=tiny_space())
+    view = layer_view(
+        Layer(id="a", name="A", type="field", kind="breathe", mask=HeightMask(0.5, 1.5)), leds
+    )
+
+    home = view.in_home(_dots([1.0, 1.0, 1.0], [1.0, 1.0, 1.5], [1.0, 1.0, 3.0]))
+
+    # Inside in full, on the edge at half, above it gone.
+    assert home.particles.pos[:, 2].tolist() == [1.0, 1.5]
+    assert np.allclose(home.particles.colour, [[1.0, 0.5, 0.25], [0.5, 0.25, 0.125]])
+
+
+def test_a_mask_keeps_rings_and_planes_whole_while_it_shows_any_led() -> None:
+    fx = Fx(
+        rings=rings([1.0, 1.0, 1.0], 2.0, 0.1, (1.0, 0.0, 0.0)),
+        planes=planes([1.0, 1.0, 1.0], (0.0, 0.0, 1.0), 0.2, (0.0, 1.0, 0.0)),
+    )
+    leds = leds_at([[1.0, 1.0, 1.0], [7.0, 1.0, 1.0]], space=tiny_space())
+
+    def masked(mask: RoomMask) -> Fx:
+        layer = Layer(id="a", name="A", type="field", kind="breathe", mask=mask)
+        return layer_view(layer, leds).in_home(fx)
+
+    shown = masked(RoomMask("west"))
+    assert (shown.rings.count, shown.planes.count) == (1, 1)
+    assert shown.rings.radius.tolist() == [2.0]  # whole, past the room's outline too
+    hidden = masked(RoomMask("no-such-room"))
+    assert (hidden.rings.count, hidden.planes.count) == (0, 0)
+
+
+def test_mask_weights_at_an_leds_place_is_the_leds_weight() -> None:
+    leds = leds_at(
+        [[1.0, 1.0, 0.2], [1.0, 1.0, 1.0], [7.0, 1.0, 0.5], [7.0, 3.0, 2.0]], space=tiny_space()
+    )
+    for mask in (HeightMask(0.5, 2.0), RoomMask("west"), AnchorMask("gone", 2.0)):
+        assert np.array_equal(mask_weights_at(mask, leds.pos, leds), mask_weights(mask, leds))

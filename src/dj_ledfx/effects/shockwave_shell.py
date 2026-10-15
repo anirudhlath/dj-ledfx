@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from dj_ledfx.effects.color import palette_at, palette_float
 from dj_ledfx.effects.field import ParamField
 from dj_ledfx.effects.field_tools import anchor_or_centre, band, distances
+from dj_ledfx.effects.fx import Fx, rings
 from dj_ledfx.effects.params import EffectParam, anchor_param, level_param
 
 if TYPE_CHECKING:
@@ -54,10 +55,29 @@ class ShockwaveShell(ParamField):
         away = self._per_leds(leds, self._away)
         front = float(values["reach_m"]) * ctx.beat_phase
         glow = band(away, front, float(values["shell_m"]))
-        glow *= np.float32((1.0 - ctx.beat_phase) ** 2)
+        glow *= np.float32(self._crest(ctx))
         frame = palette_at(self._ramp, glow)  # an array of its own, float32
         frame *= np.float32(values["level"])
         return frame
+
+    def in_space(self, ctx: RenderContext, leds: LedSet) -> Fx:
+        """The shell: a sphere round the anchor, as far out as its front, in its crest's
+        colour."""
+        values = self._values
+        crest = palette_at(self._ramp, np.array([self._crest(ctx)], dtype=np.float32))
+        crest *= np.float32(values["level"])
+        shell = rings(
+            anchor_or_centre(leds, values["anchor"]),
+            float(values["reach_m"]) * ctx.beat_phase,
+            2.0 * float(values["shell_m"]),
+            crest,
+        )
+        return Fx(rings=shell)
+
+    @staticmethod
+    def _crest(ctx: RenderContext) -> float:
+        """How bright the shell's crest is: full on the beat, fading as it spreads."""
+        return (1.0 - ctx.beat_phase) ** 2
 
     def _away(self, leds: LedSet) -> NDArray[np.float32]:
         return distances(leds, anchor_or_centre(leds, self._values["anchor"]))

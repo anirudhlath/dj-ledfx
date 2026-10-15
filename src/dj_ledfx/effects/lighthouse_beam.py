@@ -3,6 +3,7 @@ once a bar, on the floor plane; dark elsewhere, so it adds onto the layer below.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -10,7 +11,8 @@ from numpy.typing import NDArray
 
 from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.field import ParamField
-from dj_ledfx.effects.field_tools import band, bearing
+from dj_ledfx.effects.field_tools import anchor_or_centre, band, bearing
+from dj_ledfx.effects.fx import Fx, planes
 from dj_ledfx.effects.params import EffectParam, anchor_param, level_param
 
 if TYPE_CHECKING:
@@ -54,6 +56,17 @@ class LighthouseBeam(ParamField):
         beam *= np.float32(values["level"])
         frame: FloatRGB = self._colour * beam[:, None]  # float32 times float32
         return frame
+
+    def in_space(self, ctx: RenderContext, leds: LedSet) -> Fx:
+        """The beam: the upright half-plane from the anchor towards the bar's bearing, as
+        wide as the beam is 1 m from the anchor, in its colour."""
+        turn = 2.0 * math.pi * ctx.bar_phase
+        towards = (math.cos(turn), math.sin(turn), 0.0)
+        across = (-math.sin(turn), math.cos(turn), 0.0)
+        width = math.radians(float(self._values["width_deg"]))  # e^-1 either side: ±width/2
+        colour = self._colour * np.float32(self._values["level"])
+        point = anchor_or_centre(leds, self._values["anchor"])
+        return Fx(planes=planes(point, across, width, colour, ray=towards))
 
     def _bearing(self, leds: LedSet) -> NDArray[np.float64]:
         return bearing(leds, self._values["anchor"])

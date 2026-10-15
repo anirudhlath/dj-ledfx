@@ -1,5 +1,5 @@
-"""Multiplexed WebSocket hub: beat, stats, status and frame channels, the pushed snapshots,
-and the tap command."""
+"""Multiplexed WebSocket hub: beat, stats, status, frame and fx channels, the pushed
+snapshots, and the tap command."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from dj_ledfx.tempo.model import DecksChanged, TempoChanged, TempoError
 from dj_ledfx.types import is_finite_number
 from dj_ledfx.web import contract
 from dj_ledfx.web.frames import encode_frame_v1, encode_frame_v2, light_frames
+from dj_ledfx.web.fx import FX_FPS, fx_message
 from dj_ledfx.web.state import ClientSubscription, get_tempo, light_index, listening
 from dj_ledfx.zones.frames import STREAMS
 from dj_ledfx.zones.model import AttentionChanged, LightsChanged, PreviewOnlyChanged, ZonesChanged
@@ -368,6 +369,7 @@ async def _frame_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
             try:
                 await ws.send_bytes(message)
             except Exception:
+                logger.debug("The frame channel ended: a send failed")
                 return
 
 
@@ -391,6 +393,57 @@ def frame_messages(app: Any, sub: ClientSubscription, seq: int) -> list[bytes]:
     ]
 
 
+async def _fx_poll(ws: WebSocket, app: Any, sub: ClientSubscription) -> None:
+    """The fx channel, FX_FPS a second at most, while the session asks for it and speaks
+    frame protocol 2: only a message that differs from the last one it was sent, so nothing
+    while nothing changes, and one with no zones once the last zone stops drawing. Every
+    subscribe (`sub.fx_epoch` moving) gets the whole picture at once. While the session
+    doesn't ask, the poll sleeps until its subscription changes."""
+    last: str | None = None
+    epoch = sub.fx_epoch
+    while True:
+        await asyncio.sleep(1.0 / FX_FPS)
+        if not sub.wants_fx:
+            sub.fx_changed.clear()  # no await between the check and the clear
+            await sub.fx_changed.wait()
+            continue
+        if sub.fx_epoch != epoch:
+            epoch, last = sub.fx_epoch, None
+        try:
+            text = fx_text(app)
+        except Exception:  # a bug: say so once, and leave the session its other channels
+            logger.exception("The fx channel stopped for a session")
+            return
+        if text is None or text == last:
+            continue
+        try:
+            await ws.send_text(text)
+        except Exception:
+            logger.debug("The fx channel ended: a send failed")
+            return
+        last = text
+
+
+def fx_text(app: Any) -> str | None:
+    """The fx message for now, as JSON text, cached for one engine frame: made again when a
+    zone's frame for now, or its brightness, is another one. So sessions whose polls land
+    within the same frame share one text, and a session polling on another phase makes
+    its own (each poll runs at FX_FPS on its own phase, the frames change at the engine's
+    rate). None: no frame feed."""
+    feed = getattr(app.state, "frame_feed", None)
+    if feed is None:
+        return None
+    shown = feed.fx()
+    # Fx compares by identity, so a key holds the very frames' fx it was made from.
+    key = tuple((each.stream, each.zone_id, each.fx, each.brightness) for each in shown)
+    cached: tuple[tuple[Any, ...], str] | None = app.state.fx_cache
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    text = json.dumps(fx_message(shown))
+    app.state.fx_cache = (key, text)
+    return text
+
+
 def _subscribe_frames(sub: ClientSubscription, msg: dict[str, Any]) -> None:
     """subscribe_frames: v2 with "protocol": 2 (ruling 3), else v1 as the old UI sends it.
     Everything is checked before the subscription changes."""
@@ -400,7 +453,8 @@ def _subscribe_frames(sub: ClientSubscription, msg: dict[str, Any]) -> None:
     if protocol == 1:
         fps = _fps(msg, 10.0, 30.0)
         sub.frame_devices = [str(device) for device in msg.get("devices") or []]
-        sub.frame_protocol, sub.frame_fps, sub.frame_streams = 1, fps, ["live"]
+        sub.frame_fps, sub.frame_streams = fps, ["live"]
+        sub.set_frame_protocol(1)
         return
     streams = [str(stream) for stream in msg.get("streams") or ["live"]]
     unknown = [stream for stream in streams if stream not in STREAMS]
@@ -408,7 +462,8 @@ def _subscribe_frames(sub: ClientSubscription, msg: dict[str, Any]) -> None:
         raise ValueError(f"Unknown frame stream {unknown[0]!r}; expected live or preview")
     fps = _fps(msg, 30.0, 60.0)
     sub.frame_lights = [str(light) for light in msg.get("lights") or []]
-    sub.frame_protocol, sub.frame_fps, sub.frame_streams = 2, fps, streams
+    sub.frame_fps, sub.frame_streams = fps, streams
+    sub.set_frame_protocol(2)
 
 
 def _fps(msg: dict[str, Any], default: float, ceiling: float) -> float:
@@ -463,6 +518,20 @@ async def _handle_command(
             ws,
             {"channel": "ack", "id": cmd_id, "action": action, "protocol": sub.frame_protocol},
         )
+
+    elif action == "subscribe_fx":
+        on = msg.get("on")
+        if not isinstance(on, bool):
+            detail = "subscribe_fx takes on: true or false"
+            await _send_json(ws, {"channel": "error", "id": cmd_id, "detail": detail})
+            return
+        sub.set_fx(on)
+        has_fx_task = any(not t.done() and t.get_name() == "fx_poll" for t in tasks)
+        if on and not has_fx_task:
+            task = asyncio.create_task(_fx_poll(ws, app, sub))
+            task.set_name("fx_poll")
+            tasks.append(task)
+        await _send_json(ws, {"channel": "ack", "id": cmd_id, "action": action, "on": on})
 
     elif action == "tap":  # saved by the clock's run(), within 0.25 s
         try:

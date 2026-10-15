@@ -6,12 +6,16 @@ now, whether it is sent to the light or not; the preview stream is the preview r
 Watchers says which streams any WebSocket session watches: a zone draws the lights that
 run their own effect only for the web app, so only while the live stream is watched
 (constraint 3), and a preview nobody watches ends (Review Focus 1).
+
+What each zone draws in space (the `fx` channel, web spec §12.4) is read from the same
+rings at the same moment: the newest frame's at or before now, never blended.
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable, Collection, Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -20,6 +24,7 @@ from numpy.typing import NDArray
 from dj_ledfx.scheduling.route import to_device_colors
 
 if TYPE_CHECKING:
+    from dj_ledfx.effects.fx import Fx
     from dj_ledfx.zones.runtime import ZoneRuntime
 
 Stream = Literal["live", "preview"]
@@ -47,6 +52,17 @@ class Watchers:
 
 
 Runtimes = Callable[[], list["ZoneRuntime"]]
+
+
+@dataclass(frozen=True, slots=True)
+class ZoneFx:
+    """What one zone's frame for now draws in space: which stream it belongs with, the
+    zone, its fx on the map before brightness, and the zone's brightness."""
+
+    stream: Stream
+    zone_id: str
+    fx: Fx
+    brightness: float
 
 
 class FrameFeed:
@@ -82,4 +98,20 @@ class FrameFeed:
             whole = to_device_colors(colors, count, runtime.brightness)
             for piece in pieces:
                 out[piece.device_id] = whole[piece.start : piece.stop]
+        return out
+
+    def fx(self) -> list[ZoneFx]:
+        """What each zone draws in space now, live zones first, then the preview: the newest
+        frame's fx at or before now (RingBuffer.frame_at), never blended. A zone whose ring
+        has no frame yet, having just started a new one as its lights changed, shows the
+        last fx it wrote (ZoneRuntime.last_fx) until it has. A zone whose frame draws
+        nothing is left out."""
+        now = self._clock()
+        out: list[ZoneFx] = []
+        for stream in STREAMS:
+            for runtime in self._runtimes[stream]():
+                frame = runtime.ring.frame_at(now)
+                fx = runtime.last_fx if frame is None else frame.fx
+                if fx is not None:
+                    out.append(ZoneFx(stream, runtime.zone_id, fx, runtime.brightness))
         return out

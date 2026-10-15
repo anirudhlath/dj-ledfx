@@ -104,3 +104,19 @@ def test_frame_after_frame_it_draws_what_a_new_one_draws() -> None:
         fresh.reseed(seed)
         ctx = tempo_ctx(4.0 + k / 30)
         assert np.array_equal(effect.render(ctx, leds), fresh.render(ctx, leds)), k
+
+
+# M8: each kick's front in space is a sphere round a speaker, as far out as it lights the
+# LEDs, in the colour it lights them; the snares and hats stay on the LEDs.
+def test_each_kick_front_is_drawn_as_a_sphere_round_its_speaker() -> None:
+    effect = SpeakerWaves(anchor="speakers")
+    leds = leds_at(BETWEEN, anchor_points=PAIR)
+    ctx = tempo_ctx(4.25)  # each front 1 m out, as the first test says
+
+    frame = effect.render(ctx, leds)
+    fx = effect.in_space(ctx, leds)
+
+    assert np.allclose(fx.rings.centre, PAIR["speakers"]) and not fx.rings.circle.any()
+    assert np.allclose(fx.rings.radius, 1.0) and np.allclose(fx.rings.width, 0.8)
+    assert np.allclose(fx.rings.colour, frame[0])  # the LED 1 m from a speaker: on its crest
+    assert fx.particles.count == 0 and fx.planes.count == 0

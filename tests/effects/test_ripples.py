@@ -5,10 +5,10 @@ import time
 
 import numpy as np
 import pytest
-from conftest import render_ctx
+from conftest import CallCounts, render_ctx
 from map_home import leds_at, seeded_ledset
 
-from dj_ledfx.effects.color import palette_float
+from dj_ledfx.effects.color import palette_at, palette_float
 from dj_ledfx.effects.ripples import LIFE_FADES, RIPPLE_PALETTE, Ripples
 
 ACROSS_THE_ROOM = [(x, 2.0, 0.5) for x in np.linspace(0.0, 6.0, 13)]
@@ -72,3 +72,60 @@ def test_ripples_at_their_densest_render_in_under_5_ms() -> None:
         effect.render(render_ctx(t=1000.0 + step / 60), leds)
         durations.append(time.perf_counter() - started)
     assert statistics.median(durations) < 0.005
+
+
+# M8: each drop still alive is drawn as a level ring where it landed, as far out as it has
+# travelled, in its crest's colour; gone drops aren't.
+def test_each_live_drop_is_drawn_as_a_level_ring_where_it_landed() -> None:
+    effect, leds = _ripples(), leds_at(ACROSS_THE_ROOM)
+    when, where = effect.drop(0, leds)
+    palette = palette_float(list(RIPPLE_PALETTE))
+
+    for age in (0.5, 2.0):
+        ctx = render_ctx(when + age)
+        effect.render(ctx, leds)
+        fx = effect.in_space(ctx, leds)
+        assert fx is not None and fx.rings.count == 1 and fx.rings.circle.all()
+        assert np.allclose(fx.rings.centre[0], where) and np.isclose(fx.rings.radius[0], age)
+        crest = palette_at(palette, np.array([np.exp(-age / 3.0)], dtype=np.float32)) * 0.9
+        assert np.allclose(fx.rings.colour, crest) and np.isclose(fx.rings.width[0], 0.7)
+
+    gone = render_ctx(when + LIFE_FADES * 3.0 + 0.1)  # past its life, before the next drop
+    assert effect.drop(1, leds)[0] > gone.t
+    assert effect.in_space(gone, leds) is None
+
+
+def test_several_live_drops_are_drawn_oldest_first_each_with_its_own_ring() -> None:
+    effect = Ripples(drops_per_min=20.0, speed=1.0, fade_s=3.0)  # a drop every 3 s, 9 s alive
+    effect.reseed(3)
+    leds, palette = leds_at(ACROSS_THE_ROOM), palette_float(list(RIPPLE_PALETTE))
+    t = effect.drop(12, leds)[0] + 0.25  # drop 12 has just landed
+    drops = [effect.drop(k, leds) for k in range(5, 13)]
+    alive = [(when, where) for when, where in drops if 0.0 <= t - when <= LIFE_FADES * 3.0]
+    assert len(alive) >= 3
+
+    fx = effect.in_space(render_ctx(t), leds)
+
+    assert fx is not None and fx.rings.count == len(alive)
+    assert np.allclose(fx.rings.centre, [where for _, where in alive])
+    assert np.allclose(fx.rings.radius, [t - when for when, _ in alive])
+    strength = np.array([np.exp(-(t - when) / 3.0) for when, _ in alive], dtype=np.float32)
+    assert np.allclose(fx.rings.colour, palette_at(palette, strength) * 0.9)
+    assert np.all(np.diff(fx.rings.radius) < 0.0)  # the oldest, the farthest out, first
+
+
+def test_a_frame_works_out_its_live_drops_once_for_its_colours_and_its_rings(
+    call_counts: CallCounts,
+) -> None:
+    effect, leds = _ripples(), leds_at(ACROSS_THE_ROOM)
+    ctx = render_ctx(effect.drop(10, leds)[0] + 1.0)
+    call_counts.spy(Ripples, "drop")
+
+    effect.render(ctx, leds)
+    once = call_counts.calls["drop"]
+    fx = effect.in_space(ctx, leds)
+
+    assert fx is not None and fx.rings.count == 1
+    assert call_counts.calls["drop"] == once  # in_space took render's drops
+    effect.render(render_ctx(ctx.t + 1 / 60), leds)  # the next frame works them out again
+    assert call_counts.calls["drop"] == 2 * once

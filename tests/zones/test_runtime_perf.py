@@ -11,9 +11,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from conftest import builtin_look
+from conftest import builtin_look, nearest_frame
 from map_home import seeded_space, seeded_zone_lights
 
+from dj_ledfx.effects.base import Effect
+from dj_ledfx.effects.registry import get_effect_class
 from dj_ledfx.home.model import Location
 from dj_ledfx.home.seed import handoff_home_json
 from dj_ledfx.home.sun import Evening, evening_amount
@@ -21,6 +23,7 @@ from dj_ledfx.looks.builtin import builtin_looks
 from dj_ledfx.looks.model import (
     MAX_TRANSITION_S,
     HeightMask,
+    Layer,
     Look,
     LookModifiers,
     Mirror,
@@ -193,3 +196,56 @@ def test_a_start_taking_lights_from_two_zones_mid_transition_renders_in_under_5_
     assert all(len(source.transition_sources) == 1 for source in new.transition_sources)
     assert statistics.median(durations) < FRAME_BUDGET_S
     assert new.fps_actual >= 59
+
+
+# M8: what a zone draws in space is worked out with every frame, inside the same budget.
+# Each look that draws anything in space, at its layers' largest settings and with every
+# modifier, its mirror doubling its particles; and the whole share of M8's work in the
+# frame (the hooks, in_home(), the join and the look's modifiers on the fx), against the
+# same look with the runtime asking no layer what it draws.
+FX_SHARE_S = 0.0005  # a tenth of the budget
+
+
+def _at_their_largest(look: Look) -> Look:
+    def largest(layer: Layer) -> Layer:
+        if layer.type == "firmware":
+            return layer
+        params = get_effect_class(layer.kind).parameters().items()
+        top = {
+            name: int(param.max) if param.type == "int" else param.max
+            for name, param in params
+            if param.type in ("int", "float") and param.max is not None
+        }
+        return replace(layer, settings={**layer.settings, **top})
+
+    return replace(look, layers=tuple(largest(layer) for layer in look.layers))
+
+
+def _draws_in_space(look: Look) -> bool:
+    return any(
+        layer.type != "firmware" and get_effect_class(layer.kind).in_space is not Effect.in_space
+        for layer in look.layers
+    )
+
+
+@pytest.mark.parametrize(
+    "look", [look for look in builtin_looks() if _draws_in_space(look)], ids=lambda look: look.id
+)
+def test_what_a_zone_draws_in_space_keeps_its_frame_under_5_ms(
+    look: Look, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dressed = with_every_modifier(_at_their_largest(look))
+    runtime = home_runtime(dressed, evening=lambda: 0.5)
+    durations = tick_times(runtime)
+    assert statistics.median(durations) < FRAME_BUDGET_S
+    drawn = 0  # the frames that drew something in space (the mirror hides half the field)
+    for step in range(240):
+        runtime.tick(1010.0 + step / 60)
+        drawn += nearest_frame(runtime.ring, 1e9).fx is not None
+    assert drawn > 0
+
+    # Without any of it: no layer asked, so no in_home(), no join, no evening or cap on fx.
+    monkeypatch.setattr(ZoneRuntime, "_in_space", lambda self, *args: None)
+    without = home_runtime(dressed, evening=lambda: 0.5)
+    share = statistics.median(durations) - statistics.median(tick_times(without))
+    assert share < FX_SHARE_S

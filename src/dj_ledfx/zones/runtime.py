@@ -17,6 +17,7 @@ from loguru import logger
 from dj_ledfx.effects.blend import blend_into
 from dj_ledfx.effects.context import render_context
 from dj_ledfx.effects.firmware import FirmwareEffect
+from dj_ledfx.effects.fx import Fx, fx_joined
 from dj_ledfx.effects.ledset import (
     NO_ROOM,
     NO_SPACE,
@@ -60,7 +61,10 @@ if TYPE_CHECKING:
 FRAME_BUDGET_S = 0.005
 SLOW_RATIO = 0.8
 SLOW_AFTER_S = 30.0
+# A crash is logged at most this often, and so is each layer's fx failing (the look's
+# modifiers on them counting as one more).
 CRASH_LOG_INTERVAL_S = 60.0
+_LOOK_FX = -1  # the key of the look's own step on its layers' fx (joined, evening, cap)
 ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5.2)
 # How far ahead a zone renders at most. A light slower than this gets the newest frame and
 # runs late by the difference. A dozing Govee lamp's latency is its whole round trip, up to
@@ -189,6 +193,7 @@ class RuntimeEnv:
     fps: int = 60
     max_lookahead_s: float = 1.0
     timer: Callable[[], float] = time.perf_counter  # times each render
+    log_clock: Callable[[], float] = time.monotonic  # spaces the crash and fx failure logs
     now: Callable[[], datetime] = utcnow  # when a zone crashed or turned slow
     # Whether anyone watches the zone's frames (Task 13). Lights that run their own effect
     # are drawn only for the preview, so only while someone watches.
@@ -248,6 +253,9 @@ class ZoneRuntime:
         self._views: dict[int, tuple[object, LayerView]] = {}  # by the layer's place
         self._rendering = ""
         self._last_crash_log = float("-inf")
+        self._last_fx_logs: dict[int, float] = {}  # by the layer's place, or _LOOK_FX
+        self._fx: Fx | None = None  # what the look's newest frame draws in space, on the map
+        self._last_fx: Fx | None = None  # the fx of the newest frame written, kept across rings
         self._render_s = 0.0  # moving average of the render time
         self._stride = 1
         self._ticks = 0
@@ -269,6 +277,13 @@ class ZoneRuntime:
     @property
     def space(self) -> Space:
         return self._space
+
+    @property
+    def last_fx(self) -> Fx | None:
+        """What the newest frame the zone wrote draws in space, kept when the zone's lights
+        change and it starts a new ring: the frame feed shows it until that ring has a
+        frame, so the stage never blinks the zone out."""
+        return self._last_fx
 
     @property
     def field_effect(self) -> FieldEffect | None:
@@ -632,16 +647,19 @@ class ZoneRuntime:
                 target_time=target,
                 beat_phase=ctx.beat_phase,
                 bar_phase=ctx.bar_phase,
+                fx=self._fx,
             )
         )
+        self._last_fx = self._fx
         self._track_speed(now, elapsed)
 
-    def render(self, ctx: RenderContext) -> FloatRGB:
+    def render(self, ctx: RenderContext, *, in_space: bool = True) -> FloatRGB:
         """The zone's frame for ctx.t: its look, and while a transition plays, the looks it
         replaces under it, LED by LED (spec §5.3). Both count against the frame budget: tick
         times this whole call. A replaced look that fails ends the transition, never the
-        zone."""
-        frame = self._render_look(ctx)
+        zone. What the look draws in space goes in self._fx unless `in_space` is False: a
+        replaced look's isn't wanted (the frame carries the new look's alone)."""
+        frame = self._render_look(ctx, in_space)
         transition = self._transition
         if transition is None:
             return frame
@@ -694,23 +712,25 @@ class ZoneRuntime:
         """A replaced look's frame at its own brightness (frames are scaled by this zone's
         at send), scaled in place: nothing else holds it (twins and replaced looks don't
         tick)."""
-        colours = source.render(ctx)
+        colours = source.render(ctx, in_space=False)
         scale = source.brightness / self.brightness if self.brightness > 0.0 else 0.0
         if scale != 1.0:
             colours *= np.float32(scale)
         return colours
 
-    def _render_look(self, ctx: RenderContext) -> FloatRGB:
+    def _render_look(self, ctx: RenderContext, in_space: bool = True) -> FloatRGB:
         """A new frame every tick: the ring keeps it. The look's streamed colours (its
         layers), then its modifiers on them (spec §5.3): the downbeat flash, trails (so a
         flash leaves one) and the evening. The lights that run their own effect are drawn
         after those, as they show (for the preview, while it's watched), and the brightness
         cap goes over every LED. The trails keep their own copy of what they showed.
-        Waiting, it's dark."""
+        Waiting, it's dark. What the layers draw in space is kept in self._fx, under the
+        evening and the cap; a flash and trails are the LEDs' alone."""
+        self._fx = None
         count = self.leds.count
         if self.waiting_for or count == 0:
             return np.zeros((count, 3), dtype=np.float32)
-        frame = self._render_layers(ctx)
+        frame, drawn_in_space = self._render_layers(ctx, in_space)
         modifiers = self.look.modifiers
         if modifiers.downbeat_flash:
             frame = flashed(frame, ctx)
@@ -722,15 +742,19 @@ class ZoneRuntime:
             self._draw_firmware(frame, ctx, self._claim_targets)
         if modifiers.brightness_cap is not None:
             frame = capped(frame, modifiers.brightness_cap)
+        if drawn_in_space:
+            self._fx = self._look_fx(drawn_in_space, ctx)
         return frame
 
-    def _render_layers(self, ctx: RenderContext) -> FloatRGB:
+    def _render_layers(self, ctx: RenderContext, in_space: bool) -> tuple[FloatRGB, list[Fx]]:
         """The streamed layers blended bottom to top, then each firmware layer's copy drawn
         on the lights that stream it. A particle layer's particles move to the frame's
         moment among the lamps its mask weighs above 0 (all of its view's, with no mask),
-        and light every LED of its view, which the mask then weighs."""
+        and light every LED of its view, which the mask then weighs. Beside the frame, what
+        each layer draws in space, on the map, bottom first (none unless `in_space`)."""
         count = self.leds.count
         frame: FloatRGB | None = None
+        drawn_in_space: list[Fx] = []
         for index, (layer, effect) in enumerate(self._streamed):
             self._rendering = layer.name
             view = self._view(index, layer)
@@ -738,6 +762,9 @@ class ZoneRuntime:
                 colors = _finite(drawn(effect, ctx, view.leds, view.among))
             else:
                 colors = _finite(effect.render(ctx, view.leds))
+            fx = self._in_space(index, layer, effect, ctx, view) if in_space else None
+            if fx is not None:
+                drawn_in_space.append(fx)
             opacity = _opacity(layer, view)
             if frame is None and layer.blend == "normal":  # over black: its colours, weighed
                 frame = np.multiply(colors, opacity, dtype=np.float32)
@@ -748,7 +775,64 @@ class ZoneRuntime:
         if frame is None:
             frame = np.zeros((count, 3), dtype=np.float32)
         self._draw_firmware(frame, ctx, self._copy_targets)
-        return frame
+        return frame, drawn_in_space
+
+    def _in_space(
+        self,
+        index: int,
+        layer: Layer,
+        effect: FieldEffect | ParticleEffect,
+        ctx: RenderContext,
+        view: LayerView,
+    ) -> Fx | None:
+        """What the layer at `index` draws in space, on the map at its opacity (the view's
+        in_home()); None: nothing. An effect that fails to say loses its fx, never its
+        frame: the lights come first."""
+        try:
+            fx = effect.in_space(ctx, view.leds)
+            if fx is None or fx.empty:
+                return None
+            placed = view.in_home(fx)
+            if layer.opacity != 1.0:
+                opacity = np.float32(layer.opacity)
+                placed = placed.recoloured(lambda colours: colours * opacity)
+        except Exception as exc:
+            self._fx_failed(index, f"layer '{layer.name}'", exc)
+            return None
+        return None if placed.empty else placed
+
+    def _look_fx(self, drawn_in_space: list[Fx], ctx: RenderContext) -> Fx | None:
+        """The layers' fx as one, under the look's evening and brightness cap (not the
+        flash or the trails: they're the LEDs', not things in space). A failure here costs
+        the frame its fx, never its colours."""
+        modifiers = self.look.modifiers
+        try:
+            fx = fx_joined(drawn_in_space)
+            if fx is not None and modifiers.evening:
+                fx = fx.recoloured(lambda colours: warmed(colours, ctx))
+            if fx is not None and modifiers.brightness_cap is not None:
+                cap = modifiers.brightness_cap
+                fx = fx.recoloured(lambda colours: capped(colours, cap))
+        except Exception as exc:
+            self._fx_failed(_LOOK_FX, "its look", exc)
+            return None
+        return fx
+
+    def _fx_failed(self, key: int, who: str, exc: Exception) -> None:
+        """Log a failure of what the zone draws in space, at most once a
+        CRASH_LOG_INTERVAL_S for each layer (`key`, its place), so one failing layer never
+        hides another."""
+        stamp = self._env.log_clock()
+        if stamp - self._last_fx_logs.get(key, float("-inf")) < CRASH_LOG_INTERVAL_S:
+            return
+        self._last_fx_logs[key] = stamp
+        logger.warning(
+            "Zone {}: {} couldn't say what it draws in space ({}: {})",
+            self.zone_id,
+            who,
+            type(exc).__name__,
+            exc,
+        )
 
     def _draw_firmware(
         self,
@@ -862,7 +946,7 @@ class ZoneRuntime:
     def _fail(self, layer: str, message: str) -> None:
         self.crash = CrashInfo(layer=layer, message=message, at=self._env.now())
         self._state_changed()
-        stamp = time.monotonic()
+        stamp = self._env.log_clock()
         if stamp - self._last_crash_log >= CRASH_LOG_INTERVAL_S:
             self._last_crash_log = stamp
             logger.error(
