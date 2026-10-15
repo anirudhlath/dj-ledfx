@@ -90,6 +90,8 @@ export class FxWriter {
    * `ray` (a beam) its angle in radians, its thickness 1 m out (§12.4). Nothing draws it yet (F10 ruling 12).
    */
   readonly planes = new FxBatch([3, 3, 3, 3, 1])
+  /** Whether what it wrote last has a zone's preview in it. */
+  previewing = false
   private version = -1
   private pick: FxPick | null = null
   /** The zones written, and the ones picked next: both reused from write to write. */
@@ -109,6 +111,7 @@ export class FxWriter {
     if (sameZones(picked, this.zones)) return false
     this.picked = this.zones
     this.zones = picked
+    this.previewing = preview !== undefined
     let particles = 0
     let rings = 0
     let planes = 0

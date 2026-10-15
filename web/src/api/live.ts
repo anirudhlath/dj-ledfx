@@ -82,7 +82,7 @@ export function resetDataLayer(): void {
   fxGeneration += 1
   resetLiveStore()
   frames.clear()
-  fx.clear()
+  fx.reset()
   beatClock.reset()
   queryClient.clear()
 }

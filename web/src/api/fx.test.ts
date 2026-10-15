@@ -97,6 +97,16 @@ describe('the fx store (§12.4)', () => {
     expect(fx.version).toBe(2)
   })
 
+  // e2e's count (fxPictured()): the pictures stored, which only a picture moves.
+  it('counts the pictures it stored, and nothing else', () => {
+    const fx = new FxStore()
+    fx.apply({ channel: 'fx', zones: [zone('living'), zone('living', 'preview')] })
+    fx.clearPreview()
+    fx.clear()
+    fx.apply({ channel: 'fx', zones: [] })
+    expect([fx.stored, fx.version]).toEqual([2, 4])
+  })
+
   it('clears, moving its version only when it held something', () => {
     const fx = new FxStore()
     fx.clear()

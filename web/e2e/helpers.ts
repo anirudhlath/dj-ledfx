@@ -30,9 +30,10 @@ export function stageCanvas(page: Page): Locator {
 /**
  * The stage has drawn the mock's pictures of the effects in space, so a screenshot of a stage that draws them can't
  * settle before the picture lands. The mock counts the pictures it sends (src/api/mocks/browser.ts marks the page), and
- * the stage's canvas names the fx store's version it last drew (scene/fx-layer.tsx), which moves at least once a
- * picture stored: this waits for the first, then for the second to catch up with it. A stage frozen before it asked
- * for a picture never gets one, and a stage that draws none never marks its canvas.
+ * the stage's canvas names how many pictures the fx store had stored when it last drew (scene/fx-layer.tsx), which
+ * only a picture moves: this waits for the first, then for the canvas to show exactly that many. The canvas writes its
+ * mark as it renders, and takes it away for a new pick until it has drawn it. A stage frozen before it asked for a
+ * picture never gets one, and a stage that draws none never marks its canvas.
  */
 export async function fxPictured(page: Page): Promise<void> {
   const sent = page.locator('html[data-mock-fx]')
@@ -40,7 +41,8 @@ export async function fxPictured(page: Page): Promise<void> {
   await expect
     .poll(async () => {
       const [count, drawn] = [await sent.getAttribute('data-mock-fx'), await stageCanvas(page).getAttribute('data-fx-drawn')]
-      return drawn !== null && Number(drawn) >= Number(count)
+      // " preview" follows the count while the canvas draws a preview's picture.
+      return drawn !== null && Number(drawn.split(' ')[0]) === Number(count)
     })
     .toBe(true)
 }

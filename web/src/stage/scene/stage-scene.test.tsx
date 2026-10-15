@@ -10,7 +10,7 @@ import { HERO_NOW, pushFrame, startMockDataLayer } from '@/test/live'
 import { sceneProps } from '@/test/stage'
 import { SPEC } from '../design-numbers'
 import { FrameWriter } from '../frame-writer'
-import { LIVE_ONLY } from '../fx-writer'
+import { LIVE_ONLY, type FxPick } from '../fx-writer'
 import type { RGB } from '@/lib/light-colour'
 import type { ZoneFx } from '@/api/ws-messages'
 import { FxMaterials } from './fx-meshes'
@@ -243,16 +243,82 @@ describe('the stage scene (§7.2, §7.5)', () => {
       </>,
     )
     await vi.advanceTimersByTimeAsync(1000)
-    expect(fx.version).toBeGreaterThan(0)
-    expect(canvas!.getAttribute('data-fx-drawn')).toBe(String(fx.version))
+    expect(fx.stored).toBeGreaterThan(0)
+    expect(canvas!.getAttribute('data-fx-drawn')).toBe(String(fx.stored))
     const marks = vi.spyOn(canvas!, 'setAttribute')
-    const before = fx.version
+    const before = fx.stored
     await vi.advanceTimersByTimeAsync(1000)
     const drawn = marks.mock.calls.filter(([name]) => name === 'data-fx-drawn').length
     expect(drawn).toBeGreaterThan(0)
-    expect(drawn).toBeLessThanOrEqual(fx.version - before)
-    expect(canvas!.getAttribute('data-fx-drawn')).toBe(String(fx.version))
+    expect(drawn).toBeLessThanOrEqual(fx.stored - before)
+    expect(canvas!.getAttribute('data-fx-drawn')).toBe(String(fx.stored))
     release()
+  })
+
+  // Task 8's re-review (d), (e): the mark counts the pictures stored, which a clear doesn't move, so e2e can wait for it to equal
+  // the mock's count; it's written as the canvas renders, a new pick takes it away until its own render, and a picture that
+  // changes nothing drawn is marked at once, as the canvas shows it already.
+  it('marks the pictures it shows exactly, as it renders them, and a new pick only once it has drawn it', async () => {
+    const props = sceneProps('hero', { cadenceMs: 1000 / SPEC.target.fps, fx: LIVE_ONLY })
+    let gl: WebGLRenderer | undefined
+    // The frame a pick's invalidate() asks for: R3F's loop is one for every root, and the tests before this one leave theirs behind.
+    let frame: () => void = () => {}
+    function Renderer() {
+      gl = useThree((state) => state.gl)
+      const advance = useThree((state) => state.advance)
+      frame = () => advance(performance.now())
+      return null
+    }
+    const scene = (fxPick: FxPick | null) => (
+      <>
+        <StageScene {...props} fx={fxPick} />
+        <Renderer />
+      </>
+    )
+    const { renderer } = await renderScene(scene(LIVE_ONLY))
+    await vi.advanceTimersByTimeAsync(100)
+    const canvas = gl!.domElement
+    const mark = () => canvas.getAttribute('data-fx-drawn')
+    // When the canvas renders, the mark says what it shows.
+    const marked: (string | null)[] = []
+    vi.spyOn(gl!, 'render').mockImplementation(() => void marked.push(mark()))
+    const office: ZoneFx = { ...EVERY_KIND, zoneId: 'office' }
+    fx.apply({ channel: 'fx', zones: [EVERY_KIND, office] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(marked).toEqual(['1'])
+    expect(mark()).toBe('1')
+    // A clear moves the version, not the count.
+    const version = fx.version
+    fx.clear()
+    fx.apply({ channel: 'fx', zones: [EVERY_KIND, office] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(fx.version).toBe(version + 2)
+    expect(mark()).toBe('2')
+
+    // Focus on the living room: the mark goes until the canvas draws the new pick.
+    const focus: FxPick = { preview: null, hidden: new Set(['office']) }
+    await renderer.update(scene(focus))
+    expect(mark()).toBeNull()
+    frame()
+    expect(marked.at(-1)).toBe('2')
+    expect(mark()).toBe('2')
+    // The hidden office moves: nothing drawn changes, so nothing renders, and the mark moves at once.
+    const renders = marked.length
+    fx.apply({ channel: 'fx', zones: [EVERY_KIND, { ...office, particles: [[2, 2, 2, 1, 1, 1, 0.3]] }] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect([marked.length, mark()]).toEqual([renders, '3'])
+
+    // The preview of the living room, once drawn, says so.
+    const compose: FxPick = { preview: 'living', hidden: new Set(['living']) }
+    await renderer.update(scene(compose))
+    frame()
+    fx.apply({ channel: 'fx', zones: [office, { ...EVERY_KIND, stream: 'preview' }] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(mark()).toBe('4 preview')
+    expect(marked.at(-1)).toBe('4 preview')
+    // The switch off: the canvas shows no picture.
+    await renderer.update(scene(null))
+    expect(mark()).toBeNull()
   })
 
   it('draws no effects in space while it picks none, and lets them go when it stops', async () => {

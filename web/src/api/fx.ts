@@ -20,6 +20,11 @@ export class FxStore {
   readonly preview = new Map<Id, ZoneFx>()
   /** Moves with every picture stored or cleared: redraw when it has moved. */
   version = 0
+  /**
+   * How many pictures it has stored since the page opened (or resetDataLayer()), which only a picture moves: the stage's
+   * canvas marks the count it shows, and e2e waits for that to be the mock's count of pictures sent (fxPictured()).
+   */
+  stored = 0
   private readonly waiting = new Set<() => void>()
   private readonly previewHeld: () => boolean
   /** The zones a message stores, reused from message to message. */
@@ -52,6 +57,7 @@ export class FxStore {
     if (!held) this.preview.clear()
     for (const zone of kept) (zone.stream === 'live' ? this.live : this.preview).set(zone.zoneId, zone)
     kept.length = 0
+    this.stored += 1
     this.bump()
   }
 
@@ -68,6 +74,12 @@ export class FxStore {
     this.live.clear()
     this.preview.clear()
     this.bump()
+  }
+
+  /** As on a page just opened: nothing to draw, and none stored. */
+  reset(): void {
+    this.clear()
+    this.stored = 0
   }
 
   /** Calls `wake` once, when the version next moves; returns what stops it waiting. */
