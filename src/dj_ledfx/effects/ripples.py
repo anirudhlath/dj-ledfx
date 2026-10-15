@@ -4,7 +4,8 @@ Stateless: drop k's landing time and place come from the seed and k alone (drop(
 a frame draws the rings of the drops still alive. A ring reaches each LED when it has
 travelled the LED's 3D distance from the drop (engine spec §9: "a ripple reaches LEDs in
 order of distance"). Each drop's random draws are kept while it may be alive, and the
-zone's footprint while the LED set is the same.
+zone's footprint while the LED set is the same; the drops alive at a moment are worked out
+once, for the frame's colours and its rings in space alike.
 """
 
 from __future__ import annotations
@@ -32,8 +33,14 @@ RING_WIDTH_M = 0.35
 LIFE_FADES = 3.0  # a ring is dropped after this many fade times (e^-3: 5% left)
 LANDING_SPREAD = 0.8  # drop k lands in the first 80% of its interval
 
+_Drop = tuple[NDArray[np.float32], float, float]  # where it landed, its ring's radius, strength
+
 
 class Ripples(ParamField):
+    # The drops alive at the last moment asked, on the LEDs asked: render() and in_space()
+    # share them within a frame.
+    _alive_at: tuple[float, LedSet, list[_Drop]] | None
+
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
         return {
@@ -67,10 +74,12 @@ class Ripples(ParamField):
     def reseed(self, seed: int) -> None:
         super().reseed(seed)
         self._draws.clear()
+        self._alive_at = None
 
     def _prepare(self) -> None:
         super()._prepare()
         self._draws: dict[int, NDArray[np.float64]] = getattr(self, "_draws", {})
+        self._alive_at = None
 
     def _draw(self, k: int) -> NDArray[np.float64]:
         """Drop k's three random numbers: when in its interval, and where."""
@@ -122,22 +131,24 @@ class Ripples(ParamField):
             )
         )
 
-    def _alive(
-        self, ctx: RenderContext, leds: LedSet
-    ) -> list[tuple[NDArray[np.float32], float, float]]:
-        """Each drop still alive at ctx's moment: where it landed, how far its ring has
-        travelled, and how strong it still is (1 as it lands, fading). Draws of drops gone
-        are let go."""
+    def _alive(self, ctx: RenderContext, leds: LedSet) -> list[_Drop]:
+        """Each drop still alive at ctx's moment, oldest first: where it landed, how far its
+        ring has travelled, and how strong it still is (1 as it lands, fading). Worked out
+        once for a moment and an LED set. Draws of drops gone are let go."""
+        kept = self._alive_at
+        if kept is not None and kept[0] == ctx.t and kept[1] is leds:
+            return kept[2]
         interval, fade = self._interval(), float(self._values["fade_s"])
         speed, life = float(self._values["speed"]), LIFE_FADES * fade
         first = math.floor((ctx.t - life) / interval) - 1  # the oldest drop that may be alive
         last = math.floor(ctx.t / interval)  # no later drop has landed yet
         for gone in [k for k in self._draws if k < first]:
             del self._draws[gone]
-        alive = []
+        alive: list[_Drop] = []
         for k in range(first, last + 1):
             when, where = self.drop(k, leds)
             age = ctx.t - when
             if 0.0 <= age <= life:
                 alive.append((where, speed * age, math.exp(-age / fade)))
+        self._alive_at = (ctx.t, leds, alive)
         return alive
