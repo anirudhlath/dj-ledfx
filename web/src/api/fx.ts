@@ -55,6 +55,13 @@ export class FxStore {
     this.bump()
   }
 
+  /** The preview's frames went (FrameStore.clearPreview, preview.ts): its picture goes with them. */
+  clearPreview(): void {
+    if (this.preview.size === 0) return
+    this.preview.clear()
+    this.bump()
+  }
+
   /** Nothing to draw: the link dropped, or the stage stopped asking. */
   clear(): void {
     if (this.empty) return

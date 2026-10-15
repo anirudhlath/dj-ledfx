@@ -88,6 +88,15 @@ describe('the fx store (§12.4)', () => {
     expect(wake).toHaveBeenCalledOnce()
   })
 
+  it("clears the preview's picture alone, moving its version only when it held one", () => {
+    const fx = new FxStore()
+    fx.apply({ channel: 'fx', zones: [zone('living'), zone('living', 'preview')] })
+    fx.clearPreview()
+    expect([fx.preview.size, [...fx.live.keys()], fx.version]).toEqual([0, ['living'], 2])
+    fx.clearPreview()
+    expect(fx.version).toBe(2)
+  })
+
   it('clears, moving its version only when it held something', () => {
     const fx = new FxStore()
     fx.clear()

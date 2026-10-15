@@ -21,7 +21,7 @@ let fxWants = 0
 let fxGeneration = 0
 
 /** The composer's preview (F4): one at a time, on the stage only. */
-export const previewSession = new PreviewSession({ frames, client: () => client })
+export const previewSession = new PreviewSession({ frames, fx, client: () => client })
 
 /**
  * Starts the live client, stopping any this started before: there is one socket at a time. What the
@@ -29,6 +29,8 @@ export const previewSession = new PreviewSession({ frames, client: () => client 
  */
 export function startDataLayer(options: { openSocket?: OpenSocket; url?: string } = {}): LiveClient {
   client?.stop()
+  // The stopped link's picture is of a moment that's gone, as on a drop: the new one's server sends its own.
+  fx.clear()
   stopRefetching?.()
   stopRefetching = refetchOnNews(liveStore, queryClient)
   client = new LiveClient({

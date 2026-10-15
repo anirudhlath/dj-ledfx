@@ -30,14 +30,17 @@ describe('startDataLayer', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['zones'] })
   })
 
-  it('keeps one client: starting again stops the first', () => {
+  it('keeps one client: starting again stops the first, and lets its picture of the effects in space go', () => {
     const { sockets, open } = fakeSockets()
     const first = startDataLayer({ openSocket: open, url: 'ws://test/ws' })
+    fx.apply({ channel: 'fx', zones: [{ zoneId: 'living', stream: 'live', particles: [[1, 1, 1, 1, 1, 1, 0.2]] }] })
     const second = startDataLayer({ openSocket: open, url: 'ws://test/ws' })
     expect(second).not.toBe(first)
     expect(liveClient()).toBe(second)
     expect(sockets).toHaveLength(2)
     expect(sockets[0].closed).toBe(true)
+    // The new link's server sends its own picture once asked; the old link's is of a moment that's gone.
+    expect(fx.empty).toBe(true)
   })
 })
 
