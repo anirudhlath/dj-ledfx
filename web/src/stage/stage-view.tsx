@@ -137,7 +137,7 @@ export function StageView({ data, variant, route, roomTo, roomState, outlined = 
     }
     return { preview: previewed === null || composeZone === undefined ? null : composeZone.id, hidden }
   }, [previewed, focusZone, running, composeZone])
-  // FxWriter takes a new object for a change: this is the same one while the zones it names are the same.
+  // FxWriter looks the picture over again for a new object: this is the same one while the zones it names are the same.
   const fxPick = useStable(picked, sameFxPick)
   const drawsFx = webgl && pose !== null && behaviour.effects
   useFxStream(drawsFx)
