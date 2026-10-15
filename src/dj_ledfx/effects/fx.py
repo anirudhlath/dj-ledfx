@@ -9,7 +9,8 @@ colours linear 0..1 as the effect draws them, before the layer's opacity, the lo
 modifiers and the zone's brightness.
 
 `width` is how thick a ring or a plane is drawn: its light's full width where it falls to
-e^-1, twice the `band()` width its effect lights the LEDs with.
+e^-1, twice the `band()` width its effect lights the LEDs with. The exception is a plane
+with a `ray` (a beam), whose `width` is an angle in radians.
 """
 
 from __future__ import annotations
@@ -35,7 +36,8 @@ def _rows(values: ArrayLike, count: int, width: int) -> F32:
 @dataclass(frozen=True, eq=False, slots=True)
 class Rings:
     """Shells and level rings of light: each one's centre, radius, width and colour, and
-    whether it's a level circle (its axis z) rather than a sphere's shell."""
+    whether it's a level circle (its axis z) rather than a sphere's shell. A ring's width is
+    its light's full thickness where it falls to e^-1."""
 
     centre: F32  # (K, 3)
     radius: F32  # (K,)
@@ -72,7 +74,8 @@ def rings(
 class Planes:
     """Planes of light: a point on each, its unit normal, width and colour, and its ray, a
     direction in the plane: the plane is the half on that side of the point (a beam). A ray
-    of zeros: the whole plane."""
+    of zeros: the whole plane. A plane's width is its light's full thickness where it falls
+    to e^-1, but a plane with a ray gives it as an angle in radians."""
 
     point: F32  # (K, 3)
     normal: F32  # (K, 3)
@@ -93,7 +96,7 @@ def planes(
     ray: ArrayLike = (0.0, 0.0, 0.0),
 ) -> Planes:
     """Planes from points (K, 3) and each one's (or one for all) normal, width, colour and
-    ray."""
+    ray; with a ray, the width is an angle in radians."""
     where = np.array(point, dtype=np.float32).reshape(-1, 3)
     count = len(where)
     return Planes(
