@@ -69,7 +69,10 @@ export interface SignalsMessage { channel: 'signals'; values: Record<string, Sig
  * the home map's frame (z up); colours linear 0–1, after the zone's brightness.
  */
 export type FxParticle = [x: number, y: number, z: number, r: number, g: number, b: number, size: number]
-/** A ring of light: a `sphere` is a shell, a `circle` lies level (its axis is z). `width` is how thick it's drawn. */
+/**
+ * A ring of light: a `sphere` is a shell, a `circle` lies level (its axis is z). `width` is how thick it's drawn: its full
+ * thickness in metres where its light falls to 1/e (§12.4).
+ */
 export interface FxRing {
   center: Vec3
   radius: number
@@ -77,7 +80,11 @@ export interface FxRing {
   rgb: Vec3
   form: 'sphere' | 'circle'
 }
-/** A plane of light: infinite, or with a `ray` (a direction in the plane) the half on that side of `point`. */
+/**
+ * A plane of light: infinite, or with a `ray` (a direction in the plane) the half on that side of `point`, a beam. Its
+ * `width` is its full thickness in metres where its light falls to 1/e, but a beam's is its angle in radians, its width
+ * 1 m out (§12.4). The stage doesn't draw it yet (F10 ruling 12).
+ */
 export interface FxPlane {
   point: Vec3
   normal: Vec3
@@ -111,7 +118,7 @@ export type Command =
 export type ClientCommand = Command & { id: number }
 
 const IS = {
-  list: (value: unknown) => Array.isArray(value),
+  list: (value: unknown): value is unknown[] => Array.isArray(value),
   object: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
   string: (value: unknown) => typeof value === 'string',
   number: (value: unknown) => typeof value === 'number',
@@ -136,8 +143,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => IS.object
 const isStream = (value: unknown): value is FrameStream => value === 'live' || value === 'preview'
 
 /**
- * A particle: seven finite numbers, its size above 0. A longer one is a later optional field (§12.4's
- * "Extending it"), read as its first seven.
+ * A particle: seven finite numbers, its size above 0. A longer one carries a later optional field (§12.4's
+ * "Extending it"): it's kept whole, and read by index, so only its first seven are drawn.
  */
 function isParticle(value: unknown): value is FxParticle {
   if (!Array.isArray(value) || value.length < 7) return false
@@ -170,7 +177,7 @@ const itemsOf = <T>(list: unknown, is: (item: unknown) => item is T): T[] | unde
 function readFx(record: Record<string, unknown>): FxMessage | null {
   if (!IS.list(record.zones)) return null
   const zones: ZoneFx[] = []
-  for (const zone of record.zones as unknown[]) {
+  for (const zone of record.zones) {
     if (!isRecord(zone) || typeof zone.zoneId !== 'string' || !isStream(zone.stream)) continue
     const read: ZoneFx = { zoneId: zone.zoneId, stream: zone.stream }
     const particles = itemsOf(zone.particles, isParticle)
