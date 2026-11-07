@@ -81,13 +81,13 @@ function colour(out: Float32Array, at: number, r: number, g: number, b: number):
 }
 
 export class FxWriter {
-  /** centre (3), colour (3), size: the glow's radius, metres (1). */
+  /** centre (3), colour (3), size: its radius, metres, where its light falls to 1/e (1). */
   readonly particles = new FxBatch([3, 3, 1])
   /** centre (3), colour (3), shape: radius, width and form, 0 a sphere and 1 a circle (3). */
   readonly rings = new FxBatch([3, 3, 3])
   /**
    * point (3), normal (3), ray (3; 0 for none), colour (3), width (1): a plane's thickness in metres, but with a
-   * `ray` (a beam) its angle in radians, its thickness 1 m out (§12.4). Nothing draws it yet (F10 ruling 12).
+   * `ray` (a beam) its angle in radians, its thickness 1 m out (§12.4).
    */
   readonly planes = new FxBatch([3, 3, 3, 3, 1])
   /** Whether what it wrote last has a zone's preview in it. */

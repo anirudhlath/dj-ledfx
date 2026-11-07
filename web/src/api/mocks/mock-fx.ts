@@ -175,7 +175,7 @@ export function zoneFx(zone: FxZone, at: number, beat: number): ZoneFx | null {
       for (const offset of [0, 0.5]) {
         const grown = (at * 0.4 + offset) % 1
         const center = rounded([cx + (offset - 0.25) * box.reach, cy, 0])
-        rings.push({ center, radius: round3(grown * box.reach), width: SHELL_WIDTH, rgb: hueRgb(hue + spread * offset, level * (1 - grown)), form: 'circle' })
+        rings.push({ center, radius: round3(grown * box.reach), width: SHELL_WIDTH, rgb: hueRgb(hue + spread * offset, level * (1 - grown)), form: 'sphere' })
       }
       out.rings = rings
       break

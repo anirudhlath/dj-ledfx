@@ -5,10 +5,10 @@ import type { ZoneFx } from '@/api/ws-messages'
 import { heroPose } from '@/test/stage'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { HERO_NOW } from '@/test/live'
-import { RENDER, SPEC } from '../design-numbers'
+import { SPEC } from '../design-numbers'
 import { FxWriter, LIVE_ONLY } from '../fx-writer'
 import { compileFx, FxMaterials, FxMeshes } from './fx-meshes'
-import { MIN_RING_WIDTH_M, RING_REACH_WIDTHS, RING_SAMPLES } from './fx-shaders'
+import { BEAM_SAMPLES, MIN_WIDTH, PARTICLE_REACH_SIZES, PLANE_SAMPLES, REACH_WIDTHS, RING_SAMPLES } from './fx-shaders'
 
 const { home } = buildScenario('hero', HERO_NOW)
 
@@ -111,40 +111,45 @@ describe('the effects in space (§7.4)', () => {
     expect(geometry).toHaveBeenCalledOnce()
   })
 
-  it("draws the particles as the render's fireflies, and planes and rings at the glass's alpha", () => {
+  // The pictures themselves are e2e/stage.spec.ts's, in a browser: jsdom has no WebGL.
+  it("draws all three at the glass's alpha and over the walls, rings and planes between the home's floor and ceiling", () => {
     const materials = new FxMaterials(home)
-    // The glow is the render's gradient: each stop's place and alpha, as the shader's mix between neighbours.
-    const stops = RENDER.particle.glow.stops
-    const glsl = (value: number) => (Number.isInteger(value) ? `${value}.0` : `${value}`)
-    stops.slice(1).forEach((stop, i) => {
-      const from = stops[i]
-      expect(materials.particle.fragmentShader).toContain(
-        `if (r <= ${glsl(stop.at)}) return mix(${glsl(from.alpha)}, ${glsl(stop.alpha)}, (r - ${glsl(from.at)}) / ${glsl(stop.at - from.at)});`,
-      )
-    })
-    expect(materials.ring.uniforms.glassAlpha.value).toBe(SPEC.window.glassAlpha)
-    expect(materials.plane.uniforms.glassAlpha.value).toBe(SPEC.window.glassAlpha)
-    expect(materials.plane.uniforms.ceiling.value).toBe(home.ceiling)
+    for (const material of [materials.particle, materials.ring, materials.plane]) {
+      expect(material.uniforms.glassAlpha.value).toBe(SPEC.window.glassAlpha)
+      // The engine's light passes through walls, and the floor's depth would cut a glow off in a straight line.
+      expect(material.depthTest).toBe(false)
+      expect(material.depthWrite).toBe(false)
+    }
+    for (const material of [materials.ring, materials.plane]) expect(material.uniforms.ceiling.value).toBe(home.ceiling)
+    // A particle's strength is its own at any height: neither the floor nor the ceiling dims it.
+    expect(materials.particle.uniforms.ceiling).toBeUndefined()
     const pose = heroPose()
     materials.setView(pose)
     expect(materials.particle.uniforms.pxPerM.value).toBe(pose.zoom)
-    expect(materials.plane.uniforms.back.value.toArray()).toEqual(pose.back)
   })
 
-  it('draws a ring as the engine means its width: light falling to 1/e at half of it either side', () => {
-    const { ring } = new FxMaterials(home)
+  it('clips rings and planes, and no particle, to the same mask of the outline', () => {
+    const { particle, ring, plane } = new FxMaterials(home)
+    expect(ring.uniforms.mask.value).toBeDefined()
+    expect(ring.uniforms.mask.value).toBe(plane.uniforms.mask.value)
+    expect(ring.uniforms.maskOrigin.value).toEqual(plane.uniforms.maskOrigin.value)
+    expect(ring.uniforms.maskSize.value).toEqual(plane.uniforms.maskSize.value)
+    expect(particle.uniforms.mask).toBeUndefined()
+  })
+
+  it('reaches as far as the light it draws, and never divides by a width of 0', () => {
+    const { particle, ring, plane } = new FxMaterials(home)
     expect(ring).toBeInstanceOf(ShaderMaterial)
-    // The quad reaches RING_REACH_WIDTHS widths past the radius, and discards beyond it, so the tail isn't cut.
-    const reach = `${RING_REACH_WIDTHS}`
-    expect(ring.vertexShader).toContain(`shape.x + ${reach} * width`)
-    expect(ring.fragmentShader).toContain(`radius + ${reach} * vShape.y`)
-    expect(ring.fragmentShader).toContain('if (rho > reach) discard')
-    // The profile is a Gaussian in the distance from the radius over half the width, summed over the sight line for a sphere.
-    expect(ring.fragmentShader).toContain('/ hw')
-    expect(ring.fragmentShader).toContain('exp(-t * t)')
+    expect(PARTICLE_REACH_SIZES).toBeGreaterThan(2)
+    expect(particle.vertexShader).toContain(`max(size * ${PARTICLE_REACH_SIZES},`)
+    // A ring's quad, and the stretch of a sight counted through a ring or a plane, reach REACH_WIDTHS widths past its middle.
+    expect(ring.vertexShader).toContain(`shape.x + ${REACH_WIDTHS} * width`)
+    expect(plane.fragmentShader).toContain(`${REACH_WIDTHS} * vWidth`)
     expect(ring.fragmentShader).toContain(`i < ${RING_SAMPLES}`)
-    // A width of 0 can't divide by zero.
-    expect(ring.vertexShader).toContain(`max(shape.y, ${MIN_RING_WIDTH_M})`)
-    expect(MIN_RING_WIDTH_M).toBeGreaterThan(0)
+    expect(plane.fragmentShader).toContain(`i < ${PLANE_SAMPLES}`)
+    expect(plane.fragmentShader).toContain(`i < ${BEAM_SAMPLES}`)
+    expect(ring.vertexShader).toContain(`max(shape.y, ${MIN_WIDTH})`)
+    expect(plane.vertexShader).toContain(`max(width, ${MIN_WIDTH})`)
+    expect(MIN_WIDTH).toBeGreaterThan(0)
   })
 })

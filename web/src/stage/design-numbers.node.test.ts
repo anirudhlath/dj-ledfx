@@ -68,8 +68,9 @@ describe('the design numbers', () => {
     expect(LIVE_RENDER.selectedZoneNote.button).toMatch(/^#/)
   })
 
-  // §7.4: "firefly and ember particles (tiny glowing points)". F10 draws every particle as Main.html draws a firefly.
-  it('draw a particle as a glow fading to nothing at its edge, round a smaller, whiter core', () => {
+  // §7.4: "firefly and ember particles (tiny glowing points)". The stage draws every particle's core as Main.html draws a
+  // firefly's; its light round the core is the engine's (fx-shaders.ts), not this glow, which stays read from the render.
+  it('read a firefly as a glow fading to nothing at its edge, round a smaller, whiter core', () => {
     const { glow, core } = RENDER.particle
     expect(glow.stops.map((stop) => stop.at)).toEqual([0, ...glow.stops.slice(1, -1).map((stop) => stop.at), 1])
     expect(glow.stops.at(-1)!.alpha).toBe(0)

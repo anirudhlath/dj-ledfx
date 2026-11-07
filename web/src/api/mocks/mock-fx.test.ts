@@ -28,7 +28,7 @@ describe('zoneFx', () => {
     expect(fx.planes).toBeUndefined()
   })
 
-  it('draws Shockwave as a shell and a beam with a ray, Speaker waves as a shell, Ripples as level circles and Scanner as a level plane', () => {
+  it('draws Shockwave as a shell and a beam with a ray, Speaker waves as a shell, Ripples as shells and Scanner as a level plane', () => {
     const shockwave = zoneFx(zone('shockwave'), 3, 6.5)!
     expect(shockwave.rings!.map((ring) => ring.form)).toEqual(['sphere'])
     expect(shockwave.planes![0].ray).toBeDefined()
@@ -36,7 +36,7 @@ describe('zoneFx', () => {
     expect(shockwave.planes![0].width).toBe(BEAM_WIDTH_RAD)
     expect(zoneFx(zone('speakers'), 3, 6.5)!.rings!.map((ring) => ring.form)).toEqual(['sphere'])
     const ripples = zoneFx(zone('ripples'), 3, 6.5)!
-    expect(ripples.rings!.map((ring) => [ring.form, ring.center[2]])).toEqual([['circle', 0], ['circle', 0]])
+    expect(ripples.rings!.map((ring) => [ring.form, ring.center[2]])).toEqual([['sphere', 0], ['sphere', 0]])
     const scanner = zoneFx(zone('scanner'), 3, 6.5)!.planes!
     expect(scanner.map((plane) => [plane.normal, plane.ray])).toEqual([[[0, 0, 1], undefined]])
     // Between the zone's lowest and highest points.

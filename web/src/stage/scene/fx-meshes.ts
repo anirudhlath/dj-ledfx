@@ -17,31 +17,31 @@ import { maskTexture } from './light-shaders'
 
 /** The fx's materials and the home outline's mask: once per home. */
 export class FxMaterials {
-  readonly particle = particleMaterial()
-  readonly ring = ringMaterial()
+  readonly particle: ShaderMaterial
+  readonly ring: ShaderMaterial
   readonly plane: ShaderMaterial
   private readonly texture: DataTexture
 
   constructor(home: Pick<Home, 'outline' | 'ceiling'>) {
-    // The outline as one room: a plane draws only inside the home (§7.4: "clipped to the apartment outline").
+    // The outline as one room: rings and planes draw only inside the home (§7.4: "clipped to the apartment outline").
     const mask = roomMask([{ polygon: home.outline }])
     this.texture = maskTexture(mask)
+    const within = { mask, texture: this.texture, ceilingM: home.ceiling }
     const { min, max } = bounds(home.outline)
     const [halfX, halfY, halfZ] = [(max[0] - min[0]) / 2, (max[1] - min[1]) / 2, home.ceiling / 2]
+    this.particle = particleMaterial()
+    this.ring = ringMaterial(within)
     this.plane = planeMaterial({
-      mask,
-      texture: this.texture,
-      ceilingM: home.ceiling,
+      ...within,
       // In three's world (plan.ts's toWorld): x, then up, then the plan's y.
       centre: [min[0] + halfX, halfZ, min[1] + halfY],
       reachM: Math.hypot(halfX, halfY, halfZ),
     })
   }
 
-  /** The pose's scale and the way the camera looks. */
+  /** The pose's scale, for a particle's core. */
   setView(pose: CameraPose): void {
     this.particle.uniforms.pxPerM.value = pose.zoom
-    this.plane.uniforms.back.value.set(...pose.back)
   }
 
   dispose(): void {
