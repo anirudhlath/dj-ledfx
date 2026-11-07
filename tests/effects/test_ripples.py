@@ -76,7 +76,7 @@ def test_ripples_at_their_densest_render_in_under_5_ms() -> None:
 
 # M8: each drop still alive is drawn as a level ring where it landed, as far out as it has
 # travelled, in its crest's colour; gone drops aren't.
-def test_each_live_drop_is_drawn_as_a_level_ring_where_it_landed() -> None:
+def test_each_live_drop_is_drawn_as_the_shell_its_leds_are_lit_by() -> None:
     effect, leds = _ripples(), leds_at(ACROSS_THE_ROOM)
     when, where = effect.drop(0, leds)
     palette = palette_float(list(RIPPLE_PALETTE))
@@ -85,7 +85,7 @@ def test_each_live_drop_is_drawn_as_a_level_ring_where_it_landed() -> None:
         ctx = render_ctx(when + age)
         effect.render(ctx, leds)
         fx = effect.in_space(ctx, leds)
-        assert fx is not None and fx.rings.count == 1 and fx.rings.circle.all()
+        assert fx is not None and fx.rings.count == 1 and not fx.rings.circle.any()
         assert np.allclose(fx.rings.centre[0], where) and np.isclose(fx.rings.radius[0], age)
         crest = palette_at(palette, np.array([np.exp(-age / 3.0)], dtype=np.float32)) * 0.9
         assert np.allclose(fx.rings.colour, crest) and np.isclose(fx.rings.width[0], 0.7)

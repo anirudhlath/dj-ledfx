@@ -114,8 +114,9 @@ class Ripples(ParamField):
         return (colours * np.float32(self._values["level"])).astype(np.float32)
 
     def in_space(self, ctx: RenderContext, leds: LedSet) -> Fx | None:
-        """Each live drop's ring: a level circle on the floor where it landed, as far out as
-        it has travelled, in the colour its crest lights an LED."""
+        """Each live drop's ring: a sphere's shell round where it landed, since a ring reaches
+        each LED by its 3D distance, as far out as it has travelled, in the colour its crest
+        lights an LED."""
         alive = self._alive(ctx, leds)
         if not alive:
             return None
@@ -127,7 +128,6 @@ class Ripples(ParamField):
                 [radius for _, radius, _ in alive],
                 2.0 * RING_WIDTH_M,
                 crest,
-                circle=True,
             )
         )
 
