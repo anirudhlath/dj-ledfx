@@ -20,6 +20,8 @@ export interface StageOptions {
   reducedMotion: boolean
   /** The Labels switch (§8.1). */
   labels: boolean
+  /** The "Effects in space" switch (§7.4, §8.1). */
+  effects: boolean
 }
 
 export interface StageBehaviour {
@@ -49,6 +51,12 @@ export interface StageBehaviour {
   outlinePx: number
   /** The rooms' labels (§7.6). */
   labels: boolean
+  /**
+   * §7.4's effects in space, drawn faintly in the room: as the switch says, and always on the phone, which
+   * has no switch (§8.10: Phone-Live and Phone-Zone draw them). §7.6 frozen has "no animation", and the
+   * Reconnecting renders draw none; §5.4's reduced motion stops particles, and so stops them all.
+   */
+  effects: boolean
   /** The sun's mono label (§7.4); Phone-Live.png draws the sun without it. */
   sunLabel: boolean
   /** The picture greyed as SPEC.frozen says (§7.6 frozen). */
@@ -66,7 +74,7 @@ export interface StageBehaviour {
   cadenceMs: number | null
 }
 
-export function stageBehaviour({ mode, variant, reducedMotion, labels }: StageOptions): StageBehaviour {
+export function stageBehaviour({ mode, variant, reducedMotion, labels, effects }: StageOptions): StageBehaviour {
   const live = mode === 'live'
   const compose = mode === 'compose'
   const phone = variant === 'phone'
@@ -80,6 +88,7 @@ export function stageBehaviour({ mode, variant, reducedMotion, labels }: StageOp
     legend: !phone && (live || compose),
     outlinePx: phone ? LIVE_RENDER.phoneOutlinePx : SPEC.compose.outlinePx,
     labels: !phone && !focus && labels,
+    effects: mode !== 'frozen' && !reducedMotion && (phone || effects),
     sunLabel: !phone && !focus,
     greyed: mode === 'frozen',
     previewTag: compose ? (phone ? 'tag' : 'card') : null,

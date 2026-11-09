@@ -4,6 +4,7 @@ import { HERO_NOW, pushFrame, restOn, startMockDataLayer } from '@/test/live'
 import { failureText, startLook } from './actions'
 import type { PreviewStarted } from './contract'
 import { FrameStore } from './frames'
+import { FxStore } from './fx'
 import { frames, previewSession, startDataLayer } from './live'
 import type { LiveClient } from './live-client'
 import { PreviewSession } from './preview'
@@ -24,12 +25,13 @@ function held<T>() {
 
 const started = (previewId: string): PreviewStarted => ({ previewId, lights: [] })
 
-/** A session over its own frame store and a client that records what it subscribes to. */
+/** A session over its own frame and fx stores, and a client that records what it subscribes to. */
 function session() {
   const store = new FrameStore()
+  const fx = new FxStore({ previewHeld: () => store.previewHeld })
   const subscribeFrames = vi.fn()
-  const preview = new PreviewSession({ frames: store, client: () => ({ subscribeFrames }) as unknown as LiveClient })
-  return { preview, store, subscribeFrames }
+  const preview = new PreviewSession({ frames: store, fx, client: () => ({ subscribeFrames }) as unknown as LiveClient })
+  return { preview, store, fx, subscribeFrames }
 }
 
 describe('the preview', () => {
@@ -155,6 +157,40 @@ describe('the preview', () => {
     expect(store.preview.size).toBe(0)
     second.resolve(started('p2'))
     await vi.waitFor(() => expect(preview.snapshot()).toMatchObject({ status: 'on', zoneId: 'kitchen' }))
+  })
+
+  // Final review 3: the preview's effects in space are of the look its frames are, so they go with them, or a picture held over a
+  // replaced look would stay on the stage until the server next sent one.
+  it("lets the preview's effects in space go with its frames: for another zone, and when it ends", async () => {
+    const { preview, store, fx } = session()
+    vi.spyOn(api, 'startPreview').mockResolvedValue(started('p1'))
+    const picture = () =>
+      fx.apply({
+        channel: 'fx',
+        zones: [
+          { zoneId: 'office', stream: 'live', particles: [[1, 1, 1, 1, 1, 1, 0.2]] },
+          { zoneId: 'living', stream: 'preview', particles: [[1, 1, 1, 1, 1, 1, 0.2]] },
+        ],
+      })
+    preview.show('living', 'embers')
+    await vi.waitFor(() => expect(preview.snapshot().status).toBe('on'))
+    picture()
+    pushFrame('a-light', 1, [1, 2, 3], { store, stream: 'preview' })
+    // The same zone: its picture stays, as its frames do.
+    preview.show('living', 'aurora')
+    expect(fx.get('living', 'preview')).toBeDefined()
+    await vi.waitFor(() => expect(preview.snapshot()).toMatchObject({ status: 'on', lookId: 'aurora' }))
+    const version = fx.version
+    preview.show('kitchen', 'aurora')
+    expect([store.preview.size, fx.preview.size]).toEqual([0, 0])
+    expect(fx.version).toBeGreaterThan(version)
+    expect(fx.get('office')).toBeDefined()
+    await vi.waitFor(() => expect(preview.snapshot()).toMatchObject({ status: 'on', zoneId: 'kitchen' }))
+    picture()
+    preview.stop()
+    await vi.waitFor(() => expect(api.stopPreview).toHaveBeenCalled())
+    expect(fx.preview.size).toBe(0)
+    expect(fx.get('office')).toBeDefined()
   })
 
   // A preview POST the server never answers fails after PREVIEW_ANSWER_MS (rest.ts), so it can't hold the queue: the choice made since is

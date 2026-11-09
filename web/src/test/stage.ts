@@ -43,7 +43,7 @@ export function stageWriter(
 /** What StageView hands the canvas for a scenario's home and lights: at Main.png's size, fitted, and not drawing. */
 export function sceneProps(name: ScenarioName = 'hero', overrides: Partial<StageSceneProps> = {}): StageSceneProps {
   const { home, lights } = buildScenario(name, HERO_NOW)
-  return { home, ...stageWriter(lights, { rooms: home.rooms }), mask: roomMask(home.rooms), pose: heroPose(), cadenceMs: null, ...overrides }
+  return { home, ...stageWriter(lights, { rooms: home.rooms }), mask: roomMask(home.rooms), pose: heroPose(), cadenceMs: null, fx: null, ...overrides }
 }
 
 /** A scenario's REST answers and live store, as Live finds them once it's connected. */

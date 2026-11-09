@@ -1,7 +1,8 @@
-import { act, fireEvent, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useSearchParams } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { startDataLayer } from '@/api/live'
 import { applyMessage, liveStore } from '@/api/live-store'
 import { queries, queryClient } from '@/api/queries'
 import { lookName, roomName } from '@/api/mocks/fixtures'
@@ -10,6 +11,7 @@ import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import type { ElementSize } from '@/lib/use-element-size'
 import { renderApp } from '@/test/app'
 import { renders, resetRenders } from '@/test/count-renders'
+import { fakeSockets } from '@/test/fake-socket'
 import { pushFrame } from '@/test/live'
 import { resizeObserved } from '@/test/resize'
 import { drawn, heroPose, loadedStage, MAIN_STAGE, seedStage, stageWriter } from '@/test/stage'
@@ -23,7 +25,7 @@ import { STAGE_LABEL } from './stage-pending'
 import { sunPosition, sunScene } from './sun'
 import Stage from './stage'
 import type { StageVariant } from './stage-view'
-import { readStageView } from './view-memory'
+import { DEFAULT_STAGE_VIEW, readStageView, writeStageView } from './view-memory'
 import { hasWebGL2 } from './webgl'
 import { zonePolygons } from './zone-shape'
 
@@ -71,6 +73,8 @@ describe('the stage on Live (§7, §8.1)', () => {
   it("lays the overlays out in Main.html's order", async () => {
     const { state } = await openLive()
     const overlays = [
+      screen.getByRole('group', { name: 'View' }),
+      screen.getByRole('switch', { name: 'Effects in space' }),
       screen.getByRole('switch', { name: 'Labels' }),
       screen.getByText(sunPosition(state.inputs.sun)!),
       screen.getByRole('list', { name: 'What the lights show' }),
@@ -132,6 +136,53 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(readStageView(window.localStorage, 'live').labels).toBe(false)
   })
 
+  // §7.4: "This is the "Effects in space" toggle (default on)"; Main.html draws it on.
+  it('draws the effects in space of every running zone with the switch on, and hides them with it, remembered for Live', async () => {
+    await openLive()
+    const effects = screen.getByRole('switch', { name: 'Effects in space' })
+    expect(effects).toHaveAttribute('aria-checked', 'true')
+    expect(drawn.props!.fx).toEqual({ preview: null, hidden: new Set() })
+    await userEvent.click(effects)
+    expect(drawn.props!.fx).toBeNull()
+    expect(readStageView(window.localStorage, 'live').effects).toBe(false)
+    await userEvent.click(effects)
+    expect(drawn.props!.fx).not.toBeNull()
+  })
+
+  // §12.4: the server sends `fx` only to a session that asked for it, until it says off. The stage asks while it draws the effects
+  // (useFxStream), and lets go when the switch turns them off, when it freezes, and when it goes.
+  it('asks for the effects in space while it draws them, and lets go for the switch, a frozen stage and leaving', async () => {
+    const { sockets, open } = fakeSockets()
+    startDataLayer({ openSocket: open, url: 'ws://test/ws' })
+    sockets[0].open()
+    const asked = () => sockets[0].sent.filter((command) => command.action === 'subscribe_fx').map((command) => command.on)
+    await openLive()
+    expect(asked()).toEqual([true])
+    const effects = screen.getByRole('switch', { name: 'Effects in space' })
+    await userEvent.click(effects)
+    expect(asked()).toEqual([true, false])
+    await userEvent.click(effects)
+    expect(asked()).toEqual([true, false, true])
+    const live = liveStore.getState().connection
+    act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
+    expect(asked()).toEqual([true, false, true, false])
+    act(() => liveStore.setState({ connection: live }))
+    expect(asked()).toEqual([true, false, true, false, true])
+    cleanup()
+    expect(asked()).toEqual([true, false, true, false, true, false])
+  })
+
+  // FxWriter looks the store's picture over again for a new pick object: the pick is the same object while what it
+  // names is the same, however the live store's `running` arrives.
+  it('hands the canvas the same pick for as long as the zones it names are the same', async () => {
+    await openLive()
+    const pick = drawn.props!.fx
+    expect(pick).not.toBeNull()
+    const { running } = liveStore.getState()
+    act(() => liveStore.setState({ running: { ...running!, zones: structuredClone(running!.zones) } }))
+    expect(drawn.props!.fx).toBe(pick)
+  })
+
   it('turns to Plan, orbits a step at a time, zooms in to the last step, and fits again', async () => {
     await openLive()
     await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
@@ -153,18 +204,22 @@ describe('the stage on Live (§7, §8.1)', () => {
     act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
     // No draws for frames (§7.6 "no animation"), and the picture greyed.
     expect(canvas().dataset.cadence).toBe('null')
+    // State-Reconnecting draws no effects in space.
+    expect(drawn.props!.fx).toBeNull()
     expect(picture().style.filter).toBe(`grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`)
     expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
     // State-Reconnecting.png's stage is the greyed picture alone: "Controls come back when the link does".
     const overlays = () => [
+      screen.queryByRole('switch', { name: 'Effects in space' }),
       screen.queryByRole('switch', { name: 'Labels' }),
       screen.queryByRole('button', { name: 'Rotate view' }),
       screen.queryByRole('list', { name: 'What the lights show' }),
       screen.queryByText(sunPosition(liveStore.getState().inputs!.sun)!),
     ]
-    expect(overlays()).toEqual([null, null, null, null])
+    expect(overlays()).toEqual([null, null, null, null, null])
     act(() => liveStore.setState({ connection: live }))
     expect(canvas().dataset.cadence).toBe(String(1000 / SPEC.target.fps))
+    expect(drawn.props!.fx).not.toBeNull()
     expect(picture().style.filter).toBe('')
     expect(screen.getByRole('navigation', { name: 'Rooms' })).toBeInTheDocument()
     for (const overlay of overlays()) expect(overlay).toBeInTheDocument()
@@ -262,7 +317,11 @@ describe('the stage on Live (§7, §8.1)', () => {
 
   it("draws the phone's stage without labels or overlays", async () => {
     setViewportWidth(LIVE_SPEC.phoneStage.width)
+    // Phone-Live draws the effects in space with no switch, whatever the desktop's says.
+    writeStageView(window.localStorage, 'live', { ...DEFAULT_STAGE_VIEW, effects: false })
     const { state } = await openLive()
+    expect(screen.queryByRole('switch', { name: 'Effects in space' })).not.toBeInTheDocument()
+    expect(drawn.props!.fx).toEqual({ preview: null, hidden: new Set() })
     expect(screen.queryByText(state.home.rooms[0].name)).not.toBeInTheDocument()
     expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'What the lights show' })).not.toBeInTheDocument()
@@ -345,10 +404,26 @@ describe('the stage in focus (§7.6)', () => {
     expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
     expect(screen.queryByRole('switch', { name: 'Labels' })).not.toBeInTheDocument()
     expect(picture().querySelector('[data-vignette]')).not.toBeNull()
+    // Phone-Zone draws the zone's effects in space: the zones with no light in it draw none.
+    expect(drawn.props!.fx).toEqual({ preview: null, hidden: new Set(['home', 'office']) })
 
     act(() => liveStore.setState({ connection: { status: 'reconnecting', attempt: 1 } }))
     expect(drawn.props!.pose).toEqual(framed)
     expect(picture().style.filter).toBe(`grayscale(${SPEC.frozen.grayscale}) brightness(${SPEC.frozen.brightness})`)
+  })
+})
+
+describe('the pick of zones in focus (§7.6)', () => {
+  it('stays the same object through a push that names the same zones', async () => {
+    seedStage('hero')
+    renderApp('/next/focus', { routes: [{ path: '/focus', element: <Stage variant="phone" focus="living" /> }] })
+    await loadedStage()
+    act(() => resizeObserved(390, 280))
+    const pick = drawn.props!.fx
+    expect(pick!.hidden.size).toBeGreaterThan(0)
+    const { running } = liveStore.getState()
+    act(() => liveStore.setState({ running: { ...running!, zones: structuredClone(running!.zones) } }))
+    expect(drawn.props!.fx).toBe(pick)
   })
 })
 
@@ -420,8 +495,12 @@ describe('the stage in compose (§7.6)', () => {
     expect(screen.queryByText(sunPosition(state.inputs.sun)!)).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Rooms' })).not.toBeInTheDocument()
 
+    // The preview's effects in space are drawn on the zone, in place of those of the look its lights run.
+    expect(drawn.props!.fx).toEqual({ preview: 'living', hidden: new Set(['living']) })
+
     // The preview ends: the lights draw the live stream again, and the card goes.
     await act(() => router.navigate('/live/put?zone=living&look=embers', { replace: true }))
+    expect(drawn.props!.fx).toEqual({ preview: null, hidden: new Set() })
     expect(streams(zone.lights)).toEqual({ zone: new Set(['live']), rest: new Set(['live']) })
     expect(stage.getByText(lookName('fireflies'))).toHaveClass('fill-text')
     expect(document.querySelector('[data-preview-card]')).toBeNull()

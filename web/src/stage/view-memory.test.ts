@@ -20,7 +20,7 @@ function throwingStorage(): Storage {
   return { length: 0, clear: refuse, getItem: refuse, key: refuse, removeItem: refuse, setItem: refuse }
 }
 
-const PLAN: StoredView = { view: { mode: 'plan', rotateDeg: -SPEC.rotate.stepDeg, zoom: ZOOM_STEPS[2] }, labels: false }
+const PLAN: StoredView = { view: { mode: 'plan', rotateDeg: -SPEC.rotate.stepDeg, zoom: ZOOM_STEPS[2] }, labels: false, effects: false }
 
 beforeEach(() => {
   window.localStorage.clear()
@@ -37,17 +37,25 @@ describe('the remembered view (§7.2)', () => {
   // Review focus 5: an old app's, another tab's or a hand-edited value; private mode; a full disk.
   it("ignores a stored view it can't read, and survives storage that throws", () => {
     const storage = window.localStorage
-    for (const junk of ['{', '"plan"', '[]', 'null', '{"mode":"top","rotateDeg":7,"zoom":9,"labels":"yes"}']) {
+    for (const junk of ['{', '"plan"', '[]', 'null', '{"mode":"top","rotateDeg":7,"zoom":9,"labels":"yes","effects":1}']) {
       storage.setItem('dj-ledfx:stage-view:live', junk)
       expect(readStageView(storage, 'live')).toEqual(DEFAULT_STAGE_VIEW)
     }
     storage.setItem('dj-ledfx:stage-view:live', JSON.stringify({ mode: 'plan', rotateDeg: 'x', zoom: ZOOM_STEPS[1] }))
-    expect(readStageView(storage, 'live')).toEqual({ view: { mode: 'plan', rotateDeg: 0, zoom: ZOOM_STEPS[1] }, labels: true })
+    expect(readStageView(storage, 'live')).toEqual({ view: { mode: 'plan', rotateDeg: 0, zoom: ZOOM_STEPS[1] }, labels: true, effects: true })
 
     const blocked = throwingStorage()
     expect(readStageView(blocked, 'live')).toEqual(DEFAULT_STAGE_VIEW)
     expect(() => writeStageView(blocked, 'live', PLAN)).not.toThrow()
     expect(readStageView(null, 'live')).toEqual(DEFAULT_STAGE_VIEW)
+  })
+
+  // §7.4: the "Effects in space" toggle is "default on"; a view stored before it existed keeps it on.
+  it('keeps the effects in space on unless they were turned off', () => {
+    const storage = window.localStorage
+    expect(DEFAULT_STAGE_VIEW.effects).toBe(true)
+    storage.setItem('dj-ledfx:stage-view:live', JSON.stringify({ mode: 'plan', rotateDeg: 0, zoom: 1, labels: false }))
+    expect(readStageView(storage, 'live').effects).toBe(true)
   })
 
   it('steps the rotation round within its range, and the zoom up to its last step', () => {

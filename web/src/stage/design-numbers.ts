@@ -244,6 +244,30 @@ export const RENDER = {
       "angleDeg": -69.7
     }
   },
+  "particle": {
+    "glow": {
+      "stops": [
+        {
+          "at": 0,
+          "alpha": 0.9
+        },
+        {
+          "at": 0.3,
+          "alpha": 0.25
+        },
+        {
+          "at": 1,
+          "alpha": 0
+        }
+      ]
+    },
+    "core": {
+      "lift": 0.5,
+      "share": 0.222,
+      "minPx": 0.9,
+      "maxPx": 1.4
+    }
+  },
   "ownEffect": {
     "ringPx": 7.5,
     "colour": "--color-text",

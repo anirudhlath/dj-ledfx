@@ -1,12 +1,12 @@
-// When the stage draws (§7.5): only once a frame has arrived since its last draw, and no more often
-// than its rate, the stage behaviour's cadenceMs (behaviour.ts); none at all while that's null (§7.6
-// frozen). It rides the browser's animation frames, so a hidden tab draws nothing (§7.5, "pause
-// rendering when the tab is hidden"), and after an animation frame with nothing new to draw it
-// sleeps, asking for none until the frame store has another frame. It is the stage's one draw tick:
-// the canvas draws on it, and whatever else shows the frames (the light tooltip) follows it through
-// onStageDraw().
+// When the stage draws (§7.5): only once a frame or a picture of the effects in space (§7.4) has
+// arrived since its last draw, and no more often than its rate, the stage behaviour's cadenceMs
+// (behaviour.ts); none at all while that's null (§7.6 frozen). It rides the browser's animation
+// frames, so a hidden tab draws nothing (§7.5, "pause rendering when the tab is hidden"), and after
+// an animation frame with nothing new to draw it sleeps, asking for none until the frame store has
+// another frame or the fx store another picture. It is the stage's one draw tick: the canvas draws
+// on it, and whatever else shows the frames (the light tooltip) follows it through onStageDraw().
 import { useEffect, useEffectEvent } from 'react'
-import { frames } from '@/api/live'
+import { frames, fx } from '@/api/live'
 
 /** Half a 60 Hz animation frame: the slack until the cadence has measured the screen's. */
 const DEFAULT_SLACK_MS = 1000 / 60 / 2
@@ -28,7 +28,7 @@ export class Cadence {
     this.intervalMs = intervalMs
   }
 
-  /** `now` is the animation frame's time; `version` the frame store's. */
+  /** `now` is the animation frame's time; `version` what the stage draws from's (drawnVersion()). */
   due(now: number, version: number): boolean {
     if (this.frameAt !== null && now > this.frameAt) this.slackMs = (now - this.frameAt) / 2
     this.frameAt = now
@@ -49,6 +49,24 @@ export class Cadence {
   sleep(): void {
     this.frameAt = null
   }
+}
+
+/** What the stage draws from: both stores' versions only grow, so their sum moves whenever either does. */
+const drawnVersion = () => frames.version + fx.version
+
+/** Calls `wake` once, at the next frame or the next picture, whichever comes first; returns what stops it waiting. */
+function onNextDrawable(wake: () => void): () => void {
+  const stop = () => {
+    stopFrame()
+    stopFx()
+  }
+  const woken = () => {
+    stop()
+    wake()
+  }
+  const stopFrame = frames.onNextFrame(woken)
+  const stopFx = fx.onNextChange(woken)
+  return stop
 }
 
 const listeners = new Set<() => void>()
@@ -74,11 +92,12 @@ export function useCadence(intervalMs: number | null, draw: (now: number) => voi
     const cadence = new Cadence(intervalMs)
     let stopWaiting = () => {}
     const tick = (now: number) => {
-      if (cadence.due(now, frames.version)) due(now)
-      else if (cadence.drawn(frames.version)) {
+      const version = drawnVersion()
+      if (cadence.due(now, version)) due(now)
+      else if (cadence.drawn(version)) {
         // A whole animation frame with nothing new to draw: nothing is streaming.
         cadence.sleep()
-        stopWaiting = frames.onNextFrame(() => (handle = requestAnimationFrame(tick)))
+        stopWaiting = onNextDrawable(() => (handle = requestAnimationFrame(tick)))
         return
       }
       handle = requestAnimationFrame(tick)

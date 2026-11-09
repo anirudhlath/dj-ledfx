@@ -4,7 +4,7 @@ import { stageBehaviour, type StageOptions } from './behaviour'
 import { SPEC } from './design-numbers'
 
 const behaviour = (options: Partial<StageOptions>) =>
-  stageBehaviour({ mode: 'live', variant: 'desktop', reducedMotion: false, labels: true, ...options })
+  stageBehaviour({ mode: 'live', variant: 'desktop', reducedMotion: false, labels: true, effects: true, ...options })
 
 describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)", () => {
   it('is all there on desktop Live, labels as the Labels switch says', () => {
@@ -15,6 +15,7 @@ describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)",
       overlays: true,
       legend: true,
       labels: true,
+      effects: true,
       sunLabel: true,
       greyed: false,
       previewTag: null,
@@ -33,6 +34,7 @@ describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)",
       overlays: false,
       legend: false,
       labels: false,
+      effects: true,
       sunLabel: false,
       greyed: false,
       previewTag: null,
@@ -51,6 +53,7 @@ describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)",
       overlays: true,
       legend: true,
       labels: true,
+      effects: true,
       sunLabel: true,
       greyed: false,
       previewTag: 'card',
@@ -71,6 +74,20 @@ describe("the stage's behaviour in each mode (§7.6) and on the phone (§8.10)",
   it("has no labels or overlays on the phone, and draws at the phone's rate", () => {
     expect(behaviour({ variant: 'phone' })).toMatchObject({ interactive: true, overlays: false, labels: false, sunLabel: false })
     expect(behaviour({ variant: 'phone' }).cadenceMs).toBeCloseTo(1000 / SPEC.phoneFps)
+  })
+
+  // §7.4: the "Effects in space" switch, default on (view-memory.ts). The phone has no switch and draws them
+  // (Phone-Live, Phone-Zone); the Reconnecting renders draw none, and §5.4's reduced motion stops particles.
+  it('draws the effects in space as the switch says, always on the phone, and never while frozen or still', () => {
+    expect(behaviour({ effects: false }).effects).toBe(false)
+    expect(behaviour({ mode: 'compose', effects: false }).effects).toBe(false)
+    expect(behaviour({ mode: 'focus', effects: false }).effects).toBe(false)
+    expect(behaviour({ variant: 'phone', effects: false }).effects).toBe(true)
+    expect(behaviour({ mode: 'focus', variant: 'phone', effects: false }).effects).toBe(true)
+    expect(behaviour({ mode: 'frozen' }).effects).toBe(false)
+    expect(behaviour({ mode: 'frozen', variant: 'phone' }).effects).toBe(false)
+    expect(behaviour({ reducedMotion: true }).effects).toBe(false)
+    expect(behaviour({ variant: 'phone', reducedMotion: true }).effects).toBe(false)
   })
 
   // §5.4: "The stage still updates light colours, at most once per second."
