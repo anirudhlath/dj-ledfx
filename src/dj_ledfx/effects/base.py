@@ -16,6 +16,8 @@ from dj_ledfx.effects.params import EffectParam, check_setting
 from dj_ledfx.types import BeatContext
 
 if TYPE_CHECKING:
+    from dj_ledfx.effects.context import RenderContext
+    from dj_ledfx.effects.fx import Fx
     from dj_ledfx.effects.ledset import LedSet
     from dj_ledfx.types import FloatRGB
 
@@ -75,6 +77,12 @@ class Effect(ABC):  # noqa: B024
 
     def reseed(self, seed: int) -> None:  # noqa: B027
         """Make the effect's randomness repeatable. Default: it has none."""
+
+    def in_space(self, ctx: RenderContext, leds: LedSet) -> Fx | None:
+        """What the effect's last frame on these LEDs, at ctx's moment, draws in space, for
+        the web app's stage (effects/fx.py); None: nothing to draw, the default. Called
+        right after the frame, with the same moment and LEDs."""
+        return None
 
 
 class ParamSettings(Effect, register=False):

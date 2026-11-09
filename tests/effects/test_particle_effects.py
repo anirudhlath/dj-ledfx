@@ -134,6 +134,16 @@ def test_a_zone_with_no_leds_draws_nothing(kind: str) -> None:
     effect = _effect(kind)
     frame = drawn(effect, tempo_ctx(START), leds_at([]))
     assert frame.shape == (0, 3) and effect.particles.count == 0
+    assert effect.in_space(tempo_ctx(START), leds_at([])) is None  # nothing in space either
+
+
+# M8: each particle look's particles reach the stage as they are, with no code of its own.
+@pytest.mark.parametrize("kind", PARTICLE_KINDS)
+def test_every_particle_effect_draws_its_particles_in_space(kind: str) -> None:
+    effect, leds, ctx = _effect(kind), seeded_ledset(), tempo_ctx(START)
+    drawn(effect, ctx, leds)
+    fx = effect.in_space(ctx, leds)
+    assert fx is not None and fx.particles is effect.particles and fx.particles.count > 0
 
 
 # Ceilings float32 stores a little over (2.45 as 2.4500000477): a lamp with its top LED exactly

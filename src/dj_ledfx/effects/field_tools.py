@@ -27,7 +27,12 @@ def anchor_or_centre(leds: LedSet, anchor: str) -> F32:
 
 def distances(leds: LedSet, point: F32) -> F32:
     """Each LED's distance from the point, in metres."""
-    return np.asarray(np.linalg.norm(leds.pos - point, axis=1), dtype=np.float32)
+    return distances_at(leds.pos, point)
+
+
+def distances_at(pos: NDArray[np.floating[Any]], point: F32) -> F32:
+    """Each place's distance from the point, in metres: an LED's, or a particle's."""
+    return np.asarray(np.linalg.norm(pos - point, axis=1), dtype=np.float32)
 
 
 def reach(

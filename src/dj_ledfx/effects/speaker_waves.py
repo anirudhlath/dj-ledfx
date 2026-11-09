@@ -23,7 +23,9 @@ from dj_ledfx.effects.field_tools import (
     height01,
     smoothstep,
 )
+from dj_ledfx.effects.fx import Fx, rings
 from dj_ledfx.effects.params import EffectParam, anchor_param, level_param
+from dj_ledfx.effects.particle_tools import swarm
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.context import RenderContext
@@ -94,6 +96,22 @@ class SpeakerWaves(ParamField):
         out *= np.float32(values["level"])
         return out
 
+    def in_space(self, ctx: RenderContext, leds: LedSet) -> Fx:
+        """Each kick's front: a sphere round each of the anchor's points, as far out as the
+        front, in the colour its crest lights an LED. A snare's bloom: a particle as wide as
+        the bloom at the points' middle, which falls off as the bloom does. The hats, a light
+        LED by LED, stay on the LEDs."""
+        points = self._points(leds)
+        fade, level = np.float32(1.0 - ctx.beat_phase), np.float32(self._values["level"])
+        front = _reach(points, leds) * ctx.beat_phase / ACROSS_BY
+        crest = self._rest + (self._kick - self._rest) * fade
+        crest *= level
+        fronts = rings(points, front, 2.0 * WAVE_M, crest)
+        if ctx.beat_index % 2 == 0:
+            return Fx(rings=fronts)
+        bloom = swarm(points.mean(axis=0), self._snare * fade * fade * level, BLOOM_M)
+        return Fx(particles=bloom, rings=fronts)
+
     def _sparkles(self, beat_index: int, count: int, share: float) -> F32:
         """Which LEDs this beat's hi-hat lights (1) and leaves (0): drawn once a beat, from
         the seed and the beat alone, and kept for the beat's frames."""
@@ -107,16 +125,27 @@ class SpeakerWaves(ParamField):
         """Each LED's distance from each of the anchor's points (k, n), from their middle,
         how high up it is (0 low, 1 high), and the kick's reach: from the points to the
         farthest corner of the zone's bounds."""
+        points = self._points(leds)
+        each = np.stack([distances(leds, point) for point in points])
+        middle = distances(leds, points.mean(axis=0).astype(np.float32))
+        high = smoothstep(HIGH_FROM, HIGH_TO, height01(leds))
+        return each, middle, high, _reach(points, leds)
+
+    def _points(self, leds: LedSet) -> F32:
+        """Where the waves start: each of the anchor's points, or the zone's middle, (k, 3)."""
         anchor = self._values["anchor"]
         points = leds.space.anchor_points.get(anchor) if anchor else None
         if points is None or len(points) == 0:
             points = anchor_or_centre(leds, anchor)[None, :]
-        each = np.stack([distances(leds, point) for point in points])
-        middle = distances(leds, points.mean(axis=0).astype(np.float32))
-        low, top = leds.bounds
-        farthest = np.maximum(abs(points - low), abs(points - top))  # to each point's far corner
-        reach = float(np.linalg.norm(farthest, axis=1).max())
-        return each, middle, smoothstep(HIGH_FROM, HIGH_TO, height01(leds)), reach
+        return points
+
+
+def _reach(points: F32, leds: LedSet) -> float:
+    """How far a kick's front goes: from the points to the farthest corner of the zone's
+    bounds."""
+    low, top = leds.bounds
+    farthest = np.maximum(abs(points - low), abs(points - top))  # to each point's far corner
+    return float(np.linalg.norm(farthest, axis=1).max())
 
 
 def _towards(out: FloatRGB, colour: F32, amount: F32) -> None:

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from functools import partial
+from types import SimpleNamespace
 
 import numpy as np
 from conftest import FakeLight, nearest_frame
 from runtime_fakes import TILE
 from zone_home import BREATHE_AND_GLOW, GLOW, HomeFactory, zone_record
 
+from dj_ledfx.effects.fx import Fx
+from dj_ledfx.effects.particle_tools import swarm
+from dj_ledfx.effects.ring_buffer import RingBuffer
 from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.types import RenderedFrame
-from dj_ledfx.zones.frames import FrameFeed, Watchers
+from dj_ledfx.zones.frames import FrameFeed, Watchers, ZoneFx
 from dj_ledfx.zones.preview import PreviewManager
 
 
@@ -121,3 +125,43 @@ async def test_the_web_app_sees_a_zone_at_its_brightness(make_home: HomeFactory)
     count = runtime.leds.count
     expected = to_device_colors(frame.colors[:count] * np.float32(0.5), count)
     assert np.array_equal(feed.frames("live")["lamp"], expected)
+
+
+# M8: what each zone draws in space, read from the rings at now.
+
+
+def _ring_of(*frames: tuple[float, Fx | None]) -> RingBuffer:
+    ring = RingBuffer(8)
+    for t, fx in frames:
+        ring.write(
+            RenderedFrame(
+                colors=np.zeros((1, 3), dtype=np.float32),
+                target_time=t,
+                beat_phase=0.0,
+                bar_phase=0.0,
+                fx=fx,
+            )
+        )
+    return ring
+
+
+def _drawn() -> Fx:
+    return Fx(particles=swarm([[1.0, 2.0, 1.0]], (1.0, 1.0, 1.0), 0.2))
+
+
+def test_the_feed_reads_each_zones_fx_from_the_newest_frame_at_or_before_now() -> None:
+    early, late = _drawn(), _drawn()
+    live = SimpleNamespace(
+        zone_id="z", brightness=0.5, ring=_ring_of((99.0, early), (100.5, late))
+    )
+    dark = SimpleNamespace(zone_id="dark", brightness=1.0, ring=_ring_of((99.0, None)))
+    preview = SimpleNamespace(zone_id="z", brightness=1.0, ring=_ring_of((99.0, late)))
+    now = [100.0]
+    feed = FrameFeed(lambda: [live, dark], lambda: [preview], clock=lambda: now[0])  # type: ignore[list-item, return-value]
+
+    assert feed.fx() == [ZoneFx("live", "z", early, 0.5), ZoneFx("preview", "z", late, 1.0)]
+    now[0] = 100.4  # nearer the next frame: still the one before, never a blend
+    assert feed.fx()[0].fx is early
+    now[0] = 100.5
+    assert feed.fx()[0].fx is late
+    assert FrameFeed(lambda: [], clock=lambda: 100.0).fx() == []

@@ -9,7 +9,13 @@ from map_home import leds_at, seeded_ledset, seeded_space, seeded_zone_lights
 from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.field_tools import distances, height01
 from dj_ledfx.effects.ledset import LedSet, LedSource, build_ledset
-from dj_ledfx.effects.speaker_waves import KICK_COLOUR, REST_COLOUR, SNARE_COLOUR, SpeakerWaves
+from dj_ledfx.effects.speaker_waves import (
+    BLOOM_M,
+    KICK_COLOUR,
+    REST_COLOUR,
+    SNARE_COLOUR,
+    SpeakerWaves,
+)
 
 # Two speakers 4 m apart, and LEDs 1, 2 and 3 m along the line between them.
 PAIR = {"speakers": [(0.0, 0.0, 1.0), (4.0, 0.0, 1.0)]}
@@ -104,3 +110,49 @@ def test_frame_after_frame_it_draws_what_a_new_one_draws() -> None:
         fresh.reseed(seed)
         ctx = tempo_ctx(4.0 + k / 30)
         assert np.array_equal(effect.render(ctx, leds), fresh.render(ctx, leds)), k
+
+
+# M8: each kick's front in space is a sphere round a speaker, as far out as it lights the
+# LEDs, in the colour it lights them; the snares and hats stay on the LEDs.
+def test_each_kick_front_is_drawn_as_a_sphere_round_its_speaker() -> None:
+    effect = SpeakerWaves(anchor="speakers")
+    leds = leds_at(BETWEEN, anchor_points=PAIR)
+    ctx = tempo_ctx(4.25)  # each front 1 m out, as the first test says
+
+    frame = effect.render(ctx, leds)
+    fx = effect.in_space(ctx, leds)
+
+    assert np.allclose(fx.rings.centre, PAIR["speakers"]) and not fx.rings.circle.any()
+    assert np.allclose(fx.rings.radius, 1.0) and np.allclose(fx.rings.width, 0.8)
+    assert np.allclose(fx.rings.colour, frame[0])  # the LED 1 m from a speaker: on its crest
+    assert fx.particles.count == 0 and fx.planes.count == 0  # no snare on the first beat
+
+
+def test_a_snare_is_drawn_as_a_particle_as_wide_as_its_bloom() -> None:
+    effect = SpeakerWaves(anchor="speakers", rest="#000000", kick="#000000", sparkle=0.0)
+    leds = leds_at(BETWEEN, anchor_points=PAIR)
+    ctx = tempo_ctx(5.25)  # the second beat, a quarter through
+
+    frame = effect.render(ctx, leds)
+    fx = effect.in_space(ctx, leds)
+
+    assert fx.particles.count == 1
+    assert np.allclose(fx.particles.pos, [(2.0, 0.0, 1.0)])  # the speakers' middle
+    assert np.allclose(fx.particles.radius, BLOOM_M)
+    # A particle lights an LED by exp(-(d/r)^2): the same as the bloom, LED by LED.
+    away = np.linalg.norm(np.array(BETWEEN) - fx.particles.pos, axis=1)
+    lit = fx.particles.colour * np.exp(-((away / fx.particles.radius) ** 2))[:, None]
+    assert np.allclose(lit, frame, atol=1e-5)
+    assert fx.rings.count == 2  # the kicks' fronts still go out
+
+
+def test_a_faded_snare_still_draws_only_what_it_lights() -> None:
+    effect = SpeakerWaves(anchor="speakers")
+    leds = leds_at(BETWEEN, anchor_points=PAIR)
+
+    fading = effect.in_space(tempo_ctx(5.9), leds)  # the second beat, nearly over
+
+    assert fading.particles.count == 1
+    fade = 1.0 - 0.9
+    assert np.allclose(fading.particles.colour, SNARE * fade * fade, atol=1e-5)
+    assert effect.in_space(tempo_ctx(6.25), leds).particles.count == 0  # the third beat: none

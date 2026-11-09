@@ -57,6 +57,12 @@ class RingBuffer:
             return before, before, 0.0
         return before, after, (target_time - before_t) / (after_t - before_t)
 
+    def frame_at(self, target_time: float) -> RenderedFrame | None:
+        """The newest frame at or before target_time, never blended: the first frame for a
+        moment before it, as colors_at holds it; None while the ring is empty."""
+        found = self.find_around(target_time)
+        return None if found is None else found[0]
+
     def colors_at(self, target_time: float, start: int, stop: int) -> FloatRGB | None:
         """LEDs start..stop at target_time, blended from the frames either side of it, or
         None: the ring is empty, or a frame is shorter than stop. Between two frames it's a

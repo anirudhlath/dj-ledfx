@@ -155,6 +155,7 @@ def create_app(
     app.state.discovery_orchestrator = discovery_orchestrator  # scans and lamp outputs
     app.state.ws_sessions = set()  # open /ws sessions: pushes go to them, ws.close_all ends them
     app.state.ws_closing = False
+    app.state.fx_cache = None  # the last fx message, and what it was made of (ws.fx_text)
 
     @app.on_event("startup")
     async def _start_broadcasts() -> None:

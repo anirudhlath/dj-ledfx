@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -32,6 +33,28 @@ class ClientSubscription:
     frame_devices: list[str] = field(default_factory=list)  # v1: device ids; empty = all
     frame_lights: list[str] = field(default_factory=list)  # v2: light ids; empty = all
     frame_streams: list[str] = field(default_factory=lambda: ["live"])  # v1: live only
+    fx: bool = False  # subscribe_fx {on}: the fx channel, while it speaks frame protocol 2
+    # Bumped by every subscribe_fx {on: true} and every switch to frame protocol 2: each is a
+    # subscribe, and the fx poll sends the whole picture again to a session whose epoch moved,
+    # however quickly the commands came. `fx_changed` wakes a poll that sleeps while fx is off.
+    fx_epoch: int = 0
+    fx_changed: asyncio.Event = field(default_factory=asyncio.Event, repr=False, compare=False)
+
+    @property
+    def wants_fx(self) -> bool:
+        return self.fx and self.frame_protocol == 2
+
+    def set_fx(self, on: bool) -> None:
+        self.fx = on
+        if on:
+            self.fx_epoch += 1
+        self.fx_changed.set()
+
+    def set_frame_protocol(self, protocol: int) -> None:
+        if protocol == 2 and self.frame_protocol != 2:
+            self.fx_epoch += 1
+        self.frame_protocol = protocol
+        self.fx_changed.set()
 
 
 def get_db(request: Request) -> StateDB:

@@ -15,6 +15,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING
 
 from dj_ledfx.effects.base import Effect, ParamSettings
+from dj_ledfx.effects.fx import Fx
 from dj_ledfx.effects.particle_tools import NO_PARTICLES, Among, Ground, Particles, lit
 
 if TYPE_CHECKING:
@@ -46,6 +47,11 @@ class ParticleEffect(Effect):
     @abstractmethod
     def particles(self) -> Particles:
         """The particles of the last step, oldest first."""
+
+    def in_space(self, ctx: RenderContext, leds: LedSet) -> Fx | None:
+        """The last step's particles: where each is, its colour and its radius."""
+        particles = self.particles
+        return Fx(particles=particles) if particles.count else None
 
 
 class ParamParticles(ParamSettings, ParticleEffect):
