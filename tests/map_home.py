@@ -169,14 +169,17 @@ def lights_at(
     *lights: Sequence[Sequence[float]],
     ceiling: float | None = 3.0,
     anchors: Mapping[str, Sequence[float]] | None = None,
+    rooms: Sequence[int] | None = None,
 ) -> LedSet:
     """Lights' LEDs at these map positions, one light for each list of points, in this
-    order, in a zone with this ceiling and these anchors."""
+    order, in a zone with this ceiling and these anchors. `rooms` gives each light its room
+    (an index, NO_ROOM for none); left out, none is in a room."""
     sources = [
         LedSource(
             f"light-{index}",
             len(points),
             placed=PlacedLeds.from_positions(np.asarray(points, dtype=np.float64).reshape(-1, 3)),
+            room=NO_ROOM if rooms is None else rooms[index],
         )
         for index, points in enumerate(lights)
     ]

@@ -40,7 +40,7 @@ M2 = ("sunset", "aurora", "lava", "carousel", "ripples", "focus")
 M3 = ("shockwave", "scanner", "checker", "speakers")
 M5_AMBIENT = ("fireflies", "embers", "rain", "snow", "spotlights")
 M5_TEMPO = ("bursts", "vortex", "comets", "fountain", "flock", "ball")
-M6 = ("homesunset",)  # the Home looks built so far; Wisp and Goodnight join it
+M6 = ("homesunset", "wisp")  # the Home looks built so far; Goodnight joins them
 SHOWCASE = [  # in looks.json's order
     look_id
     for look_id in handoff_looks()
@@ -58,6 +58,7 @@ PARTICLE_KINDS = {
     "fountain": "fountain",
     "flock": "flock",
     "ball": "bouncing_ball",
+    "wisp": "wisp",
 }
 
 
@@ -143,6 +144,9 @@ def test_each_particle_look_has_its_particle_layer_named_after_it(look_id: str) 
         assert others == []
     if look_id in M5_AMBIENT:
         assert look.category == "ambient"
+    elif look_id in M6:  # a Home look runs on seconds, not beats
+        assert look.category == "home"
+        assert look.needs == ()
     else:
         assert look.needs == ("tempo",)
 

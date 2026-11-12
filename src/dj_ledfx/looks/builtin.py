@@ -2,7 +2,7 @@
 
 The handoff's looks take their metadata from its looks.json (vendored in data/looks.json,
 byte for byte), in its order: M2's six showcase looks, M3's four tempo looks, M5's eleven
-particle looks, M6's Home looks (so far Home sunset) and the Firmware showcase. The
+particle looks, M6's Home looks (so far Home sunset and Wisp) and the Firmware showcase. The
 handoff has no layers, so they live here; a particle look's one particle layer takes the
 look's own name. The six classic looks are today's effects; the handoff has no entry for
 them, so their names and descriptions live here too.
@@ -105,6 +105,7 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
     return {
         "sunset": (_field("sky", "Gradient", "sunset_gradient"), candles),
         "homesunset": (_field("sky", "Gradient", "home_sunset"), candles),
+        "wisp": (_particles("wisp", "wisp"),),
         "aurora": (
             _field("curtains", "Curtains", "aurora_curtains"),
             _firmware(

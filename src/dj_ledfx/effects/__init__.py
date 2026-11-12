@@ -29,3 +29,4 @@ from dj_ledfx.effects import strobe as _strobe  # noqa: F401
 from dj_ledfx.effects import sunset_gradient as _sunset_gradient  # noqa: F401
 from dj_ledfx.effects import twin_comets as _twin_comets  # noqa: F401
 from dj_ledfx.effects import vortex as _vortex  # noqa: F401
+from dj_ledfx.effects import wisp as _wisp  # noqa: F401
