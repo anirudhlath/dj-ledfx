@@ -1,10 +1,14 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { LIVE_SPEC } from '../src/design/live-numbers'
 import { LIBRARY } from '../src/looks/looks-render'
 import { KEEP_MOTIFS, open } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in Dallas (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
+
+/** The tempo the mock's `inputs-down` scenario plays (Internal), which the beat thumb's rate is read against. */
+const BPM = 118
 
 /** The library on the mock's `library` scenario (Looks.png's stars, running pills and saved looks). */
 const LIBRARY_PATH = '/next/looks?scenario=library'
@@ -25,6 +29,10 @@ async function axeViolations(page: Page): Promise<string[]> {
 
 /** The library's card for a look, by the id it carries. */
 const cardOf = (page: Page, lookId: string): Locator => page.locator(`article[data-look="${lookId}"]`)
+
+/** Every card's width by its look's id, to a tenth of a pixel: what a column that a long name widened would change. */
+const cardWidths = (page: Page): Promise<Record<string, number>> =>
+  page.locator('article[data-look]').evaluateAll((cards) => Object.fromEntries(cards.map((card) => [card.getAttribute('data-look')!, Math.round(card.getBoundingClientRect().width * 10) / 10])))
 
 /** A card's thumb: the box the pill, the scrim and the motif are drawn in. */
 const thumbOf = (card: Locator): Locator => card.locator('[data-thumb]')
@@ -63,6 +71,8 @@ test.describe('Looks', () => {
   test('moves a beat thumb at the live tempo, with its CSS paused', async ({ page }, info) => {
     test.skip(info.project.name !== 'desktop')
     await open(page, '/next/looks?scenario=inputs-down')
+    // The rate window below is built on this scenario's tempo, so a tempo that moved fails here, by name, and not as a rate that is merely off.
+    await expect(page.getByRole('banner').getByRole('group', { name: 'Tempo' }), `inputs-down no longer plays Internal at ${BPM} BPM, which the rate below assumes`).toContainText(`${BPM}.0`)
     const svg = page.locator('svg.tb[data-beat]').first()
     // The first beat thumb sits at the viewport's bottom edge, and a thumb off screen rests: it must be on screen to be read.
     await svg.scrollIntoViewIfNeeded()
@@ -73,12 +83,13 @@ test.describe('Looks', () => {
     expect(second.times.length, 'a beat motif with no animation checks nothing').toBeGreaterThan(0)
     expect(second.times).toHaveLength(first.times.length)
     // The CSS is paused (Looks.html's keyframes are a stand-in), and the beat clock moves the time: one beat of 118 BPM is
-    // 60 000 / 118 ms, which the motif's one-beat keyframe at 121.8 BPM covers in 60 000 / 121.8, so 118 / 121.8 = 0.969 of the wall clock.
+    // 60 000 / 118 ms, which the motif's one-beat keyframe at LIVE_SPEC.mockBpm (121.8) covers in 60 000 / 121.8, so 118 / 121.8 = 0.969 of the wall clock.
+    const expected = BPM / LIVE_SPEC.mockBpm
     for (const [i, state] of second.states.entries()) {
       expect(state, `animation ${i}`).toBe('paused')
       const rate = (second.times[i] - first.times[i]) / (second.at - first.at)
-      expect(rate, `animation ${i}`).toBeGreaterThan(0.94)
-      expect(rate, `animation ${i}`).toBeLessThan(0.99)
+      expect(rate, `animation ${i}`).toBeGreaterThan(expected - 0.025)
+      expect(rate, `animation ${i}`).toBeLessThan(expected + 0.025)
     }
   })
 
@@ -161,7 +172,7 @@ test.describe('Looks', () => {
         return { own: hit !== null && element.contains(hit), other: hit?.closest('a')?.getAttribute('href') ?? hit?.tagName ?? null }
       })
 
-    test("shows its scrim and white border on hover, and Put on… and Edit take a pointer only under it", async ({ page }) => {
+    test('shows its scrim and white border on hover, and Put on… and Edit take a pointer only under it', async ({ page }) => {
       const card = cardOf(page, LIBRARY.hovered)
       const thumb = thumbOf(card)
       const scrim = scrimOf(card)
@@ -235,11 +246,16 @@ test.describe('Looks', () => {
   })
 
   // §6.4: a name the owner typed can be any length (a saved look's, a zone's). The mock serves the library with two of them made long, and a pill
-  // must keep to its thumb, cut short with an ellipsis, with its dot still its size; the card and the page don't widen.
-  test("keeps a long look name's pill, and a long zone's, inside the thumb", async ({ page }, info) => {
-    test.skip(info.project.name !== 'desktop')
+  // must keep to its thumb, cut short with an ellipsis, with its dot still its size; no card and not the page widen. Both projects run it:
+  // the phone's cards are the narrower, so a pill is cut there first.
+  test("keeps a long look name's pill, and a long zone's, inside the thumb", async ({ page }) => {
     const [runningLook, zoneName] = Object.entries(LIBRARY.running)[0]
     const parent = LIBRARY.mine[0].from
+    // The library as the mock serves it, to measure the cards against once two names are long.
+    await open(page, `${LIBRARY_PATH}&still`)
+    await expect(page.getByRole('heading', { level: 2, name: 'Firmware' })).toBeVisible()
+    const before = await cardWidths(page)
+    expect(Object.keys(before).length, 'the library draws its cards').toBeGreaterThan(20)
     await page.addInitScript(
       ({ parent, zoneName, long }) => {
         // The mock plays in this page (MSW's worker), so a Playwright route can't reach it: the page's own fetch is wrapped instead.
@@ -279,23 +295,28 @@ test.describe('Looks', () => {
         const card = pill.closest('article')!
         const thumb = card.querySelector('[data-thumb]')!.getBoundingClientRect()
         const box = pill.getBoundingClientRect()
+        // The pill is a fixed-height row, so its own box says nothing of a label that wrapped: the label's text is counted by its line boxes instead.
+        const range = document.createRange()
+        range.selectNodeContents(span)
         return {
           inside: box.left >= thumb.left && box.right <= thumb.right && box.top >= thumb.top && box.bottom <= thumb.bottom,
           cut: span.scrollWidth > span.clientWidth && getComputedStyle(span).textOverflow === 'ellipsis',
-          oneLine: box.height === parseFloat(getComputedStyle(pill).height),
+          lines: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
+          hidden: span.scrollHeight - span.clientHeight,
           dot: pill.querySelector('span.rounded-full')?.getBoundingClientRect().width ?? null,
-          cardFits: card.scrollWidth <= card.clientWidth,
+          pillRight: box.right,
+          cardRight: card.getBoundingClientRect().right,
         }
       })
       expect(fit.inside, `${name} is inside its thumb`).toBe(true)
       expect(fit.cut, `${name} is cut short with an ellipsis`).toBe(true)
-      expect(fit.oneLine, `${name} keeps to one line`).toBe(true)
-      expect(fit.cardFits, `${name}'s card doesn't widen`).toBe(true)
+      expect(fit.lines, `${name}'s label keeps to one line`).toBe(1)
+      expect(fit.hidden, `${name}'s label has no second line hidden below it`).toBeLessThanOrEqual(0)
+      expect(fit.pillRight, `${name} stays inside its card's right edge`).toBeLessThanOrEqual(fit.cardRight)
       if (fit.dot !== null) expect(fit.dot, `${name}'s dot keeps its size`).toBe(shortDot)
     }
-    // The page doesn't scroll sideways for any of it, and the cards still line up in their columns.
+    // The page doesn't scroll sideways for any of it, and every card is the width it was with the names as the mock serves them.
     expect(await page.locator('main').evaluate((main) => main.scrollWidth - main.clientWidth)).toBeLessThanOrEqual(0)
-    const widths = await page.locator('article[data-look]').evaluateAll((cards) => new Set(cards.map((card) => Math.round(card.getBoundingClientRect().width))).size)
-    expect(widths, 'every card is as wide as its neighbours').toBeLessThanOrEqual(2)
+    expect(await cardWidths(page), 'no card is wider or narrower than it was').toEqual(before)
   })
 })

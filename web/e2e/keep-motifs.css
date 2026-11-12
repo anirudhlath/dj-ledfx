@@ -1,8 +1,12 @@
 /*
  * What a screenshot of the looks' motifs adds (KEEP_MOTIFS in helpers.ts): the app's own CSS animations stand still and its transitions
  * are over, so that 'allow' leaves nothing to land at a moment of its own. The motifs aren't named here: ?still holds them paused.
+ *
+ * The two animations are named, the live dot's pulse (animate-[livedot_…]) and a spinner (animate-[spin_…]), and not every `animate-*`
+ * class: an animation a later element adds is not stopped here, so it shows up as a baseline that won't hold still.
  */
-[class*='animate-'] {
+[class*='animate-[livedot'],
+[class*='animate-[spin'] {
   animation: none !important;
 }
 *,
