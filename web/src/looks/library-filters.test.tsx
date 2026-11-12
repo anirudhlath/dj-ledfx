@@ -75,6 +75,15 @@ describe('LibraryFilters (§8.4)', () => {
     expect(onQuery).toHaveBeenLastCalledWith('')
   })
 
+  // As the composer's search does (`query.trim() !== ''`): a box holding only spaces has nothing to clear, so its Esc is the page's.
+  it('leaves Esc to the page while the search holds only spaces', () => {
+    const { onQuery } = renderBar({ query: '  ' })
+    const box = screen.getByRole('searchbox', { name: 'Search looks' })
+    expect(fireEvent.keyDown(box, { key: 'Escape' })).toBe(true)
+    expect(onQuery).not.toHaveBeenCalled()
+    expect(box).toHaveValue('  ')
+  })
+
   it('shows the search it is given', () => {
     renderBar({ query: 'drop' })
     expect(screen.getByRole('searchbox', { name: 'Search looks' })).toHaveValue('drop')
@@ -143,5 +152,25 @@ describe('LibraryFilters (§8.4)', () => {
     expect(bar).toHaveClass('flex-wrap')
     expect(left).toHaveClass('flex-wrap', 'max-md:w-full')
     expect(search).toHaveClass('max-md:w-full')
+  })
+
+  // The tab row is what puts eight tabs on two rows at 358 px, and the phone's §6 44 px minimum rides on `touch-target` on each control.
+  it("wraps the tab row and gives each of the phone's controls a 44 px target", () => {
+    renderBar()
+    const group = screen.getByRole('group', { name: 'Categories' })
+    expect(group).toHaveClass('flex-wrap')
+    const tabs = within(group).getAllByRole('button')
+    expect(tabs).toHaveLength(LIBRARY_TABS.length)
+    for (const tab of tabs) expect(tab).toHaveClass('max-md:touch-target')
+    expect(screen.getByRole('searchbox', { name: 'Search looks' }).closest('label')).toHaveClass('max-md:touch-target')
+    expect(screen.getByRole('switch', { name: 'Only ready now' })).toHaveClass('max-md:touch-target')
+  })
+
+  // CLAUDE.md: an sr-only element inside a scroller needs a positioned parent, and the label's `max-md:touch-target` positions it on the phone alone.
+  it('positions the search label at every width, for its sr-only name', () => {
+    renderBar()
+    const label = screen.getByRole('searchbox', { name: 'Search looks' }).closest('label')!
+    expect(label).toHaveClass('relative')
+    expect(within(label).getByText('Search looks')).toHaveClass('sr-only')
   })
 })

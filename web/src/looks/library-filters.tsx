@@ -26,8 +26,9 @@ export function LibraryFilters({ tab, counts, query, readyOnly, onTab, onQuery, 
       <div className="flex flex-wrap items-center gap-3 max-md:w-full">
         {/* The composer's search face: the whole of it is the input's label, so a click on its icon or its padding focuses the input too,
             and its ring is the label's, as the input draws none. The render's box is 280 by 36 with its border inside (`box-sizing`
-            is border-box here, as it is in Looks.html's search). max-md:touch-target grows it to the touch minimum. */}
-        <label className="flex h-9 w-70 cursor-text items-center gap-2 rounded-control border border-line bg-control px-3 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-text max-md:w-full max-md:touch-target">
+            is border-box here, as it is in Looks.html's search). `relative` at every width is the positioned parent the sr-only name needs
+            inside <main>'s scroller (max-md:touch-target sets it on the phone alone), which also grows the box to the touch minimum. */}
+        <label className="relative flex h-9 w-70 cursor-text items-center gap-2 rounded-control border border-line bg-control px-3 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-text max-md:w-full max-md:touch-target">
           <Icon name="search" size={15} className="text-text-3" />
           <span className="sr-only">Search looks</span>
           <input
@@ -37,8 +38,9 @@ export function LibraryFilters({ tab, counts, query, readyOnly, onTab, onQuery, 
             className="min-w-0 grow bg-transparent text-size-control text-text outline-none placeholder:text-text-3 [&::-webkit-search-cancel-button]:appearance-none"
             onChange={(event) => onQuery(event.target.value)}
             onKeyDown={(event) => {
-              // A search's Esc clears it first, and the page's Esc leaves a key handled alone.
-              if (event.key !== 'Escape' || query === '') return
+              // A search's Esc clears it first, and the page's Esc leaves a key handled alone: a box of spaces has nothing to clear (the
+              // composer's `searching` is `query.trim() !== ''` too).
+              if (event.key !== 'Escape' || query.trim() === '') return
               event.preventDefault()
               onQuery('')
             }}
