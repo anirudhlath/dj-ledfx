@@ -100,3 +100,13 @@
     opacity: 0.35;
   }
 }
+
+/*
+ * §5.4 LookThumb: a motif rests paused, and the thumb writer (F5 ruling 6) lets it run only while it is
+ * on screen, by taking `data-paused` off. `!important` is what makes this work: each motif's inline
+ * `animation:` shorthand resets `animation-play-state` to running, and an inline style beats a rule that
+ * isn't important, so without it no thumb would ever pause.
+ */
+.tb[data-paused] * {
+  animation-play-state: paused !important;
+}

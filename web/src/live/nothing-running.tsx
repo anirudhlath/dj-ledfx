@@ -1,6 +1,7 @@
 // §9.4 Nothing running (State-Nothing-Running): the lights as they were, and "Start again", recent looks
 // with one-tap play (`GET /api/running/recent`, newest stop first: F3 decision 35). The thumbnail is a
-// plain tile until F5 ports LookThumb's motifs (F3 decision 27, F4 ruling 7).
+// plain tile, not a LookThumb: its box is no ThumbSize's (a tile's, a row's or a card's), so it draws no
+// motif (F3 decision 27, F4 ruling 7).
 import { useQuery } from '@tanstack/react-query'
 import { failureText, startAgain } from '@/api/actions'
 import type { RecentLook } from '@/api/contract'
