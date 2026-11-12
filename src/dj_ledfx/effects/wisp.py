@@ -108,7 +108,7 @@ class Wisp(ParamParticles):
         if len(rooms) < 2:
             return tour(self._seed, wisp, visits, ground.lamps.count)
         in_room = tour(self._seed, wisp, visits, len(rooms))  # an index into `rooms`
-        lamps = many[in_room]
-        which = np.minimum((pick * lamps).astype(np.intp), lamps - 1)
+        per_room = many[in_room]  # how many lamps the room of each visit has
+        which = np.minimum((pick * per_room).astype(np.intp), per_room - 1)
         stops: NDArray[np.intp] = by_room[first[in_room] + which]
         return stops

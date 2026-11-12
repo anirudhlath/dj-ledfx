@@ -100,12 +100,20 @@ def test_a_wisp_rests_on_a_lamps_led_then_moves_to_another_room(leds: LedSet) ->
     assert set(rooms) == set(range(int(leds.room.max()) + 1))  # every room, in time
 
 
-def test_every_wisp_rests_on_an_led_of_its_own_in_turn() -> None:
-    by_wisp = _rests(TWO_ROOMS, range(100, 112), count=3)
+@pytest.mark.parametrize("leds", [TWO_ROOMS, THREE_ROOMS], ids=["two rooms", "three rooms"])
+def test_every_wisp_rests_on_an_led_and_moves_to_another_room_in_turn(leds: LedSet) -> None:
+    by_wisp = _rests(leds, range(100, 112), count=3)
 
     for rests in by_wisp:
-        rooms = [int(TWO_ROOMS.room[led]) for led in rests]
+        rooms = [int(leds.room[led]) for led in rests]
         assert all(a != b for a, b in zip(rooms, rooms[1:], strict=False))
+
+
+def test_each_wisp_tours_the_rooms_in_an_order_of_its_own() -> None:
+    by_wisp = _rests(THREE_ROOMS, range(100, 136), count=3)  # each at the same step of its own
+
+    orders = {tuple(int(THREE_ROOMS.room[led]) for led in rests) for rests in by_wisp}
+    assert len(orders) == 3  # on one tour (one key) they would all be in the same room each step
 
 
 @pytest.mark.parametrize("rooms", [ONE_ROOM, NO_ROOMS], ids=["one room", "no rooms"])
@@ -139,10 +147,15 @@ def test_a_lamp_in_no_room_is_never_a_stop_while_the_map_has_rooms() -> None:
 
 
 def test_a_wisp_picks_its_lamp_in_each_room_and_its_led_on_it_from_draws() -> None:
-    [rests] = _rests(TWO_ROOMS, range(100, 140))
+    [rests] = _rests(TWO_ROOMS, range(100, 160))
 
     assert {led // 14 for led in rests} == {0, 1, 2, 3}  # both lamps of each room
     assert len(set(rests)) > 10  # and a different LED of a lamp each visit
+    for lamp in range(4):
+        # Its LED is a draw of its own, not the lamp's: from the lamp's draw the first lamp of a
+        # room would be reached only along its lower half and the second only along its upper.
+        leds_of_lamp = [led % 14 for led in rests if led // 14 == lamp]
+        assert min(leds_of_lamp) < 7 <= max(leds_of_lamp)
 
 
 def test_each_lamp_glows_only_while_a_wisp_is_near() -> None:
@@ -166,22 +179,27 @@ def test_each_lamp_glows_only_while_a_wisp_is_near() -> None:
 
 
 def test_wisps_set_off_apart() -> None:
+    frame = 1 / 30
     for count in (2, 3, 4):
         wisps = _wisps(count=count, hold_s=HOLD, move_s=MOVE)
         starts = np.zeros(count, dtype=np.int64)
+        set_off: list[float] = []  # the moment each wisp set off, whichever it was
         last = was_moving = None
-        for t in np.arange(700.0, 700.0 + 3 * STEP, 1 / 30):  # three steps of each wisp
+        for t in np.arange(700.0, 700.0 + 3 * STEP, frame):  # three steps of each wisp
             drawn(wisps, render_ctx(t=float(t)), TWO_ROOMS)
             pos = wisps.particles.pos.copy()
             if last is not None:
                 moving = (pos != last).any(axis=1)
                 if was_moving is not None:
                     setting_off = moving & ~was_moving  # at rest in the last frame, gliding now
-                    assert setting_off.sum() <= 1  # never two in one frame
+                    set_off += [float(t)] * int(setting_off.sum())
                     starts += setting_off
                 was_moving = moving
             last = pos
         assert (starts >= 2).all()  # each wisp set off at least twice
+        # In even shares of a step apart: a step over `count` between one set-off and the next,
+        # give or take the frame each is seen in. It is never two in one frame.
+        np.testing.assert_allclose(np.diff(set_off), STEP / count, atol=frame)
 
 
 def test_a_wisp_rests_for_hold_s_and_glides_for_move_s() -> None:
