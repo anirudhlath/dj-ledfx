@@ -6,6 +6,7 @@ import type { Look } from '@/api/contract'
 import { beatClock, resetDataLayer } from '@/api/live'
 import { queries, queryClient } from '@/api/queries'
 import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
+import { stubAnimations } from '@/test/animations'
 import { intersect } from '@/test/intersection'
 import { seedLive } from '@/test/live'
 import { seedRest } from '@/test/rest'
@@ -16,12 +17,8 @@ import { MOTIFS } from './looks-render'
 const wrap = (ui: ReactElement) => <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
 const renderThumb = (lookId: string, size: ThumbSize, live?: boolean) => render(wrap(<LookThumb lookId={lookId} size={size} live={live} />))
 
-/** A thumb's two animations, stubbed on its svg (jsdom has none): the same objects on every call, as a browser's. */
-function stubAnimations(svg: Element): { currentTime: number | null }[] {
-  const animations: { currentTime: number | null }[] = [{ currentTime: null }, { currentTime: null }]
-  svg.getAnimations = () => animations as unknown as Animation[]
-  return animations
-}
+/** The fake timers' animation frame. */
+const FRAME_MS = 16
 const markupChildren = (markup: string) =>
   new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${markup}</svg>`, 'image/svg+xml').documentElement.childElementCount
 
@@ -178,6 +175,64 @@ describe('LookThumb (§6.4)', () => {
         // Each condition alone: the page as a new one finds it, ?still's hold let go.
         setReducedMotion(false)
         resetDataLayer()
+      }
+    })
+
+    // A thumb given another look of the same kind gets a new svg, which the writer seeks afresh.
+    it('seeks the new motif when a mounted beat thumb is given another beat look', () => {
+      vi.useFakeTimers()
+      seedRest('hero')
+      seedLive('hero')
+      const { container, rerender } = render(wrap(<LookThumb lookId="shockwave" size="card" />))
+      const before = container.querySelector('svg.tb')!
+      const old = stubAnimations(before)
+      act(() => intersect(before, true))
+      vi.advanceTimersByTime(20)
+      rerender(wrap(<LookThumb lookId="vortex" size="card" />))
+      expect(container.querySelector('[data-thumb]')).toHaveAttribute('data-thumb', 'vortex')
+      const after = container.querySelector('svg.tb')!
+      const animations = stubAnimations(after)
+      act(() => intersect(after, true))
+      vi.advanceTimersByTime(FRAME_MS)
+      for (const animation of animations) expect(animation.currentTime).toBeGreaterThan(0)
+      // The old motif's animations are left where they were.
+      const left = old.map((animation) => animation.currentTime)
+      vi.advanceTimersByTime(FRAME_MS)
+      expect(old.map((animation) => animation.currentTime)).toEqual(left)
+    })
+
+    // F5 decision 8, and the controller's ruling: `live` turning false shows the frame ?still shows, a motif that never moved.
+    it('draws the frame ?still draws once live turns false on a mounted thumb', () => {
+      vi.useFakeTimers()
+      seedRest('hero')
+      seedLive('hero')
+      const thumbs = (live: boolean) =>
+        wrap(
+          <>
+            <LookThumb lookId="aurora" size="card" live={live} />
+            <LookThumb lookId="shockwave" size="card" live={live} />
+          </>,
+        )
+      const { container, rerender } = render(thumbs(true))
+      const moving = [...container.querySelectorAll('svg.tb')]
+      const seeked = moving.map(stubAnimations)
+      act(() => moving.forEach((svg) => intersect(svg, true)))
+      vi.advanceTimersByTime(20)
+      expect(moving[0]).not.toHaveAttribute('data-paused')
+      expect(seeked[1][0].currentTime).toBeGreaterThan(0)
+
+      rerender(thumbs(false))
+      const resting = [...container.querySelectorAll('svg.tb')]
+      // ?still's frame is a thumb drawn and never moved: a new svg, paused, that nothing runs or seeks.
+      for (const [index, svg] of resting.entries()) {
+        expect(svg).not.toBe(moving[index])
+        expect(moving[index].isConnected).toBe(false)
+        expect(svg).toHaveAttribute('data-paused')
+        const animations = stubAnimations(svg)
+        act(() => intersect(svg, true))
+        vi.advanceTimersByTime(500)
+        expect(svg).toHaveAttribute('data-paused')
+        expect(animations.map((animation) => animation.currentTime)).toEqual([null, null])
       }
     })
 

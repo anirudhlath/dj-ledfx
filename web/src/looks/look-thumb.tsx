@@ -3,7 +3,7 @@
 // alone, the ground every render draws one on (F4 ruling 7, F5 decision 7). A motif is drawn paused
 // (`data-paused`, styles/app.css), at the moment its author drew it, and moves only while it's on screen
 // (use-thumb-motion.ts): an ambient motif runs its loop, a tempo or audio one follows the beat clock
-// (thumb-writer.ts). `live` is §6.4's interface: false keeps it at its authored moment.
+// (thumb-writer.ts). `live` is §6.4's interface: false keeps it at its authored moment, the frame ?still draws.
 import { useQuery } from '@tanstack/react-query'
 import { type CSSProperties, type ReactNode, useId, useRef } from 'react'
 import type { Id } from '@/api/contract'
@@ -11,7 +11,7 @@ import { queries } from '@/api/queries'
 import { cx } from '@/design/cx'
 import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import './looks-render.css'
-import { instanceMarkup, motifFor } from './motif'
+import { instanceMarkup, motifFor, type Motif } from './motif'
 import { useThumbMotion } from './use-thumb-motion'
 
 /**
@@ -45,8 +45,6 @@ export interface LookThumbProps {
 export function LookThumb({ lookId, size, className, children, live = true }: LookThumbProps) {
   const thumbnail = useQuery(queries.looks()).data?.find((look) => look.id === lookId)?.thumbnail
   const motif = motifFor(thumbnail)
-  const svg = useRef<SVGSVGElement>(null)
-  useThumbMotion(svg, motif?.beat, live)
   // Looks.html numbers its motifs' ids `lk<n>`; each thumb here has its own prefix (F5 decision 3).
   const prefix = `tb${useId().replace(/[^\w-]/g, '')}`
   const box = BOX[size]
@@ -59,19 +57,30 @@ export function LookThumb({ lookId, size, className, children, live = true }: Lo
       style={{ ...box.style, background }}
     >
       {motif && (
-        <svg
-          ref={svg}
-          className="tb absolute inset-0 block size-full"
-          data-paused=""
-          data-beat={motif.beat ? '' : undefined}
-          viewBox={`0 0 ${width} ${height}`}
-          preserveAspectRatio="xMidYMid slice"
-          aria-hidden="true"
-          focusable="false"
-          dangerouslySetInnerHTML={{ __html: instanceMarkup(motif, prefix) }}
-        />
+        // A new motif is a new svg, which its motion watches afresh. So is `live` turning false: a motif drawn
+        // and never moved, the frame ?still draws (F5 decisions 6 and 8).
+        <MotifSvg key={`${thumbnail}:${live}`} motif={motif} prefix={prefix} live={live} />
       )}
       {children}
     </span>
+  )
+}
+
+/** A thumb's motif, which moves while it's on screen (use-thumb-motion.ts). */
+function MotifSvg({ motif, prefix, live }: { motif: Motif; prefix: string; live: boolean }) {
+  const svg = useRef<SVGSVGElement>(null)
+  useThumbMotion(svg, motif.beat, live)
+  return (
+    <svg
+      ref={svg}
+      className="tb absolute inset-0 block size-full"
+      data-paused=""
+      data-beat={motif.beat ? '' : undefined}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden="true"
+      focusable="false"
+      dangerouslySetInnerHTML={{ __html: instanceMarkup(motif, prefix) }}
+    />
   )
 }

@@ -49,7 +49,9 @@ function draw(): void {
   else if (fresh && lastFresh) tau += nearWay(place - last)
   last = place
   lastFresh = fresh
-  const ms = beatMs(tau)
+  // A clock stepped back early in a run can take τ below 0, where every keyframe is in its before phase and
+  // the motif would draw blank: it holds at its start instead, until τ is back past 0.
+  const ms = beatMs(Math.max(0, tau))
   for (const seeked of beatThumbs.values()) {
     if (seeked.written === ms) continue
     seeked.written = ms

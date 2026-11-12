@@ -3,6 +3,7 @@ import { clientNow, type Beat } from '@/api/beat'
 import { beatClock } from '@/api/live'
 import { liveStore } from '@/api/live-store'
 import { LIVE_SPEC } from '@/design/live-numbers'
+import { stubAnimations } from '@/test/animations'
 import { seedLive } from '@/test/live'
 import { beatMs, registerThumb } from './thumb-writer'
 
@@ -15,9 +16,7 @@ function thumbSvg(beat: boolean): SVGSVGElement {
   svg.classList.add('tb')
   svg.setAttribute('data-paused', '')
   if (beat) svg.setAttribute('data-beat', '')
-  // The same objects on every call, as a browser hands back the same animations.
-  const animations: { currentTime: number | null }[] = [{ currentTime: null }, { currentTime: null }]
-  svg.getAnimations = () => animations as unknown as Animation[]
+  stubAnimations(svg)
   return svg
 }
 const beatSvg = () => thumbSvg(true)
@@ -32,6 +31,19 @@ function hear(beat: Beat): void {
   beatClock.receive(beat, null)
 }
 const heroBeat = () => liveStore.getState().beat!
+
+/** The clock's place now, in beats from bar 1's downbeat. */
+function position(): number {
+  const { bar, barPhase } = beatClock.sample(clientNow())
+  return ((bar ?? 1) - 1) * 4 + barPhase * 4
+}
+
+/** The hero's beat, heard now `beats` from bar 1's downbeat. */
+function heardAt(beats: number): void {
+  const bar = Math.floor(beats / 4) + 1
+  const within = beats - (bar - 1) * 4
+  hear({ ...heroBeat(), bar, barPhase: within / 4, beatPhase: within % 1, beatInBar: Math.floor(within) + 1, receivedAt: clientNow() })
+}
 
 const registered: (() => void)[] = []
 const register = (...args: Parameters<typeof registerThumb>) => {
@@ -60,7 +72,7 @@ describe('the thumb writer (§5.4, F5 decisions 4 to 6)', () => {
     expect(sample).toHaveBeenCalledTimes(1)
     const place = sample.mock.results[0].value.barPhase * 4
     expect(place).toBeGreaterThanOrEqual(1.25)
-    expect(place - 1.25).toBeLessThan((20 * LIVE_SPEC.mockBpm) / 60_000)
+    expect(place - 1.25).toBeLessThan((20 * heroBeat().bpm) / 60_000)
     for (const animation of svg.getAnimations({ subtree: true })) expect(animation.currentTime).toBeCloseTo(beatMs(place), 6)
     expect(svg).toHaveAttribute('data-paused')
   })
@@ -79,6 +91,11 @@ describe('the thumb writer (§5.4, F5 decisions 4 to 6)', () => {
   // Review Focus 5.
   it('holds a beat thumb while the beat stops or goes stale, and goes on from there', () => {
     seedLive('hero')
+    // A tempo that isn't the render's, so the motif's time is the clock's beats converted, not the clock's time.
+    const tempo = LIVE_SPEC.mockBpm * 1.25
+    hear({ ...heroBeat(), bpm: tempo, receivedAt: clientNow() })
+    /** The motif's time over `ms` of the clock running: its beats, at Looks.html's one beat at mockBpm. */
+    const moved = (ms: number) => (ms * tempo) / LIVE_SPEC.mockBpm
     const svg = beatSvg()
     register({ svg, beat: true })
     // On a frame from here: each advance below ends on one.
@@ -94,8 +111,8 @@ describe('the thumb writer (§5.4, F5 decisions 4 to 6)', () => {
     vi.advanceTimersByTime(FRAME_MS)
     expect(current(svg)).toBeCloseTo(stopped, 6)
     vi.advanceTimersByTime(63 * FRAME_MS)
-    // At the render's tempo, a beat in the clock is a beat in the motif: it moved as long as the clock ran.
-    expect(current(svg) - stopped).toBeCloseTo(63 * FRAME_MS, 2)
+    // A beat in the clock is a beat in the motif: it moved as many beats as the clock ran.
+    expect(current(svg) - stopped).toBeCloseTo(moved(63 * FRAME_MS), 2)
 
     // Stale: the live store says so, whatever the clock does.
     liveStore.setState({ beat: { ...heroBeat(), stale: true } })
@@ -106,7 +123,28 @@ describe('the thumb writer (§5.4, F5 decisions 4 to 6)', () => {
     vi.advanceTimersByTime(FRAME_MS)
     expect(current(svg)).toBeCloseTo(stale, 6)
     vi.advanceTimersByTime(63 * FRAME_MS)
-    expect(current(svg) - stale).toBeCloseTo(63 * FRAME_MS, 2)
+    expect(current(svg) - stale).toBeCloseTo(moved(63 * FRAME_MS), 2)
+  })
+
+  // Before 0, every keyframe of a motif is in its before phase, and the motif would draw blank.
+  it('never seeks a beat thumb below 0 when the clock steps back early in a run, and goes on from 0', () => {
+    seedLive('hero')
+    // A twentieth of a beat into bar 42, so the run starts just past a downbeat.
+    heardAt(41 * 4 + 0.05)
+    const svg = beatSvg()
+    register({ svg, beat: true })
+    vi.advanceTimersByTime(FRAME_MS)
+    expect(current(svg)).toBeGreaterThan(0)
+    // Half a beat back, into bar 41: τ, under a tenth of a beat, would go below 0.
+    heardAt(position() - 0.5)
+    vi.advanceTimersByTime(FRAME_MS)
+    expect(times(svg)).toEqual([0, 0])
+    for (let frame = 0; frame < 25; frame++) {
+      vi.advanceTimersByTime(FRAME_MS)
+      expect(current(svg)).toBeGreaterThanOrEqual(0)
+    }
+    // 400 ms at the hero's 121.8 BPM is about 0.8 beats, past the 0.4 τ fell below 0.
+    expect(current(svg)).toBeGreaterThan(0)
   })
 
   it('lets an ambient thumb run while it is registered, and pauses it again when it goes', () => {
