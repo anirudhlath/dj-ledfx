@@ -150,6 +150,44 @@ describe('LookThumb (§6.4)', () => {
       expect(svg).toHaveAttribute('data-paused')
     })
 
+    // A report already queued when the thumb unmounts can still reach its callback after disconnect().
+    it('ignores a visibility report that comes after it unmounts', () => {
+      vi.useFakeTimers()
+      seedRest('hero')
+      seedLive('hero')
+      const callbacks: IntersectionObserverCallback[] = []
+      const Observer = window.IntersectionObserver
+      vi.stubGlobal(
+        'IntersectionObserver',
+        class extends Observer {
+          constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+            super(callback, options)
+            callbacks.push(callback)
+          }
+        },
+      )
+      const { container, unmount } = render(
+        wrap(
+          <>
+            <LookThumb lookId="aurora" size="card" />
+            <LookThumb lookId="shockwave" size="card" />
+          </>,
+        ),
+      )
+      const [ambient, beat] = [...container.querySelectorAll('svg.tb')]
+      const animations = stubAnimations(beat)
+      expect(callbacks).toHaveLength(2)
+      unmount()
+      const frame = vi.spyOn(window, 'requestAnimationFrame')
+      const late = (target: Element) => [{ target, isIntersecting: true, intersectionRatio: 1 } as unknown as IntersectionObserverEntry]
+      callbacks.forEach((callback, index) => callback(late([ambient, beat][index]), {} as IntersectionObserver))
+      vi.advanceTimersByTime(100)
+      // The writer is untouched: the ambient motif stays paused, and nothing asks for frames or seeks the beat one.
+      expect(ambient).toHaveAttribute('data-paused')
+      expect(frame).not.toHaveBeenCalled()
+      expect(animations.map((animation) => animation.currentTime)).toEqual([null, null])
+    })
+
     it('keeps every thumb still under reduced motion, with the beat held (?still), and with live={false}', () => {
       const still = [
         { why: 'reduced motion', set: () => setReducedMotion(true), live: true },

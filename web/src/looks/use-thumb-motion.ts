@@ -13,7 +13,10 @@ export function useThumbMotion(svg: RefObject<SVGSVGElement | null>, beat: boole
     const element = svg.current
     if (element === null || beat === undefined || !live || reducedMotion || beatClock.held) return
     let stop: (() => void) | null = null
+    let disposed = false
     const observer = new IntersectionObserver((entries) => {
+      // A report already queued when the effect cleaned up can still arrive after disconnect().
+      if (disposed) return
       // The newest entry is where the svg is now.
       const onScreen = entries.at(-1)?.isIntersecting ?? false
       if (onScreen && stop === null) stop = registerThumb({ svg: element, beat })
@@ -24,6 +27,7 @@ export function useThumbMotion(svg: RefObject<SVGSVGElement | null>, beat: boole
     })
     observer.observe(element)
     return () => {
+      disposed = true
       observer.disconnect()
       stop?.()
     }
