@@ -291,6 +291,22 @@ describe('setStarred', () => {
       expect(cached(ID)).toEqual(before)
     })
 
+    it('puts each cache back from its own look when the two differ', async () => {
+      seedRest('library')
+      const listed = cached(ID)
+      const own = { ...listed, description: 'as the editor read it' }
+      queryClient.setQueryData(queries.look(ID).queryKey, own)
+      const answer = deferred<Look>()
+      vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+      const done = setStarred(ID, true)
+      expect(cached(ID)).toEqual({ ...listed, starred: true })
+      expect(detail(ID)).toEqual({ ...own, starred: true })
+      answer.reject(new ApiError(500, 'Internal Server Error', `/api/looks/${ID}/starred`))
+      await expect(done).rejects.toBeInstanceOf(ApiError)
+      expect(cached(ID)).toEqual(listed)
+      expect(detail(ID)).toEqual(own)
+    })
+
     it('leaves the entries of other looks alone, and makes none for a look nobody has read', async () => {
       seedRest('library')
       const other = cached('rain')

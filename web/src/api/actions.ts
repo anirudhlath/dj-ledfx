@@ -103,15 +103,22 @@ export function retryLink(): void {
   liveClient()?.retryNow()
 }
 
+/** A look as each cache holds it: the library's list and the look's own entry (the editor's); undefined where a cache doesn't hold it. */
+interface Cached {
+  listed: Look | undefined
+  own: Look | undefined
+}
+
 /**
- * A look's star requests: how many have been made (the latest wins), how many wait for an answer, the look a failure puts back, which is
- * the server's (the look as it stood before the first request now waiting, or what an earlier answer has served since), and whether the
- * latest request failed and its put-back is what the cache shows: an earlier request's answer after that is the server's word, and lands.
+ * A look's star requests: how many have been made (the latest wins), how many wait for an answer, the look a failure puts back in each
+ * cache, which is the server's (the look as that cache held it before the first request now waiting, or what an earlier answer has served
+ * since), and whether the latest request failed and its put-back is what the caches show: an earlier request's answer after that is the
+ * server's word, and lands.
  */
 interface StarRequests {
   made: number
   waiting: number
-  settled: Look | undefined
+  settled: Cached
   putBack: boolean
 }
 
@@ -119,17 +126,29 @@ interface StarRequests {
 const starRequests = new Map<Id, StarRequests>()
 
 /**
- * A look in the `looks` cache and in its own `['looks', id]` entry (the editor's), replaced by what `change` makes of it in each. A cache
- * nobody has read has nothing to change, and is left alone: an updater that answers undefined makes no entry.
+ * A look in the `looks` cache, replaced by what `change` makes of it; a cache nobody has read has nothing to change, and is left alone.
+ * The look's own entry is `changeOwnLook`'s: an updater that answers undefined makes no entry.
  */
-function changeCachedLook(lookId: Id, change: (look: Look) => Look): void {
+function changeListedLook(lookId: Id, change: (look: Look) => Look): void {
   queryClient.setQueryData(queries.looks().queryKey, (looks) => looks?.map((look) => (look.id === lookId ? change(look) : look)))
+}
+
+/** A look's own `['looks', id]` entry (the editor's), replaced by what `change` makes of it, if anybody has read it. */
+function changeOwnLook(lookId: Id, change: (look: Look) => Look): void {
   queryClient.setQueryData(queries.look(lookId).queryKey, (look) => look && change(look))
 }
 
-/** The look as the caches hold it, the list's first, else its own entry's. */
-const cachedLook = (lookId: Id): Look | undefined =>
-  queryClient.getQueryData(queries.looks().queryKey)?.find((look) => look.id === lookId) ?? queryClient.getQueryData(queries.look(lookId).queryKey)
+/** A look in each cache, replaced by what `change` makes of it. */
+function changeCachedLook(lookId: Id, change: (look: Look) => Look): void {
+  changeListedLook(lookId, change)
+  changeOwnLook(lookId, change)
+}
+
+/** The look as each cache holds it now. */
+const cachedLook = (lookId: Id): Cached => ({
+  listed: queryClient.getQueryData(queries.looks().queryKey)?.find((look) => look.id === lookId),
+  own: queryClient.getQueryData(queries.look(lookId).queryKey),
+})
 
 /**
  * §8.4's star, F5 ruling 16: the card shows the choice at once, then the server's look. The latest choice for a look wins: an earlier
@@ -138,7 +157,7 @@ const cachedLook = (lookId: Id): Look | undefined =>
  * answered after that put-back shows its answer, since the server holds it.
  */
 export async function setStarred(lookId: Id, starred: boolean): Promise<void> {
-  const requests = starRequests.get(lookId) ?? { made: 0, waiting: 0, settled: undefined, putBack: false }
+  const requests = starRequests.get(lookId) ?? { made: 0, waiting: 0, settled: { listed: undefined, own: undefined }, putBack: false }
   starRequests.set(lookId, requests)
   const request = ++requests.made
   requests.putBack = false
@@ -147,12 +166,14 @@ export async function setStarred(lookId: Id, starred: boolean): Promise<void> {
   changeCachedLook(lookId, (look) => ({ ...look, starred }))
   try {
     const served = await api.setStarred(lookId, starred)
-    requests.settled = served
+    requests.settled = { listed: served, own: served }
     if (request === requests.made || requests.putBack) changeCachedLook(lookId, () => served)
   } catch (error) {
     const { settled } = requests
-    if (request === requests.made && settled !== undefined) {
-      changeCachedLook(lookId, () => settled)
+    if (request === requests.made && (settled.listed !== undefined || settled.own !== undefined)) {
+      // Each cache gets back the look it held, which need not be the other's.
+      changeListedLook(lookId, (look) => settled.listed ?? look)
+      changeOwnLook(lookId, (look) => settled.own ?? look)
       requests.putBack = true
     }
     throw error
