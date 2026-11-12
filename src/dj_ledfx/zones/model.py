@@ -152,6 +152,16 @@ class TransitionSwitched:
 
 
 @dataclass(frozen=True, slots=True)
+class ClaimsChanged:
+    """A running zone's state changed while some of its lights aren't as its look now runs
+    them: above all a look that stopped waiting for the sun, which claims its firmware
+    layers' lights, or started, which gives them back. main runs ZoneManager.resync() for
+    the zone."""
+
+    zone_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class PreviewOnlyChanged:
     on: bool
 

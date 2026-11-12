@@ -8,17 +8,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import FakeLight, span
+from conftest import FakeLight, events, span
 from runtime_fakes import FADE, TILE
+from sun_fakes import AT_DUSK, FixedSun
 from zone_home import BREATHE_AND_GLOW, GLOW, FakeHome, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.model import Look, LookModifiers, Transition
+from dj_ledfx.main import _resync_on_claims
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.model import (
     HOME_ZONE_ID,
+    ClaimsChanged,
+    LightsChanged,
     TakeOver,
     ZoneError,
     ZoneNotFoundError,
@@ -476,6 +480,97 @@ async def test_running_zones_follow_the_managers_evening(make_home: HomeFactory)
     home.host.runtimes["z"].tick(1000.0)
 
     assert asked
+
+
+# M6 ruling 4: the zone manager's sun reaches every runtime it makes, a preview's and a
+# resumed zone's too, so a look that needs the sun runs while there is one.
+async def test_the_zone_manager_hands_its_runtimes_and_previews_the_sun(
+    make_home: HomeFactory,
+) -> None:
+    sun = FixedSun(AT_DUSK)
+    home = await make_home([FakeLight("lamp", caps=LAMP)], [zone_record("z", "lamp")], sun=sun)
+    look = replace(home.look("classic-breathe"), needs=("sun",))
+
+    await home.manager.start("z", look)
+    preview = home.manager.start_preview("z", look, lambda: None)
+
+    assert (home.host.runtimes["z"].state, preview.state) == ("running", "running")
+    resumed = await home.restart()  # the test home keeps its sun across a restart
+    assert resumed.host.runtimes["z"].state == "running"
+    sun.point = None
+    assert home.manager.start_preview("z", look, lambda: None).waiting_for == ("sun",)
+
+
+# M6 scan 2: a look that waits claims no light for its firmware layers, so its lights
+# stream its dark. When the sun arrives after the first tick, the tick claims the tile for
+# the firmware layer and the manager starts it there (main runs resync() for the event);
+# when the sun goes, the tile leaves its effect and streams the dark again.
+async def test_a_sun_arriving_after_the_first_tick_starts_the_firmware_layers(
+    make_home: HomeFactory,
+) -> None:
+    tile, lamp = FakeLight("tile", caps=TILE), FakeLight("lamp", caps=LAMP)
+    sun = FixedSun(None)
+    home = await make_home([tile, lamp], [zone_record("z", "tile", "lamp")], sun=sun)
+    await home.manager.start("z", replace(BREATHE_AND_GLOW, needs=("sun",)))
+    runtime = home.host.runtimes["z"]
+    runtime.tick(1000.0)
+    assert home.manager.light_mode("tile") == "streaming" and "firmware" not in tile.names()
+    claims = events(home.bus, ClaimsChanged)
+    lamp_calls = len(lamp.calls)
+
+    sun.point = AT_DUSK
+    runtime.tick(1000.0 + 1 / 60)
+    assert claims == [ClaimsChanged("z")]
+    await home.manager.resync("z")
+
+    assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": 1.0})
+    assert home.manager.light_mode("tile") == "own-effect"
+    assert not home.routes.routes["tile"].streaming
+    assert lamp.calls[lamp_calls:] == []  # the streamed lamp is left as it was
+
+    sun.point = None
+    runtime.tick(1000.0 + 2 / 60)
+    assert claims == [ClaimsChanged("z")] * 2
+    await home.manager.resync("z")
+
+    assert tile.names()[-1] == "prepare_stream"
+    assert home.manager.light_mode("tile") == "streaming"
+    assert home.routes.routes["tile"].streaming
+    assert lamp.calls[lamp_calls:] == []
+
+
+async def test_the_manager_applies_a_late_suns_claims_by_itself(make_home: HomeFactory) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    sun = FixedSun(None)
+    home = await make_home([tile], [zone_record("z", "tile")], sun=sun)
+    background: set[asyncio.Task[object]] = set()
+    _resync_on_claims(home.bus, home.manager, background)  # as main wires it
+    await home.manager.start("z", replace(GLOW, needs=("sun",)))
+    lights_changed = events(home.bus, LightsChanged)
+
+    sun.point = AT_DUSK
+    home.host.runtimes["z"].tick(1000.0)
+    assert background, "nothing was spawned"
+    await asyncio.wait(set(background))
+
+    assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": 1.0})
+    assert lights_changed == [LightsChanged()]
+
+
+async def test_a_zone_whose_lights_are_in_line_needs_no_resync(make_home: HomeFactory) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    sun = FixedSun(None)
+    home = await make_home([tile], [zone_record("z", "tile")], sun=sun)
+    await home.manager.start("z", replace(home.look("classic-breathe"), needs=("sun",)))
+    claims = events(home.bus, ClaimsChanged)
+    calls = len(tile.calls)
+
+    sun.point = AT_DUSK  # no firmware layer: the tile streams either way
+    home.host.runtimes["z"].tick(1000.0)
+    await home.manager.resync("z")
+    await home.manager.resync("gone")  # a zone that isn't running: nothing to do
+
+    assert claims == [] and tile.calls[calls:] == []
 
 
 async def test_a_look_starts_its_firmware_even_when_layer_ids_repeat(

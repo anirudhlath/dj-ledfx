@@ -12,12 +12,13 @@ from dj_ledfx.tempo.timeline import beat_and_bar
 from dj_ledfx.types import BeatContext
 
 if TYPE_CHECKING:
+    from dj_ledfx.home.sun import SunPoint
     from dj_ledfx.tempo.clock import TempoClock
 
 
 class SignalView:
-    """Named input signals sampled at the frame's target time (spec §7.3). Until M6-M7
-    there are two: DJ_BEAT and EVENING."""
+    """Named input signals sampled at the frame's target time (spec §7.3). Until M7 there
+    are four: DJ_BEAT, EVENING, and SUN_ELEVATION and SUN_AZIMUTH while there is a sun."""
 
     __slots__ = ("_values",)
 
@@ -31,20 +32,31 @@ class SignalView:
 NO_SIGNALS = SignalView()
 DJ_BEAT = "beat.dj"  # 1 while a DJ's deck drives the tempo clock, so a look can tell
 EVENING = "time.evening"  # how far into the evening it is at the home, 0..1 (home/sun.py)
+# The sun at the home (home/sun.py's Sun), in degrees: its height over the horizon, and its
+# bearing clockwise from true north (a look turns it to the plan with plan_bearing). Neither
+# is signalled without a sun (no location), so a look reading one gets its own default.
+SUN_ELEVATION = "sun.elevation"
+SUN_AZIMUTH = "sun.azimuth"
 _DJ_SIGNALS = SignalView({DJ_BEAT: 1.0})
 
 
-def _signals(dj: bool, evening: float) -> SignalView:
-    if evening <= 0.0:
+def _signals(dj: bool, evening: float, sun: SunPoint | None) -> SignalView:
+    if evening <= 0.0 and sun is None:
         return _DJ_SIGNALS if dj else NO_SIGNALS
-    return _evening_signals(dj, evening)
+    return _home_signals(dj, evening, sun)
 
 
 @lru_cache(maxsize=4)
-def _evening_signals(dj: bool, evening: float) -> SignalView:
-    """The evening's amount moves at most once a second (home/sun.py's Evening), so the
-    frames between share a view."""
-    return SignalView({EVENING: evening, DJ_BEAT: 1.0} if dj else {EVENING: evening})
+def _home_signals(dj: bool, evening: float, sun: SunPoint | None) -> SignalView:
+    """The evening and the sun move at most once a second (home/sun.py's Evening and Sun),
+    so the frames between share a view."""
+    values: dict[str, float] = {DJ_BEAT: 1.0} if dj else {}
+    if evening > 0.0:
+        values[EVENING] = evening
+    if sun is not None:
+        values[SUN_ELEVATION] = sun.elevation_deg
+        values[SUN_AZIMUTH] = sun.azimuth_deg
+    return SignalView(values)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,10 +77,13 @@ class RenderContext:
         return self.beat_index + self.beat_phase
 
 
-def render_context(clock: TempoClock, t: float, dt: float, evening: float = 0.0) -> RenderContext:
+def render_context(
+    clock: TempoClock, t: float, dt: float, evening: float = 0.0, *, sun: SunPoint | None = None
+) -> RenderContext:
     """Read the tempo clock at the frame's target time `t` (spec §7.2): only what a frame
     draws with, so no whole TempoSample. `evening` is how far into the evening it is, which
-    the signals carry as EVENING."""
+    the signals carry as EVENING, and `sun` where the sun is (None: no sun), which they
+    carry as SUN_ELEVATION and SUN_AZIMUTH."""
     beat_index, beat_phase, bar_index, bar_phase = beat_and_bar(clock.position_at(t))
     return RenderContext(
         t=t,
@@ -78,7 +93,7 @@ def render_context(clock: TempoClock, t: float, dt: float, evening: float = 0.0)
         bpm=clock.bpm,
         beat_index=beat_index,
         bar_index=bar_index,
-        signals=_signals(clock.source == "prodjlink" and not clock.stale, evening),
+        signals=_signals(clock.source == "prodjlink" and not clock.stale, evening, sun),
     )
 
 

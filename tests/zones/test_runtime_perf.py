@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from conftest import builtin_look, nearest_frame
 from map_home import seeded_space, seeded_zone_lights
+from sun_fakes import AT_DUSK
 
 from dj_ledfx.effects.base import Effect
 from dj_ledfx.effects.registry import get_effect_class
@@ -60,14 +61,16 @@ def with_every_modifier(look: Look) -> Look:
 
 def home_runtime(look: Look, **env: Any) -> ZoneRuntime:
     """The look on every seeded LED of this home, as the whole-home zone runs it; `env`
-    sets RuntimeEnv's fields."""
+    sets RuntimeEnv's fields (zone_runtime's sun by default)."""
     lights = seeded_zone_lights()
     assert sum(light.led_count for light in lights) == handoff_home_json()["totals"]["leds"]
     return zone_runtime("home", look, lights, **env)
 
 
 def zone_runtime(zone_id: str, look: Look, lights: Sequence[ZoneLight], **env: Any) -> ZoneRuntime:
-    """The look on these seeded lights, as a zone of them runs it."""
+    """The look on these seeded lights, as a zone of them runs it, under a sun (AT_DUSK)
+    unless `env` gives another: every frame carries its signals, as the app's do."""
+    env.setdefault("sun", lambda: AT_DUSK)
     return ZoneRuntime(
         zone_id,
         look,
@@ -98,6 +101,7 @@ def test_a_zone_frame_renders_in_under_5_ms(look: Look, dressed: Callable[[Look]
 
     assert statistics.median(tick_times(runtime)) < FRAME_BUDGET_S
     assert runtime.fps_actual >= 59  # it never dropped to a lower frame rate
+    assert runtime.waiting_for == ()  # it drew the look, not a waiting zone's dark
 
 
 # Spec §5.3: the evening is worked out once a second, inside whichever zone's tick asks

@@ -9,6 +9,7 @@ from conftest import FakeLight
 from runtime_fakes import register_fields
 from zone_home import Home, HomeFactory, build_home
 
+from dj_ledfx.home.sun import SunPoint
 from dj_ledfx.zones.home_view import HomeView
 from dj_ledfx.zones.model import ZoneRecord
 
@@ -32,6 +33,7 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
         view: HomeView | None = None,
         frames_watched: Callable[[], bool] | None = None,
         evening: Callable[[], float] | None = None,
+        sun: Callable[[], SunPoint | None] | None = None,
     ) -> Home:
         home = await build_home(
             tmp_path,
@@ -41,6 +43,7 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
             view=view,
             frames_watched=frames_watched,
             evening=evening,
+            sun=sun,
         )
         homes.append(home)
         return home

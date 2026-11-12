@@ -39,6 +39,7 @@ from dj_ledfx.zones.model import (
     HOME_ZONE_ID,
     HOME_ZONE_NAME,
     Assignment,
+    ClaimsChanged,
     CrashInfo,
     LightsChanged,
     PreviewOnlyChanged,
@@ -70,6 +71,7 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.field import FieldEffect
     from dj_ledfx.effects.ledset import Space
     from dj_ledfx.events import EventBus
+    from dj_ledfx.home.sun import SunPoint
     from dj_ledfx.looks.model import Look, Transition
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
@@ -155,6 +157,7 @@ class ZoneManager:
         home: HomeView = NO_HOME,
         frames_watched: Callable[[], bool] = lambda: True,
         evening: Callable[[], float] = lambda: 0.0,
+        sun: Callable[[], SunPoint | None] = lambda: None,
     ) -> None:
         self._store = store
         self._looks = looks
@@ -169,7 +172,9 @@ class ZoneManager:
         # What every zone's runtime reads. `frames_watched`: whether anyone watches the live
         # stream, so zones draw lights that run their own effect only then (M1 review,
         # constraint 3; main passes Watchers.watching_live). `evening`: how far into the
-        # evening it is, for looks that follow it.
+        # evening it is, for looks that follow it. `sun`: where the sun is (None: no sun),
+        # which every frame carries and a look that needs it waits for. Previews and twins
+        # inherit both (dataclasses.replace).
         self._env = RuntimeEnv(
             clock=clock,
             latency_s=self._latency_s,
@@ -178,6 +183,7 @@ class ZoneManager:
             now=now,
             watched=frames_watched,
             evening=evening,
+            sun=sun,
             on_state_change=self._state_changed,
             on_switch=self._switch_due,
         )
@@ -854,11 +860,51 @@ class ZoneManager:
         )
 
     def _state_changed(self, runtime: ZoneRuntime) -> None:
-        """A running zone crashed, turned slow or recovered by itself (spec §8), or its
-        transition started, passed the midpoint or ended (spec §5.3)."""
+        """A running zone crashed, turned slow or recovered by itself (spec §8), started or
+        stopped waiting for an input (spec §5.2), or its transition started, passed the
+        midpoint or ended (spec §5.3). A look that stops waiting claims its firmware layers'
+        lights, and one that starts gives them back, so when any of the zone's lights isn't
+        as its look now runs it, main runs resync() for the zone (ClaimsChanged)."""
         running = self._running.get(runtime.zone_id)
-        if running is not None and running.runtime is runtime:  # not one still starting
-            self._event_bus.emit(ZonesChanged())
+        if running is None or running.runtime is not runtime:  # not one still starting
+            return
+        self._event_bus.emit(ZonesChanged())
+        if self._out_of_line(running, runtime):
+            self._event_bus.emit(ClaimsChanged(runtime.zone_id))
+
+    def _out_of_line(self, running: _Running, runtime: ZoneRuntime) -> list[str]:
+        """The zone's lights that a sync would apply now: last given something other than
+        what its look gives them (applied_key). Not the lights left as they are (_held),
+        switched off elsewhere, or a transition hands over (switch() applies those)."""
+        handing_over = runtime.handing_over
+        out = []
+        for device_id in running.lights:
+            adapter = self._adapter(device_id)
+            if (
+                adapter is None
+                or device_id in handing_over
+                or self._held(runtime, adapter)
+                or self._power.get(device_id) is False
+            ):
+                continue
+            if not self._ready(device_id, runtime):
+                out.append(device_id)
+        return out
+
+    async def resync(self, zone_id: str) -> None:
+        """Apply a running zone's lights that aren't as its look now runs them (ClaimsChanged):
+        a firmware layer's effect starts on a light its look claimed when the sun came, and
+        a light it gave back when the sun went streams again."""
+        async with self._lock:
+            running = self._running.get(zone_id)
+            runtime = running.runtime if running is not None else None
+            if running is None or runtime is None:
+                return
+            lights = self._out_of_line(running, runtime)
+            if not lights:
+                return
+            await self._sync(lights)
+        self._event_bus.emit(LightsChanged())
 
     def _switch_due(self, runtime: ZoneRuntime) -> None:
         """Lights went over to a running zone's new look: its transition passed the midpoint,

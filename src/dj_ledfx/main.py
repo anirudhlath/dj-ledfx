@@ -35,7 +35,7 @@ from dj_ledfx.effects.engine import EffectEngine
 from dj_ledfx.events import DeviceDiscoveredEvent, DeviceOfflineEvent, DeviceOnlineEvent, EventBus
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.store import HomeStore
-from dj_ledfx.home.sun import Evening
+from dj_ledfx.home.sun import Evening, Sun
 from dj_ledfx.latency.memory import LinkMemory
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
@@ -60,7 +60,7 @@ from dj_ledfx.zones.frames import FrameFeed, Watchers
 from dj_ledfx.zones.home_view import MapZones
 from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.manager import ZoneManager
-from dj_ledfx.zones.model import TransitionSwitched
+from dj_ledfx.zones.model import ClaimsChanged, TransitionSwitched
 from dj_ledfx.zones.preview import PreviewManager
 from dj_ledfx.zones.store import ZoneStore
 
@@ -267,6 +267,15 @@ def _switch_at_midpoints(
     )
 
 
+def _resync_on_claims(
+    bus: EventBus, zones: ZoneManager, background: set[asyncio.Task[object]]
+) -> None:
+    """A look that stops waiting for the sun claims its firmware layers' lights, and one
+    that starts gives them back (M6): the zone's lights are applied again, one task for
+    each change, as the midpoints' switches are."""
+    bus.subscribe(ClaimsChanged, lambda event: _spawn(background, zones.resync(event.zone_id)))
+
+
 async def _run(args: argparse.Namespace) -> None:
     metrics.init(enabled=args.metrics, port=args.metrics_port)
 
@@ -360,6 +369,7 @@ async def _run(args: argparse.Namespace) -> None:
     scheduler = LookaheadScheduler(
         devices=device_manager.devices, fps=config.engine.fps, event_bus=event_bus
     )
+    sun = Sun(lambda: home_map.home.location)
     zone_manager = ZoneManager(
         store=zone_store,
         looks=look_store,
@@ -375,6 +385,7 @@ async def _run(args: argparse.Namespace) -> None:
         home=MapZones(home_map),
         frames_watched=partial(watchers.watching, "live"),
         evening=Evening(lambda: home_map.home.location),  # looks with evening (spec §5.3)
+        sun=sun,  # every frame carries it, and looks that need it wait for it (spec §5.2)
     )
     await zone_manager.load()
     # Before any light connects, so no light is restored and then taken over again.
@@ -420,6 +431,7 @@ async def _run(args: argparse.Namespace) -> None:
     event_bus.subscribe(DeviceOnlineEvent, _on_device_back)
     event_bus.subscribe(DeviceDiscoveredEvent, _on_device_back)
     _switch_at_midpoints(event_bus, zone_manager, background)
+    _resync_on_claims(event_bus, zone_manager, background)
 
     if registered_devices:
         await discovery_orchestrator.connect_known_devices(registered_devices)

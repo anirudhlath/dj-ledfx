@@ -18,6 +18,7 @@ from dj_ledfx.events import EventBus
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import Home as HomeModel
 from dj_ledfx.home.store import HomeStore
+from dj_ledfx.home.sun import SunPoint
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.model import Layer, Look
@@ -169,6 +170,11 @@ class Home:
     view: HomeView = NO_HOME  # the home map the manager asks
     home_map: HomeMap | None = None  # a real map, with build_home(plan=...)
     changes: list[ZonesChanged] = field(default_factory=list)
+    # What it was built with, which restart() hands the app it starts again (None: the
+    # factories' defaults).
+    frames_watched: Callable[[], bool] | None = None
+    evening: Callable[[], float] | None = None
+    sun: Callable[[], SunPoint | None] | None = None
 
     def look(self, look_id: str) -> Look:
         return self.looks.get(look_id)
@@ -188,7 +194,10 @@ class Home:
             preview_only,
             ghosts=ghosts,
             view=self.view,
+            frames_watched=self.frames_watched,
             with_map=self.home_map is not None,
+            evening=self.evening,
+            sun=self.sun,
         )
         await home.manager.resume()
         return home
@@ -213,6 +222,7 @@ async def build_home(
     frames_watched: Callable[[], bool] | None = None,
     plan: HomeModel | None = None,
     evening: Callable[[], float] | None = None,
+    sun: Callable[[], SunPoint | None] | None = None,
 ) -> Home:
     db = StateDB(tmp_path / "state.db")
     await db.open()
@@ -232,6 +242,7 @@ async def build_home(
         frames_watched=frames_watched,
         with_map=plan is not None,
         evening=evening,
+        sun=sun,
     )
 
 
@@ -246,6 +257,7 @@ async def assemble(
     frames_watched: Callable[[], bool] | None = None,
     with_map: bool = False,
     evening: Callable[[], float] | None = None,
+    sun: Callable[[], SunPoint | None] | None = None,
 ) -> Home:
     """The app's objects around an open state.db and a set of lights."""
     bus = EventBus()
@@ -291,6 +303,7 @@ async def assemble(
         home=view or NO_HOME,
         frames_watched=frames_watched or (lambda: True),
         evening=evening or (lambda: 0.0),
+        sun=sun or (lambda: None),
     )
     host.zones = manager
     if home_map is not None:
@@ -309,6 +322,9 @@ async def assemble(
         tempo=tempo,
         view=view or NO_HOME,
         home_map=home_map,
+        frames_watched=frames_watched,
+        evening=evening,
+        sun=sun,
     )
     bus.subscribe(ZonesChanged, home.changes.append)
     await manager.load()

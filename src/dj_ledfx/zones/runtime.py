@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from dj_ledfx.devices.capabilities import DeviceCapabilities
     from dj_ledfx.effects.context import RenderContext
     from dj_ledfx.effects.field import FieldEffect
+    from dj_ledfx.home.sun import SunPoint
     from dj_ledfx.spatial.geometry import DeviceGeometry
     from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.types import FloatRGB
@@ -66,6 +67,7 @@ SLOW_AFTER_S = 30.0
 CRASH_LOG_INTERVAL_S = 60.0
 _LOOK_FX = -1  # the key of the look's own step on its layers' fx (joined, evening, cap)
 ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5.2)
+_WITH_SUN = ALWAYS_AVAILABLE | {"sun"}  # and the sun, while the home has a location
 # How far ahead a zone renders at most. A light slower than this gets the newest frame and
 # runs late by the difference. A dozing Govee lamp's latency is its whole round trip, up to
 # about 0.4 s, so a zone with one renders that far ahead, a LIFX matrix's zone about 140 ms
@@ -200,8 +202,12 @@ class RuntimeEnv:
     watched: Callable[[], bool] = lambda: True
     # How far into the evening it is now, 0..1 (home/sun.py), for looks that follow it.
     evening: Callable[[], float] = lambda: 0.0
-    # Called when the zone crashes, turns slow, recovers by itself or its transition
-    # starts, passes the midpoint or ends: the zone manager tells the running channel.
+    # Where the sun is now (home/sun.py's Sun; None: no location, so no sun), which every
+    # frame carries and a look that needs the sun waits for.
+    sun: Callable[[], SunPoint | None] = lambda: None
+    # Called when the zone crashes, turns slow, recovers by itself, starts or stops waiting
+    # for an input, or its transition starts, passes the midpoint or ends: the zone manager
+    # tells the running channel, and applies lights the zone now runs otherwise.
     on_state_change: Callable[[ZoneRuntime], None] | None = None
     # Called when lights went over to the zone's new look (its transition passed the
     # midpoint, or ended before it, holding lights): the zone manager applies them.
@@ -237,6 +243,7 @@ class ZoneRuntime:
         self._trails = Trails()
         self._transition: _Transition | None = None
         self._handover: set[str] = set()  # see handing_over
+        self._waiting: tuple[str, ...] = ()  # see waiting_for
         self._streamed: list[tuple[Layer, FieldEffect | ParticleEffect]] = []  # bottom to top
         self._firmware: list[tuple[Layer, FirmwareEffect]] = []  # top layer first
         self._claims: dict[str, int] = {}  # light -> firmware layer it runs itself
@@ -294,7 +301,10 @@ class ZoneRuntime:
 
     @property
     def waiting_for(self) -> tuple[str, ...]:
-        return tuple(need for need in self.look.needs if need not in ALWAYS_AVAILABLE)
+        """The inputs the look needs that the home hasn't got (spec §5.2): the sun while
+        there is none. Worked out when the look is built and at each tick, from the tick's
+        one read of the sun, so the zone's state, its claims and its frame agree."""
+        return self._waiting
 
     @property
     def state(self) -> ZoneState:
@@ -578,6 +588,9 @@ class ZoneRuntime:
             emulated=self._emulated,
         )
         twin.generation = self.generation
+        if twin._waiting != self._waiting:  # the sun moved since this one last ticked
+            twin._waiting = self._waiting
+            twin._plan_claims()
         twin._trails = self._trails.copy()
         twin._handover = set(self._handover)
         if self._transition is not None:  # its mix, as it is (it never ticks or switches)
@@ -621,9 +634,13 @@ class ZoneRuntime:
     # --- rendering ------------------------------------------------------------------
 
     def tick(self, now: float) -> None:
-        """Render the frame shown at now + horizon, unless crashed or skipping for budget."""
+        """Render the frame shown at now + horizon, unless crashed or skipping for budget.
+        First it reads the sun, once, and waits or stops waiting as it came or went."""
         if self.crash is not None:
             return
+        sun = self._env.sun()
+        if self._follow_inputs(sun):
+            self._state_changed()  # the running channel, and the lights it now claims
         transition = self._transition
         if transition is not None and not transition.switched and transition.past_midpoint(now):
             self._switch(transition)  # the frame showing now is past it
@@ -632,7 +649,7 @@ class ZoneRuntime:
             return
         target = now + self.horizon_s
         ctx = render_context(
-            self._env.clock, target, self._stride / self._env.fps, self._env.evening()
+            self._env.clock, target, self._stride / self._env.fps, self._env.evening(), sun=sun
         )
         started = self._env.timer()
         try:
@@ -858,8 +875,28 @@ class ZoneRuntime:
         self._views[index] = (modifiers, view)
         return view
 
+    def _follow_inputs(self, sun: SunPoint | None) -> bool:
+        """Wait, or stop waiting, as the sun comes and goes, here and in the looks this
+        one's transition mixes in (they never tick themselves). A look that stops waiting
+        claims its firmware layers' lights, and one that starts gives them back. Returns
+        whether any look's waiting changed."""
+        changed = False
+        for source in self.transition_sources:
+            changed = source._follow_inputs(sun) or changed
+        waiting = self._missing(sun)
+        if waiting != self._waiting:
+            self._waiting = waiting
+            self._plan_claims()
+            changed = True
+        return changed
+
+    def _missing(self, sun: SunPoint | None) -> tuple[str, ...]:
+        available = ALWAYS_AVAILABLE if sun is None else _WITH_SUN
+        return tuple(need for need in self.look.needs if need not in available)
+
     def _compile(self) -> None:
         self.generation = next(_GENERATIONS)
+        self._waiting = self._missing(self._env.sun())
         self.crash = None
         self._trails.reset()
         self._streamed = []
