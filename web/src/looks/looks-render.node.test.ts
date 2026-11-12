@@ -35,8 +35,8 @@ describe('the looks render', () => {
     }
   })
 
-  // §5.4: "The mocks use CSS keyframes at 121.8 BPM only as a stand-in." The writer's beatMs() rests on it. These looks' motifs loop once a beat at that
-  // tempo, read from the render today; a motif that loops in two beats, or four, is no stand-in for the beat and isn't listed.
+  // §5.4: "The mocks use CSS keyframes at 121.8 BPM only as a stand-in." The writer's beatMs() rests on it. Each of these looks' motifs has an animation
+  // that loops once a beat at that tempo (some have others that loop longer), read from the render today; a beat motif with no such animation isn't listed.
   const LOOP_ONE_BEAT = ['ball', 'bursts', 'fountain', 'speakers', 'spectrum', 'vortex']
 
   it("draws exactly these beat motifs at §5.4's stand-in tempo, once a beat", () => {
