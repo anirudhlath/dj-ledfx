@@ -281,7 +281,8 @@ describe('the library', () => {
     for (const look of saved) {
       const parent = looks.find((l) => l.id === look.derivedFrom)!
       expect(look).toEqual({ ...parent, id: look.id, name: look.name, description: look.description, builtIn: false, derivedFrom: parent.id, starred: false })
-      expect(look.modifiers).not.toBe(parent.modifiers)
+      // A deep copy: nothing a saved look holds is its parent's own object or array.
+      for (const key of ['modifiers', 'needs', 'uses', 'layers', 'transition'] as const) expect(look[key], key).not.toBe(parent[key])
     }
   })
 })

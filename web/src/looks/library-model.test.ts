@@ -23,7 +23,7 @@ const starredSaved: Look[] = looks.map((look) => (look.id === 'mine-2' ? { ...lo
 const idsOf = (shown: readonly Look[]) => shown.map((look) => look.id)
 const everything = { query: '', readyOnly: false, inputs: null } as const
 
-// Review Focus 1.
+// F5 plan, Review Focus 1: a `cat` the app doesn't know, or none, is All.
 describe('the tabs', () => {
   it('say what Looks.png says, in its order', () => {
     expect(LIBRARY_TABS.map((tab) => tab.label)).toEqual(Object.keys(LIBRARY.counts))
@@ -223,7 +223,7 @@ describe('cardInputs', () => {
   })
 })
 
-// Review Focus 2.
+// F5 plan, Review Focus 2: a look on several zones, or on a zone /api/zones doesn't name, is a pill of the zones it can name.
 describe('where a look runs', () => {
   const zones = [
     { id: 'a', name: 'Alpha' },
