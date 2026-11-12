@@ -671,6 +671,8 @@ export interface Handoff {
   spec: string
   /** tokens.css. */
   tokens: string
+  /** looks.json's text. */
+  looks: string
   /** Reads tokens.css or a render, each render RENDER or LIVE_RENDER reads the one HANDOFF.sha256 pins; null where the renders are missing (CI). */
   read: ReadText | null
 }
@@ -694,10 +696,11 @@ export function readHandoff(repo: string): Handoff {
   const design = resolve(repo, 'docs/design/web-app')
   const spec = readFileSync(resolve(repo, 'docs/superpowers/specs/2026-09-23-web-app-rebuild-design.md'), 'utf8')
   const tokens = readFileSync(resolve(design, 'tokens.css'), 'utf8')
+  const looks = readFileSync(resolve(design, 'looks.json'), 'utf8')
   const main = existsSync(resolve(design, 'reference/Main.html')) ? repo : mainCheckout(repo)
   const renders = main === null ? null : resolve(main, 'docs/design/web-app/reference')
-  if (renders === null || !existsSync(resolve(renders, 'Main.html'))) return { spec, tokens, read: null }
+  if (renders === null || !existsSync(resolve(renders, 'Main.html'))) return { spec, tokens, looks, read: null }
   const path = (name: string) => (name.startsWith('reference/') ? resolve(renders, name.slice('reference/'.length)) : resolve(design, name))
   checkPins(readFileSync(path('HANDOFF.sha256'), 'utf8'), [...new Set([...RENDERS, ...LIVE_RENDERS])], (name) => readFileSync(path(name)))
-  return { spec, tokens, read: (name) => readFileSync(path(name), 'utf8') }
+  return { spec, tokens, looks, read: (name) => readFileSync(path(name), 'utf8') }
 }
