@@ -105,6 +105,10 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
             _field("sky", "Gradient", "sunset_gradient"),
             _firmware("flame", "Candles", "lifx_flame", lights=["type:candle"]),
         ),
+        "homesunset": (
+            _field("sky", "Gradient", "home_sunset"),
+            _firmware("flame", "Candles", "lifx_flame", lights=["type:candle"]),
+        ),
         "aurora": (
             _field("curtains", "Curtains", "aurora_curtains"),
             _firmware(

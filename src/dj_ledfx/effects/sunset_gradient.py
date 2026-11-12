@@ -28,6 +28,17 @@ HORIZON_SWAY = 0.06  # how far the horizon rises and settles, as a share of the 
 ANCHOR_SHARE = 0.3  # with a sun anchor, the share of the gradient that is distance from it
 
 
+def warmest_at(
+    along: NDArray[np.float32], shares: NDArray[np.float64] | None
+) -> NDArray[np.float32]:
+    """The gradient places `along`, with ANCHOR_SHARE of each now its LED's `reach()` from
+    the sun (`shares`, 0 at the sun), so the gradient is warmest nearest it. None, or every
+    LED at the sun (nothing to cool): `along` itself, which is never changed."""
+    if shares is None or not shares.any():
+        return along
+    return ((1.0 - ANCHOR_SHARE) * along + ANCHOR_SHARE * shares).astype(np.float32)
+
+
 class SunsetGradient(ParamField):
     @classmethod
     def parameters(cls) -> dict[str, EffectParam]:
@@ -67,19 +78,25 @@ class SunsetGradient(ParamField):
         }
 
     def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
+        return self._painted(ctx, self._per_leds(leds, self._along))
+
+    def _painted(self, ctx: RenderContext, along: NDArray[np.float32]) -> FloatRGB:
+        """The gradient's colours at each LED's place on it, the horizon swayed by the
+        moment and the level applied. `along` is never changed."""
         values = self._values
         sway = HORIZON_SWAY * math.sin(2.0 * math.pi * ctx.t / float(values["drift_s"]))
-        colours = palette_at(self._palette, self._per_leds(leds, self._along) - np.float32(sway))
+        colours = palette_at(self._palette, along - np.float32(sway))
         return (colours * np.float32(values["level"])).astype(np.float32)
 
+    def _height(self, leds: LedSet) -> NDArray[np.float32]:
+        """Each LED's place on the gradient from its height alone, bent by warmth (0.5 is
+        straight; more bends it so the warm stops climb higher)."""
+        exponent = 2.0 ** (2.0 * float(self._values["warmth"]) - 1.0)
+        return np.asarray(height01(leds) ** np.float32(exponent), dtype=np.float32)
+
     def _along(self, leds: LedSet) -> NDArray[np.float32]:
-        """Each LED's place on the gradient before the horizon sways: its height, bent by
-        warmth (0.5 is straight; more bends it so the warm stops climb higher), and with
+        """Each LED's place on the gradient before the horizon sways: its height, and with
         a sun, partly its distance from the sun."""
         values = self._values
-        along = height01(leds) ** np.float32(2.0 ** (2.0 * float(values["warmth"]) - 1.0))
         sun = leds.anchors.get(values["anchor"]) if values["anchor"] else None
-        shares = None if sun is None else reach(leds, sun)
-        if shares is not None and shares.any():  # every LED at the sun: nothing to cool
-            along = ((1.0 - ANCHOR_SHARE) * along + ANCHOR_SHARE * shares).astype(np.float32)
-        return along
+        return warmest_at(self._height(leds), None if sun is None else reach(leds, sun))

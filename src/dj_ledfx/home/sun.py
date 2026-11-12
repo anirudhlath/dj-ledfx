@@ -18,7 +18,10 @@ from typing import TYPE_CHECKING
 from astral import Observer, sun
 from loguru import logger
 
-from dj_ledfx.effects.field_tools import smoothstep
+# plan_bearing is defined in field_tools, where the looks that turn the sun's bearing read
+# it, since this module imports field_tools; it stays importable from here.
+from dj_ledfx.effects.field_tools import plan_bearing as plan_bearing
+from dj_ledfx.effects.field_tools import smoothstep, wrap_degrees
 from dj_ledfx.timing import utcnow
 
 if TYPE_CHECKING:
@@ -258,12 +261,6 @@ class SunReading:
     path: tuple[SunPoint, ...]
 
 
-def _turn(degrees: float) -> float:
-    """`degrees` taken into [0, 360). Python's % gives 360.0 for a tiny negative number."""
-    turned = degrees % 360.0
-    return 0.0 if turned >= 360.0 else turned
-
-
 def sun_position(lat: float, lon: float, at: datetime) -> SunPoint:
     """The sun at `at` (aware): the apparent elevation (astral's, refraction included: the
     height that "above the horizon" means) and the azimuth from true north, in [0, 360)."""
@@ -271,7 +268,7 @@ def sun_position(lat: float, lon: float, at: datetime) -> SunPoint:
     return SunPoint(
         at,
         sun.elevation(observer, at, with_refraction=True),
-        _turn(sun.azimuth(observer, at)),
+        wrap_degrees(sun.azimuth(observer, at)),
     )
 
 
@@ -296,12 +293,6 @@ def sun_path(lat: float, lon: float, at: datetime) -> tuple[SunPoint, ...]:
     return tuple(
         sun_position(lat, lon, latest - PATH_STEP * back) for back in range(steps - 1, -1, -1)
     )
-
-
-def plan_bearing(azimuth_deg: float, north_offset_deg: float) -> float:
-    """A bearing from true north as the plan draws it: clockwise from the plan's up, which
-    is north when the map's north offset is 0."""
-    return _turn(azimuth_deg + north_offset_deg)
 
 
 class Sun:

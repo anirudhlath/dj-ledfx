@@ -1,5 +1,6 @@
 """Small helpers the field effects share (spec §5.1): anchors, distances, bearings, height,
-a soft band and smoothstep (float palettes are in color.py). Pure numpy, no state."""
+a soft band, smoothstep and the sun's point (float palettes are in color.py). Pure numpy,
+no state."""
 
 from __future__ import annotations
 
@@ -97,3 +98,37 @@ def smoothstep(edge0: float, edge1: float, x: float | NDArray[np.floating[Any]])
         return ease_in_out(clamp01((x - edge0) / span))
     t: NDArray[np.float64] = np.clip((np.asarray(x, dtype=np.float64) - edge0) / span, 0.0, 1.0)
     return np.asarray(ease_in_out(t), dtype=np.float32)
+
+
+def wrap_degrees(degrees: float) -> float:
+    """`degrees` taken into [0, 360). Python's % gives 360.0 for a tiny negative number."""
+    turned = degrees % 360.0
+    return 0.0 if turned >= 360.0 else turned
+
+
+def plan_bearing(azimuth_deg: float, north_offset_deg: float) -> float:
+    """A bearing from true north as the plan draws it: clockwise from the plan's up, which
+    is north when the map's north offset is 0."""
+    return wrap_degrees(azimuth_deg + north_offset_deg)
+
+
+def sun_point(leds: LedSet, elevation_deg: float, azimuth_deg: float) -> F32:
+    """Where the sun stands on the zone's frame (LedSet.bounds), as the stage draws it but
+    with no margin: on a line from the frame's middle along the sun's bearing on the plan
+    (x east, y south, so the plan direction is (sin b, -cos b)), at the point where that
+    line leaves the frame's box (`exit` out), `exit * cos(elevation)` across and `exit *
+    sin(elevation)` above the frame's top. At 0 degrees it is on the box's edge at the top
+    height; at 90 over its middle, `exit` higher; below the horizon it is lower."""
+    low, high = (corner.astype(np.float64) for corner in leds.bounds)
+    bearing_rad = math.radians(plan_bearing(azimuth_deg, leds.space.north_offset_deg))
+    toward = np.array([math.sin(bearing_rad), -math.cos(bearing_rad)])
+    half = (high[:2] - low[:2]) / 2.0
+    # The distance along `toward` to each side it leaves through; one it runs along never.
+    sides = np.where(np.abs(toward) > 1e-9, half / np.maximum(np.abs(toward), 1e-9), np.inf)
+    exit_m = float(sides.min())
+    elevation = math.radians(elevation_deg)
+    across = exit_m * math.cos(elevation)
+    middle = (low[:2] + high[:2]) / 2.0 + across * toward
+    return np.array(
+        [middle[0], middle[1], high[2] + exit_m * math.sin(elevation)], dtype=np.float32
+    )

@@ -33,8 +33,9 @@ NO_SIGNALS = SignalView()
 DJ_BEAT = "beat.dj"  # 1 while a DJ's deck drives the tempo clock, so a look can tell
 EVENING = "time.evening"  # how far into the evening it is at the home, 0..1 (home/sun.py)
 # The sun at the home (home/sun.py's Sun), in degrees: its height over the horizon, and its
-# bearing clockwise from true north (a look turns it to the plan with plan_bearing). Neither
-# is signalled without a sun (no location), so a look reading one gets its own default.
+# bearing clockwise from true north (a look turns it to the plan with plan_bearing, in
+# field_tools). Neither is signalled without a sun (no location), so a look reading one gets
+# its own default.
 SUN_ELEVATION = "sun.elevation"
 SUN_AZIMUTH = "sun.azimuth"
 _DJ_SIGNALS = SignalView({DJ_BEAT: 1.0})

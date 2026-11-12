@@ -40,10 +40,11 @@ M2 = ("sunset", "aurora", "lava", "carousel", "ripples", "focus")
 M3 = ("shockwave", "scanner", "checker", "speakers")
 M5_AMBIENT = ("fireflies", "embers", "rain", "snow", "spotlights")
 M5_TEMPO = ("bursts", "vortex", "comets", "fountain", "flock", "ball")
+M6 = ("homesunset",)  # the Home looks built so far; Wisp and Goodnight join it
 SHOWCASE = [  # in looks.json's order
     look_id
     for look_id in handoff_looks()
-    if look_id in {*M2, *M3, *M5_AMBIENT, *M5_TEMPO, FIRMWARE_LOOK_ID}
+    if look_id in {*M2, *M3, *M5_AMBIENT, *M5_TEMPO, *M6, FIRMWARE_LOOK_ID}
 ]
 PARTICLE_KINDS = {
     "fireflies": "fireflies",
@@ -72,7 +73,7 @@ def test_the_handoff_looks_come_first_in_its_order_with_its_metadata() -> None:
     looks = builtin_looks()[: len(SHOWCASE)]
 
     assert [look.id for look in looks] == SHOWCASE
-    assert len(SHOWCASE) == len(M2) + len(M3) + len(M5_AMBIENT) + len(M5_TEMPO) + 1
+    assert len(SHOWCASE) == len(M2) + len(M3) + len(M5_AMBIENT) + len(M5_TEMPO) + len(M6) + 1
     for look in looks:
         entry = handoff[look.id]
         assert (look.name, look.category, look.description) == (
@@ -103,11 +104,17 @@ def test_each_showcase_look_has_its_fields_and_firmware() -> None:
     assert layers["scanner"] == [("field", "scanner_plane")]
     assert layers["checker"] == [("field", "checker_cubes")]
     assert layers["speakers"] == [("field", "speaker_waves")]
+    assert layers["homesunset"] == [("field", "home_sunset"), ("firmware", "lifx_flame")]
     assert builtin_look("shockwave").layers[1].blend == "add"  # the beam adds onto the shell
     sunset_flame, aurora_morph = builtin_look("sunset").layers[1], builtin_look("aurora").layers[1]
     assert (sunset_flame.lights, sunset_flame.settings) == ((Selector("type", "candle"),), {})
     assert aurora_morph.lights == (Selector("type", "candle"), Selector("type", "tube"))
     assert aurora_morph.settings == {"palette": list(AURORA_PALETTE)}  # the curtains' palette
+    home_sunset = builtin_look("homesunset")
+    home_flame = home_sunset.layers[1]  # the candles are Sunset's, on the same lights
+    assert (home_flame.id, home_flame.name) == (sunset_flame.id, sunset_flame.name)
+    assert (home_flame.lights, home_flame.settings) == (sunset_flame.lights, sunset_flame.settings)
+    assert (home_sunset.scope, home_sunset.needs) == ("whole-home", ("sun",))
 
 
 @pytest.mark.parametrize("look_id", PARTICLE_KINDS)

@@ -99,7 +99,7 @@ class Space:
     ceiling: metres, None without a map. centre: where unplaced lights gather when
     none of the zone's lights is placed. room_outlines and sub_zone_outlines: each room's
     and sub-zone's floor polygon by id, for a layer's mask. north_offset_deg: the plan's
-    turn from true north (Home.north_offset_deg), which home/sun.py's plan_bearing takes
+    turn from true north (Home.north_offset_deg), which field_tools' plan_bearing takes
     the sun's bearing through.
     """
 
