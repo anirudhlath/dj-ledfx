@@ -4,6 +4,7 @@ import { ZoneTitle } from '@/live/zone-detail'
 import { AppError, RootError } from '@/pages/app-error'
 import { InputsPage } from '@/pages/inputs'
 import { LivePage } from '@/pages/live'
+import { LooksContext, LooksPage } from '@/pages/looks'
 import { NotFound } from '@/pages/not-found'
 import { Placeholder } from '@/pages/placeholder'
 import { AppShell } from '@/shell/app-shell'
@@ -26,7 +27,10 @@ const LIVE: PageMeta = {
 const ZONE: PageMeta = { title: LIVE.title, context: LIVE.context, PhoneTitle: ZoneTitle, phoneBack: '/live' }
 /** Put a look on (§8.2): Live, with the composer in the Running panel's place; on the phone, a focused task (Phone-PutLookOn). */
 const PUT: PageMeta = { title: LIVE.title, context: LIVE.context, focusedTask: true }
-const LOOKS: PageMeta = { title: 'Looks' }
+// "29 looks · 3 running" is Looks.png's (F5 ruling 9); it counts data, so a component draws it, desktop only. The phone keeps its plain title until F9.
+const LOOKS: PageMeta = { title: 'Looks', Context: LooksContext }
+/** The editor (F8's placeholder for now) is Looks without the library's count: it isn't a line about the editor. */
+const LOOK: PageMeta = { title: 'Looks' }
 const MAP: PageMeta = {
   title: 'Map',
   context: () => 'Place lights, anchors and sub-zones',
@@ -65,8 +69,8 @@ export const routes: RouteObject[] = [
               { path: 'put', handle: PUT, element: null },
             ],
           },
-          { path: 'looks', handle: LOOKS, element: <Placeholder name="Looks" milestone="F5" /> },
-          { path: 'looks/:lookId', handle: LOOKS, element: <Placeholder name="Look editor" milestone="F8" /> },
+          { path: 'looks', handle: LOOKS, element: <LooksPage /> },
+          { path: 'looks/:lookId', handle: LOOK, element: <Placeholder name="Look editor" milestone="F8" /> },
           { path: 'map', handle: MAP, element: <Placeholder name="Home map" milestone="F7" /> },
           { path: 'map/:thingId', handle: MAP, element: <Placeholder name="Home map" milestone="F7" /> },
           { path: 'devices', handle: DEVICES, element: <Placeholder name="Devices" milestone="F6" /> },

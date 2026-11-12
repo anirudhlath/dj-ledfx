@@ -107,9 +107,15 @@ export function useStageCompose(composing: boolean, covered: boolean): StageComp
   return { zoneId: zone.id, previewing: previewing(preview, zone, looks), choose, covered }
 }
 
-type InputsRead = Pick<Inputs, 'music' | 'homeAssistant'> | null
+/** The inputs a look is judged by (`missingInputs()`): music and Home Assistant; null until the server has sent them. */
+export type InputsRead = Pick<Inputs, 'music' | 'homeAssistant'> | null
 /** The heartbeat sends the inputs every second as an equal copy: the same, for what the composer reads. */
 const sameInputs = (a: InputsRead, b: InputsRead) => JSON.stringify(a) === JSON.stringify(b)
+
+/** The inputs from the live store, as the composer and the Looks page judge a look by them. */
+export const useInputsRead = (): InputsRead =>
+  useLiveBy((state): InputsRead => (state.inputs === null ? null : { music: state.inputs.music, homeAssistant: state.inputs.homeAssistant }), sameInputs)
+
 const NOTHING_RUNS: readonly RunningZone[] = []
 
 /** What runs now, from the live store. */
@@ -153,10 +159,7 @@ export function useComposer(): Composer {
   const { zone, look } = choice
   const lights = useQuery(queries.lights()).data
   const running = useRunning()
-  const inputs = useLiveBy(
-    (state): InputsRead => (state.inputs === null ? null : { music: state.inputs.music, homeAssistant: state.inputs.homeAssistant }),
-    sameInputs,
-  )
+  const inputs = useInputsRead()
   // A zone with no lights has nothing to preview: the engine would refuse it.
   const preview = usePreview(zone !== undefined && zone.lights.length > 0 ? zone.id : null, look?.id ?? null)
   const close = useCloseComposer()
