@@ -1,19 +1,12 @@
 // @vitest-environment node
-import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import {
-  checkPins, extractLive, extractLiveRender, extractRender, extractSpec, readHandoff, tokenColours, type ReadText,
-} from '../../scripts/design-extract.ts'
+import { checkPins, extractLive, extractLiveRender, extractRender, extractSpec, tokenColours } from '../../scripts/design-extract.ts'
 import { LIVE_RENDER, LIVE_SPEC } from '../design/live-numbers'
+import { edited, handoff } from '../test/handoff'
 import { RENDER, SPEC, TOKENS } from './design-numbers'
 
 // If one of these fails, the handoff changed: run `npm run design:numbers` in web/ and commit the
 // files it writes. Never edit design-numbers.ts or live-numbers.ts by hand.
-const handoff = readHandoff(resolve(import.meta.dirname, '../../..'))
-
-/** The handoff's renders with one of them edited in memory, for how the extractor fails when a render moves: no file is written. */
-const edited = (render: string, edit: (html: string) => string): ReadText => (name) =>
-  name === `reference/${render}.html` ? edit(handoff.read!(name)) : handoff.read!(name)
 
 describe('the design numbers', () => {
   it("are what the spec's sentences say", () => {
