@@ -194,6 +194,21 @@ const LIVE_ENTRIES: Record<string, Entry> = {
     pattern: /\*\*`LookTile`\*\* \(composer, (\d+) px\): thumb, serif (\d+) name/,
     take: (m) => ({ px: n(m[1]), namePx: n(m[2]) }),
   },
+  lookCard: {
+    where: '§6.4 LookCard',
+    pattern: /\*\*`LookCard`\*\* \(grid, (\d+) px at (\d+) columns\): thumb \(radius (\d+), line border\), serif (\d+) name \+ star toggle, two-line description \((\d+) text-3\)/,
+    take: (m) => ({ px: n(m[1]), columns: n(m[2]), radiusPx: n(m[3]), namePx: n(m[4]), descriptionPx: n(m[5]) }),
+  },
+  looksPage: {
+    where: '§8.4 Looks',
+    pattern: /Sections per category: serif (\d+) name, count, one-line blurb \(`looks\.json` `categories`\)\. (\d+)-column grid of `LookCard`s, (\d+)\/(\d+) px gaps/,
+    take: (m) => ({ sectionNamePx: n(m[1]), columns: n(m[2]), rowGapPx: n(m[3]), columnGapPx: n(m[4]) }),
+  },
+  mockBpm: {
+    where: '§5.4 stand-in tempo',
+    pattern: /The mocks use CSS keyframes at ([\d.]+) BPM only as a stand-in/,
+    take: (m) => n(m[1]),
+  },
   phoneComposer: {
     where: '§8.10 Put a look on',
     pattern: /sheet: Where \((\d+) px zone buttons, horizontal scroll\), What \(category chips, look rows with (\d+) × (\d+) thumbs\)/,
@@ -265,6 +280,7 @@ const LIVE_RENDERS = [
   'reference/State-Problems.html',
   'reference/Live-PutLookOn.html',
   'reference/Phone-PutLookOn.html',
+  'reference/Looks.html',
 ]
 
 /** Fails unless each named file of docs/design/web-app is the one HANDOFF.sha256 (`pins`) pins. */
@@ -517,7 +533,8 @@ export function extractRender(read: ReadText): Record<string, unknown> {
  * chosen zone's name on the desktop's chip, and under it on the phone's zone button: tokens.css has no colour for it.
  * The phone's stage outlines the chosen zone in a narrower stroke than the spec's number, which Live-PutLookOn.html's
  * matches: the phone's render isn't scaled (its floor strokes are as wide as the desktop's). The phone's sheet: how far it lies over
- * the stage's foot, and the padding under Start.
+ * the stage's foot, and the padding under Start. The Looks page (Looks.html): its thumbs are the same scene as the composer's, and
+ * a LookCard's thumb box, which all its cards draw alike.
  */
 export function extractLiveRender(read: ReadText): Record<string, unknown> {
   const tokens = read('tokens.css')
@@ -526,6 +543,7 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
   const problems = read('reference/State-Problems.html')
   const put = read('reference/Live-PutLookOn.html')
   const phonePut = read('reference/Phone-PutLookOn.html')
+  const looks = read('reference/Looks.html')
   const curve = same(main, {
     where: 'Main.html @keyframes pip',
     pattern:
@@ -550,16 +568,24 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     pattern:
       /font-size: 20px; white-space: nowrap">[^<]*<\/span><span style="font-size: 12px; color: #[0-9a-f]{6}; white-space: nowrap">[^<]*<\/span><\/div><div style="display: flex; align-items: center; flex-wrap: wrap; gap: \d+px"><span title="[^"]*" style="display: inline-block; width: (\d+)px; height: \1px; border-radius: 50%/,
   })
-  // One scene in both renders, each read on its own: a render whose thumbs moved fails here by its name, and never
-  // leaves the other's to stand for both.
+  // One scene in all three renders, each read on its own: a render whose thumbs moved fails here by its name, and never
+  // leaves the others' to stand for all.
   const thumbPattern =
     /<svg class="tb " viewBox="0 0 (\d+) (\d+)" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: block; background: (#[0-9a-f]{6}); ">/
   const thumb = same(put, { where: "Live-PutLookOn.html's thumb", pattern: thumbPattern })
   const phoneThumb = same(phonePut, { where: "Phone-PutLookOn.html's thumb", pattern: thumbPattern })
-  const [scene, phoneScene] = [thumb, phoneThumb].map((m) => JSON.stringify(m.slice(1)))
-  if (scene !== phoneScene) {
-    throw new Error(`design numbers: Live-PutLookOn.html's thumb and Phone-PutLookOn.html's thumb draw the scene two ways: ${scene} and ${phoneScene}`)
+  const looksThumb = same(looks, { where: "Looks.html's thumb", pattern: thumbPattern })
+  const scene = JSON.stringify(thumb.slice(1))
+  for (const [name, other] of [["Phone-PutLookOn.html's thumb", phoneThumb], ["Looks.html's thumb", looksThumb]] as const) {
+    if (JSON.stringify(other.slice(1)) !== scene) {
+      throw new Error(`design numbers: Live-PutLookOn.html's thumb and ${name} draw the scene two ways: ${scene} and ${JSON.stringify(other.slice(1))}`)
+    }
   }
+  // A LookCard's thumb box (Looks.html): every card draws one, `border-box` sized, so its line border is inside the width and height.
+  const cardThumb = same(looks, {
+    where: "Looks.html's card thumb",
+    pattern: /<div style="position: relative; width: (\d+)px; height: (\d+)px; border-radius: \d+px; overflow: hidden; border: 1px solid #[0-9a-f]{6}; box-sizing: border-box">/,
+  })
   const chipNote = same(put, {
     where: "Live-PutLookOn.html, the selected zone chip's note",
     pattern:
@@ -603,6 +629,7 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
     overlay: { background: card[1], border: card[2], ink: card[3], track: card[4], fill: card[5] },
     rowSwatchPx: n(row[1]),
     lookThumb: { width: n(thumb[1]), height: n(thumb[2]), background: colour(tokens, thumb[3]) },
+    lookCard: { thumb: { width: n(cardThumb[1]), height: n(cardThumb[2]) } },
     selectedZoneNote: { chip: colour(tokens, chipNote[1]), button: colour(tokens, buttonNote[1]) },
     phoneOutlinePx: n(phoneOutline[1]),
     phoneSheet: { overlapPx: n(phoneStage[1]) + n(phoneStage[2]) - n(phoneSheet[1]), footerPaddingPx: n(phoneFooter[1]) },

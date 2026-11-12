@@ -38,6 +38,20 @@ export const LIVE_SPEC = {
     "px": 176,
     "namePx": 19
   },
+  "lookCard": {
+    "px": 201,
+    "columns": 6,
+    "radiusPx": 10,
+    "namePx": 20,
+    "descriptionPx": 12
+  },
+  "looksPage": {
+    "sectionNamePx": 32,
+    "columns": 6,
+    "rowGapPx": 28,
+    "columnGapPx": 16
+  },
+  "mockBpm": 121.8,
   "phoneComposer": {
     "zonePx": 52,
     "thumb": {
@@ -70,6 +84,12 @@ export const LIVE_RENDER = {
     "width": 160,
     "height": 100,
     "background": "#0f0e0c"
+  },
+  "lookCard": {
+    "thumb": {
+      "width": 201,
+      "height": 125
+    }
   },
   "selectedZoneNote": {
     "chip": "#4a4640",
