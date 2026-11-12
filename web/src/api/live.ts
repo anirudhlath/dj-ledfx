@@ -71,7 +71,10 @@ export function liveClient(): LiveClient | null {
   return client
 }
 
-/** Back to a page just opened: no client or preview, and the live store, frames, beat clock and REST cache empty. */
+/**
+ * Back to a page just opened: no client or preview, and the live store, frames, beat clock and REST cache empty.
+ * The beat clock lets go of ?still's hold here too, which its reset (every reconnect's) keeps.
+ */
 export function resetDataLayer(): void {
   client?.stop()
   client = null
@@ -84,5 +87,6 @@ export function resetDataLayer(): void {
   frames.clear()
   fx.reset()
   beatClock.reset()
+  beatClock.release()
   queryClient.clear()
 }

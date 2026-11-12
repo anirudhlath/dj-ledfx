@@ -1,15 +1,18 @@
 // §6.4 LookThumb, a look's motion portrait: a 16:10 scene keyed by looks.json's `thumbnail`, with that
 // look's motif drawn on it, verbatim from Looks.html (F5 decision 2). A look with no motif is the scene
 // alone, the ground every render draws one on (F4 ruling 7, F5 decision 7). A motif is drawn paused
-// (`data-paused`, styles/app.css), at the moment its author drew it. `live` is §6.4's interface: false keeps it there.
+// (`data-paused`, styles/app.css), at the moment its author drew it, and moves only while it's on screen
+// (use-thumb-motion.ts): an ambient motif runs its loop, a tempo or audio one follows the beat clock
+// (thumb-writer.ts). `live` is §6.4's interface: false keeps it at its authored moment.
 import { useQuery } from '@tanstack/react-query'
-import { type CSSProperties, type ReactNode, useId } from 'react'
+import { type CSSProperties, type ReactNode, useId, useRef } from 'react'
 import type { Id } from '@/api/contract'
 import { queries } from '@/api/queries'
 import { cx } from '@/design/cx'
 import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import './looks-render.css'
 import { instanceMarkup, motifFor } from './motif'
+import { useThumbMotion } from './use-thumb-motion'
 
 /**
  * The composer's tile (§6.4 LookTile: its width, at 16:10), the phone's look row (§8.10), the library's card
@@ -39,9 +42,11 @@ export interface LookThumbProps {
   live?: boolean
 }
 
-export function LookThumb({ lookId, size, className, children }: LookThumbProps) {
+export function LookThumb({ lookId, size, className, children, live = true }: LookThumbProps) {
   const thumbnail = useQuery(queries.looks()).data?.find((look) => look.id === lookId)?.thumbnail
   const motif = motifFor(thumbnail)
+  const svg = useRef<SVGSVGElement>(null)
+  useThumbMotion(svg, motif?.beat, live)
   // Looks.html numbers its motifs' ids `lk<n>`; each thumb here has its own prefix (F5 decision 3).
   const prefix = `tb${useId().replace(/[^\w-]/g, '')}`
   const box = BOX[size]
@@ -55,6 +60,7 @@ export function LookThumb({ lookId, size, className, children }: LookThumbProps)
     >
       {motif && (
         <svg
+          ref={svg}
           className="tb absolute inset-0 block size-full"
           data-paused=""
           data-beat={motif.beat ? '' : undefined}

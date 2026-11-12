@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BeatClock, ClockOffset, clientNow, normaliseBeat, type Beat } from './beat'
+import { BeatClock, ClockOffset, clientNow, nearWay, normaliseBeat, type Beat } from './beat'
 import type { BeatV1, BeatV2 } from './ws-messages'
 
 const V1: BeatV1 = {
@@ -121,6 +121,26 @@ describe('BeatClock', () => {
     const held = clock.sample(15)
     expect(held).toMatchObject({ beatInBar: 2, bar: 42, running: true })
     expect(held.beatPhase).toBeCloseTo(0.25)
+  })
+
+  it('says whether it holds the beat (?still)', () => {
+    const clock = new BeatClock()
+    expect(clock.held).toBe(false)
+    clock.hold()
+    expect(clock.held).toBe(true)
+  })
+
+  // Every reconnect resets the clock (live-client.ts), and ?still must hold through one: only release() lets go.
+  it('keeps holding through a reset, and lets go on release', () => {
+    const clock = new BeatClock()
+    clock.hold()
+    clock.reset()
+    expect(clock.held).toBe(true)
+    clock.receive(beat(42, 1.25, 10), null)
+    expect(clock.sample(15).beatPhase).toBeCloseTo(0.25)
+    clock.release()
+    expect(clock.held).toBe(false)
+    expect(clock.sample(10.25).beatPhase).toBeCloseTo(0.75)
   })
 
   it('runs on at the tempo between messages', () => {
@@ -257,6 +277,16 @@ describe('BeatClock', () => {
     clock.receive(beat(42, 1.5, 100), null)
     clock.reset()
     expect(clock.sample(100.5)).toEqual({ beatPhase: 0, barPhase: 0, beatInBar: 1, bar: null, bpm: 0, running: false })
+  })
+})
+
+describe('nearWay', () => {
+  it('takes a change in the place in the bar the near way round, within (−2, 2]', () => {
+    expect(nearWay(0.5)).toBeCloseTo(0.5)
+    expect(nearWay(0.02 - 3.98)).toBeCloseTo(0.04) // across the bar line, forwards
+    expect(nearWay(3.98 - 0.02)).toBeCloseTo(-0.04) // and back
+    expect(nearWay(2)).toBe(2)
+    expect(nearWay(-2)).toBe(2)
   })
 })
 

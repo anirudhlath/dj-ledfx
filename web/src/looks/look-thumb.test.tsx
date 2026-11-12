@@ -1,16 +1,27 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { render } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Look } from '@/api/contract'
+import { beatClock, resetDataLayer } from '@/api/live'
 import { queries, queryClient } from '@/api/queries'
 import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
+import { intersect } from '@/test/intersection'
+import { seedLive } from '@/test/live'
 import { seedRest } from '@/test/rest'
+import { setReducedMotion } from '@/test/viewport'
 import { LookThumb, type ThumbSize } from './look-thumb'
 import { MOTIFS } from './looks-render'
 
 const wrap = (ui: ReactElement) => <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
-const renderThumb = (lookId: string, size: ThumbSize) => render(wrap(<LookThumb lookId={lookId} size={size} />))
+const renderThumb = (lookId: string, size: ThumbSize, live?: boolean) => render(wrap(<LookThumb lookId={lookId} size={size} live={live} />))
+
+/** A thumb's two animations, stubbed on its svg (jsdom has none): the same objects on every call, as a browser's. */
+function stubAnimations(svg: Element): { currentTime: number | null }[] {
+  const animations: { currentTime: number | null }[] = [{ currentTime: null }, { currentTime: null }]
+  svg.getAnimations = () => animations as unknown as Animation[]
+  return animations
+}
 const markupChildren = (markup: string) =>
   new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${markup}</svg>`, 'image/svg+xml').documentElement.childElementCount
 
@@ -108,5 +119,76 @@ describe('LookThumb (§6.4)', () => {
     )
     const thumb = container.querySelector('[data-thumb]')!
     expect([...thumb.children].map((child) => child.tagName.toLowerCase())).toEqual(['svg', 'b'])
+  })
+
+  describe('motion (§5.4, F5 decisions 4 to 8)', () => {
+    it('runs a thumb only while it is on screen', () => {
+      seedRest('hero')
+      const svg = renderThumb('aurora', 'card').container.querySelector('svg.tb')!
+      expect(svg).toHaveAttribute('data-paused')
+      act(() => intersect(svg, true))
+      expect(svg).not.toHaveAttribute('data-paused')
+      act(() => intersect(svg, false))
+      expect(svg).toHaveAttribute('data-paused')
+    })
+
+    it('seeks a beat thumb on screen to the beat, and leaves it paused for CSS', () => {
+      vi.useFakeTimers()
+      seedRest('hero')
+      seedLive('hero')
+      const svg = renderThumb('shockwave', 'card').container.querySelector('svg.tb')!
+      const animations = stubAnimations(svg)
+      act(() => intersect(svg, true))
+      vi.advanceTimersByTime(20)
+      expect(svg).toHaveAttribute('data-paused')
+      for (const animation of animations) expect(animation.currentTime).toBeGreaterThan(0)
+    })
+
+    it('stops when it unmounts', () => {
+      seedRest('hero')
+      const { container, unmount } = renderThumb('aurora', 'card')
+      const svg = container.querySelector('svg.tb')!
+      act(() => intersect(svg, true))
+      unmount()
+      expect(svg).toHaveAttribute('data-paused')
+    })
+
+    it('keeps every thumb still under reduced motion, with the beat held (?still), and with live={false}', () => {
+      const still = [
+        { why: 'reduced motion', set: () => setReducedMotion(true), live: true },
+        { why: 'the beat held', set: () => beatClock.hold(), live: true },
+        { why: 'live={false}', set: () => {}, live: false },
+      ]
+      for (const { why, set, live } of still) {
+        vi.useFakeTimers()
+        seedRest('hero')
+        seedLive('hero')
+        set()
+        // An ambient motif, whose loop would run, and a beat one, which the writer would seek.
+        for (const lookId of ['aurora', 'shockwave']) {
+          const { container, unmount } = renderThumb(lookId, 'card', live)
+          const svg = container.querySelector('svg.tb')!
+          const animations = stubAnimations(svg)
+          act(() => intersect(svg, true))
+          vi.advanceTimersByTime(500)
+          expect(svg, `${lookId}, ${why}`).toHaveAttribute('data-paused')
+          expect(animations.map((animation) => animation.currentTime), `${lookId}, ${why}`).toEqual([null, null])
+          unmount()
+        }
+        // Each condition alone: the page as a new one finds it, ?still's hold let go.
+        setReducedMotion(false)
+        resetDataLayer()
+      }
+    })
+
+    // F5 decision 7.
+    it('registers nothing for a look with no motif', () => {
+      const [first] = seedRest('hero').looks
+      queryClient.setQueryData(queries.looks().queryKey, [{ ...first, id: 'x', thumbnail: 'classic-pulse' }])
+      const observe = vi.spyOn(window.IntersectionObserver.prototype, 'observe')
+      const { container } = renderThumb('x', 'card')
+      expect(container.querySelector('svg.tb')).toBeNull()
+      expect(observe).not.toHaveBeenCalled()
+    })
   })
 })
