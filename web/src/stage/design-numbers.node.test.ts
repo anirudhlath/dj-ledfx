@@ -64,6 +64,11 @@ describe('the design numbers', () => {
     expect(String(LIVE_SPEC.lookCard.descriptionPx)).toBe(tokenPx('--text-meta'))
   })
 
+  // §6.4's 201 px card and Looks.html's 201 px thumb box are one width read twice (the spec sizes the grid, the render the thumb).
+  it("draw a LookCard's thumb as wide as the spec's card", () => {
+    expect(LIVE_RENDER.lookCard.thumb.width).toBe(LIVE_SPEC.lookCard.px)
+  })
+
   // Phone-PutLookOn draws the chosen zone's outline narrower than the spec's number, which Live-PutLookOn's matches; the phone's
   // render isn't scaled (its floor strokes are as wide as the desktop's), so the narrower outline is the render's own.
   it("draw the phone's zone outline narrower than the desktop's", () => {
@@ -138,7 +143,7 @@ describe('the design numbers', () => {
     expect(() => extractLive(handoff.spec.replace('**`LookTile`** (composer', '**`LookTile`** (library'))).toThrow(/§6\.4 LookTile/)
     expect(() => extractLive(handoff.spec.replace('**`LookCard`** (grid', '**`LookCard`** (list'))).toThrow(/§6\.4 LookCard/)
     expect(() => extractLive(handoff.spec.replace('Sections per category: serif', 'Sections per category: sans'))).toThrow(/§8\.4 Looks/)
-    expect(() => extractLive(handoff.spec.replace('CSS keyframes at', 'CSS keyframes near'))).toThrow(/§5\.4/)
+    expect(() => extractLive(handoff.spec.replace('CSS keyframes at', 'CSS keyframes near'))).toThrow(/§5\.4 stand-in tempo/)
   })
 
   // A render whose thumb moved is named, whichever it is: it never drops out and leaves the other's to stand for both.

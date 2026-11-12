@@ -534,7 +534,7 @@ export function extractRender(read: ReadText): Record<string, unknown> {
  * The phone's stage outlines the chosen zone in a narrower stroke than the spec's number, which Live-PutLookOn.html's
  * matches: the phone's render isn't scaled (its floor strokes are as wide as the desktop's). The phone's sheet: how far it lies over
  * the stage's foot, and the padding under Start. The Looks page (Looks.html): its thumbs are the same scene as the composer's, and
- * a LookCard's thumb box, which all its cards draw alike.
+ * a LookCard's thumb box, which all its cards draw at the same size.
  */
 export function extractLiveRender(read: ReadText): Record<string, unknown> {
   const tokens = read('tokens.css')
@@ -581,7 +581,8 @@ export function extractLiveRender(read: ReadText): Record<string, unknown> {
       throw new Error(`design numbers: Live-PutLookOn.html's thumb and ${name} draw the scene two ways: ${scene} and ${JSON.stringify(other.slice(1))}`)
     }
   }
-  // A LookCard's thumb box (Looks.html): every card draws one, `border-box` sized, so its line border is inside the width and height.
+  // A LookCard's thumb box (Looks.html): every card draws one at the same size, `border-box`, so its line border is inside the width and
+  // height. Only the size is compared: the hovered card's border is another colour, which the pattern accepts.
   const cardThumb = same(looks, {
     where: "Looks.html's card thumb",
     pattern: /<div style="position: relative; width: (\d+)px; height: (\d+)px; border-radius: \d+px; overflow: hidden; border: 1px solid #[0-9a-f]{6}; box-sizing: border-box">/,
