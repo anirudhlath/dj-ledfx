@@ -98,13 +98,19 @@ async def test_a_new_preview_replaces_the_last_and_a_bad_request_changes_nothing
         previews.stop(first)
     previews.update(second, home.look("classic-color-chase"))
     assert runtime.look.id == "classic-color-chase"
+    home_look = replace(home.look("classic-strobe"), scope="whole-home")
     with pytest.raises(ZoneNotFoundError):
         previews.start("nope", home.look("classic-strobe"))
+    with pytest.raises(ZoneNotFoundError):  # an unknown zone is not found, not refused a look
+        previews.start("nope", home_look)
     with pytest.raises(ZoneError, match="has no lights"):
         previews.start("empty", home.look("classic-strobe"))
-    with pytest.raises(ZoneError, match="plays on Whole home only"):  # the preview is on a group
-        previews.update(second, replace(home.look("classic-strobe"), scope="whole-home"))
+    with pytest.raises(ZoneError, match="plays on Whole home only"):  # the zone is a group
+        previews.start("z", home_look)
+    with pytest.raises(ZoneError, match="plays on Whole home only"):
+        previews.update(second, home_look)
     assert previews.runtimes() == [runtime]  # the failed requests left it running
+    assert home.host.hosted == [runtime]
 
 
 async def test_a_home_look_previews_on_whole_home(make_home: HomeFactory) -> None:
@@ -113,11 +119,30 @@ async def test_a_home_look_previews_on_whole_home(make_home: HomeFactory) -> Non
     previews = _previews(home, Watch())
     home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)
 
-    previews.start(HOME_ZONE_ID, home_look)
+    preview_id = previews.start(HOME_ZONE_ID, home_look)
 
     [runtime] = previews.runtimes()
     assert (runtime.zone_id, runtime.look.id) == (HOME_ZONE_ID, "x")
     assert runtime.leds.count == 8  # both lights, where the preview shows the whole home
+
+    previews.update(preview_id, replace(home_look, id="y", name="Y"))  # another home look
+
+    assert previews.runtimes() == [runtime] and runtime.look.id == "y"
+
+
+async def test_the_manager_refuses_a_home_look_preview_off_whole_home(
+    make_home: HomeFactory,
+) -> None:
+    home = await make_home(
+        [FakeLight("a")], [zone_record("z", "a")], view=FakeHome(rooms={"w": ["a"]})
+    )
+    home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)
+
+    for zone_id in ("z", "w"):  # a group and a room
+        with pytest.raises(ZoneError, match="X plays on Whole home only"):
+            home.manager.start_preview(zone_id, home_look, lambda: None)
+
+    assert home.manager.preview_runtimes() == [] and home.host.hosted == []
 
 
 # M2 review A2 + E7: the preview follows the map inside the zone manager's own redraw.

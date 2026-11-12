@@ -510,6 +510,21 @@ async def test_a_zone_with_no_lights_or_a_home_look_off_whole_home_is_refused(
     assert lamp.calls == []
 
 
+async def test_an_unknown_zone_is_not_found_whatever_look_starts_on_it(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp")
+    home = await make_home([lamp], [zone_record("z", "lamp")])
+    home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)
+
+    with pytest.raises(ZoneNotFoundError):  # not "plays on Whole home only"
+        await home.manager.start("nope", home_look)
+
+    with pytest.raises(ZoneNotFoundError):
+        await home.manager.start("nope", home.look("classic-breathe"))
+    assert lamp.calls == []
+
+
 async def test_a_home_look_starts_on_whole_home(make_home: HomeFactory) -> None:
     home = await make_home([FakeLight("lamp")], [], view=FakeHome(rooms={"west": ["lamp"]}))
     home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)

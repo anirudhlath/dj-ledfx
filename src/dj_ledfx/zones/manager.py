@@ -306,8 +306,10 @@ class ZoneManager:
 
     def check_scope(self, zone_id: str, look: Look) -> None:
         """A home look plays on the whole home only (spec §5.2): it draws the whole map, so
-        a room or a group would show a piece of it. Raises ZoneError for any other zone."""
+        a room or a group would show a piece of it. Raises ZoneError for any other zone,
+        and ZoneNotFoundError first for one that doesn't exist."""
         if look.scope == "whole-home" and zone_id != HOME_ZONE_ID:
+            self.get_zone(zone_id)
             raise ZoneError(f"{look.name} plays on {HOME_ZONE_NAME} only")
 
     async def start(
@@ -889,13 +891,15 @@ class ZoneManager:
         self._event_bus.emit(LightsChanged())
 
     def _rebuild_broken(self, zone_id: str, running: _Running) -> bool:
-        """A zone whose saved look can't be read tries the look saved under its id."""
+        """A zone whose saved look can't be read tries the look saved under its id, unless
+        that is now a Home look and the zone isn't Whole home: it stays broken."""
         saved = running.saved
         if saved is None:
             return False
         try:
             look = self._looks.get(saved.look_id)
-        except LookNotFoundError:
+            self.check_scope(zone_id, look)
+        except (LookNotFoundError, ZoneError):
             return False
         running.runtime = self._new_runtime(zone_id, look, running.lights, saved.brightness)
         running.saved = running.broken = None
