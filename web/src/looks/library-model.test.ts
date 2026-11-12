@@ -2,34 +2,24 @@ import { describe, expect, it } from 'vitest'
 import type { Layer, Look, RunningZone, Zone } from '@/api/contract'
 import { buildScenario } from '@/api/mocks/scenarios'
 import { missingInputs } from '@/compose/model'
+import { HERO_NOW } from '@/test/live'
 import { INPUTS } from '@/zones/zone-view'
 import {
   cardInputs, emptyText, LIBRARY_TABS, librarySections, looksContext, parentName, readTab, runningOn, runningPill, searchLooks, tabCounts,
 } from './library-model'
 import { LIBRARY, LOOK_CATEGORIES } from './looks-render'
 
-// The library as Looks.png draws it (Task 6's `library` scenario serves the same): the hero's built-in looks with the render's six
-// stars, and two saved looks made from fixtures, the second one starred, after them.
-const fixtures = buildScenario('hero').looks
+// The library as Looks.png draws it: the `library` scenario's looks, the hero's built-in looks with the render's six stars and its two
+// saved looks after them. Neither saved look is starred; `starredSaved` is the library with the second one starred, for what a star
+// on a saved look changes.
+const looks: Look[] = buildScenario('library', HERO_NOW).looks
+const builtIns = looks.filter((look) => look.builtIn)
 const fixture = (id: string): Look => {
-  const look = fixtures.find((each) => each.id === id)
+  const look = builtIns.find((each) => each.id === id)
   if (look === undefined) throw new Error(`no fixture look ${id}`)
   return look
 }
-const saved = (from: string, id: string, starred: boolean): Look => ({
-  ...fixture(from),
-  id,
-  name: `${fixture(from).name}, mine`,
-  builtIn: false,
-  derivedFrom: from,
-  starred,
-})
-const looks: Look[] = [
-  ...fixtures.map((look) => ({ ...look, starred: LIBRARY.starred.includes(look.id) })),
-  saved('fireflies', 'mine-1', false),
-  saved('bursts', 'mine-2', true),
-]
-const builtIns = looks.filter((look) => look.builtIn)
+const starredSaved: Look[] = looks.map((look) => (look.id === 'mine-2' ? { ...look, starred: true } : look))
 const idsOf = (shown: readonly Look[]) => shown.map((look) => look.id)
 const everything = { query: '', readyOnly: false, inputs: null } as const
 
@@ -54,13 +44,18 @@ describe('the tabs', () => {
     expect(counts.all).toBe(builtIns.length)
     expect(counts.mine).toBe(looks.filter((look) => !look.builtIn).length)
     expect(counts.starred).toBe(looks.filter((look) => look.starred).length)
-    expect(counts.starred).toBe(LIBRARY.starred.length + 1)
     for (const { id } of LOOK_CATEGORIES) expect(counts[id]).toBe(builtIns.filter((look) => look.category === id).length)
   })
 
-  it("count what the render's tabs say, but for the stars the test adds", () => {
+  it("count what the render's tabs say", () => {
     const counts = tabCounts(looks)
-    for (const { id, label } of LIBRARY_TABS) if (id !== 'starred') expect(counts[id], label).toBe(LIBRARY.counts[label])
+    for (const { id, label } of LIBRARY_TABS) expect(counts[id], label).toBe(LIBRARY.counts[label])
+  })
+
+  it('count a starred saved look in Starred and in Mine', () => {
+    const counts = tabCounts(starredSaved)
+    expect(counts.starred).toBe(LIBRARY.counts.Starred + 1)
+    expect(counts.mine).toBe(LIBRARY.counts.Mine)
   })
 })
 
@@ -148,10 +143,12 @@ describe('librarySections', () => {
   })
 
   it('keep the category sections on Starred, and a saved look in Mine', () => {
-    const sections = librarySections(looks, { tab: 'starred', ...everything })
+    const sections = librarySections(starredSaved, { tab: 'starred', ...everything })
     expect(sections.map((s) => s.id)).toEqual(['ambient', 'tempo', 'home', 'mine'])
     expect(sections.flatMap((s) => idsOf(s.looks))).toEqual(idsOf(looks.filter((l) => l.starred && l.builtIn)).concat('mine-2'))
     expect(sections.every((s) => s.looks.every((l) => l.starred))).toBe(true)
+    // As Looks.png draws it, no saved look is starred, so Mine has no section on Starred.
+    expect(librarySections(looks, { tab: 'starred', ...everything }).map((s) => s.id)).toEqual(['ambient', 'tempo', 'home'])
   })
 
   it('show one section on a category tab, of its built-in looks only', () => {
@@ -174,7 +171,8 @@ describe('librarySections', () => {
     expect(idsOf(librarySections(looks, { tab: 'all', ...everything, query: 'bursts' }).flatMap((s) => s.looks))).toEqual(['bursts', 'mine-2'])
     expect(idsOf(librarySections(looks, { tab: 'mine', ...everything, query: 'bursts' }).flatMap((s) => s.looks))).toEqual(['mine-2'])
     expect(librarySections(looks, { tab: 'ambient', ...everything, query: 'bursts' })).toEqual([])
-    expect(idsOf(librarySections(looks, { tab: 'starred', ...everything, query: 'bursts' }).flatMap((s) => s.looks))).toEqual(['mine-2'])
+    expect(idsOf(librarySections(starredSaved, { tab: 'starred', ...everything, query: 'bursts' }).flatMap((s) => s.looks))).toEqual(['mine-2'])
+    expect(librarySections(looks, { tab: 'starred', ...everything, query: 'bursts' })).toEqual([])
   })
 
   it("hide the looks waiting for an input with Only ready now: inputs-down's music and Home Assistant", () => {

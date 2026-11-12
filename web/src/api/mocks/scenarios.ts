@@ -2,6 +2,7 @@
 // the reference renders' sample content. Times count from `now`, so a clock fixed at 19:14 shows the
 // renders' times (decision 8). Names come from the fixtures; ids pick things out of them.
 import { formatBpm, formatTime } from '@/lib/format'
+import { LIBRARY } from '@/looks/looks-render'
 import type {
   AttentionItem, Deck, Home, Id, Inputs, Light, Look, Overlay, ProDjLinkInput, RecentLook, RunningZone, Signal, SunInput,
   SunPathPoint, TempoSource, Zone,
@@ -24,6 +25,7 @@ export const SCENARIOS = [
   'preview-only',
   'waiting',
   'first-run',
+  'library',
 ] as const
 export type ScenarioName = (typeof SCENARIOS)[number]
 
@@ -336,6 +338,20 @@ function hero(state: ScenarioState, now: Date): void {
   state.attention = orderAttention([lightOffline(state, 'rope')])
 }
 
+/**
+ * Looks.png: the hero, with the render's stars on its built-in looks and its saved looks after them, each a copy of
+ * the look it was saved from (F5 decision 19). The hero itself has none, as F4's composer baselines need.
+ */
+function library(state: ScenarioState, now: Date): void {
+  hero(state, now)
+  for (const look of state.looks) look.starred = LIBRARY.starred.includes(look.id)
+  const saved = LIBRARY.mine.map(({ name, from, description }, index): Look => {
+    const parent = the(state.looks, (look) => look.id === from, `look ${from}`)
+    return { ...structuredClone(parent), id: `mine-${index + 1}`, name, description, builtIn: false, derivedFrom: parent.id, starred: false }
+  })
+  state.looks.push(...saved)
+}
+
 /** State-Inputs-Down: the music went quiet 42 s ago, so the tempo fell back to Internal. */
 /** With no music and no DJ, the tempo falls back to Internal, at the hero's tapped 118 BPM. */
 function onInternal(state: ScenarioState): void {
@@ -368,6 +384,7 @@ function inputsDown(state: ScenarioState, now: Date): void {
 
 const BUILD: Record<ScenarioName, (state: ScenarioState, now: Date) => void> = {
   hero,
+  library,
   doorbell(state, now) {
     hero(state, now)
     state.overlays = [
