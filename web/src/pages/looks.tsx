@@ -24,7 +24,9 @@ import {
   parentName,
   readTab,
   runningOn,
+  switchHidesLooks,
   tabCounts,
+  type LibraryFilter,
   type LibrarySection,
   type LibraryTab,
 } from '@/looks/library-model'
@@ -113,7 +115,8 @@ export function LooksPage() {
     )
   }
 
-  const sections = librarySections(looks, { tab, query, readyOnly, inputs })
+  const filter: LibraryFilter = { tab, query, readyOnly, inputs }
+  const sections = librarySections(looks, filter)
   const card = (look: Look) => (
     <LookCard look={look} running={runningOn(look.id, running, zones)} parent={parentName(look, looks)} missing={missingInputs(look, inputs)} />
   )
@@ -133,7 +136,7 @@ export function LooksPage() {
           onQuery={search}
           onReadyOnly={setReadyOnly}
         />
-        {sections.length === 0 && <p className="py-16 text-center text-body text-text-2">{emptyText({ tab, query, readyOnly })}</p>}
+        {sections.length === 0 && <p className="py-16 text-center text-body text-text-2">{emptyText(filter, switchHidesLooks(looks, filter))}</p>}
         {grids.map((section) => (
           <Section key={section.id} section={section} card={card} />
         ))}

@@ -241,6 +241,35 @@ describe('the Looks page (§8.4)', () => {
     expect(await screen.findByText('No saved looks yet.')).toBeInTheDocument()
   })
 
+  // F5 final review, issue 1: the switch's line is only for a switch that hid looks.
+  it('blames "Only ready now" only where it hid the looks: an empty tab with the switch on says its own line', async () => {
+    const user = userEvent.setup()
+    seedLive('inputs-down')
+    const heard = liveStore.getState().inputs!
+    liveStore.setState({ inputs: { ...heard, music: { ...heard.music!, state: 'idle', track: null } } })
+    const { inputs } = liveStore.getState()
+    // Built-in and unstarred, so that Starred and Mine hold nothing.
+    const waiting = looks.filter((look) => look.builtIn && missingInputs(look, inputs).length > 0).map((look) => ({ ...look, starred: false }))
+    expect(waiting.length).toBeGreaterThan(0)
+    // The tab's looks all wait for an input: with the switch on, the switch hid them.
+    queryClient.setQueryData(queries.looks().queryKey, waiting)
+    const router = renderApp('/next/looks')
+    await screen.findAllByRole('heading', { level: 2 })
+    await user.click(screen.getByRole('switch', { name: 'Only ready now' }))
+    expect(await screen.findByText('No looks are ready now.')).toBeInTheDocument()
+    expect(shown()).toEqual([])
+    // Starred holds no look at all, so the switch hid nothing there, and neither does Mine's.
+    await act(() => router.navigate('/looks?cat=starred'))
+    expect(await screen.findByText('No starred looks yet.')).toBeInTheDocument()
+    expect(screen.queryByText('No looks are ready now.')).toBeNull()
+    await user.click(screen.getByRole('button', { name: /^Mine/ }))
+    expect(await screen.findByText('No saved looks yet.')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Only ready now' })).toBeChecked()
+    // The search comes first.
+    await user.type(screen.getByRole('searchbox', { name: 'Search looks' }), 'zz')
+    expect(await screen.findByText('No looks match “zz”.')).toBeInTheDocument()
+  })
+
   it("says when the looks didn't load, and tries again", async () => {
     vi.useFakeTimers()
     // Everything but the looks is seeded, so the page really asks for them.

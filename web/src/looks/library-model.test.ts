@@ -5,7 +5,7 @@ import { missingInputs } from '@/compose/model'
 import { HERO_NOW } from '@/test/live'
 import { INPUTS } from '@/zones/zone-view'
 import {
-  cardInputs, emptyText, LIBRARY_TABS, librarySections, looksContext, parentName, readTab, runningOn, runningPill, searchLooks, tabCounts,
+  cardInputs, emptyText, LIBRARY_TABS, librarySections, looksContext, parentName, readTab, runningOn, runningPill, searchLooks, switchHidesLooks, tabCounts,
 } from './library-model'
 import { LIBRARY, LOOK_CATEGORIES } from './looks-render'
 
@@ -272,21 +272,57 @@ describe('parentName', () => {
 
 describe('emptyText', () => {
   it('says why the grid is empty: the search first, then the switch, then the tab', () => {
-    expect(emptyText({ tab: 'starred', query: 'zz', readyOnly: true })).toBe('No looks match “zz”.')
-    expect(emptyText({ tab: 'starred', query: '', readyOnly: true })).toBe('No looks are ready now.')
-    expect(emptyText({ tab: 'starred', query: '', readyOnly: false })).toBe('No starred looks yet.')
-    expect(emptyText({ tab: 'mine', query: '', readyOnly: false })).toBe('No saved looks yet.')
-    expect(emptyText({ tab: 'home', query: '', readyOnly: false })).toBe('No home looks yet.')
-    expect(emptyText({ tab: 'all', query: '', readyOnly: false })).toBe('No looks yet.')
+    expect(emptyText({ tab: 'starred', query: 'zz' }, true)).toBe('No looks match “zz”.')
+    expect(emptyText({ tab: 'starred', query: '' }, true)).toBe('No looks are ready now.')
+    expect(emptyText({ tab: 'starred', query: '' }, false)).toBe('No starred looks yet.')
+    expect(emptyText({ tab: 'mine', query: '' }, false)).toBe('No saved looks yet.')
+    expect(emptyText({ tab: 'home', query: '' }, false)).toBe('No home looks yet.')
+    expect(emptyText({ tab: 'all', query: '' }, false)).toBe('No looks yet.')
   })
 
   it('reads the search as the composer does, trimmed, and none for blank words', () => {
-    expect(emptyText({ tab: 'all', query: '  zz ', readyOnly: false })).toBe('No looks match “zz”.')
-    expect(emptyText({ tab: 'all', query: '   ', readyOnly: true })).toBe('No looks are ready now.')
+    expect(emptyText({ tab: 'all', query: '  zz ' }, false)).toBe('No looks match “zz”.')
+    expect(emptyText({ tab: 'all', query: '   ' }, true)).toBe('No looks are ready now.')
+    expect(emptyText({ tab: 'starred', query: '   ' }, false)).toBe('No starred looks yet.')
   })
 
   it('names every category tab in the lower case', () => {
-    for (const { id } of LOOK_CATEGORIES) expect(emptyText({ tab: id, query: '', readyOnly: false })).toBe(`No ${id} looks yet.`)
+    for (const { id } of LOOK_CATEGORIES) expect(emptyText({ tab: id, query: '' }, false)).toBe(`No ${id} looks yet.`)
+  })
+})
+
+// F5 final review, issue 1: the switch's line is for a switch that hid looks, not for any empty tab while it is on.
+describe('switchHidesLooks', () => {
+  const { inputs } = buildScenario('inputs-down')
+  const waiting = looks.filter((look) => missingInputs(look, inputs).length > 0)
+  const on = { tab: 'all', query: '', readyOnly: true, inputs } as const
+
+  it("is true where the switch hid the tab's looks, and so the grid is empty for it", () => {
+    expect(waiting.length).toBeGreaterThan(0)
+    expect(librarySections(waiting, on)).toEqual([])
+    expect(switchHidesLooks(waiting, on)).toBe(true)
+    expect(emptyText(on, switchHidesLooks(waiting, on))).toBe('No looks are ready now.')
+  })
+
+  it('is false for an empty tab with the switch on: nothing was there to hide', () => {
+    const noSaved = looks.filter((look) => look.builtIn)
+    const noStars = noSaved.map((look) => ({ ...look, starred: false }))
+    expect(librarySections(noStars, { ...on, tab: 'starred' })).toEqual([])
+    expect(switchHidesLooks(noStars, { ...on, tab: 'starred' })).toBe(false)
+    expect(emptyText({ tab: 'starred', query: '' }, switchHidesLooks(noStars, { ...on, tab: 'starred' }))).toBe('No starred looks yet.')
+    expect(switchHidesLooks(noSaved, { ...on, tab: 'mine' })).toBe(false)
+    expect(emptyText({ tab: 'mine', query: '' }, switchHidesLooks(noSaved, { ...on, tab: 'mine' }))).toBe('No saved looks yet.')
+  })
+
+  it('is false with the switch off, whatever the tab holds', () => {
+    expect(switchHidesLooks(waiting, { ...on, readyOnly: false })).toBe(false)
+    expect(switchHidesLooks([], { ...on, readyOnly: false })).toBe(false)
+  })
+
+  it('counts what the search leaves of the tab, before the switch', () => {
+    const name = waiting[0].name
+    expect(switchHidesLooks(waiting, { ...on, query: name })).toBe(true)
+    expect(switchHidesLooks(waiting, { ...on, query: 'no look is named this' })).toBe(false)
   })
 })
 

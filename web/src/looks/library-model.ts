@@ -174,11 +174,23 @@ export function parentName(look: Look, looks: readonly Look[]): string | null {
   return looks.find((each) => each.id === look.derivedFrom)?.name ?? null
 }
 
-/** Why the grid is empty (F5 ruling 21): the search first, then the switch, then the tab. */
-export function emptyText(filter: Pick<LibraryFilter, 'tab' | 'query' | 'readyOnly'>): string {
+/**
+ * Whether "Only ready now" is why the grid is empty (F5 ruling 21: the switch's line is for "the switch hiding everything"): the tab, with
+ * the search applied and the switch off, holds looks. A tab that is empty with the switch off or on, as Starred is on a fresh database,
+ * was never the switch's doing.
+ */
+export function switchHidesLooks(looks: readonly Look[], filter: LibraryFilter): boolean {
+  return filter.readyOnly && librarySections(looks, { ...filter, readyOnly: false }).length > 0
+}
+
+/**
+ * Why the grid is empty (F5 ruling 21): the search first, then the switch (`hiddenBySwitch`, from `switchHidesLooks()`), then the tab,
+ * which says what it is for: a line that blames the switch for an empty Starred tab would be false whenever the switch hides nothing.
+ */
+export function emptyText(filter: Pick<LibraryFilter, 'tab' | 'query'>, hiddenBySwitch: boolean): string {
   const query = filter.query.trim()
   if (query !== '') return `No looks match “${query}”.`
-  if (filter.readyOnly) return 'No looks are ready now.'
+  if (hiddenBySwitch) return 'No looks are ready now.'
   switch (filter.tab) {
     case 'all':
       return 'No looks yet.'
