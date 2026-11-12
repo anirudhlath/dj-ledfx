@@ -48,7 +48,7 @@ describe('LookThumb (§6.4)', () => {
     }
   })
 
-  // Review Focus 4.
+  // F5 decision 7: a look with no motif is the bare scene.
   it("draws the bare scene for a look with no motif: a classic, a thumbnail the handoff doesn't have, or none", () => {
     // The schema's thumbnail is required, so a look with none is a server's slip, not a type: cast it once.
     const [first] = seedRest('hero').looks
