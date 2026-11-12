@@ -670,6 +670,8 @@ PUT    /looks/{id}/starred
 GET    /zones                        all zones (home, rooms, sub-zones, groups)
 POST   /zones/groups · PUT/DELETE /zones/groups/{id}
 GET    /running                      RunningZone[] + Overlay[]
+POST   /running/overlay              { lookId | look (draft), durationS, trigger? } → Overlay; replaces any playing
+DELETE /running/overlay
 POST   /zones/{id}/start             { lookId | look (draft), transition? } → RunningZone, with takeOvers[]
 PUT    /zones/{id}/brightness        { value }
 POST   /zones/{id}/off · POST /zones/{id}/restart · POST /running/stop-all
@@ -690,6 +692,8 @@ GET    /config · PUT /config
 GET    /backup (file download) · POST /backup/restore (multipart)
 ```
 
+**Overlays** (engine M6): `POST /running/overlay` plays a Home look (`scope: whole-home`; any other is a 400) over every running zone for `durationS` seconds, more than 0 and at most 3600 (a 422 otherwise), and answers 201 with its `Overlay`. `trigger` says what started it, `"api"` when it's left out; Home Assistant's triggers (engine M7) name theirs. One plays at a time, and a new one replaces it. `DELETE /running/overlay` ends it and answers 204 whether or not one plays; Stop all ends it too, and it ends by itself at `endsAt`. A restart doesn't bring it back. It shows on the lights that stream a running zone's frames, screened over them, so it never darkens them; idle lights and lights running their own effect don't show it. `endsAt` is UTC, and `progress` is the share played (0–1) when the message was made. The `running` channel pushes as an overlay starts and ends, and a client moves the bar on from `endsAt`.
+
 ### 12.4 WebSocket `/ws` v2
 
 JSON envelope `{ "channel": string, ... }` as today, plus:
@@ -701,7 +705,7 @@ JSON envelope `{ "channel": string, ... }` as today, plus:
 | `running` | on change | `RunningZone[]`, `Overlay[]` |
 | `lights` | on change | `[{ id, status, statusSince, ownEffect }]` |
 | `stats` | 1 Hz | `[{ id, send_fps, latency_ms, dropped_pct }]` |
-| `inputs` | on change + 1 Hz heartbeat | music (state, track, group, loudness, lufs, spectrum[32], onsets, updated_at), home assistant (state, entities), sun (elevation, azimuth, sunset, sunrise) |
+| `inputs` | on change + 1 Hz heartbeat | music (state, track, group, loudness, lufs, spectrum[32], onsets, updated_at), home assistant (state, entities), sun (`SunInput` below: elevation, azimuth, sunrise, sunset, path; null with no location) |
 | `signals` | when subscribed, 10 Hz | `{ name: value }` |
 | `attention` | on change | `AttentionItem[]` |
 | `fx` | when subscribed, ≤ 30 Hz | optional: particles `[x,y,z,r,g,b,size]`, rings, planes, sun shafts per zone, for "Effects in space" |
@@ -728,7 +732,22 @@ type Vec3 = [number, number, number]
 - A `circle` lies level (its axis is z); a `sphere` is a shell. A plane is infinite unless it has a `ray`, a direction in the plane: then it is the half on that side of `point` (a lighthouse beam). Units: a particle's `size` is its radius in metres, where its light falls to 1/e; a ring's or plane's `width` is its full thickness in metres where its light falls to 1/e, except a plane with a `ray`, whose `width` is its angle in radians (its width 1 m out). The stage draws each so that what it draws in the room is what lights the lamps, its peak, face on, being §7.1's glass pane times its colour: a particle as that light across the screen, at any height, so that a stronger particle always adds more than a weaker one; a ring or a plane as that light summed along each line of sight between the floor and the ceiling, one crossing through its peak making that peak.
 - A zone with nothing to draw is left out, and a message with no zones clears the stage. The server sends at most 30 a second and only to a session that sent `subscribe_fx {on: true}`, until `{on: false}`; it sends the whole picture as a session subscribes, then nothing while nothing changes.
 - **Extending it:** a later kind (M6's sun `shafts`, the doorbell's ring) is a new optional key on `ZoneFx`, or a new optional field on an item. The client ignores keys it doesn't know, and the server never renames or removes one, so neither side bumps a version.
-- **What draws what (M8's first slice):** every particle effect (M5's eleven looks) sends `particles`; Shockwave's shell, Speaker waves' kick fronts and Ripples' drops send `sphere` rings, each lighting LEDs by its 3D distance, and a snare's bloom a particle as wide as the bloom; Scanner sends a level plane and Shockwave's beam a plane with a `ray`. Firmware layers send nothing, and no effect sends a `circle` before the doorbell. Sun shafts wait for M6's sun.
+- **What draws what (M8's first slice):** every particle effect (M5's eleven looks) sends `particles`; Shockwave's shell, Speaker waves' kick fronts and Ripples' drops send `sphere` rings, each lighting LEDs by its 3D distance, and a snare's bloom a particle as wide as the bloom; Scanner sends a level plane and Shockwave's beam a plane with a `ray`. Firmware layers send nothing, and no effect sends a `circle` before the doorbell. Sun shafts wait until the map's windows have sill and head heights (engine M6 deferred them); `shafts` stays the key reserved for them.
+
+**The `sun` input** (engine M6). `GET /inputs` and the `inputs` channel both carry it:
+
+```ts
+interface SunInput {
+  elevation: number        // degrees above the horizon, as the eye sees it (refraction included)
+  azimuth: number          // degrees clockwise from true north; the stage turns it onto the plan by home.northOffsetDeg
+  sunrise: string | null   // the latest sunrise at or before now, UTC ISO 8601; null when none falls near now (polar day or night)
+  sunset: string | null    // the first sunset after that sunrise, UTC ISO 8601; null likewise
+  path?: { at: string; elevation: number; azimuth: number }[]  // the sun at each 10-minute mark of the clock in the 2 h before now, oldest first
+}
+// Inputs.sun: SunInput | null. It's null while the home has no location (PUT /home sets it).
+```
+
+Every number is rounded to 1 decimal. The path's points change only when a new 10-minute mark passes, so the copies the heartbeat sends between marks have the same path.
 
 
 **Binary frame v2:** `[1B stream: 0x01 live | 0x02 preview][2B id_len LE][id UTF-8 (stable id)][4B seq LE][RGB × leds]`. Keep v1 behind a version handshake until the old UI is deleted.
