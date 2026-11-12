@@ -64,6 +64,8 @@ function fail(message: string): never {
 /** An `<svg class="tb ">`'s inner markup; nothing nests another svg in it, so the first `</svg>` ends it. */
 const TB = /<svg class="tb "[^>]*>([\s\S]*?)<\/svg>/
 const REFERS = /(id="|url\(#|href="#)/
+/** A running look's pill: its 6 px dot, which a zone's name follows (the header's dot is 7 px). */
+const PILL = /<span style="width: 6px; height: 6px;[^"]*animation: livedot[^"]*"><\/span>/
 
 /** `markup` with the prefix of each id (`lk<n>` of a built-in look's, `mn<n>` of a saved one's) replaced by the slot. */
 function slotted(markup: string): string {
@@ -191,18 +193,30 @@ export function extractLooksRender(read: ReadText, looksJson: string): LooksRend
     const { id } = card.look
     const star = /aria-label="(?:Star|Unstar) [^"]*" aria-pressed="(true|false)"/.exec(card.html)?.[1] ?? fail(`Looks.html's star on ${id} no longer reads`)
     if (star === 'true') starred.push(id)
-    const zone = /<span style="width: 6px; height: 6px;[^"]*animation: livedot[^"]*"><\/span>([^<]+)<\/span>/.exec(card.html)?.[1]
+    const zone = new RegExp(`${PILL.source}([^<]+)</span>`).exec(card.html)?.[1]
     if (zone !== undefined) running[id] = zone
     inputs[id] = readInputs(card)
   }
+  // A running pill is on a built-in look's card, with its zone; one anywhere else, or with no zone, is a card that moved.
+  const pills = html.match(new RegExp(PILL.source, 'g'))?.length ?? 0
+  if (pills !== Object.keys(running).length) fail(`Looks.html's running pills no longer read: ${pills} drawn, ${Object.keys(running).length} on a built-in look's card with a zone`)
   const scrimmed = [...built, ...saved].filter((card) => card.html.includes('linear-gradient(to top'))
-  const hovered = built.find((card) => card.html.includes('linear-gradient(to top'))
-  if (scrimmed.length !== 1 || hovered === undefined) fail(`Looks.html's hovered card no longer reads: ${scrimmed.length} draw a scrim`)
+  if (scrimmed.length !== 1) fail(`Looks.html's hovered card no longer reads: ${scrimmed.length} draw a scrim`)
+  const hovered = built.find((card) => card === scrimmed[0]) ?? fail(`Looks.html's hovered card no longer reads: the scrim is on the saved look ${scrimmed[0].name}`)
   const mineBlurb = /<h2[^>]*>Mine<\/h2><span[^>]*>([^<]+)<\/span>/.exec(html)?.[1] ?? fail("Looks.html's Mine header no longer reads")
 
   const style = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? ''
   const rules = motifRules(style)
   if (rules.length === 0) fail("Looks.html's .tb rules and t_* keyframes no longer read")
+  // Each motif animates with keyframes the rules hold: a missing one would leave it standing still.
+  const keyframes = new Set(rules.map((rule) => /^@keyframes (t_\w+)/.exec(rule)?.[1]))
+  for (const { look, raw } of built) {
+    for (const animation of raw.matchAll(/animation:([^;"]*)/g)) {
+      for (const [name] of animation[1].matchAll(/\bt_\w+/g)) {
+        if (!keyframes.has(name)) fail(`Looks.html's motif for ${look.id} animates with ${name}, which its t_* keyframes don't hold`)
+      }
+    }
+  }
 
   return {
     motifs,
