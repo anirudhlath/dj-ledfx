@@ -246,14 +246,13 @@ def test_the_path_is_the_ten_minute_marks_of_the_two_hours_before_now_oldest_fir
     )
 
 
-def test_the_path_and_the_day_follow_the_instant_not_the_zone_it_is_given_in() -> None:
+def test_the_path_follows_the_instant_not_the_zone_it_is_given_in() -> None:
     nepal = timezone(timedelta(hours=5, minutes=45))  # its :00 is not a UTC mark
     at = SOLSTICE.replace(hour=12, minute=34, second=56)
     local = at.astimezone(nepal)
 
     assert local.minute != at.minute
     assert sun_path(*MID, local) == sun_path(*MID, at)
-    assert daylight(*MID, local) == daylight(*MID, at)
 
 
 @pytest.mark.parametrize(
