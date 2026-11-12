@@ -153,14 +153,38 @@ describe('the Looks page (§8.4)', () => {
   })
 
   // The router's updates are transitions, so the URL can answer a key after the next one has been typed: that echo must not put the box back.
-  it("doesn't put the box back to the text of a replace that comes round late", async () => {
+  // Here the navigations are held and let go after the typing, so the first key's write comes round with the box already at "bu".
+  it("doesn't put the box back to the text of its own write that comes round late", async () => {
     const user = userEvent.setup()
     const router = renderApp('/next/looks')
     const search = await screen.findByRole('searchbox', { name: 'Search looks' })
+    const navigate = router.navigate as (to: unknown, options?: unknown) => Promise<void>
+    const held: Array<() => Promise<void>> = []
+    vi.spyOn(router, 'navigate').mockImplementation(((to: unknown, options?: unknown) => {
+      held.push(() => navigate(to, options))
+      return Promise.resolve()
+    }) as typeof router.navigate)
     await user.type(search, 'bu')
-    await act(() => router.navigate('/looks?q=b', { replace: true }))
+    expect(held).toHaveLength(2)
+    expect(router.state.location.search).toBe('')
+    const bu = librarySections(looks, { ...ALL, query: 'bu' }).flatMap((section) => section.looks.map((look) => look.id))
+    await act(() => held[0]!())
+    expect(router.state.location.search).toBe('?q=b')
     expect(search).toHaveValue('bu')
-    expect(shown()).toEqual(librarySections(looks, { ...ALL, query: 'bu' }).flatMap((section) => section.looks.map((look) => look.id)))
+    expect(shown()).toEqual(bu)
+    await act(() => held[1]!())
+    expect(router.state.location.search).toBe('?q=bu')
+    expect(search).toHaveValue('bu')
+  })
+
+  it("takes a replace that isn't the box's, as it takes any other change of the URL", async () => {
+    const router = renderApp('/next/looks?q=fire')
+    const search = await screen.findByRole('searchbox', { name: 'Search looks' })
+    expect(search).toHaveValue('fire')
+    await act(() => router.navigate('/looks?q=bursts', { replace: true }))
+    expect(router.state.location.search).toBe('?q=bursts')
+    expect(search).toHaveValue('bursts')
+    expect(shown()).toEqual(librarySections(looks, { ...ALL, query: 'bursts' }).flatMap((section) => section.looks.map((look) => look.id)))
   })
 
   it('filters the cards by the search and the tab, as the sections the model draws', async () => {
@@ -271,19 +295,28 @@ describe('the Looks page (§8.4)', () => {
     expect(within(card(goodnight.id)).getByText('HA')).toHaveClass('text-signal')
   })
 
-  it('stars a look on the page, and the composer sees it', async () => {
+  it('stars a look on the page, asks the server and keeps the look it answers with', async () => {
     const user = userEvent.setup()
-    restOn(startMockServer({ scenario: 'library' }))
+    const server = startMockServer({ scenario: 'library' })
+    restOn(server)
+    // The request goes to the mock server through fetch; its answer is given a mark, so that the cache can show it is the server's look.
+    const ask = api.setStarred
+    const asked = vi.spyOn(api, 'setStarred').mockImplementation(async (id, starred) => ({ ...(await ask(id, starred)), description: 'as the server has it' }))
     renderApp('/next/looks')
     await screen.findAllByRole('heading', { level: 2 })
     const star = within(card('sunset')).getByRole('button', { name: 'Star Sunset' })
     expect(star).toHaveAttribute('aria-pressed', 'false')
     await user.click(star)
-    const starred = (id: string) => queryClient.getQueryData(queries.looks().queryKey)!.find((look: Look) => look.id === id)!.starred
-    expect(starred('sunset')).toBe(true)
+    // The card shows the choice before the server has answered, and the count follows, as the tab says Starred.
     expect(within(card('sunset')).getByRole('button', { name: 'Unstar Sunset' })).toHaveAttribute('aria-pressed', 'true')
-    // The count follows, as the tab says Starred.
     expect(screen.getByRole('button', { name: /^Starred/ })).toHaveTextContent(String(LIBRARY.counts.Starred + 1))
+    // The request reached the server, which kept it, and the cache holds the look it answered with.
+    expect(asked).toHaveBeenCalledExactlyOnceWith('sunset', true)
+    const served = (await asked.mock.results[0]!.value) as Look
+    expect(served).toMatchObject({ id: 'sunset', starred: true, description: 'as the server has it' })
+    expect((server.handle('GET', '/api/looks').body as Look[]).find((look) => look.id === 'sunset')?.starred).toBe(true)
+    const cachedSunset = () => queryClient.getQueryData(queries.looks().queryKey)!.find((look: Look) => look.id === 'sunset')
+    await waitFor(() => expect(cachedSunset()).toEqual(served))
   })
 
   it('says aloud that a star was not saved, and puts it back', async () => {
@@ -294,6 +327,29 @@ describe('the Looks page (§8.4)', () => {
     await user.click(within(card('sunset')).getByRole('button', { name: 'Star Sunset' }))
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent("Couldn't star Sunset. Internal Server Error"))
     expect(within(card('sunset')).getByRole('button', { name: 'Star Sunset' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('draws the editor under the same title without the library\'s count (M10)', async () => {
+    renderApp('/next/looks/fireflies')
+    await screen.findByText('Look editor')
+    const banner = screen.getByRole('banner')
+    expect(within(banner).getByText('Looks')).toBeInTheDocument()
+    expect(banner).not.toHaveTextContent(/looks ·/)
+  })
+
+  // jsdom measures no layout, so the frame is pinned by its classes: Looks.html's main is the content width between 40 px gutters, 24 px
+  // above and 40 below. <main> also holds Live's full-bleed stage, so it is the page that frames itself.
+  it('frames itself: gutters round a content column capped at the content width, centred', async () => {
+    renderApp('/next/looks')
+    const [ambient] = await screen.findAllByRole('heading', { level: 2 })
+    const column = sectionOf(ambient).parentElement!
+    expect(column).toHaveClass('mx-auto', 'w-full', 'max-w-(--content-max-w)')
+    const gutters = column.parentElement!
+    expect(gutters).toHaveClass('px-4', 'md:px-10', 'pt-6', 'pb-10')
+    expect(gutters.parentElement).toBe(screen.getByRole('main'))
+    // The phone's gutter is the other phone pages' 16 px, and the desktop's the render's 40.
+    expect(4 * 4).toBe(16)
+    expect(4 * 10).toBe(40)
   })
 
   it('reflows to two columns on the phone, with no header context', async () => {
