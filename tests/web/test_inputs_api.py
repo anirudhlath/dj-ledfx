@@ -230,6 +230,21 @@ async def test_a_polar_sun_has_null_sunrise_and_sunset(tmp_path: Path) -> None:
     assert inputs["sun"]["elevation"] == 2.1  # the sun itself is still sent
 
 
+async def test_an_azimuth_that_rounds_up_to_360_wraps_to_0(tmp_path: Path) -> None:
+    at = datetime(2026, 3, 20, 18, 0, tzinfo=UTC)
+    reading = SunReading(
+        now=SunPoint(at, 2.14, 359.96),  # 359.96 rounds to 360.0 at 1 decimal
+        sunrise=None,
+        sunset=None,
+        path=(SunPoint(at - timedelta(minutes=10), 4.06, 359.99),),
+    )
+    async with api_home(tmp_path, [], [], sun=FixedSun(AT_DUSK, reading)) as api:
+        sun = (await api.client.get("/api/inputs")).json()["sun"]
+
+    assert sun["azimuth"] == 0.0
+    assert [point["azimuth"] for point in sun["path"]] == [0.0]
+
+
 def test_the_inputs_channel_carries_the_sun() -> None:
     sunset = datetime(2026, 3, 20, 18, 10, tzinfo=UTC)
     sun = FixedSun(AT_DUSK, _a_day_in_march(None, sunset))

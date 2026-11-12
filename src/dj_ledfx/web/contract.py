@@ -1016,9 +1016,16 @@ def tempo_out(tempo: TempoClock) -> TempoInput:
     return TempoInput.model_validate(tempo, from_attributes=True)
 
 
+def _azimuth_out(degrees: float) -> float:
+    """An azimuth to 1 decimal, kept in [0, 360): 359.96 rounds to 360.0, which is 0.0."""
+    return round(degrees, 1) % 360.0
+
+
 def _sun_path_point(point: SunPoint) -> SunPathPoint:
     return SunPathPoint(
-        at=point.at, elevation=round(point.elevation_deg, 1), azimuth=round(point.azimuth_deg, 1)
+        at=point.at,
+        elevation=round(point.elevation_deg, 1),
+        azimuth=_azimuth_out(point.azimuth_deg),
     )
 
 
@@ -1029,7 +1036,7 @@ def sun_out(reading: SunReading | None) -> SunInput | None:
         return None
     return SunInput(
         elevation=round(reading.now.elevation_deg, 1),
-        azimuth=round(reading.now.azimuth_deg, 1),
+        azimuth=_azimuth_out(reading.now.azimuth_deg),
         sunrise=reading.sunrise,
         sunset=reading.sunset,
         path=[_sun_path_point(point) for point in reading.path],
