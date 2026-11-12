@@ -103,22 +103,22 @@ export function retryLink(): void {
   liveClient()?.retryNow()
 }
 
-/** A look as each cache holds it: the library's list and the look's own entry (the editor's); undefined where a cache doesn't hold it. */
-interface Cached {
-  listed: Look | undefined
-  own: Look | undefined
+/** A look's star as each cache holds it: the library's list and the look's own entry (the editor's); undefined where a cache doesn't hold it. */
+interface Stars {
+  listed: boolean | undefined
+  own: boolean | undefined
 }
 
 /**
- * A look's star requests: how many have been made (the latest wins), how many wait for an answer, the look a failure puts back in each
- * cache, which is the server's (the look as that cache held it before the first request now waiting, or what an earlier answer has served
+ * A look's star requests: how many have been made (the latest wins), how many wait for an answer, the star a failure puts back in each
+ * cache, which is the server's (the star as that cache held it before the first request now waiting, or what an earlier answer has served
  * since), and whether the latest request failed and its put-back is what the caches show: an earlier request's answer after that is the
- * server's word, and lands.
+ * server's word, and lands. Only the star is kept: a cache may have taken other fields from a refetch since, and a put-back leaves those.
  */
 interface StarRequests {
   made: number
   waiting: number
-  settled: Cached
+  settled: Stars
   putBack: boolean
 }
 
@@ -144,36 +144,52 @@ function changeCachedLook(lookId: Id, change: (look: Look) => Look): void {
   changeOwnLook(lookId, change)
 }
 
-/** The look as each cache holds it now. */
-const cachedLook = (lookId: Id): Cached => ({
-  listed: queryClient.getQueryData(queries.looks().queryKey)?.find((look) => look.id === lookId),
-  own: queryClient.getQueryData(queries.look(lookId).queryKey),
+/** The look's star as each cache holds it now. */
+const cachedStars = (lookId: Id): Stars => ({
+  listed: queryClient.getQueryData(queries.looks().queryKey)?.find((look) => look.id === lookId)?.starred,
+  own: queryClient.getQueryData(queries.look(lookId).queryKey)?.starred,
 })
 
 /**
+ * Ends the fetches of the caches a star is about to be written to, as TanStack asks of an optimistic write: a refetch asked for before
+ * the choice would land after it with the star as it was, and a cancelled one is put back to the state it started from, so this comes
+ * before the write. A cache that holds nothing is left to finish: no choice is written over it, and a cancel would leave it empty.
+ */
+function cancelFetchesOf(lookId: Id): void {
+  for (const { queryKey } of [queries.looks(), queries.look(lookId)]) {
+    if (queryClient.getQueryData(queryKey) !== undefined) void queryClient.cancelQueries({ queryKey, exact: true })
+  }
+}
+
+/**
  * §8.4's star, F5 ruling 16: the card shows the choice at once, then the server's look. The latest choice for a look wins: an earlier
- * request's answer never overwrites a later choice, and neither does its failure. The latest request's failure puts back the server's
- * look, not an earlier choice's star that was only ever shown, and rejects for the card to say aloud; an earlier request that is
- * answered after that put-back shows its answer, since the server holds it.
+ * request's answer never overwrites a later choice's star (the rest of that look lands), and neither does its failure. The latest
+ * request's failure puts back the server's star, not an earlier choice's that was only ever shown, onto the look each cache holds now (so
+ * what a refetch brought meanwhile stays), and rejects for the card to say aloud; an earlier request that is answered after that put-back
+ * shows its answer, since the server holds it.
  */
 export async function setStarred(lookId: Id, starred: boolean): Promise<void> {
   const requests = starRequests.get(lookId) ?? { made: 0, waiting: 0, settled: { listed: undefined, own: undefined }, putBack: false }
   starRequests.set(lookId, requests)
   const request = ++requests.made
   requests.putBack = false
-  if (requests.waiting === 0) requests.settled = cachedLook(lookId)
+  cancelFetchesOf(lookId)
+  if (requests.waiting === 0) requests.settled = cachedStars(lookId)
   requests.waiting++
   changeCachedLook(lookId, (look) => ({ ...look, starred }))
   try {
     const served = await api.setStarred(lookId, starred)
-    requests.settled = { listed: served, own: served }
+    requests.settled = { listed: served.starred, own: served.starred }
+    // The latest answer, or one after the latest failed and was put back, is the look. An earlier one is the server's word on all but the
+    // star, which the latest choice still shows.
     if (request === requests.made || requests.putBack) changeCachedLook(lookId, () => served)
+    else changeCachedLook(lookId, (look) => ({ ...served, starred: look.starred }))
   } catch (error) {
     const { settled } = requests
     if (request === requests.made && (settled.listed !== undefined || settled.own !== undefined)) {
-      // Each cache gets back the look it held, which need not be the other's.
-      changeListedLook(lookId, (look) => settled.listed ?? look)
-      changeOwnLook(lookId, (look) => settled.own ?? look)
+      // Each cache gets back the star it held, which need not be the other's.
+      changeListedLook(lookId, (look) => (settled.listed === undefined ? look : { ...look, starred: settled.listed }))
+      changeOwnLook(lookId, (look) => (settled.own === undefined ? look : { ...look, starred: settled.own }))
       requests.putBack = true
     }
     throw error

@@ -242,6 +242,125 @@ describe('setStarred', () => {
     expect(cached(ID).starred).toBe(false)
   })
 
+  // F5 final review, issue 2: a refetch that lands while the star is out brings the look's other fields, and a failed star is not a
+  // reason to lose them.
+  it("puts back only the star when a refetch changed the look while the request was out", async () => {
+    seedRest('library')
+    const before = cached(ID)
+    const answer = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+    const done = setStarred(ID, true)
+    // The refetch's look, as the server holds it: renamed, and not starred, as the request has not been answered.
+    const refetched = { ...before, name: 'Renamed elsewhere', starred: false }
+    queryClient.setQueryData(queries.looks().queryKey, (looks) => looks?.map((look) => (look.id === ID ? refetched : look)))
+    answer.reject(new ApiError(500, 'Internal Server Error', `/api/looks/${ID}/starred`))
+    await expect(done).rejects.toBeInstanceOf(ApiError)
+    expect(cached(ID)).toEqual(refetched)
+    expect(cached(ID).name).toBe('Renamed elsewhere')
+    expect(cached(ID).starred).toBe(false)
+  })
+
+  it("puts back only the star in the look's own entry too", async () => {
+    seedRest('library')
+    const before = cached(ID)
+    queryClient.setQueryData(queries.look(ID).queryKey, before)
+    const answer = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+    const done = setStarred(ID, true)
+    const refetched = { ...before, name: 'Renamed elsewhere', starred: false }
+    queryClient.setQueryData(queries.look(ID).queryKey, refetched)
+    answer.reject(new ApiError(500, 'Internal Server Error', `/api/looks/${ID}/starred`))
+    await expect(done).rejects.toBeInstanceOf(ApiError)
+    expect(queryClient.getQueryData(queries.look(ID).queryKey)).toEqual(refetched)
+    expect(cached(ID)).toEqual(before)
+  })
+
+  it("lets an earlier answer's other fields land while a later choice is out, and keeps that choice's star", async () => {
+    seedRest('library')
+    const before = cached(ID)
+    const first = deferred<Look>()
+    const second = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const star = setStarred(ID, true)
+    const unstar = setStarred(ID, false)
+    first.resolve({ ...before, starred: true, description: 'as the server has it' })
+    await star
+    expect(cached(ID).description).toBe('as the server has it')
+    expect(cached(ID).starred).toBe(false)
+    second.resolve({ ...before, starred: false, description: 'as the server has it' })
+    await unstar
+    expect(cached(ID).starred).toBe(false)
+  })
+
+  // The order TanStack asks for an optimistic write: end the fetches first. A refetch asked for before the choice answers with the star as it
+  // was, and would show it over the choice until the request is answered.
+  describe('the fetches already on their way', () => {
+    const detail = (id: string) => queryClient.getQueryData(queries.look(id).queryKey)
+    const fetching = (queryKey: readonly unknown[]) => queryClient.isFetching({ queryKey, exact: true })
+
+    it("ends the list's refetch, so its answer can't land over the star", async () => {
+      seedRest('library')
+      const before = cached(ID)
+      const fetched = deferred<Look[]>()
+      vi.spyOn(api, 'looks').mockReturnValue(fetched.promise)
+      const refetch = queryClient.fetchQuery({ ...queries.looks(), staleTime: 0 })
+      expect(fetching(queries.looks().queryKey)).toBe(1)
+      const answer = deferred<Look>()
+      vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+      const done = setStarred(ID, true)
+      expect(fetching(queries.looks().queryKey)).toBe(0)
+      fetched.resolve(queryClient.getQueryData(queries.looks().queryKey)!.map((look) => (look.id === ID ? { ...before, starred: false } : look)))
+      await refetch.catch(() => undefined)
+      expect(cached(ID).starred).toBe(true)
+      answer.resolve({ ...before, starred: true })
+      await done
+      expect(cached(ID).starred).toBe(true)
+    })
+
+    it("ends the look's own refetch too, and no other look's", async () => {
+      seedRest('library')
+      const before = cached(ID)
+      const rain = cached('rain')
+      queryClient.setQueryData(queries.look(ID).queryKey, before)
+      queryClient.setQueryData(queries.look('rain').queryKey, rain)
+      const own = deferred<Look>()
+      const other = deferred<Look>()
+      vi.spyOn(api, 'look').mockReturnValueOnce(own.promise).mockReturnValueOnce(other.promise)
+      const refetch = queryClient.fetchQuery({ ...queries.look(ID), staleTime: 0 })
+      const rainRefetch = queryClient.fetchQuery({ ...queries.look('rain'), staleTime: 0 })
+      const answer = deferred<Look>()
+      vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+      const done = setStarred(ID, true)
+      expect(fetching(queries.look(ID).queryKey)).toBe(0)
+      expect(fetching(queries.look('rain').queryKey)).toBe(1)
+      own.resolve({ ...before, starred: false })
+      await refetch.catch(() => undefined)
+      expect(detail(ID)?.starred).toBe(true)
+      other.resolve({ ...rain, description: 'rain, refetched' })
+      await rainRefetch
+      expect(detail('rain')?.description).toBe('rain, refetched')
+      answer.resolve({ ...before, starred: true })
+      await done
+    })
+
+    it("leaves a fetch to finish where the cache holds nothing to write the star to", async () => {
+      seedRest('library')
+      const before = cached(ID)
+      const fetched = deferred<Look>()
+      vi.spyOn(api, 'look').mockReturnValue(fetched.promise)
+      const first = queryClient.fetchQuery(queries.look(ID))
+      const answer = deferred<Look>()
+      vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+      const done = setStarred(ID, true)
+      expect(fetching(queries.look(ID).queryKey)).toBe(1)
+      fetched.resolve(before)
+      await first
+      expect(detail(ID)).toEqual(before)
+      answer.resolve({ ...before, starred: true })
+      await done
+    })
+  })
+
   it("keeps each look's choices apart", async () => {
     seedRest('library')
     const other = deferred<Look>()
