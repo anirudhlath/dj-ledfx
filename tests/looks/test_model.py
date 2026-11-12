@@ -144,7 +144,6 @@ def test_setting_schema_types() -> None:
     [
         ({"name": ""}, "name"),
         ({"category": "party"}, "category"),
-        ({"scope": "whole-home"}, "M6"),
         ({"needs": ["weather"]}, "input"),
         ({"layers": [_layer(settings={"beats_per_cycle": {"value": 2.0, "binding": {}}})]}, "M7"),
         ({"layers": [_layer(settings={"beats_per_cycle": 2.0})]}, "value"),
@@ -156,6 +155,10 @@ def test_looks_m1_cannot_run_are_refused_with_the_reason(
 ) -> None:
     with pytest.raises(LookError, match=reason):
         validate_look(look_from_dict(_look(**change)))
+
+
+def test_a_home_look_validates() -> None:
+    validate_look(look_from_dict(_look(scope="whole-home")))
 
 
 @pytest.mark.parametrize(

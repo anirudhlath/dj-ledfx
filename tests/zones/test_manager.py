@@ -10,14 +10,15 @@ from typing import Any
 import pytest
 from conftest import FakeLight, span
 from runtime_fakes import FADE, TILE
-from zone_home import BREATHE_AND_GLOW, GLOW, HomeFactory, zone_record
+from zone_home import BREATHE_AND_GLOW, GLOW, FakeHome, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
-from dj_ledfx.looks.model import Look, LookError, LookModifiers, Transition
+from dj_ledfx.looks.model import Look, LookModifiers, Transition
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.model import (
+    HOME_ZONE_ID,
     TakeOver,
     ZoneError,
     ZoneNotFoundError,
@@ -496,7 +497,7 @@ async def test_a_look_starts_its_firmware_even_when_layer_ids_repeat(
     assert tile.calls[-1] == ("firmware", {"level": 0.9, "brightness": 1.0})
 
 
-async def test_a_zone_with_no_lights_or_a_look_m1_cannot_run_is_refused(
+async def test_a_zone_with_no_lights_or_a_home_look_off_whole_home_is_refused(
     make_home: HomeFactory,
 ) -> None:
     lamp = FakeLight("lamp")
@@ -504,9 +505,19 @@ async def test_a_zone_with_no_lights_or_a_look_m1_cannot_run_is_refused(
     with pytest.raises(ZoneError, match="no lights"):
         await home.manager.start("empty", home.look("classic-breathe"))
     home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)
-    with pytest.raises(LookError, match="M6"):
+    with pytest.raises(ZoneError, match="plays on Whole home only"):
         await home.manager.start("z", home_look)
     assert lamp.calls == []
+
+
+async def test_a_home_look_starts_on_whole_home(make_home: HomeFactory) -> None:
+    home = await make_home([FakeLight("lamp")], [], view=FakeHome(rooms={"west": ["lamp"]}))
+    home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)
+
+    result = await home.manager.start(HOME_ZONE_ID, home_look)
+
+    assert (result.running.zone_id, result.running.look_id) == (HOME_ZONE_ID, "x")
+    assert result.running.lights == ("lamp",)
 
 
 # M2 review A1: the lights that stay in a zone keep their routes when it loses others.

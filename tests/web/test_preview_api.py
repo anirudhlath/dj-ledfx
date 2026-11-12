@@ -137,7 +137,7 @@ async def test_a_bad_preview_request_says_why(api: Api) -> None:
         (400, "Send either lookId or look"),
         (404, "No zone 'nope'"),
         (404, "No look 'nope'"),
-        (400, "Home looks (whole-home scope) arrive in M6"),
+        (400, f"{home_look['name']} plays on Whole home only"),
     ]
     assert api.previews.runtimes() == []
 

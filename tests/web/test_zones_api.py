@@ -117,7 +117,7 @@ async def test_bad_starts_are_refused_with_the_reason(api: Api) -> None:
     assert both.json()["detail"] == "Send either lookId or look"
     assert no_zone.json()["detail"] == "No zone 'nope'"
     assert no_look.json()["detail"] == "No look 'nope'"
-    assert "M6" in too_big.json()["detail"]
+    assert too_big.json()["detail"] == f"{breathe['name']} plays on Whole home only"
 
 
 async def test_brightness_restart_off_and_stop_all(api: Api) -> None:

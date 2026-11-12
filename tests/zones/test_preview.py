@@ -9,8 +9,8 @@ from conftest import FakeLight
 from runtime_fakes import LAMP, TILE
 from zone_home import BREATHE_AND_GLOW, GLOW, FakeHome, Home, HomeFactory, zone_record
 
-from dj_ledfx.looks.model import LookError
-from dj_ledfx.zones.model import ZoneError, ZoneNotFoundError
+from dj_ledfx.looks.model import Look
+from dj_ledfx.zones.model import HOME_ZONE_ID, ZoneError, ZoneNotFoundError
 from dj_ledfx.zones.preview import PreviewLight, PreviewManager, PreviewNotFoundError
 
 
@@ -102,9 +102,22 @@ async def test_a_new_preview_replaces_the_last_and_a_bad_request_changes_nothing
         previews.start("nope", home.look("classic-strobe"))
     with pytest.raises(ZoneError, match="has no lights"):
         previews.start("empty", home.look("classic-strobe"))
-    with pytest.raises(LookError):
+    with pytest.raises(ZoneError, match="plays on Whole home only"):  # the preview is on a group
         previews.update(second, replace(home.look("classic-strobe"), scope="whole-home"))
     assert previews.runtimes() == [runtime]  # the failed requests left it running
+
+
+async def test_a_home_look_previews_on_whole_home(make_home: HomeFactory) -> None:
+    view = FakeHome(rooms={"west": ["a"], "east": ["b"]})
+    home = await make_home([FakeLight("a"), FakeLight("b")], [], view=view)
+    previews = _previews(home, Watch())
+    home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)
+
+    previews.start(HOME_ZONE_ID, home_look)
+
+    [runtime] = previews.runtimes()
+    assert (runtime.zone_id, runtime.look.id) == (HOME_ZONE_ID, "x")
+    assert runtime.leds.count == 8  # both lights, where the preview shows the whole home
 
 
 # M2 review A2 + E7: the preview follows the map inside the zone manager's own redraw.

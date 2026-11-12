@@ -36,6 +36,8 @@ from dj_ledfx.timing import utcnow
 from dj_ledfx.zones.home_view import NO_HOME, HomeView
 from dj_ledfx.zones.model import (
     DERIVED_KINDS,
+    HOME_ZONE_ID,
+    HOME_ZONE_NAME,
     Assignment,
     CrashInfo,
     LightsChanged,
@@ -302,12 +304,19 @@ class ZoneManager:
 
     # --- commands ---------------------------------------------------------------------
 
+    def check_scope(self, zone_id: str, look: Look) -> None:
+        """A home look plays on the whole home only (spec §5.2): it draws the whole map, so
+        a room or a group would show a piece of it. Raises ZoneError for any other zone."""
+        if look.scope == "whole-home" and zone_id != HOME_ZONE_ID:
+            raise ZoneError(f"{look.name} plays on {HOME_ZONE_NAME} only")
+
     async def start(
         self, zone_id: str, look: Look, transition: Transition | None = None
     ) -> StartResult:
         """Put a look on a zone. It takes its lights over from running zones (spec §4.3),
         with the transition asked for, or else the look's own (spec §5.3)."""
         validate_look(look)
+        self.check_scope(zone_id, look)
         async with self._lock:
             result = await self._start(zone_id, look, transition)
         self._event_bus.emit(ZonesChanged())
@@ -535,6 +544,7 @@ class ZoneManager:
         frame ahead and asks no light its latency. It follows the zone's lights (_redraw);
         when the zone is gone or has no lights it ends, and on_end is called."""
         validate_look(look)
+        self.check_scope(zone_id, look)
         zone = self.get_zone(zone_id)
         lights = self._members(zone)
         if not lights:

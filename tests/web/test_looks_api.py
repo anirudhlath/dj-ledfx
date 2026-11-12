@@ -151,13 +151,15 @@ async def test_built_in_looks_are_never_changed(api: Api) -> None:
     assert (await api.client.get("/api/looks/nope")).status_code == 404
 
 
-async def test_a_look_m1_cannot_run_is_refused_with_the_reason(api: Api) -> None:
+async def test_a_home_look_saves_and_a_look_with_no_layers_is_refused(api: Api) -> None:
     draft = (await api.client.get("/api/looks/classic-breathe")).json()
     draft["scope"] = "whole-home"
 
-    resp = await api.client.post("/api/looks", json=draft)
+    saved = await api.client.post("/api/looks", json=draft)
+    empty = await api.client.post("/api/looks", json={**draft, "layers": []})
 
-    assert resp.status_code == 400 and "M6" in resp.json()["detail"]
+    assert (saved.status_code, saved.json()["scope"]) == (201, "whole-home")
+    assert empty.status_code == 400 and "A look needs at least one layer" in empty.json()["detail"]
 
 
 async def test_any_look_can_be_starred(api: Api) -> None:
