@@ -580,7 +580,8 @@ class ZoneRuntime:
     ) -> None:
         """Spec §5.3: a light that runs a firmware effect in either look, `source`'s (the
         look it replaces that drew the light) or this one's, keeps the look it follows in
-        `source` until the midpoint, then switches whole (its rows, `held_rows`)."""
+        `source` until the midpoint, then switches whole (its rows, `held_rows`). Added
+        mid-way, a hold makes the light jump back to the old look: _follow_inputs."""
         device_id = piece.device_id
         if source.claim_for(device_id) is not None or device_id in self._claims:
             held[device_id] = source._holder(device_id)
@@ -591,8 +592,9 @@ class ZoneRuntime:
         look on the same LEDs, so the same frames (effects are seeded alike), and the same
         firmware effects under the same generation, so a light that runs one isn't sent it
         again. It carries the mix it's in, the lights its transition holds and its trails,
-        so the taken lights don't jump. It is never ticked or told about, so its own
-        midpoint never passes: the new zone renders it while its transition plays."""
+        so the taken lights don't jump. It is never ticked or told about, so it never
+        switches: the new zone renders it while its transition plays (a sun that comes past
+        its midpoint holds no more of its lights: _follow_inputs)."""
         twin = ZoneRuntime(
             self.zone_id,
             self.look,
@@ -659,7 +661,7 @@ class ZoneRuntime:
         if self.crash is not None:
             return
         sun = self._env.sun()
-        if self._follow_inputs(sun):
+        if self._follow_inputs(sun, now):
             self._state_changed()  # the running channel, and the lights it now claims
         transition = self._transition
         if transition is not None and not transition.switched and transition.past_midpoint(now):
@@ -895,22 +897,37 @@ class ZoneRuntime:
         self._views[index] = (modifiers, view)
         return view
 
-    def _follow_inputs(self, sun: SunPoint | None) -> bool:
+    def _follow_inputs(self, sun: SunPoint | None, now: float) -> bool:
         """Wait, or stop waiting, as the sun comes and goes, here and in the looks this
         one's transition mixes in (they never tick themselves). A look that stops waiting
         claims its firmware layers' lights, and one that starts gives them back; before the
         midpoint a light that now runs a firmware effect in either look is held, as
-        begin_transition holds one (_hold). Returns whether any look's waiting changed."""
+        begin_transition holds one (_hold). Returns whether any look's waiting changed.
+
+        "Before the midpoint" is tick's own test of the frame showing `now`, so a twin,
+        which never ticks or switches, stops holding at the tick its zone switched at; a
+        transition a newer start took on (settle()) holds nothing more. Spec §5.3 asks for
+        two things a hold added mid-way does, both kept on purpose: the light jumps from the
+        mix back to the old look's rows, whole, and switches at the midpoint (it can't be
+        held whole and keep mixing); and when the look that woke is the one replaced, the
+        light starts that old look's effect, then goes over to the new look at the midpoint.
+        A light first claimed after the midpoint isn't held: it goes over at once, and its
+        rows mix to the end, as a streamed light's do."""
         changed = False
         for source in self.transition_sources:
-            changed = source._follow_inputs(sun) or changed
+            changed = source._follow_inputs(sun, now) or changed
         waiting = self._missing(sun)
         if waiting != self._waiting:
             self._waiting = waiting
             self._plan_claims()
             changed = True
         transition = self._transition
-        if changed and transition is not None and not transition.switched:
+        if (
+            changed
+            and transition is not None
+            and not transition.switched
+            and not transition.past_midpoint(now)
+        ):
             for device_id, source in transition.drawn_by.items():
                 piece = self.leds.slice_for(device_id)
                 if device_id not in transition.held and piece is not None:
