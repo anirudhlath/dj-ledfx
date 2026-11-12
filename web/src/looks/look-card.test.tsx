@@ -154,6 +154,24 @@ describe('LookCard (§6.4)', () => {
     expect(within(card).queryByText(/Running on|^From /)).not.toBeInTheDocument()
   })
 
+  // The pill's row sits in the thumb's overlay layer beside the scrim, and a card with nothing to say draws no row at all: an empty box
+  // over the thumb would be a layer for nothing to sit in.
+  it("draws the pill's row only for a card that has a pill to show", () => {
+    const layerOf = (card: HTMLElement) => within(card).getByRole('link', { name: 'Put on…' }).parentElement!.parentElement!
+    const [zone] = seedRest('library').zones.map((each) => each.name)
+
+    const bare = renderCard('fireflies')
+    expect(layerOf(bare.card).children).toHaveLength(1)
+    bare.unmount()
+
+    const running = renderCard('fireflies', { running: [zone] })
+    expect(layerOf(running.card).children).toHaveLength(2)
+    running.unmount()
+
+    const { card } = renderCard('mine-1', { parent: lookName(LIBRARY.mine[0].from) })
+    expect(layerOf(card).children).toHaveLength(2)
+  })
+
   // F5 ruling 14: the same pill without the dot, in text-2.
   it('says which look a saved look came from', () => {
     const parent = lookName(LIBRARY.mine[0].from)

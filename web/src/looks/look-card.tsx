@@ -56,20 +56,21 @@ export function LookCard({ look, running, parent, missing }: LookCardProps) {
         <LookThumb lookId={look.id} size="card" className="group-hover:border-text group-focus-within:border-text" />
         {/* Looks.html's overlays are inside the thumb's border; the radius is the thumb's less that border. */}
         <div className="pointer-events-none absolute inset-px z-1 overflow-hidden rounded-[calc(var(--radius-tile)-1px)]">
-          <div className="absolute inset-x-0 top-0 p-2">
-            {where ? (
-              <span aria-hidden="true" className={cx(PILL, 'gap-1.5 text-text')}>
-                <span className="size-1.5 shrink-0 rounded-full bg-text animate-[livedot_2s_ease-in-out_infinite]" />
-                <span className="truncate">{where.shown}</span>
-              </span>
-            ) : (
-              parent !== null && (
+          {/* The row is drawn only for a card with a pill to show: a card with none gets no empty box over its thumb. */}
+          {(where || parent !== null) && (
+            <div className="absolute inset-x-0 top-0 p-2">
+              {where ? (
+                <span aria-hidden="true" className={cx(PILL, 'gap-1.5 text-text')}>
+                  <span className="size-1.5 shrink-0 rounded-full bg-text animate-[livedot_2s_ease-in-out_infinite]" />
+                  <span className="truncate">{where.shown}</span>
+                </span>
+              ) : (
                 <span className={cx(PILL, 'text-text-2')}>
                   <span className="truncate">From {parent}</span>
                 </span>
-              )
-            )}
-          </div>
+              )}
+            </div>
+          )}
           <div className="absolute inset-0 flex items-end justify-center gap-2 bg-linear-to-t from-bg/85 to-bg/0 to-70% p-2.5 opacity-0 transition-opacity duration-(--duration-fast) ease-out group-focus-within:opacity-100 group-hover:opacity-100">
             <ButtonLink
               variant="primary"
