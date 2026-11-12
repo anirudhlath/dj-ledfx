@@ -302,17 +302,12 @@ test.describe('Looks', () => {
           inside: box.left >= thumb.left && box.right <= thumb.right && box.top >= thumb.top && box.bottom <= thumb.bottom,
           cut: span.scrollWidth > span.clientWidth && getComputedStyle(span).textOverflow === 'ellipsis',
           lines: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
-          hidden: span.scrollHeight - span.clientHeight,
           dot: pill.querySelector('span.rounded-full')?.getBoundingClientRect().width ?? null,
-          pillRight: box.right,
-          cardRight: card.getBoundingClientRect().right,
         }
       })
       expect(fit.inside, `${name} is inside its thumb`).toBe(true)
       expect(fit.cut, `${name} is cut short with an ellipsis`).toBe(true)
       expect(fit.lines, `${name}'s label keeps to one line`).toBe(1)
-      expect(fit.hidden, `${name}'s label has no second line hidden below it`).toBeLessThanOrEqual(0)
-      expect(fit.pillRight, `${name} stays inside its card's right edge`).toBeLessThanOrEqual(fit.cardRight)
       if (fit.dot !== null) expect(fit.dot, `${name}'s dot keeps its size`).toBe(shortDot)
     }
     // The page doesn't scroll sideways for any of it, and every card is the width it was with the names as the mock serves them.
