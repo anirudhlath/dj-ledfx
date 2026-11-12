@@ -136,9 +136,10 @@ describe('LookCard (§6.4)', () => {
   it('names the zone it runs on, and every zone in words when there are more', () => {
     const [alpha, beta] = seedRest('library').zones.map((zone) => zone.name)
     const one = renderCard('fireflies', { running: [alpha] })
-    const pill = within(one.card).getByText(alpha)
+    const pill = within(one.card).getByText(alpha).parentElement!
     // Looks.html's pill: the live dot, then the zone.
-    expect(pill.querySelectorAll('span')).toHaveLength(1)
+    expect(pill.children).toHaveLength(2)
+    expect(pill.firstElementChild).toHaveClass('rounded-full')
     expect(pill).toHaveAttribute('aria-hidden', 'true')
     expect(within(one.card).getByText(`Running on ${alpha}`)).toHaveClass('sr-only')
     one.unmount()
@@ -157,8 +158,8 @@ describe('LookCard (§6.4)', () => {
   it('says which look a saved look came from', () => {
     const parent = lookName(LIBRARY.mine[0].from)
     const { card } = renderCard('mine-1', { parent })
-    const pill = within(card).getByText(`From ${parent}`)
-    expect(pill.querySelector('span')).toBeNull()
+    const pill = within(card).getByText(`From ${parent}`).parentElement!
+    expect(pill.children).toHaveLength(1)
     expect(pill).toHaveClass('text-text-2')
     expect(within(card).queryByText(/^Running on/)).not.toBeInTheDocument()
   })
@@ -169,6 +170,30 @@ describe('LookCard (§6.4)', () => {
     const { card } = renderCard('mine-1', { running: [zone], parent: lookName(LIBRARY.mine[0].from) })
     expect(within(card).getByText(zone)).toBeInTheDocument()
     expect(within(card).queryByText(/^From /)).not.toBeInTheDocument()
+  })
+
+  // Looks.html's pill is never longer than its thumb, but zone and look names are the owner's to type: a long one is cut short inside the
+  // pill (the live dot keeps its size), never wrapped out of it.
+  it('cuts a long zone or look name short inside the thumb, and keeps the dot its size', () => {
+    const long = 'A name typed by someone who likes long names a great deal'
+    const running = renderCard('fireflies', { running: [long] })
+    const text = within(running.card).getByText(long)
+    const pill = text.parentElement!
+    expect(text).toHaveClass('truncate')
+    expect(pill).toHaveClass('max-w-full')
+    expect(pill.firstElementChild).toHaveClass('shrink-0')
+    running.unmount()
+
+    const { card } = renderCard('mine-1', { parent: long })
+    const from = within(card).getByText(`From ${long}`)
+    expect(from).toHaveClass('truncate')
+    expect(from.parentElement).toHaveClass('max-w-full')
+  })
+
+  // Looks.html's star is a fixed colour on a transparent ground, in both states: it draws no hover of its own.
+  it('draws the star with no hover state of its own', () => {
+    const { look, card } = renderCard('sunset')
+    expect(within(card).getByRole('button', { name: `Star ${look.name}` }).className).not.toContain('hover:')
   })
 
   // §6.4: "Hover (and focus): white border, bottom gradient scrim".

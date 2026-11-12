@@ -34,8 +34,10 @@ export interface LookCardProps {
 }
 
 // Looks.html's pill: 22 px of content, a 1 px border each side and no box-sizing, so the render draws it 24 px high (h-6 here, where
-// every box is border-box), 8 px in from the thumb's padding box. §6.4's text-label at 600; the dot is its 6 px live dot (§5.4).
-const PILL = 'absolute top-2 left-2 inline-flex h-6 items-center rounded-pill border border-line bg-bg/82 px-2 text-label font-semibold'
+// every box is border-box), 8 px in from the thumb's padding box (the row's p-2, Looks.html's `left: 8px; top: 8px`). §6.4's text-label
+// at 600; the dot is its 6 px live dot (§5.4). The render draws no pill wider than its thumb, but a zone's or a look's name is typed by
+// the owner: the pill keeps to the row (max-w-full), the name is cut short with an ellipsis and the dot keeps its size.
+const PILL = 'flex h-6 w-fit max-w-full items-center rounded-pill border border-line bg-bg/82 px-2 text-label font-semibold'
 
 export function LookCard({ look, running, parent, missing }: LookCardProps) {
   const nameId = useId()
@@ -54,14 +56,20 @@ export function LookCard({ look, running, parent, missing }: LookCardProps) {
         <LookThumb lookId={look.id} size="card" className="group-hover:border-text group-focus-within:border-text" />
         {/* Looks.html's overlays are inside the thumb's border; the radius is the thumb's less that border. */}
         <div className="pointer-events-none absolute inset-px z-1 overflow-hidden rounded-[calc(var(--radius-tile)-1px)]">
-          {where ? (
-            <span aria-hidden="true" className={cx(PILL, 'gap-1.5 text-text')}>
-              <span className="size-1.5 rounded-full bg-text animate-[livedot_2s_ease-in-out_infinite]" />
-              {where.shown}
-            </span>
-          ) : (
-            parent !== null && <span className={cx(PILL, 'text-text-2')}>From {parent}</span>
-          )}
+          <div className="absolute inset-x-0 top-0 p-2">
+            {where ? (
+              <span aria-hidden="true" className={cx(PILL, 'gap-1.5 text-text')}>
+                <span className="size-1.5 shrink-0 rounded-full bg-text animate-[livedot_2s_ease-in-out_infinite]" />
+                <span className="truncate">{where.shown}</span>
+              </span>
+            ) : (
+              parent !== null && (
+                <span className={cx(PILL, 'text-text-2')}>
+                  <span className="truncate">From {parent}</span>
+                </span>
+              )
+            )}
+          </div>
           <div className="absolute inset-0 flex items-end justify-center gap-2 bg-linear-to-t from-bg/85 to-bg/0 to-70% p-2.5 opacity-0 transition-opacity duration-(--duration-fast) ease-out group-focus-within:opacity-100 group-hover:opacity-100">
             <ButtonLink
               variant="primary"
@@ -91,12 +99,13 @@ export function LookCard({ look, running, parent, missing }: LookCardProps) {
             {look.name}
           </Link>
         </h3>
+        {/* Looks.html's star: 28 px, a fixed colour on a transparent ground, text when starred, and no hover of its own. */}
         <button
           type="button"
           aria-label={`${look.starred ? 'Unstar' : 'Star'} ${look.name}`}
           aria-pressed={look.starred}
           className={cx(
-            'relative z-1 inline-flex size-7 shrink-0 items-center justify-center rounded-chip transition-colors duration-(--duration-fast) ease-out hover:bg-control hover:text-text max-md:touch-target',
+            'relative z-1 inline-flex size-7 shrink-0 items-center justify-center rounded-chip max-md:touch-target',
             look.starred ? 'text-text' : 'text-text-3',
           )}
           onClick={star}

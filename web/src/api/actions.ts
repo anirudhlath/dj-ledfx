@@ -104,15 +104,18 @@ export function retryLink(): void {
 }
 
 /**
- * A look's star requests: how many have been made (the latest wins), how many wait for an answer, and the look a failure puts back,
- * which is the server's (the look as it stood before the first request now waiting, or what an earlier answer has served since).
+ * A look's star requests: how many have been made (the latest wins), how many wait for an answer, the look a failure puts back, which is
+ * the server's (the look as it stood before the first request now waiting, or what an earlier answer has served since), and whether the
+ * latest request failed and its put-back is what the cache shows: an earlier request's answer after that is the server's word, and lands.
  */
 interface StarRequests {
   made: number
   waiting: number
   settled: Look | undefined
+  putBack: boolean
 }
 
+/** The looks with a request waiting for its answer; an entry goes when the last of them settles. */
 const starRequests = new Map<Id, StarRequests>()
 
 /** A look in the `looks` cache, replaced by what `change` makes of it; an unread library has no cache, and is left alone. */
@@ -123,25 +126,30 @@ function changeCachedLook(lookId: Id, change: (look: Look) => Look): void {
 /**
  * §8.4's star, F5 ruling 16: the card shows the choice at once, then the server's look. The latest choice for a look wins: an earlier
  * request's answer never overwrites a later choice, and neither does its failure. The latest request's failure puts back the server's
- * look, not an earlier choice's star that was only ever shown, and rejects for the card to say aloud.
+ * look, not an earlier choice's star that was only ever shown, and rejects for the card to say aloud; an earlier request that is
+ * answered after that put-back shows its answer, since the server holds it.
  */
 export async function setStarred(lookId: Id, starred: boolean): Promise<void> {
-  const requests = starRequests.get(lookId) ?? { made: 0, waiting: 0, settled: undefined }
+  const requests = starRequests.get(lookId) ?? { made: 0, waiting: 0, settled: undefined, putBack: false }
   starRequests.set(lookId, requests)
   const request = ++requests.made
+  requests.putBack = false
   if (requests.waiting === 0) requests.settled = queryClient.getQueryData(queries.looks().queryKey)?.find((look) => look.id === lookId)
   requests.waiting++
   changeCachedLook(lookId, (look) => ({ ...look, starred }))
   try {
     const served = await api.setStarred(lookId, starred)
     requests.settled = served
-    if (request === requests.made) changeCachedLook(lookId, () => served)
+    if (request === requests.made || requests.putBack) changeCachedLook(lookId, () => served)
   } catch (error) {
     const { settled } = requests
-    if (request === requests.made && settled !== undefined) changeCachedLook(lookId, () => settled)
+    if (request === requests.made && settled !== undefined) {
+      changeCachedLook(lookId, () => settled)
+      requests.putBack = true
+    }
     throw error
   } finally {
-    requests.waiting--
+    if (--requests.waiting === 0) starRequests.delete(lookId)
   }
 }
 

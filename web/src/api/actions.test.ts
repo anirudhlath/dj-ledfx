@@ -202,6 +202,46 @@ describe('setStarred', () => {
     expect(cached(ID)).toEqual(served)
   })
 
+  // F5 plan, Review Focus 3: the latest choice failed and was put back while an earlier one was still out, so the earlier answer is the
+  // server's word, and the card shows it. Otherwise it ends unstarred over a server that has the star, under "Couldn't unstar".
+  it("shows an earlier choice's answer that comes after the latest choice failed and was put back", async () => {
+    seedRest('library')
+    const before = cached(ID)
+    const first = deferred<Look>()
+    const second = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const star = setStarred(ID, true)
+    const unstar = setStarred(ID, false)
+    second.reject(new ApiError(0, 'Failed to fetch', `/api/looks/${ID}/starred`))
+    await expect(unstar).rejects.toBeInstanceOf(ApiError)
+    expect(cached(ID)).toEqual(before)
+    first.resolve({ ...before, starred: true })
+    await star
+    expect(cached(ID).starred).toBe(true)
+  })
+
+  it("doesn't show an earlier choice's answer over a newer choice, even after an earlier put-back", async () => {
+    seedRest('library')
+    const before = cached(ID)
+    const first = deferred<Look>()
+    const second = deferred<Look>()
+    const third = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockReturnValueOnce(third.promise)
+    const star = setStarred(ID, true)
+    const unstar = setStarred(ID, false)
+    second.reject(new ApiError(0, 'Failed to fetch', `/api/looks/${ID}/starred`))
+    await expect(unstar).rejects.toBeInstanceOf(ApiError)
+    // A new choice is on screen again, and it is the latest.
+    const again = setStarred(ID, false)
+    expect(cached(ID).starred).toBe(false)
+    first.resolve({ ...before, starred: true })
+    await star
+    expect(cached(ID).starred).toBe(false)
+    third.resolve({ ...before, starred: false })
+    await again
+    expect(cached(ID).starred).toBe(false)
+  })
+
   it("keeps each look's choices apart", async () => {
     seedRest('library')
     const other = deferred<Look>()
