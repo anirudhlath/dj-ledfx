@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
-from runtime_fakes import FADE, glow_layer, latest, look_of, runtime_of
+from runtime_fakes import FADE, field_layer, glow_layer, latest, look_of, runtime_of
 from sun_fakes import AT_DUSK, FixedSun
 
 from dj_ledfx.effects.base import Effect
@@ -17,7 +17,7 @@ from dj_ledfx.effects.ledset import LedSet
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.model import Layer
 from dj_ledfx.types import FloatRGB
-from dj_ledfx.zones.runtime import ZoneRuntime
+from dj_ledfx.zones.runtime import STREAMS, ZoneRuntime
 
 
 class KeptContext(FieldEffect, register=False):
@@ -105,6 +105,41 @@ def test_a_sun_arriving_lets_the_firmware_layers_claim_their_lights() -> None:
     sun.point = None
     _ticked(runtime, 2)
     assert runtime.mode_of("tile") == "streaming"
+
+
+# Spec §5.3: a light that runs a firmware effect in either look follows the old look until
+# the midpoint, then switches whole. A look that waited when its transition began claimed
+# nothing, so the sun arriving before the midpoint holds the light it now claims: it keeps
+# streaming the old look's rows, unmixed, until the midpoint hands it over.
+@pytest.mark.usefixtures("_fields")
+def test_a_sun_arriving_mid_transition_holds_the_light_it_claims_until_the_midpoint() -> None:
+    sun = FixedSun(None)
+    switched: list[ZoneRuntime] = []
+    new_look = look_of(field_layer(level=0.0), glow_layer(), needs=("sun",))
+    runtime = runtime_of(new_look, sun=sun, on_switch=switched.append)
+    runtime.begin_transition(FADE, [runtime_of(look_of(KEPT), sun=sun)])  # white everywhere
+    _ticked(runtime, 0)  # the transition starts at this frame
+    tile, bulb = runtime.leds.slice_for("tile"), runtime.leds.slice_for("bulb")
+    assert tile is not None and bulb is not None
+
+    sun.point = AT_DUSK
+    for step in range(1, 31):  # to about a quarter of the way
+        _ticked(runtime, step)
+        assert runtime.applied_key("tile") == STREAMS  # the old look's, as before the sun
+    frame = latest(runtime)
+    assert 0.0 < frame[bulb.start, 0] < 1.0  # a streamed light mixes
+    assert (frame[tile.start : tile.stop] == 1.0).all()  # the held one shows the old look
+
+    step = 31
+    while not switched:
+        assert runtime.applied_key("tile") == STREAMS
+        _ticked(runtime, step)
+        step += 1
+    assert step < 120  # at the midpoint, not at the end
+    assert runtime.handing_over == frozenset({"tile"})
+    runtime.handed_over(["tile"])
+    assert runtime.mode_of("tile") == "own-effect"
+    assert runtime.applied_key("tile") != STREAMS
 
 
 # The looks a transition replaces never tick, so the zone's tick follows the sun for them;

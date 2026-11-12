@@ -21,6 +21,7 @@ from dj_ledfx.effects.fx import Fx, fx_joined
 from dj_ledfx.effects.ledset import (
     NO_ROOM,
     NO_SPACE,
+    DeviceSlice,
     LedSet,
     LedSource,
     PlacedLeds,
@@ -150,9 +151,10 @@ def _whole(rows: list[_Drawn], count: int) -> bool:
 @dataclass(eq=False)
 class _Transition:
     """A transition while it plays (spec §5.3). `rows` says where each look it replaces
-    drew the zone's lights. `held` lights run a firmware effect in one of the two looks,
-    so they stay with the look they had until the midpoint and then switch whole;
-    `held_rows` are their rows in the frame."""
+    drew the zone's lights, and `drawn_by` which look drew each light. `held` lights run a
+    firmware effect in one of the two looks, so they stay with the look they had until the
+    midpoint and then switch whole; `held_rows` are their rows in the frame. A look's
+    claims that change before the midpoint (the sun came or went) can hold more lights."""
 
     kind: TransitionKind
     duration_s: float
@@ -161,6 +163,7 @@ class _Transition:
     order: NDArray[np.float64] | None  # each LED's place in the switch; None: all at once
     held: dict[str, ZoneRuntime]  # light -> the runtime whose look it keeps until then
     held_rows: dict[str, slice]
+    drawn_by: dict[str, ZoneRuntime]  # light -> the look it replaces that drew it
     started: float | None = None  # the first frame's time: the transition runs from it
     progress: float = 0.0  # of the newest frame, 0..1
     switched: bool = False  # the held lights went over to the new look
@@ -535,7 +538,7 @@ class ZoneRuntime:
         rows: list[_Drawn] = []
         held: dict[str, ZoneRuntime] = {}
         held_rows: dict[str, slice] = {}
-        sourced: set[str] = set()  # the lights a look before already drew
+        drawn_by: dict[str, ZoneRuntime] = {}  # the lights a look before already drew
         for source in sources:
             if source.zone_id == self.zone_id:
                 source.settle()  # this transition takes its lights on from here
@@ -544,15 +547,13 @@ class ZoneRuntime:
             for piece in self.leds.slices:
                 device_id = piece.device_id
                 old = source.leds.slice_for(device_id)
-                if device_id in sourced or old is None or old.count != piece.count:
+                if device_id in drawn_by or old is None or old.count != piece.count:
                     continue
-                sourced.add(device_id)
+                drawn_by[device_id] = source
                 here = np.arange(piece.start, piece.stop, dtype=np.intp)
                 mine.append(here)
                 theirs.append(np.arange(old.start, old.stop, dtype=np.intp))
-                if source.claim_for(device_id) is not None or device_id in self._claims:
-                    held[device_id] = source._holder(device_id)
-                    held_rows[device_id] = slice(piece.start, piece.stop)
+                self._hold(source, piece, held, held_rows)
             if mine:  # one piece for each light, however many LEDs it has
                 rows.append(_Drawn(source, len(mine), _rows(mine), _rows(theirs)))
         for source in sources:  # three looks at most in the zone's own chain: older end now
@@ -567,7 +568,23 @@ class ZoneRuntime:
             order=switch_order(transition.kind, self.leds, self.generation),
             held=held,
             held_rows=held_rows,
+            drawn_by=drawn_by,
         )
+
+    def _hold(
+        self,
+        source: ZoneRuntime,
+        piece: DeviceSlice,
+        held: dict[str, ZoneRuntime],
+        held_rows: dict[str, slice],
+    ) -> None:
+        """Spec §5.3: a light that runs a firmware effect in either look, `source`'s (the
+        look it replaces that drew the light) or this one's, keeps the look it follows in
+        `source` until the midpoint, then switches whole (its rows, `held_rows`)."""
+        device_id = piece.device_id
+        if source.claim_for(device_id) is not None or device_id in self._claims:
+            held[device_id] = source._holder(device_id)
+            held_rows[device_id] = slice(piece.start, piece.stop)
 
     def twin(self) -> ZoneRuntime:
         """This runtime as it is now, for a zone that takes some of its lights: the same
@@ -593,8 +610,11 @@ class ZoneRuntime:
             twin._plan_claims()
         twin._trails = self._trails.copy()
         twin._handover = set(self._handover)
-        if self._transition is not None:  # its mix, as it is (it never ticks or switches)
-            twin._transition = replace(self._transition)
+        transition = self._transition
+        if transition is not None:  # its mix, as it is (it never ticks or switches)
+            twin._transition = replace(  # the sun can hold more lights in either: _hold
+                transition, held=dict(transition.held), held_rows=dict(transition.held_rows)
+            )
         return twin
 
     def settle(self) -> None:
@@ -878,8 +898,9 @@ class ZoneRuntime:
     def _follow_inputs(self, sun: SunPoint | None) -> bool:
         """Wait, or stop waiting, as the sun comes and goes, here and in the looks this
         one's transition mixes in (they never tick themselves). A look that stops waiting
-        claims its firmware layers' lights, and one that starts gives them back. Returns
-        whether any look's waiting changed."""
+        claims its firmware layers' lights, and one that starts gives them back; before the
+        midpoint a light that now runs a firmware effect in either look is held, as
+        begin_transition holds one (_hold). Returns whether any look's waiting changed."""
         changed = False
         for source in self.transition_sources:
             changed = source._follow_inputs(sun) or changed
@@ -888,6 +909,12 @@ class ZoneRuntime:
             self._waiting = waiting
             self._plan_claims()
             changed = True
+        transition = self._transition
+        if changed and transition is not None and not transition.switched:
+            for device_id, source in transition.drawn_by.items():
+                piece = self.leds.slice_for(device_id)
+                if device_id not in transition.held and piece is not None:
+                    self._hold(source, piece, transition.held, transition.held_rows)
         return changed
 
     def _missing(self, sun: SunPoint | None) -> tuple[str, ...]:
