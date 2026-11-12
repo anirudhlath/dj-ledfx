@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { seedLive } from '@/test/live'
-import { failureText, setBrightness, setTempoLock, startAgain, startLook, tapTempo } from './actions'
+import { seedRest } from '@/test/rest'
+import { failureText, setBrightness, setStarred, setTempoLock, startAgain, startLook, tapTempo } from './actions'
+import type { Look } from './contract'
 import { liveStore } from './live-store'
 import { queries, queryClient } from './queries'
 import { api, ApiError } from './rest'
@@ -85,5 +87,141 @@ describe('actions', () => {
     expect(failureText('tap the tempo', new Error('The tempo is locked to Pro DJ Link: choose Auto or Internal to set it here'))).toBe(
       "Couldn't tap the tempo. The tempo is locked to Pro DJ Link: choose Auto or Internal to set it here",
     )
+  })
+})
+
+/** A promise settled by hand, for an answer the test holds back. */
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done
+    reject = fail
+  })
+  return { promise, resolve, reject }
+}
+
+const cached = (id: string): Look => queryClient.getQueryData(queries.looks().queryKey)!.find((look) => look.id === id)!
+
+// §8.4, F5 ruling 16, and the plan's Review Focus 3: a star shows at once, and the latest choice for a look wins.
+describe('setStarred', () => {
+  // One of the library's looks that Looks.png leaves unstarred.
+  const ID = 'sunset'
+
+  it("shows the star at once, then keeps the server's look", async () => {
+    seedRest('library')
+    const before = cached(ID)
+    expect(before.starred).toBe(false)
+    const answer = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+    const done = setStarred(ID, true)
+    expect(api.setStarred).toHaveBeenCalledWith(ID, true)
+    expect(cached(ID).starred).toBe(true)
+    // What the server answers is what the cache keeps, not the choice it sent: a field the server changed comes with it.
+    const served = { ...before, starred: true, description: 'as the server has it' }
+    answer.resolve(served)
+    await done
+    expect(cached(ID)).toEqual(served)
+  })
+
+  it('lets the latest choice win when two answers come back out of order', async () => {
+    seedRest('library')
+    const before = cached(ID)
+    const first = deferred<Look>()
+    const second = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const star = setStarred(ID, true)
+    const unstar = setStarred(ID, false)
+    expect(cached(ID).starred).toBe(false)
+    second.resolve({ ...before, starred: false })
+    await unstar
+    first.resolve({ ...before, starred: true })
+    await star
+    expect(cached(ID).starred).toBe(false)
+  })
+
+  it('puts the look back when the latest choice fails, and rejects with the ApiError', async () => {
+    seedRest('library')
+    const before = cached(ID)
+    const answer = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+    const done = setStarred(ID, true)
+    expect(cached(ID).starred).toBe(true)
+    const error = new ApiError(500, 'Internal Server Error', `/api/looks/${ID}/starred`)
+    answer.reject(error)
+    await expect(done).rejects.toBe(error)
+    expect(cached(ID)).toEqual(before)
+  })
+
+  it("doesn't put back over a later choice when an earlier one fails", async () => {
+    seedRest('library')
+    const before = cached(ID)
+    const first = deferred<Look>()
+    const second = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const star = setStarred(ID, true)
+    const unstar = setStarred(ID, false)
+    const error = new ApiError(500, 'Internal Server Error', `/api/looks/${ID}/starred`)
+    first.reject(error)
+    await expect(star).rejects.toBe(error)
+    // The earlier choice failed, and the cache still shows the later one, which hasn't been answered.
+    expect(cached(ID).starred).toBe(false)
+    second.resolve({ ...before, starred: false })
+    await unstar
+    expect(cached(ID).starred).toBe(false)
+  })
+
+  // The put-back is the server's look, not the screen's: an earlier choice's star was only ever shown, never confirmed.
+  it('puts back the look as it was before both when two choices in a row fail', async () => {
+    seedRest('library')
+    const before = cached(ID)
+    const first = deferred<Look>()
+    const second = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const star = setStarred(ID, true)
+    const unstar = setStarred(ID, false)
+    first.reject(new ApiError(0, 'Failed to fetch', `/api/looks/${ID}/starred`))
+    await expect(star).rejects.toBeInstanceOf(ApiError)
+    second.reject(new ApiError(0, 'Failed to fetch', `/api/looks/${ID}/starred`))
+    await expect(unstar).rejects.toBeInstanceOf(ApiError)
+    expect(cached(ID)).toEqual(before)
+  })
+
+  it('puts back what an earlier choice was answered with when the latest one fails', async () => {
+    seedRest('library')
+    const first = deferred<Look>()
+    const second = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const star = setStarred(ID, true)
+    const unstar = setStarred(ID, false)
+    const served = { ...cached(ID), starred: true, description: 'as the server has it' }
+    first.resolve(served)
+    await star
+    second.reject(new ApiError(500, 'Internal Server Error', `/api/looks/${ID}/starred`))
+    await expect(unstar).rejects.toBeInstanceOf(ApiError)
+    expect(cached(ID)).toEqual(served)
+  })
+
+  it("keeps each look's choices apart", async () => {
+    seedRest('library')
+    const other = deferred<Look>()
+    const answer = deferred<Look>()
+    vi.spyOn(api, 'setStarred').mockReturnValueOnce(other.promise).mockReturnValueOnce(answer.promise)
+    const first = setStarred('rain', true)
+    const second = setStarred(ID, true)
+    other.resolve({ ...cached('rain'), starred: true, description: 'rain, as served' })
+    await first
+    // A later request for another look doesn't make the first one's answer stale.
+    expect(cached('rain').description).toBe('rain, as served')
+    answer.resolve({ ...cached(ID), starred: true })
+    await second
+    expect(cached(ID).starred).toBe(true)
+  })
+
+  it('shows nothing, and still sends the choice, while the looks are not in the cache', async () => {
+    vi.spyOn(api, 'setStarred').mockResolvedValue({ id: ID, starred: true } as Look)
+    await setStarred(ID, true)
+    expect(api.setStarred).toHaveBeenCalledWith(ID, true)
+    expect(queryClient.getQueryData(queries.looks().queryKey)).toBeUndefined()
   })
 })

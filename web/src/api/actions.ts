@@ -2,7 +2,7 @@
 // with the new state, the action puts it in the live store at once, so a control shows it without
 // waiting for the push (F3 decision 8). A failure rejects; components say it with failureText()
 // through useAnnounce() (Review Focus 1). Components call these, never `api` or the socket (§12).
-import type { Id, RecentLook, RunningZone, StartResponse, TempoInput, TempoLock, Transition } from './contract'
+import type { Id, Look, RecentLook, RunningZone, StartResponse, TempoInput, TempoLock, Transition } from './contract'
 import { liveClient } from './live'
 import { liveStore } from './live-store'
 import { queries, queryClient } from './queries'
@@ -101,6 +101,48 @@ export async function findLights(): Promise<number> {
 /** §9.4's "Try now": retry the link at once. */
 export function retryLink(): void {
   liveClient()?.retryNow()
+}
+
+/**
+ * A look's star requests: how many have been made (the latest wins), how many wait for an answer, and the look a failure puts back,
+ * which is the server's (the look as it stood before the first request now waiting, or what an earlier answer has served since).
+ */
+interface StarRequests {
+  made: number
+  waiting: number
+  settled: Look | undefined
+}
+
+const starRequests = new Map<Id, StarRequests>()
+
+/** A look in the `looks` cache, replaced by what `change` makes of it; an unread library has no cache, and is left alone. */
+function changeCachedLook(lookId: Id, change: (look: Look) => Look): void {
+  queryClient.setQueryData(queries.looks().queryKey, (looks) => looks?.map((look) => (look.id === lookId ? change(look) : look)))
+}
+
+/**
+ * §8.4's star, F5 ruling 16: the card shows the choice at once, then the server's look. The latest choice for a look wins: an earlier
+ * request's answer never overwrites a later choice, and neither does its failure. The latest request's failure puts back the server's
+ * look, not an earlier choice's star that was only ever shown, and rejects for the card to say aloud.
+ */
+export async function setStarred(lookId: Id, starred: boolean): Promise<void> {
+  const requests = starRequests.get(lookId) ?? { made: 0, waiting: 0, settled: undefined }
+  starRequests.set(lookId, requests)
+  const request = ++requests.made
+  if (requests.waiting === 0) requests.settled = queryClient.getQueryData(queries.looks().queryKey)?.find((look) => look.id === lookId)
+  requests.waiting++
+  changeCachedLook(lookId, (look) => ({ ...look, starred }))
+  try {
+    const served = await api.setStarred(lookId, starred)
+    requests.settled = served
+    if (request === requests.made) changeCachedLook(lookId, () => served)
+  } catch (error) {
+    const { settled } = requests
+    if (request === requests.made && settled !== undefined) changeCachedLook(lookId, () => settled)
+    throw error
+  } finally {
+    requests.waiting--
+  }
 }
 
 /** What a failed action says (Review Focus 1): the action, then the server's reason, or that it didn't answer. */
