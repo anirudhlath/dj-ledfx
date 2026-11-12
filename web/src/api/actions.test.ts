@@ -258,6 +258,66 @@ describe('setStarred', () => {
     expect(cached(ID).starred).toBe(true)
   })
 
+  // The look's own entry (`queries.look(id)`, keyed ['looks', id]) is the editor's to read; a star written on the list shows there too.
+  describe("a look's own cache entry", () => {
+    const detail = (id: string) => queryClient.getQueryData(queries.look(id).queryKey)
+
+    it('shows the star at once, and keeps the look the server answers with', async () => {
+      seedRest('library')
+      const before = cached(ID)
+      queryClient.setQueryData(queries.look(ID).queryKey, before)
+      const answer = deferred<Look>()
+      vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+      const done = setStarred(ID, true)
+      expect(detail(ID)).toEqual({ ...before, starred: true })
+      const served = { ...before, starred: true, description: 'as the server has it' }
+      answer.resolve(served)
+      await done
+      expect(detail(ID)).toEqual(served)
+      expect(cached(ID)).toEqual(served)
+    })
+
+    it('puts the look back when the latest choice fails', async () => {
+      seedRest('library')
+      const before = cached(ID)
+      queryClient.setQueryData(queries.look(ID).queryKey, before)
+      const answer = deferred<Look>()
+      vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+      const done = setStarred(ID, true)
+      expect(detail(ID)?.starred).toBe(true)
+      answer.reject(new ApiError(500, 'Internal Server Error', `/api/looks/${ID}/starred`))
+      await expect(done).rejects.toBeInstanceOf(ApiError)
+      expect(detail(ID)).toEqual(before)
+      expect(cached(ID)).toEqual(before)
+    })
+
+    it('leaves the entries of other looks alone, and makes none for a look nobody has read', async () => {
+      seedRest('library')
+      const other = cached('rain')
+      queryClient.setQueryData(queries.look('rain').queryKey, other)
+      vi.spyOn(api, 'setStarred').mockResolvedValue({ ...cached(ID), starred: true })
+      await setStarred(ID, true)
+      expect(detail('rain')).toEqual(other)
+      expect(detail(ID)).toBeUndefined()
+      expect(queryClient.getQueryCache().find({ queryKey: queries.look(ID).queryKey })).toBeUndefined()
+    })
+
+    it("puts back the look it held when the list hasn't been read", async () => {
+      seedRest('library')
+      const before = cached(ID)
+      queryClient.removeQueries({ queryKey: queries.looks().queryKey, exact: true })
+      queryClient.setQueryData(queries.look(ID).queryKey, before)
+      const answer = deferred<Look>()
+      vi.spyOn(api, 'setStarred').mockReturnValue(answer.promise)
+      const done = setStarred(ID, true)
+      expect(detail(ID)?.starred).toBe(true)
+      answer.reject(new ApiError(500, 'Internal Server Error', `/api/looks/${ID}/starred`))
+      await expect(done).rejects.toBeInstanceOf(ApiError)
+      expect(detail(ID)).toEqual(before)
+      expect(queryClient.getQueryData(queries.looks().queryKey)).toBeUndefined()
+    })
+  })
+
   it('shows nothing, and still sends the choice, while the looks are not in the cache', async () => {
     vi.spyOn(api, 'setStarred').mockResolvedValue({ id: ID, starred: true } as Look)
     await setStarred(ID, true)

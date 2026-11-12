@@ -118,10 +118,18 @@ interface StarRequests {
 /** The looks with a request waiting for its answer; an entry goes when the last of them settles. */
 const starRequests = new Map<Id, StarRequests>()
 
-/** A look in the `looks` cache, replaced by what `change` makes of it; an unread library has no cache, and is left alone. */
+/**
+ * A look in the `looks` cache and in its own `['looks', id]` entry (the editor's), replaced by what `change` makes of it in each. A cache
+ * nobody has read has nothing to change, and is left alone: an updater that answers undefined makes no entry.
+ */
 function changeCachedLook(lookId: Id, change: (look: Look) => Look): void {
   queryClient.setQueryData(queries.looks().queryKey, (looks) => looks?.map((look) => (look.id === lookId ? change(look) : look)))
+  queryClient.setQueryData(queries.look(lookId).queryKey, (look) => look && change(look))
 }
+
+/** The look as the caches hold it, the list's first, else its own entry's. */
+const cachedLook = (lookId: Id): Look | undefined =>
+  queryClient.getQueryData(queries.looks().queryKey)?.find((look) => look.id === lookId) ?? queryClient.getQueryData(queries.look(lookId).queryKey)
 
 /**
  * §8.4's star, F5 ruling 16: the card shows the choice at once, then the server's look. The latest choice for a look wins: an earlier
@@ -134,7 +142,7 @@ export async function setStarred(lookId: Id, starred: boolean): Promise<void> {
   starRequests.set(lookId, requests)
   const request = ++requests.made
   requests.putBack = false
-  if (requests.waiting === 0) requests.settled = queryClient.getQueryData(queries.looks().queryKey)?.find((look) => look.id === lookId)
+  if (requests.waiting === 0) requests.settled = cachedLook(lookId)
   requests.waiting++
   changeCachedLook(lookId, (look) => ({ ...look, starred }))
   try {
