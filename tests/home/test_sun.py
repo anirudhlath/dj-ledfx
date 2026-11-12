@@ -4,7 +4,7 @@ home's)."""
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from astral import Observer, sun
@@ -246,6 +246,16 @@ def test_the_path_is_the_ten_minute_marks_of_the_two_hours_before_now_oldest_fir
     )
 
 
+def test_the_path_and_the_day_follow_the_instant_not_the_zone_it_is_given_in() -> None:
+    nepal = timezone(timedelta(hours=5, minutes=45))  # its :00 is not a UTC mark
+    at = SOLSTICE.replace(hour=12, minute=34, second=56)
+    local = at.astimezone(nepal)
+
+    assert local.minute != at.minute
+    assert sun_path(*MID, local) == sun_path(*MID, at)
+    assert daylight(*MID, local) == daylight(*MID, at)
+
+
 @pytest.mark.parametrize(
     ("azimuth", "offset", "turned"),
     [(270.0, 90.0, 0.0), (10.0, 355.0, 5.0), (90.0, 0.0, 90.0), (10.0, -20.0, 350.0)],
@@ -300,6 +310,23 @@ def test_sun_works_its_reading_out_at_most_once_a_second_and_follows_the_locatio
     )
     assert home_sun.reading() is reading and len(paths) == 1  # built once for the second
     assert home_sun() == reading.now and len(reads) == 2
+
+
+def test_a_reading_is_built_again_for_each_moment_it_is_worked_out() -> None:
+    stamp = [100.0]
+    moment = [SOLSTICE.replace(hour=12)]
+    home_sun = Sun(lambda: Location("Test", *MID), now=lambda: moment[0], clock=lambda: stamp[0])
+
+    before = home_sun.reading()
+    assert before is not None and before.now.at == moment[0]
+    stamp[0] += CACHE_S
+    moment[0] += timedelta(minutes=10)  # the next mark: its path has moved on
+    after = home_sun.reading()
+
+    assert after is not None and after is not before
+    assert after.now == sun_position(*MID, moment[0])
+    assert after.path == sun_path(*MID, moment[0]) and after.path != before.path
+    assert (after.sunrise, after.sunset) == daylight(*MID, moment[0])
 
 
 def test_no_location_no_sun_logged_once() -> None:

@@ -179,6 +179,37 @@ def _at_a_pole(lat: float, lon: float, at: datetime) -> float:
     return smoothstep(HORIZON_DEG, CIVIL_DEG, height)  # down from the horizon to civil dusk
 
 
+class _HomePlace:
+    """The home's location as Evening and Sun work with it. `due()` is true at most once a
+    `CACHE_S` on the clock; `place()` reads the location, and when there is none logs
+    `missing` at WARNING once, until a location comes back."""
+
+    def __init__(
+        self, location: Callable[[], Location | None], clock: Callable[[], float], missing: str
+    ) -> None:
+        self._location = location
+        self._clock = clock
+        self._missing = missing
+        self._worked_out = -math.inf
+        self._told = False
+
+    def due(self) -> bool:
+        stamp = self._clock()
+        if stamp - self._worked_out < CACHE_S:
+            return False
+        self._worked_out = stamp
+        return True
+
+    def place(self) -> Location | None:
+        place = self._location()
+        if place is not None:
+            self._told = False
+        elif not self._told:
+            logger.warning(self._missing)
+            self._told = True
+        return place
+
+
 class Evening:
     """How far into the evening it is now at the home, 0..1, for the zones' runtimes.
     It reads the home's location each time it works the amount out, at most once a
@@ -192,27 +223,18 @@ class Evening:
         now: Callable[[], datetime] = utcnow,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._location = location
+        self._home = _HomePlace(
+            location, clock, "The home has no location: looks play as they are at evening"
+        )
         self._now = now
-        self._clock = clock
-        self._worked_out = -math.inf
         self._amount = 0.0
-        self._told = False
 
     def __call__(self) -> float:
-        stamp = self._clock()
-        if stamp - self._worked_out < CACHE_S:
-            return self._amount
-        self._worked_out = stamp
-        place = self._location()
-        if place is None:
-            if not self._told:
-                logger.warning("The home has no location: looks play as they are at evening")
-                self._told = True
-            self._amount = 0.0
-        else:
-            self._told = False
-            self._amount = evening_amount(place.lat, place.lon, self._now())
+        if self._home.due():
+            place = self._home.place()
+            self._amount = (
+                0.0 if place is None else evening_amount(place.lat, place.lon, self._now())
+            )
         return self._amount
 
 
@@ -297,14 +319,13 @@ class Sun:
         now: Callable[[], datetime] = utcnow,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._location = location
+        self._home = _HomePlace(
+            location, clock, "The home has no location: looks that need the sun wait"
+        )
         self._now = now
-        self._clock = clock
-        self._worked_out = -math.inf
         self._place: Location | None = None
         self._point: SunPoint | None = None
         self._reading: SunReading | None = None
-        self._told = False
 
     def __call__(self) -> SunPoint | None:
         self._refresh()
@@ -322,17 +343,12 @@ class Sun:
         return self._reading
 
     def _refresh(self) -> None:
-        stamp = self._clock()
-        if stamp - self._worked_out < CACHE_S:
+        if not self._home.due():
             return
-        self._worked_out = stamp
-        self._reading = None
-        self._place = self._location()
-        if self._place is None:
-            if not self._told:
-                logger.warning("The home has no location: looks that need the sun wait")
-                self._told = True
-            self._point = None
-        else:
-            self._told = False
-            self._point = sun_position(self._place.lat, self._place.lon, self._now())
+        self._reading = None  # built again, for this moment, when it's asked for
+        self._place = self._home.place()
+        self._point = (
+            None
+            if self._place is None
+            else sun_position(self._place.lat, self._place.lon, self._now())
+        )
