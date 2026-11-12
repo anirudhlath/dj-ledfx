@@ -95,6 +95,39 @@ def test_the_sun_moves_the_warmth_with_it_across_the_home() -> None:
     assert np.allclose(rising[EAST], setting[WEST])  # the same warmth, at the other side
 
 
+def test_a_higher_sun_warms_the_west_less_for_it_stands_nearer_overhead() -> None:
+    leds, effect = _row(), HomeSunset()
+
+    low = effect.render(_sun(5.0, 270.0), leds)
+    high = effect.render(_sun(80.0, 270.0), leds)
+
+    assert not np.array_equal(low, high)
+    # Low in the west it is warm there and cool in the east; near overhead it is over the
+    # middle, so the two ends come close.
+    low_gap = low[WEST, 0] - low[EAST, 0]
+    high_gap = high[WEST, 0] - high[EAST, 0]
+    assert low_gap > 0.1
+    assert 0.0 <= high_gap < low_gap / 3.0
+
+
+@pytest.mark.parametrize(
+    ("elevation", "azimuth"), [(5.0, 270.0), (45.0, 270.0), (80.0, 270.0), (-10.0, 135.0)]
+)
+def test_the_warmth_stands_at_the_sun_point_of_the_suns_height_and_bearing(
+    elevation: float, azimuth: float
+) -> None:
+    leds = _row(north_offset_deg=30.0)
+    sun = sun_point(leds, elevation, azimuth)
+    anchored = leds_at(
+        [*ROW, *BOX], space=replace(leds.space, anchors={"sun": sun})
+    )  # Sunset's anchor, put where the sun is
+
+    home = HomeSunset().render(_sun(elevation, azimuth), leds)
+    sunset = SunsetGradient(anchor="sun").render(render_ctx(t=0.0), anchored)
+
+    assert np.array_equal(home, sunset)
+
+
 @pytest.mark.parametrize("t", [0.0, 7.5, 31.0])
 def test_without_a_sun_it_plays_as_sunset_with_no_anchor(t: float) -> None:
     settings = {"warmth": 0.8, "level": 0.6, "drift_s": 30.0}

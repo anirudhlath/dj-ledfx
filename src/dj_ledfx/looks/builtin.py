@@ -2,10 +2,10 @@
 
 The handoff's looks take their metadata from its looks.json (vendored in data/looks.json,
 byte for byte), in its order: M2's six showcase looks, M3's four tempo looks, M5's eleven
-particle looks and the Firmware showcase. The handoff has no layers, so they live here; a
-particle look's one particle layer takes the look's own name. The six classic looks
-are today's effects; the handoff has no entry for them, so their names and descriptions
-live here too.
+particle looks, M6's Home looks (so far Home sunset) and the Firmware showcase. The
+handoff has no layers, so they live here; a particle look's one particle layer takes the
+look's own name. The six classic looks are today's effects; the handoff has no entry for
+them, so their names and descriptions live here too.
 """
 
 from __future__ import annotations
@@ -100,15 +100,11 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
     tv, speakers = _anchor_of("shockwave", anchors), _anchor_of("speakers", anchors)
     focus = _anchor_of("focus", anchors)
     bursts, fountain = _anchor_of("bursts", anchors), _anchor_of("fountain", anchors)
+    # Sunset's candles, which Home sunset has too (layers are frozen: one serves both looks).
+    candles = _firmware("flame", "Candles", "lifx_flame", lights=["type:candle"])
     return {
-        "sunset": (
-            _field("sky", "Gradient", "sunset_gradient"),
-            _firmware("flame", "Candles", "lifx_flame", lights=["type:candle"]),
-        ),
-        "homesunset": (
-            _field("sky", "Gradient", "home_sunset"),
-            _firmware("flame", "Candles", "lifx_flame", lights=["type:candle"]),
-        ),
+        "sunset": (_field("sky", "Gradient", "sunset_gradient"), candles),
+        "homesunset": (_field("sky", "Gradient", "home_sunset"), candles),
         "aurora": (
             _field("curtains", "Curtains", "aurora_curtains"),
             _firmware(
