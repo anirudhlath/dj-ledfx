@@ -337,8 +337,8 @@ describe('the Looks page (§8.4)', () => {
     expect(banner).not.toHaveTextContent(/looks ·/)
   })
 
-  // jsdom measures no layout, so the frame is pinned by its classes: Looks.html's main is the content width between 40 px gutters, 24 px
-  // above and 40 below. <main> also holds Live's full-bleed stage, so it is the page that frames itself.
+  // jsdom measures no layout, so the frame is pinned by its classes: Looks.html's main is the content width between gutters (the phone's
+  // are the other phone pages'), with space above and below. <main> also holds Live's full-bleed stage, so it is the page that frames itself.
   it('frames itself: gutters round a content column capped at the content width, centred', async () => {
     renderApp('/next/looks')
     const [ambient] = await screen.findAllByRole('heading', { level: 2 })
@@ -347,9 +347,6 @@ describe('the Looks page (§8.4)', () => {
     const gutters = column.parentElement!
     expect(gutters).toHaveClass('px-4', 'md:px-10', 'pt-6', 'pb-10')
     expect(gutters.parentElement).toBe(screen.getByRole('main'))
-    // The phone's gutter is the other phone pages' 16 px, and the desktop's the render's 40.
-    expect(4 * 4).toBe(16)
-    expect(4 * 10).toBe(40)
   })
 
   it('reflows to two columns on the phone, with no header context', async () => {
