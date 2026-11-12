@@ -3,7 +3,8 @@
 // (State-Problems) and "on screen only" (State-Preview-Only).
 import type { RunningZone } from '@/api/contract'
 
-const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+/** "1 zone", "3 zones": a number with its noun, the noun plural but for one. */
+export const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 export function runningSummary(zones: readonly RunningZone[], overlays: number, lightCount: number, previewOnly: boolean | null): string {
   if (previewOnly === true) return 'on screen only'

@@ -91,7 +91,9 @@ describe('searchLooks', () => {
     for (const query of ['HA', 'ha', INPUTS['home-assistant'].label, 'home assistant']) {
       expect(searchLooks(all, query), query).toEqual(expect.arrayContaining(homeAssistant))
     }
-    expect(idsOf(searchLooks(all, 'HA')).sort()).toEqual(idsOf(homeAssistant).sort())
+    // A look that neither needs nor uses Home Assistant is found only by a name or a layer's that holds "ha".
+    const namesHa = (look: Look) => [look.name, ...(look.layers ?? []).map((layer) => layer.name)].some((text) => text.toLowerCase().includes('ha'))
+    for (const hit of searchLooks(all, 'HA')) expect(homeAssistant.includes(hit) || namesHa(hit), hit.id).toBe(true)
     const music = needing('music')
     expect(music.length).toBeGreaterThan(0)
     expect(searchLooks(all, 'music')).toEqual(expect.arrayContaining(music))
@@ -296,5 +298,10 @@ describe('looksContext', () => {
     expect(running.length).toBeGreaterThan(0)
     expect(looksContext(looks, running)).toBe(`${tabCounts(looks).all} looks · ${running.length} running`)
     expect(looksContext(looks, [])).toBe(`${LIBRARY.counts.All} looks · 0 running`)
+  })
+
+  it('says one look, not one looks', () => {
+    expect(looksContext([fixture('rain')], [])).toBe('1 look · 0 running')
+    expect(looksContext([], [])).toBe('0 looks · 0 running')
   })
 })

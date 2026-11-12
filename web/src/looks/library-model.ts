@@ -5,6 +5,7 @@ import type { Id, InputKind, Inputs, Look, RunningZone, Zone } from '@/api/contr
 import { missingInputs, type MissingInput } from '@/compose/model'
 import type { IconName } from '@/design/icons'
 import { formatList } from '@/lib/format'
+import { count } from '@/live/words'
 import { INPUTS } from '@/zones/zone-view'
 import { LIBRARY, LOOK_CATEGORIES } from './looks-render'
 
@@ -18,6 +19,13 @@ export const LIBRARY_TABS: readonly { id: LibraryTab; label: string }[] = [
   ...LOOK_CATEGORIES.map((category) => ({ id: category.id, label: category.name })),
   { id: 'mine', label: 'Mine' },
 ]
+
+/**
+ * Compile-time: looks.json's categories take in every category the schema's `Look` has. One that didn't would count its built-in looks in
+ * All and draw them in no section, and `tabCounts()`'s cast below would hide it. A category left over makes `Assert<false>`.
+ */
+type Assert<T extends true> = T
+export type CategoriesCovered = Assert<[Exclude<Look['category'], (typeof LOOK_CATEGORIES)[number]['id']>] extends [never] ? true : false>
 
 /** The tab `?cat=` names (§4.3); one the app doesn't know, or none, is All (F5 ruling 10). */
 export function readTab(cat: string | null): LibraryTab {
@@ -76,9 +84,12 @@ export interface LibrarySection {
   name: string
   blurb: string
   looks: Look[]
-  /** Whether the heading says how many looks it holds. */
+  /** Whether the heading says how many looks it holds: always `!lastRow`. */
   counted: boolean
-  /** Whether it shares the last row with the other. */
+  /**
+   * Whether it belongs to the last row (Firmware and Mine, the same fact as `!counted`, so the page reads one of them): beside the
+   * other when both have looks, alone when the other has none or isn't on the tab.
+   */
   lastRow: boolean
 }
 
@@ -182,4 +193,4 @@ export function emptyText(filter: Pick<LibraryFilter, 'tab' | 'query' | 'readyOn
 
 /** The header's context line (F5 ruling 9): "29 looks · 3 running", the built-in looks and the zones that run one. */
 export const looksContext = (looks: readonly Look[], running: readonly RunningZone[]): string =>
-  `${tabCounts(looks).all} looks · ${running.length} running`
+  `${count(tabCounts(looks).all, 'look')} · ${running.length} running`
