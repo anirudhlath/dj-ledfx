@@ -1,8 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { components, paths } from './generated/schema'
 import type {
-  ApiPath, Deck, Furniture, Home, InputKind, InputState, Light, LightShape, LightStatus, Location, Mask, PendingPath,
-  PendingSchema, Room, RunningZone, RunningZoneTransition, TempoLock, TempoSource,
+  ApiPath, Deck, Furniture, Home, InputKind, Inputs, InputState, Light, LightShape, LightStatus, Location, Mask,
+  PendingPath, PendingSchema, Room, RunningZone, RunningZoneTransition, SunInput, TempoLock, TempoSource,
 } from './contract'
 
 describe('the contract', () => {
@@ -64,6 +64,13 @@ describe('the contract', () => {
     expectTypeOf<Mask['kind']>().toEqualTypeOf<'height' | 'room' | 'sub-zone' | 'anchor'>()
     expectTypeOf<NonNullable<RunningZone['transition']>>().toEqualTypeOf<RunningZoneTransition>()
     expectTypeOf<RunningZoneTransition['durationS']>().toEqualTypeOf<number>()
+  })
+
+  // Engine M6 serves the sun, with its day and path, in place of the hand-written one.
+  it("serves engine M6's sun", () => {
+    expectTypeOf<'SunInput' | 'SunPathPoint'>().toExtend<keyof components['schemas']>()
+    expectTypeOf<NonNullable<Inputs['sun']>>().toEqualTypeOf<SunInput>()
+    expectTypeOf<SunInput['sunrise']>().toEqualTypeOf<string | null>()
   })
 
   // I1: engine M2 serves the home's size and which rooms hold lights.

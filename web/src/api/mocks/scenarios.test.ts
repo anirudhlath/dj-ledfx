@@ -101,7 +101,7 @@ describe('the hero', () => {
       beatInBar: HERO_BEAT.beat,
       stale: false,
     })
-    expect(hhmm(hero.inputs.sun.sunset)).toBe(HERO_CHROME.sunset)
+    expect(hhmm(hero.inputs.sun.sunset!)).toBe(HERO_CHROME.sunset)
     expect(hero.previewOnly).toBe(false)
     expect(hero.dropAfterMs).toBeNull()
   })

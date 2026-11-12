@@ -1424,10 +1424,11 @@ export interface components {
         };
         /**
          * Inputs
-         * @description GET /inputs: music, Home Assistant and the sun join in M6 and M7 (M3 ruling 12).
+         * @description GET /inputs: the tempo, Pro DJ Link and the sun; music and Home Assistant join in M7.
          */
         Inputs: {
             prodjlink: components["schemas"]["ProDjLinkInput"];
+            sun: components["schemas"]["SunInput"] | null;
             tempo: components["schemas"]["TempoInput"];
         };
         /**
@@ -2172,6 +2173,35 @@ export interface components {
             ][] | null;
             /** Room */
             room?: string | null;
+        };
+        /**
+         * SunInput
+         * @description The sun where the home is (engine M6): its height and its bearing from true north,
+         *     in degrees, to 1 decimal.
+         */
+        SunInput: {
+            /** Azimuth */
+            azimuth: number;
+            /** Elevation */
+            elevation: number;
+            /** Path */
+            path?: components["schemas"]["SunPathPoint"][];
+            /** Sunrise */
+            sunrise: string | null;
+            /** Sunset */
+            sunset: string | null;
+        };
+        /** SunPathPoint */
+        SunPathPoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Azimuth */
+            azimuth: number;
+            /** Elevation */
+            elevation: number;
         };
         /** TakeOver */
         TakeOver: {

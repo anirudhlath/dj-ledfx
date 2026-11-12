@@ -1115,10 +1115,20 @@
         "type": "object"
       },
       "Inputs": {
-        "description": "GET /inputs: music, Home Assistant and the sun join in M6 and M7 (M3 ruling 12).",
+        "description": "GET /inputs: the tempo, Pro DJ Link and the sun; music and Home Assistant join in M7.",
         "properties": {
           "prodjlink": {
             "$ref": "#/components/schemas/ProDjLinkInput"
+          },
+          "sun": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SunInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "tempo": {
             "$ref": "#/components/schemas/TempoInput"
@@ -1126,7 +1136,8 @@
         },
         "required": [
           "tempo",
-          "prodjlink"
+          "prodjlink",
+          "sun"
         ],
         "title": "Inputs",
         "type": "object"
@@ -3298,6 +3309,82 @@
           }
         },
         "title": "SubZoneUpdate",
+        "type": "object"
+      },
+      "SunInput": {
+        "description": "The sun where the home is (engine M6): its height and its bearing from true north,\nin degrees, to 1 decimal.",
+        "properties": {
+          "azimuth": {
+            "title": "Azimuth",
+            "type": "number"
+          },
+          "elevation": {
+            "title": "Elevation",
+            "type": "number"
+          },
+          "path": {
+            "items": {
+              "$ref": "#/components/schemas/SunPathPoint"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "sunrise": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sunrise"
+          },
+          "sunset": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sunset"
+          }
+        },
+        "required": [
+          "elevation",
+          "azimuth",
+          "sunrise",
+          "sunset"
+        ],
+        "title": "SunInput",
+        "type": "object"
+      },
+      "SunPathPoint": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "azimuth": {
+            "title": "Azimuth",
+            "type": "number"
+          },
+          "elevation": {
+            "title": "Elevation",
+            "type": "number"
+          }
+        },
+        "required": [
+          "at",
+          "elevation",
+          "azimuth"
+        ],
+        "title": "SunPathPoint",
         "type": "object"
       },
       "TakeOver": {

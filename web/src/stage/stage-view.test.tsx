@@ -330,14 +330,14 @@ describe('the stage on Live (§7, §8.1)', () => {
     expect(canvas().dataset.cadence).toBe(String(1000 / SPEC.phoneFps))
   })
 
-  // Review focus 1: engine M2 sends no inputs, and M3 (Mi2) only its tempo and Pro DJ Link, so no sun.
+  // Review focus 1: the server sends `sun: null` while the home has no location (engine M6).
   it('shows no sun and no readout when the server has no sun, or it has set', async () => {
     const { state } = await openLive()
     const inputs = liveStore.getState().inputs!
     const sun = state.inputs.sun
     const sunDrawn = () => screen.queryByText(sunScene(state.home, sun)!.label!) ?? screen.queryByText(sunPosition(sun)!)
     expect(sunDrawn()).toBeInTheDocument()
-    act(() => applyMessage(liveStore, { channel: 'inputs', inputs: { tempo: inputs.tempo, prodjlink: inputs.prodjlink } }, 0))
+    act(() => applyMessage(liveStore, { channel: 'inputs', inputs: { tempo: inputs.tempo, prodjlink: inputs.prodjlink, sun: null } }, 0))
     expect(sunDrawn()).not.toBeInTheDocument()
     act(() => liveStore.setState({ inputs }))
     expect(sunDrawn()).toBeInTheDocument()

@@ -121,7 +121,18 @@ export type Transform = Schemas['Transform']
 /** A running zone's transition: `durationS` lets the bar move on between the running channel's pushes. */
 export type RunningZoneTransition = Schemas['RunningZoneTransition']
 
-// ── Pending: engine M6/M7 (Music Assistant, Home Assistant, the sun, signals) ─────────────
+// ── Served since engine M6 (the sun, overlays) ────────────────────────────────────────────
+/**
+ * The sun on GET /inputs and the `inputs` channel, every number to 1 decimal: `azimuth` is from true
+ * north (the stage turns it onto the plan), `sunrise` and `sunset` are null where none falls near
+ * now (polar day or night), and `path` is the last two hours at the clock's 10-minute marks, oldest
+ * first (without it the stage draws no arc). `Inputs['sun']` is null while the home has no location.
+ */
+export type SunInput = Schemas['SunInput']
+/** A point on the sun's recent path, for the stage's arc (§7.4). */
+export type SunPathPoint = Schemas['SunPathPoint']
+
+// ── Pending: engine M7 (Music Assistant, Home Assistant, signals) ─────────────────────────
 // Shaped from §12.3–12.4, §9.3 and the Inputs renders; the milestone that serves them owns the
 // final shape (decision 6).
 export interface MusicInput {
@@ -144,22 +155,8 @@ export interface HomeAssistantInput {
   retryS: number | null
   entities: HomeAssistantEntity[]
 }
-/** A point on the sun's recent path, for the stage's arc (§7.4); F2 asks engine M6 for it (F2 decision 7). */
-export interface SunPathPoint {
-  at: string
-  elevation: number
-  azimuth: number
-}
-export interface SunInput {
-  elevation: number
-  azimuth: number
-  sunrise: string
-  sunset: string
-  /** The last two hours or so, oldest first; without it the stage draws no arc. */
-  path?: SunPathPoint[]
-}
-/** What M6 and M7 add to GET /inputs. */
-export interface PendingInputs { music: MusicInput; homeAssistant: HomeAssistantInput; sun: SunInput }
+/** What M7 adds to GET /inputs. */
+export interface PendingInputs { music: MusicInput; homeAssistant: HomeAssistantInput }
 /** GET /inputs: the tempo and Pro DJ Link since engine M3; the rest is optional until it's served. */
 export type Inputs = Schemas['Inputs'] & Partial<PendingInputs>
 export type SignalValue = number | string | boolean

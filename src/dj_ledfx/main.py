@@ -484,6 +484,7 @@ async def _run(args: argparse.Namespace) -> None:
             frame_watchers=watchers,
             listening=listening,
             discovery_orchestrator=discovery_orchestrator,
+            sun=sun,
         )
 
         try:
