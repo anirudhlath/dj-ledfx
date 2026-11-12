@@ -1,0 +1,12 @@
+/*
+ * What a screenshot of the looks' motifs adds (KEEP_MOTIFS in helpers.ts): the app's own CSS animations stand still and its transitions
+ * are over, so that 'allow' leaves nothing to land at a moment of its own. The motifs aren't named here: ?still holds them paused.
+ */
+[class*='animate-'] {
+  animation: none !important;
+}
+*,
+*::before,
+*::after {
+  transition: none !important;
+}
