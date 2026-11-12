@@ -11,8 +11,11 @@ import { LIVE_RENDER, LIVE_SPEC } from '@/design/live-numbers'
 import './looks-render.css'
 import { instanceMarkup, motifFor } from './motif'
 
-/** The composer's tile (§6.4 LookTile: its width, at 16:10), the phone's look row (§8.10) or the library's card (Looks.html's). */
-export type ThumbSize = 'tile' | 'row' | 'card'
+/**
+ * The composer's tile (§6.4 LookTile: its width, at 16:10), the phone's look row (§8.10), the library's card
+ * (Looks.html's), or the box beside a recent look on Nothing running (§9.4), desktop's and the phone's.
+ */
+export type ThumbSize = 'tile' | 'row' | 'card' | 'recent' | 'recent-phone'
 
 const { width, height, background } = LIVE_RENDER.lookThumb
 const card = LIVE_RENDER.lookCard.thumb
@@ -20,6 +23,9 @@ const BOX: Record<ThumbSize, { className: string; style: CSSProperties }> = {
   tile: { className: 'w-full rounded-tile border', style: { aspectRatio: `${width} / ${height}` } },
   row: { className: 'shrink-0 rounded-control', style: { ...LIVE_SPEC.phoneComposer.thumb } },
   card: { className: 'w-full rounded-tile border border-line', style: { aspectRatio: `${card.width} / ${card.height}` } },
+  // State-Nothing-Running's and Phone-State-Nothing-Running's boxes, drawn with no border.
+  recent: { className: 'h-11.5 w-18 shrink-0 rounded-control', style: {} },
+  'recent-phone': { className: 'h-10.5 w-16 shrink-0 rounded-control', style: {} },
 }
 
 export interface LookThumbProps {

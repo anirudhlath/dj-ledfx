@@ -1,7 +1,7 @@
 // §9.4 Nothing running (State-Nothing-Running): the lights as they were, and "Start again", recent looks
 // with one-tap play (`GET /api/running/recent`, newest stop first: F3 decision 35). The thumbnail is a
-// plain tile, not a LookThumb: its box is no ThumbSize's (a tile's, a row's or a card's), so it draws no
-// motif (F3 decision 27, F4 ruling 7).
+// LookThumb in the box each render draws, with the look's motif on it; a look the library no longer has is
+// the bare scene (F5 decisions 7 and 23).
 import { useQuery } from '@tanstack/react-query'
 import { failureText, startAgain } from '@/api/actions'
 import type { RecentLook } from '@/api/contract'
@@ -11,6 +11,7 @@ import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
 import { formatSpan } from '@/lib/format'
 import { useNow } from '@/lib/use-now'
+import { LookThumb } from '@/looks/look-thumb'
 
 export interface NothingRunningProps {
   /** How many lights are on, of `total` (REST's lights): "9 on, 10 off". */
@@ -53,10 +54,7 @@ export function NothingRunning({ on, total, variant = 'desktop' }: NothingRunnin
                 key={`${look.zoneId}:${look.lookId}`}
                 className="flex items-center gap-3 rounded-card border border-line bg-raised p-2"
               >
-                <span
-                  aria-hidden="true"
-                  className={cx('block shrink-0 overflow-hidden rounded-control bg-control', phone ? 'h-10.5 w-16' : 'h-11.5 w-18')}
-                />
+                <LookThumb lookId={look.lookId} size={phone ? 'recent-phone' : 'recent'} />
                 <span className="flex min-w-0 grow flex-col gap-0.5">
                   <span className={phone ? 'font-serif text-[19px] leading-[1.1]' : 'font-serif text-display-xs'}>{look.lookName}</span>
                   {/* F3 decision 35: Goodnight's end shows, so a line too long for the row goes on to a second. */}
