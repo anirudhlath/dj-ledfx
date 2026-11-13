@@ -26,7 +26,7 @@ import { TopBar } from './top-bar'
 export function AppShell() {
   const isPhone = useIsPhone()
   const meta = usePageMeta()
-  const { PhoneTitle } = meta
+  const { Context, PhoneTitle } = meta
   const focused = isPhone && meta.focusedTask === true
   const news = useConnectionNews(useConnectionStatus())
   const server = useServerName()
@@ -54,7 +54,7 @@ export function AppShell() {
             <div className="row-span-2">
               <Rail server={server} />
             </div>
-            <TopBar title={meta.title} context={meta.context && <PageContext get={meta.context} />} />
+            <TopBar title={meta.title} context={Context ? <Context /> : meta.context && <PageContext get={meta.context} />} />
           </>
         )}
         <main className="min-h-0 flex-1 overflow-y-auto">

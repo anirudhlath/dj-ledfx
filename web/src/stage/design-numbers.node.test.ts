@@ -1,19 +1,12 @@
 // @vitest-environment node
-import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import {
-  checkPins, extractLive, extractLiveRender, extractRender, extractSpec, readHandoff, tokenColours, type ReadText,
-} from '../../scripts/design-extract.ts'
+import { checkPins, extractLive, extractLiveRender, extractRender, extractSpec, tokenColours } from '../../scripts/design-extract.ts'
 import { LIVE_RENDER, LIVE_SPEC } from '../design/live-numbers'
+import { edited, handoff } from '../test/handoff'
 import { RENDER, SPEC, TOKENS } from './design-numbers'
 
 // If one of these fails, the handoff changed: run `npm run design:numbers` in web/ and commit the
 // files it writes. Never edit design-numbers.ts or live-numbers.ts by hand.
-const handoff = readHandoff(resolve(import.meta.dirname, '../../..'))
-
-/** The handoff's renders with one of them edited in memory, for how the extractor fails when a render moves: no file is written. */
-const edited = (render: string, edit: (html: string) => string): ReadText => (name) =>
-  name === `reference/${render}.html` ? edit(handoff.read!(name)) : handoff.read!(name)
 
 describe('the design numbers', () => {
   it("are what the spec's sentences say", () => {
@@ -51,6 +44,22 @@ describe('the design numbers', () => {
   // §6.4: LookThumb is "a small 16:10 scene", and the composer's tile holds one (F4 ruling 7).
   it("draw a look's thumb at 16:10", () => {
     expect(LIVE_RENDER.lookThumb.width / LIVE_RENDER.lookThumb.height).toBe(16 / 10)
+  })
+
+  const tokenPx = (name: string) => new RegExp(`${name}:\\s*([\\d.]+)px`).exec(handoff.tokens)?.[1]
+
+  // §6.4: "LookCard (grid, 201 px at 6 columns): thumb (radius 10, line border), serif 20 name …, two-line description (12 text-3)";
+  // §8.4: "6-column grid of LookCards, 28/16 px gaps". The card draws them with tokens.css's own sizes.
+  it("read §6.4's LookCard and §8.4's grid, in tokens.css's own sizes", () => {
+    expect(LIVE_SPEC.lookCard.columns).toBe(LIVE_SPEC.looksPage.columns)
+    expect(String(LIVE_SPEC.lookCard.radiusPx)).toBe(tokenPx('--radius-tile'))
+    expect(String(LIVE_SPEC.lookCard.namePx)).toBe(tokenPx('--text-display-xs'))
+    expect(String(LIVE_SPEC.lookCard.descriptionPx)).toBe(tokenPx('--text-meta'))
+  })
+
+  // §6.4's 201 px card and Looks.html's 201 px thumb box are one width read twice (the spec sizes the grid, the render the thumb).
+  it("draw a LookCard's thumb as wide as the spec's card", () => {
+    expect(LIVE_RENDER.lookCard.thumb.width).toBe(LIVE_SPEC.lookCard.px)
   })
 
   // Phone-PutLookOn draws the chosen zone's outline narrower than the spec's number, which Live-PutLookOn's matches; the phone's
@@ -125,6 +134,9 @@ describe('the design numbers', () => {
     expect(() => extractSpec('')).toThrow(/§7\.1 Floors/)
     expect(() => extractLive('')).toThrow(/§4\.4/)
     expect(() => extractLive(handoff.spec.replace('**`LookTile`** (composer', '**`LookTile`** (library'))).toThrow(/§6\.4 LookTile/)
+    expect(() => extractLive(handoff.spec.replace('**`LookCard`** (grid', '**`LookCard`** (list'))).toThrow(/§6\.4 LookCard/)
+    expect(() => extractLive(handoff.spec.replace('Sections per category: serif', 'Sections per category: sans'))).toThrow(/§8\.4 Looks/)
+    expect(() => extractLive(handoff.spec.replace('CSS keyframes at', 'CSS keyframes near'))).toThrow(/§5\.4 stand-in tempo/)
   })
 
   // A render whose thumb moved is named, whichever it is: it never drops out and leaves the other's to stand for both.
@@ -132,6 +144,16 @@ describe('the design numbers', () => {
     const renamed = (html: string) => html.replaceAll('<svg class="tb "', '<svg class="tile "')
     expect(() => extractLiveRender(edited('Phone-PutLookOn', renamed))).toThrow(/Phone-PutLookOn\.html's thumb no longer reads/)
     expect(() => extractLiveRender(edited('Live-PutLookOn', renamed))).toThrow(/Live-PutLookOn\.html's thumb no longer reads/)
+    expect(() => extractLiveRender(edited('Looks', renamed))).toThrow(/Looks\.html's thumb no longer reads/)
+  })
+
+  it.runIf(handoff.read !== null)("name the render whose card's thumb box moved", () => {
+    // One card's box a pixel taller: the 31 cards no longer agree.
+    const taller = (html: string) => html.replace(/(height: )(\d+)(px; border-radius: \d+px; overflow: hidden; border: 1px solid)/, (_, a: string, h: string, b: string) => `${a}${Number(h) + 1}${b}`)
+    expect(() => extractLiveRender(edited('Looks', taller))).toThrow(/Looks\.html's card thumb draws it two ways/)
+    // Every card's box clipped another way: none reads.
+    const clipped = (html: string) => html.replaceAll('overflow: hidden; border: 1px solid', 'overflow: clip; border: 1px solid')
+    expect(() => extractLiveRender(edited('Looks', clipped))).toThrow(/Looks\.html's card thumb no longer reads/)
   })
 
   // The phone's outline is read from the one path Phone-PutLookOn draws it with: a render that moves it is named.
@@ -147,6 +169,8 @@ describe('the design numbers', () => {
     const twoWays = /Live-PutLookOn\.html's thumb and Phone-PutLookOn\.html's thumb draw the scene two ways/
     expect(() => extractLiveRender(edited('Phone-PutLookOn', taller))).toThrow(twoWays)
     expect(() => extractLiveRender(edited('Phone-PutLookOn', paler))).toThrow(twoWays)
+    // Looks.html's thumbs are a third render of the one scene.
+    expect(() => extractLiveRender(edited('Looks', taller))).toThrow(/Live-PutLookOn\.html's thumb and Looks\.html's thumb draw the scene two ways/)
   })
 
   it('come only from pinned files', () => {

@@ -28,5 +28,5 @@
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src"],
-  "exclude": ["src/**/*.node.test.ts"]
+  "exclude": ["src/**/*.node.test.ts", "src/test/handoff.ts"]
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { HERO_BEAT, HERO_CHROME } from '@/chrome/state'
+import { LIBRARY } from '@/looks/looks-render'
 import { attentionAbout, HERO_NOW } from '@/test/live'
 import type { AttentionItem } from '../contract'
 import { HOME_ZONE, lookName, roomName } from './fixtures'
@@ -246,6 +247,43 @@ describe('the other scenarios', () => {
 
   it("puts Evening on the hero's Home sunset, as Main.png's card shows", () => {
     expect(buildScenario('hero', HERO_NOW).looks.find((look) => look.id === 'homesunset')?.modifiers?.evening).toBe(true)
+  })
+})
+
+describe('the library', () => {
+  it("is the hero, with Looks.html's stars and saved looks", () => {
+    const library = buildScenario('library', HERO_NOW)
+    const hero = buildScenario('hero', HERO_NOW)
+    expect(library.running).toEqual(hero.running)
+    expect(library.looks.filter((l) => l.starred).map((l) => l.id)).toEqual(LIBRARY.starred)
+    const saved = library.looks.filter((l) => !l.builtIn)
+    expect(saved.map(({ name, description, derivedFrom }) => ({ name, description, from: derivedFrom }))).toEqual(LIBRARY.mine)
+    for (const look of saved) expect(look.thumbnail).toBe(library.looks.find((l) => l.id === look.derivedFrom)!.thumbnail)
+  })
+
+  it('runs the looks Looks.html marks running, on the zones it names', () => {
+    const { running, zones } = buildScenario('library', HERO_NOW)
+    for (const [lookId, zoneName] of Object.entries(LIBRARY.running)) {
+      expect(running.some((z) => z.lookId === lookId && zones.find((zone) => zone.id === z.zoneId)?.name === zoneName)).toBe(true)
+    }
+  })
+
+  // F4's composer baselines rest on it (ruling 19).
+  it('leaves the hero with no star and no saved look', () => {
+    expect(buildScenario('hero', HERO_NOW).looks.every((l) => l.builtIn && !l.starred)).toBe(true)
+  })
+
+  it('saves each look as a copy of its parent, with ids of its own, after the built-in looks', () => {
+    const { looks } = buildScenario('library', HERO_NOW)
+    const saved = looks.filter((l) => !l.builtIn)
+    expect(saved.map((l) => l.id)).toEqual(LIBRARY.mine.map((_, i) => `mine-${i + 1}`))
+    expect(looks.slice(-saved.length)).toEqual(saved)
+    for (const look of saved) {
+      const parent = looks.find((l) => l.id === look.derivedFrom)!
+      expect(look).toEqual({ ...parent, id: look.id, name: look.name, description: look.description, builtIn: false, derivedFrom: parent.id, starred: false })
+      // A deep copy: nothing a saved look holds is its parent's own object or array.
+      for (const key of ['modifiers', 'needs', 'uses', 'layers', 'transition'] as const) expect(look[key], key).not.toBe(parent[key])
+    }
   })
 })
 

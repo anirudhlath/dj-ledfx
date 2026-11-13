@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeSockets } from '@/test/fake-socket'
 import { HERO_NOW, startMockDataLayer } from '@/test/live'
-import { frames, fx, liveClient, resetDataLayer, startDataLayer, wantFx } from './live'
+import { beatClock, frames, fx, liveClient, resetDataLayer, startDataLayer, wantFx } from './live'
 import { liveStore } from './live-store'
 import { buildScenario } from './mocks/scenarios'
 import { queries, queryClient } from './queries'
@@ -89,5 +89,14 @@ describe('wantFx', () => {
     await vi.advanceTimersByTimeAsync(1100)
     expect([...fx.live.keys()].sort()).toEqual(['living', 'office'])
     release()
+  })
+})
+
+describe('resetDataLayer', () => {
+  // ?still's hold (app/boot.tsx) lasts the page, through every reconnect; a test that holds the clock lets go with the page.
+  it("lets go of ?still's hold on the beat clock", () => {
+    beatClock.hold()
+    resetDataLayer()
+    expect(beatClock.held).toBe(false)
   })
 })

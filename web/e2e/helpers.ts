@@ -1,5 +1,13 @@
 // What the e2e specs share: opening a page on the mock, Live's stage, a notched screen, and what the layout checks measure with.
+import { fileURLToPath } from 'node:url'
 import { expect, type Locator, type Page } from '@playwright/test'
+
+/**
+ * toHaveScreenshot's options for a page that draws looks' motifs, under ?still. Playwright's default, 'disabled', cancels every infinite
+ * animation, which leaves a motif's elements in their own style, where keyframes that start dark (Rain storm's flash, Drop moment's) sit
+ * at full strength. 'allow' leaves them at the time ?still holds them at, 0, and keep-motifs.css stops the app's own pulses and transitions.
+ */
+export const KEEP_MOTIFS = { animations: 'allow', stylePath: fileURLToPath(new URL('./keep-motifs.css', import.meta.url)) } as const
 
 /**
  * Opens a page and waits for the chrome's first data from the mock (the hero, unless the path asks

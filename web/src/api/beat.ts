@@ -114,8 +114,8 @@ export interface BeatSample {
 
 /** Beats within the bar, in [0, 4). */
 const withinBar = (beats: number) => ((beats % 4) + 4) % 4
-/** An error in beats, wrapped to (−2, 2]: the near way round the bar. */
-const nearWay = (beats: number) => beats - 4 * Math.ceil((beats - 2) / 4)
+/** A change in beats, wrapped to (−2, 2]: the near way round the bar. The clock's errors, and the look thumbs' steps. */
+export const nearWay = (beats: number) => beats - 4 * Math.ceil((beats - 2) / 4)
 
 /**
  * The beat between messages. A position is in beats: counted from the first bar's downbeat when
@@ -127,7 +127,7 @@ export class BeatClock {
   private bpm = 0
   private running = false
   private counted = false
-  private held = false
+  private holding = false
 
   /** A beat with a number that isn't finite is ignored, so a malformed message can't stop the clock. */
   receive(beat: Beat, offset: number | null): void {
@@ -166,16 +166,26 @@ export class BeatClock {
 
   /** ?still (the mock builds' screenshots; app/boot.tsx): the beat stays where its messages put it. */
   hold(): void {
-    this.held = true
+    this.holding = true
   }
 
-  /** Forget the beat: after a reconnect, the next message anchors afresh. */
+  /** ?still holds the beat: the look thumbs then stay at their authored moment (F5 decision 6). */
+  get held(): boolean {
+    return this.holding
+  }
+
+  /** Lets go of ?still's hold. Only resetDataLayer() calls it: a hold lasts the page, through every reconnect. */
+  release(): void {
+    this.holding = false
+  }
+
+  /** Forget the beat: after a reconnect, the next message anchors afresh. ?still's hold stays. */
   reset(): void {
     this.anchor(0, 0, 0, false, false)
   }
 
   private positionAt(now: number): number {
-    return this.running && !this.held ? this.position + ((now - this.at) * this.bpm) / 60 : this.position
+    return this.running && !this.holding ? this.position + ((now - this.at) * this.bpm) / 60 : this.position
   }
 
   private anchor(position: number, at: number, bpm: number, running: boolean, counted: boolean): void {

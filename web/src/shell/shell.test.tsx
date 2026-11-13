@@ -1,8 +1,13 @@
 import { act, screen, within } from '@testing-library/react'
+import type { RouteObject } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { liveStore } from '@/api/live-store'
+import type { PageMeta } from '@/app/page-meta'
+import { renderApp } from '@/test/app'
 import { attentionAbout, seedLive } from '@/test/live'
 import { linkNames, renderAt as at } from '@/test/router'
+import { setViewportWidth } from '@/test/viewport'
+import { AppShell } from './app-shell'
 import { PhoneHeader } from './phone-header'
 import { Rail } from './rail'
 import { TabBar } from './tab-bar'
@@ -103,5 +108,35 @@ describe('PhoneHeader', () => {
       </PhoneHeader>
     ))
     expect(within(screen.getByRole('banner')).getByText('strip')).toBeInTheDocument()
+  })
+})
+
+describe('AppShell', () => {
+  /** The shell around one page whose route handle is `meta`. */
+  const shellAround = (meta: PageMeta): RouteObject[] => [{ element: <AppShell />, children: [{ path: 'x', handle: meta, element: <p>page</p> }] }]
+  const Seven = () => <>seven</>
+
+  it("draws a page's context component where it has one", () => {
+    seedLive()
+    renderApp('/next/x', { routes: shellAround({ title: 'X', Context: Seven, context: () => 'never' }) })
+    const bar = screen.getByRole('banner')
+    expect(within(bar).getByRole('heading', { level: 1, name: 'X' })).toBeInTheDocument()
+    expect(bar).toHaveTextContent('seven')
+    expect(bar).not.toHaveTextContent('never')
+  })
+
+  it("still draws a page's context line where it has no component", () => {
+    seedLive()
+    renderApp('/next/x', { routes: shellAround({ title: 'X', context: () => 'a line' }) })
+    expect(screen.getByRole('banner')).toHaveTextContent('a line')
+  })
+
+  // F5 decision 22: the phone keeps its plain title until F9.
+  it('draws the context component on desktop only', () => {
+    setViewportWidth(390)
+    seedLive()
+    renderApp('/next/x', { routes: shellAround({ title: 'X', Context: Seven, context: () => 'never' }) })
+    expect(screen.getByRole('banner')).not.toHaveTextContent('seven')
+    expect(screen.getByRole('banner')).not.toHaveTextContent('never')
   })
 })

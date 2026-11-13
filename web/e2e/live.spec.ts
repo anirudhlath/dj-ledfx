@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { absoluteEscapes, fxPictured, mainScroll, open, settled, stageCanvas } from './helpers'
+import { absoluteEscapes, fxPictured, KEEP_MOTIFS, mainScroll, open, settled, stageCanvas } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in Dallas (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -33,6 +33,8 @@ interface State {
   rateless?: true
   /** The link drops, so the stage freezes (§7.6) and may never get a picture of the effects in space to draw. */
   frozen?: true
+  /** Thumbs draw their looks' motifs: a thumb with no thumbnail yet is the library not in, which the shot must not catch. */
+  motifs?: true
 }
 
 // §13.1 F3 ("M3" there): every Live state from §9, from a mock scenario. The hero is shell.spec.ts's `Live`.
@@ -43,7 +45,7 @@ const DESKTOP: State[] = [
   { name: 'firmware', path: '/next/live?scenario=firmware', render: 'State-Firmware', ready: (page) => page.getByRole('region', { name: 'Lights in Whole home' }) },
   // State-Inputs-Down is F6's Inputs page: compare only its top bar.
   { name: 'inputs-down', path: '/next/live?scenario=inputs-down', render: 'State-Inputs-Down', ready: (page) => page.getByRole('banner').getByRole('button', { name: '3 need attention' }) },
-  { name: 'nothing-running', path: '/next/live?scenario=nothing-running', render: 'State-Nothing-Running', ready: (page) => page.getByRole('heading', { name: 'Nothing running' }), rateless: true },
+  { name: 'nothing-running', path: '/next/live?scenario=nothing-running', render: 'State-Nothing-Running', ready: (page) => page.getByRole('heading', { name: 'Nothing running' }), rateless: true, motifs: true },
   { name: 'no-lights', path: '/next/live?scenario=no-lights', render: 'State-No-Lights-Placed', ready: (page) => page.getByRole('region', { name: 'Place your 19 lights' }) },
   { name: 'reconnecting', path: '/next/live?scenario=reconnecting', render: 'State-Reconnecting', ready: (page) => page.getByRole('region', { name: 'Lost the live link to homeserver' }), mask: reconnectingMask, rateless: true, frozen: true },
   { name: 'preview-only', path: '/next/live?scenario=preview-only', render: 'State-Preview-Only', ready: (page) => page.getByText('Everything renders here. Nothing is sent to the lights.') },
@@ -55,7 +57,7 @@ const PHONE: State[] = [
   { name: 'preview-only', path: '/next/live?scenario=preview-only', render: 'Phone-State-Preview-Only', ready: (page) => page.getByRole('button', { name: 'Turn off preview only' }) },
   { name: 'problems', path: '/next/live?scenario=problems', render: 'Phone-State-Problems', ready: (page) => page.getByRole('article', { name: 'Kitchen — Lava' }), then: openAttention },
   { name: 'reconnecting', path: '/next/live?scenario=reconnecting', render: 'Phone-State-Reconnecting', ready: (page) => page.getByRole('region', { name: 'Lost the live link' }), mask: reconnectingMask, frozen: true },
-  { name: 'nothing-running', path: '/next/live?scenario=nothing-running', render: 'Phone-State-Nothing-Running', ready: (page) => page.getByRole('heading', { name: 'Nothing running' }), quiet: true },
+  { name: 'nothing-running', path: '/next/live?scenario=nothing-running', render: 'Phone-State-Nothing-Running', ready: (page) => page.getByRole('heading', { name: 'Nothing running' }), quiet: true, motifs: true },
   { name: 'zone', path: '/next/live/zones/living', render: 'Phone-Zone', ready: (page) => page.getByRole('region', { name: 'Lights · live' }) },
   { name: 'tempo', path: '/next/inputs?scenario=dj-playing', render: 'Phone-Tempo', ready: (page) => page.getByRole('region', { name: 'Decks' }) },
   { name: 'waiting', path: '/next/live?scenario=waiting', render: null, ready: (page) => page.getByText('Nothing playing on Music Assistant. The look waits dark and starts with the music.') },
@@ -79,8 +81,13 @@ for (const [size, states] of [['desktop', DESKTOP], ['phone', PHONE]] as const) 
         // As shell.spec.ts's openStill: Live's tempo drawn, and on desktop the frame rate settled where the banner has one.
         if (state.path.startsWith('/next/live?')) await expect(page.getByRole('banner').getByRole('group', { name: 'Tempo' })).toBeVisible()
         if (size === 'desktop' && !state.rateless) await expect(page.getByRole('banner').getByText('60 fps')).toBeVisible({ timeout: 10_000 })
+        if (state.motifs) {
+          await expect(page.locator('[data-thumb]').first()).toBeVisible()
+          await expect(page.locator('[data-thumb=""]')).toHaveCount(0)
+          await expect(page.locator('[data-thumb] > svg.tb').first()).toBeVisible()
+        }
         await state.then?.(page)
-        await expect(page).toHaveScreenshot(`${state.name}.png`, { mask: state.mask?.(page) })
+        await expect(page).toHaveScreenshot(`${state.name}.png`, { ...(state.motifs ? KEEP_MOTIFS : {}), mask: state.mask?.(page) })
       })
     }
   })

@@ -67,6 +67,7 @@ describe('LookTile (§6.4)', () => {
   })
 
   // Live-PutLookOn draws the inputs' icons at the right of the name; §8.2's signal is the one it waits for.
+  // (`svg:not(.tb)` here and below: the thumb's motif is an svg too, but it isn't an icon.)
   it('draws an icon for each input the look uses, and the one it would wait for in signal', () => {
     inQuery(
       <>
@@ -74,12 +75,12 @@ describe('LookTile (§6.4)', () => {
         <LookTile {...props('drop', { missing: ['music'] })} />
       </>,
     )
-    const [tempo, music, ...others] = screen.getByRole('button', { name: lookName('drop') }).querySelectorAll('svg')
+    const [tempo, music, ...others] = screen.getByRole('button', { name: lookName('drop') }).querySelectorAll('svg:not(.tb)')
     expect(others).toHaveLength(0)
     expect(tempo).toHaveClass('text-text-3')
     expect(music).toHaveClass('text-text-3')
     const waiting = screen.getByRole('button', { name: `${lookName('drop')}, Waits for music` })
-    const [tempoStill, musicWaiting, ...rest] = waiting.querySelectorAll('svg')
+    const [tempoStill, musicWaiting, ...rest] = waiting.querySelectorAll('svg:not(.tb)')
     expect(rest).toHaveLength(0)
     expect(tempoStill).toHaveClass('text-text-3')
     expect(musicWaiting).toHaveClass('text-signal')
@@ -140,7 +141,7 @@ describe('a chosen look whose preview is refused', () => {
     )
     const chosen = screen.getByRole('button', { name: lookName('embers'), pressed: true })
     expect(chosen).toHaveClass('border-text', 'bg-control')
-    expect(chosen.querySelectorAll('svg')).toHaveLength(1)
+    expect(chosen.querySelectorAll('svg:not(.tb)')).toHaveLength(1)
     expect(within(chosen).queryByText('Previewing on screen')).not.toBeInTheDocument()
     expect(within(chosen).getByText('Ambient · no input', { selector: ':not(.sr-only)' })).toHaveClass('text-text-2')
     const running = screen.getByRole('button', { name: `${lookName('fireflies')}, running here`, pressed: true })
@@ -167,11 +168,11 @@ describe('LookRow (§8.10)', () => {
     })
     // F4 ruling 19: on the chosen row's control fill the line is text-2, for §14's contrast.
     expect(within(chosen).getByText('Previewing on screen')).toHaveClass('text-text-2')
-    expect(chosen.querySelectorAll('svg')).toHaveLength(1)
+    expect(chosen.querySelectorAll('svg:not(.tb)')).toHaveLength(1)
     const here = screen.getByRole('button', { name: `${lookName('fireflies')}, running here` })
     expect(within(here).getByText('Running here now')).toBeInTheDocument()
     expect(here).toHaveClass('border-transparent')
-    expect(here.querySelectorAll('svg')).toHaveLength(0)
+    expect(here.querySelectorAll('svg:not(.tb)')).toHaveLength(0)
     const plain = screen.getByRole('button', { name: lookName('aurora') })
     // A row with no state to show has the same words twice: its line, and its description, hidden. The line is the drawn one.
     expect(within(plain).getByText('Ambient · no input', { selector: ':not(.sr-only)' })).toHaveClass('text-text-3')

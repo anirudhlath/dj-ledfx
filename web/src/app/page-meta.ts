@@ -17,6 +17,8 @@ export interface PageMeta {
   title: string
   /** The line beside the title on desktop. */
   context?: (at: MetaContext) => string
+  /** Draws the desktop line from data (Looks: "29 looks · 3 running"), over `context`. The phone keeps its own, `phoneContext`. */
+  Context?: ComponentType
   /** The phone header's serif title, when it differs ("Home" on Live). */
   phoneTitle?: string
   /** The line under the phone title. Phones show no context without it. */
