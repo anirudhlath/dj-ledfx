@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { LIVE_SPEC } from '../src/design/live-numbers'
 import { LIBRARY } from '../src/looks/looks-render'
-import { KEEP_MOTIFS, open } from './helpers'
+import { absoluteEscapes, KEEP_MOTIFS, open, settled } from './helpers'
 
 // The hero moment (spec §12.5): Wednesday 23 September, 19:14 in Dallas (timezoneId in the config).
 const HERO_TIME = new Date('2026-09-23T19:14:00-05:00')
@@ -150,6 +150,18 @@ test.describe('Looks', () => {
     await hoverThumb(thumbOf(cardOf(page, LIBRARY.hovered)))
     await expect.poll(() => cardOf(page, LIBRARY.hovered).getByRole('link', { name: 'Put on…' }).locator('..').evaluate((scrim) => getComputedStyle(scrim).opacity)).toBe('1')
     expect(await axeViolations(page)).toEqual([])
+  })
+
+  // A hidden label (sr-only) is absolutely positioned: with no positioned ancestor inside a scroller it escapes the scroller's clip and stretches
+  // <main>'s scroll area. The search's label holds its name with `relative` (the phone's `max-md:touch-target` is the only other positioner),
+  // and the composer's spec runs the same audit. Both projects run it: the phone is where the search's `relative` matters.
+  test('Looks: nothing absolutely positioned in <main> escapes a clip', async ({ page }) => {
+    await open(page, `${LIBRARY_PATH}&still`)
+    await expect(page.getByRole('group', { name: 'Categories' })).toBeVisible()
+    await settled(page)
+    const { examined, escaped } = await absoluteEscapes(page)
+    expect(examined, 'absolutely positioned elements looked at, or this checks nothing').toBeGreaterThan(0)
+    expect(escaped).toEqual([])
   })
 
   // The card's overlays, in Chromium (look-card.test.tsx has no layout): LookCard's own layering is what these pin.
