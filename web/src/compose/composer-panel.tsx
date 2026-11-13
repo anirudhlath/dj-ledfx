@@ -8,6 +8,7 @@ import { useId, useRef } from 'react'
 import { Button, IconButton } from '@/design/button'
 import { cx } from '@/design/cx'
 import { Icon } from '@/design/icon'
+import { SearchField } from '@/design/search-field'
 import { Select } from '@/design/select'
 import { ConsequenceText } from './consequence-text'
 import { LookTile } from './look-tile'
@@ -65,25 +66,14 @@ export function ComposerPanel({ className }: { className?: string }) {
         <>
           <div className="flex flex-col gap-2.5 px-5 pb-3">
             {/* 38 px: the render's 36 px and its border, as its HTML sets no box-sizing; the chips and tiles are drawn 2 px lower for it.
-                The whole face is the input's label, so a click on its icon or its padding focuses the input too, and touch-target
-                grows it to the touch minimum. */}
-            <label className="flex h-9.5 cursor-text items-center gap-2 rounded-control border border-line bg-control px-3 touch-target focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-text">
-              <Icon name="search" size={15} className="text-text-3" />
-              <span className="sr-only">Search looks</span>
-              <input
-                type="search"
-                value={view.query}
-                placeholder={`Search ${looks.length} looks`}
-                className="min-w-0 grow bg-transparent text-size-control text-text outline-none placeholder:text-text-3 [&::-webkit-search-cancel-button]:appearance-none"
-                onChange={(event) => view.search(event.target.value)}
-                onKeyDown={(event) => {
-                  // A search's Esc clears it first, and the page's Esc leaves a key handled alone.
-                  if (event.key !== 'Escape' || !view.searching) return
-                  event.preventDefault()
-                  view.search('')
-                }}
-              />
-            </label>
+                touch-target grows the face to the touch minimum. */}
+            <SearchField
+              label="Search looks"
+              value={view.query}
+              placeholder={`Search ${looks.length} looks`}
+              onValueChange={view.search}
+              className="h-9.5 touch-target"
+            />
             {/* The row clips, as drawn: its last chip is cut at the panel's edge, as in the render. That would cut a focused chip's ring
                 (2 px and its 2 px offset, tokens.css) and the hit area touch-target grows, so it pads by their reach on its left, top
                 and bottom and pulls back by as much, moving nothing (as ZonePicker's phone row does), and pads its end by it too, so the

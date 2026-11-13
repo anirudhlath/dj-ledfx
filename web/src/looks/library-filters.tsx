@@ -5,7 +5,7 @@
 // Below the phone breakpoint the bar wraps and the search takes the whole of its row (ruling 1).
 import { ButtonLink } from '@/design/button'
 import { cx } from '@/design/cx'
-import { Icon } from '@/design/icon'
+import { SearchField } from '@/design/search-field'
 import { Switch } from '@/design/switch'
 import { LIBRARY_TABS, type LibraryTab } from './library-model'
 
@@ -24,28 +24,16 @@ export function LibraryFilters({ tab, counts, query, readyOnly, onTab, onQuery, 
   return (
     <div className="flex flex-wrap items-center justify-between gap-4">
       <div className="flex flex-wrap items-center gap-3 max-md:w-full">
-        {/* The composer's search face: the whole of it is the input's label, so a click on its icon or its padding focuses the input too,
-            and its ring is the label's, as the input draws none. The render's box is 280 by 36 with its border inside (`box-sizing`
-            is border-box here, as it is in Looks.html's search). `relative` at every width is the positioned parent the sr-only name needs
-            inside <main>'s scroller (max-md:touch-target sets it on the phone alone), which also grows the box to the touch minimum. */}
-        <label className="relative flex h-9 w-70 cursor-text items-center gap-2 rounded-control border border-line bg-control px-3 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-text max-md:w-full max-md:touch-target">
-          <Icon name="search" size={15} className="text-text-3" />
-          <span className="sr-only">Search looks</span>
-          <input
-            type="search"
-            value={query}
-            placeholder="Search looks, layers, inputs"
-            className="min-w-0 grow bg-transparent text-size-control text-text outline-none placeholder:text-text-3 [&::-webkit-search-cancel-button]:appearance-none"
-            onChange={(event) => onQuery(event.target.value)}
-            onKeyDown={(event) => {
-              // A search's Esc clears it first, and the page's Esc leaves a key handled alone: a box of spaces has nothing to clear (the
-              // composer's `searching` is `query.trim() !== ''` too).
-              if (event.key !== 'Escape' || query.trim() === '') return
-              event.preventDefault()
-              onQuery('')
-            }}
-          />
-        </label>
+        {/* The render's box is 280 by 36 with its border inside (`box-sizing` is border-box here, as it is in Looks.html's search).
+            `relative` at every width is the positioned parent the sr-only name needs inside <main>'s scroller (max-md:touch-target sets
+            it on the phone alone), which also grows the box to the touch minimum. */}
+        <SearchField
+          label="Search looks"
+          value={query}
+          placeholder="Search looks, layers, inputs"
+          onValueChange={onQuery}
+          className="relative h-9 w-70 max-md:w-full max-md:touch-target"
+        />
         <div role="group" aria-label="Categories" className="flex flex-wrap gap-1.5">
           {LIBRARY_TABS.map(({ id, label }) => {
             const on = id === tab
