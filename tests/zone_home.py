@@ -3,6 +3,7 @@ fakes for the engine (it hosts runtimes) and the scheduler (it holds routes)."""
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -175,6 +176,7 @@ class Home:
     frames_watched: Callable[[], bool] | None = None
     evening: Callable[[], float] | None = None
     sun: Callable[[], SunPoint | None] | None = None
+    monotonic: Callable[[], float] | None = None
 
     def look(self, look_id: str) -> Look:
         return self.looks.get(look_id)
@@ -198,6 +200,7 @@ class Home:
             with_map=self.home_map is not None,
             evening=self.evening,
             sun=self.sun,
+            monotonic=self.monotonic,
         )
         await home.manager.resume()
         return home
@@ -223,6 +226,7 @@ async def build_home(
     plan: HomeModel | None = None,
     evening: Callable[[], float] | None = None,
     sun: Callable[[], SunPoint | None] | None = None,
+    monotonic: Callable[[], float] | None = None,
 ) -> Home:
     db = StateDB(tmp_path / "state.db")
     await db.open()
@@ -243,6 +247,7 @@ async def build_home(
         with_map=plan is not None,
         evening=evening,
         sun=sun,
+        monotonic=monotonic,
     )
 
 
@@ -258,6 +263,7 @@ async def assemble(
     with_map: bool = False,
     evening: Callable[[], float] | None = None,
     sun: Callable[[], SunPoint | None] | None = None,
+    monotonic: Callable[[], float] | None = None,
 ) -> Home:
     """The app's objects around an open state.db and a set of lights."""
     bus = EventBus()
@@ -304,6 +310,7 @@ async def assemble(
         frames_watched=frames_watched or (lambda: True),
         evening=evening or (lambda: 0.0),
         sun=sun or (lambda: None),
+        monotonic=monotonic or time.monotonic,
     )
     host.zones = manager
     if home_map is not None:
@@ -325,6 +332,7 @@ async def assemble(
         frames_watched=frames_watched,
         evening=evening,
         sun=sun,
+        monotonic=monotonic,
     )
     bus.subscribe(ZonesChanged, home.changes.append)
     await manager.load()

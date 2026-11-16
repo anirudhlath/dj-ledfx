@@ -42,6 +42,13 @@ EVERY_LOOK_MODIFIER = LookModifiers(
 )
 
 
+# The first tick's time (made up, as every tick's is here) and how long the look has run by
+# then: a runtime's elapsed time counts from its start on the real clock, so a look that
+# plays a walk of its own (Goodnight's) is measured half-way through it.
+FIRST_TICK = 1000.0
+LOOK_AGE_S = 30.0
+
+
 def with_every_modifier(look: Look) -> Look:
     """The look with every look modifier on, and a mask, a mirror and a transform on each
     streamed layer (a firmware layer takes none)."""
@@ -69,7 +76,8 @@ def home_runtime(look: Look, **env: Any) -> ZoneRuntime:
 
 def zone_runtime(zone_id: str, look: Look, lights: Sequence[ZoneLight], **env: Any) -> ZoneRuntime:
     """The look on these seeded lights, as a zone of them runs it, under a sun (AT_DUSK)
-    unless `env` gives another: every frame carries its signals, as the app's do."""
+    unless `env` gives another: every frame carries its signals, as the app's do. The look
+    began LOOK_AGE_S before the first tick."""
     env.setdefault("sun", lambda: AT_DUSK)
     return ZoneRuntime(
         zone_id,
@@ -77,10 +85,11 @@ def zone_runtime(zone_id: str, look: Look, lights: Sequence[ZoneLight], **env: A
         lights,
         RuntimeEnv(TempoClock(), lambda _: 0.05, **env),
         space=seeded_space(),
+        started_t=FIRST_TICK - LOOK_AGE_S,
     )
 
 
-def tick_times(runtime: ZoneRuntime, ticks: int = 240, start: float = 1000.0) -> list[float]:
+def tick_times(runtime: ZoneRuntime, ticks: int = 240, start: float = FIRST_TICK) -> list[float]:
     """How long each of `ticks` ticks took, 60 a second from `start`."""
     durations = []
     for step in range(ticks):

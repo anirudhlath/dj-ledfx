@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from conftest import tempo_ctx
+from conftest import render_ctx, tempo_ctx
 from sun_fakes import AT_DUSK
 from tempo_fakes import START, FakeTime, play, tempo_clock
 
@@ -122,3 +122,11 @@ def test_to_beat_context_keeps_the_beat_bpm_and_dt() -> None:
 def test_a_moment_says_where_the_music_is_in_beats() -> None:
     assert tempo_ctx(13.25).beats == 13.25
     assert to_beat_context(tempo_ctx(13.25)).beats == 13.25
+
+
+def test_a_frame_carries_the_looks_elapsed_time() -> None:
+    clock = tempo_clock(FakeTime())
+
+    assert render_context(clock, START, 1 / 60, elapsed_s=12.5).elapsed_s == 12.5
+    assert render_context(clock, START, 1 / 60).elapsed_s == 0.0  # a look that keeps no time
+    assert tempo_ctx(4.0).elapsed_s == render_ctx().elapsed_s == 0.0

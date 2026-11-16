@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import time
 from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, ClassVar
@@ -11,6 +12,7 @@ from conftest import builtin_look, nearest_frame, span
 from loguru import logger
 from runtime_fakes import (
     BULB,
+    FADE,
     LAMP,
     TILE,
     FlatField,
@@ -30,7 +32,7 @@ from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet, PlacedLeds, Space
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.builtin import classic_look_id
-from dj_ledfx.looks.model import Layer
+from dj_ledfx.looks.model import Layer, Look
 from dj_ledfx.looks.selectors import parse_selector
 from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.tempo.clock import TempoClock
@@ -38,6 +40,27 @@ from dj_ledfx.types import FloatRGB, RenderedFrame
 from dj_ledfx.zones.runtime import HORIZON_CAP_S, ZoneLight
 
 pytestmark = pytest.mark.usefixtures("_fields")
+
+
+class ElapsedField(FlatField, register=False):
+    """Flat grey at `level`, keeping the elapsed time of each frame it draws with its level
+    (`seen`), which tells a zone's looks apart."""
+
+    seen: ClassVar[list[tuple[float, float]]] = []
+
+    def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
+        ElapsedField.seen.append((self.level, ctx.elapsed_s))
+        return super().render(ctx, leds)
+
+
+@pytest.fixture(autouse=True)
+def _elapsed_field() -> None:
+    Effect._registry["elapsed_field"] = ElapsedField  # the root conftest drops it after
+    ElapsedField.seen = []
+
+
+def _timed(level: float) -> Look:
+    return look_of(replace(field_layer(level), kind="elapsed_field"), name=f"Level {level}")
 
 
 def test_firmware_runs_where_supported_and_the_field_plays_elsewhere() -> None:
@@ -462,3 +485,51 @@ def test_changing_the_lights_a_layer_picks_plans_the_claims_again() -> None:
     runtime.update_look(look_of(field_layer(), _flame("type:candle")))  # LIGHTS has no candle
 
     assert runtime.mode_of("tile") == "streaming" and runtime.generation > generation
+
+
+def test_a_runtime_counts_its_looks_time_from_its_start() -> None:
+    runtime = runtime_of(_timed(0.5), started_t=100.0)
+
+    runtime.tick(110.0)
+
+    assert runtime.started_t == 100.0
+    [(_, elapsed)] = ElapsedField.seen
+    assert elapsed == pytest.approx(110.0 + runtime.horizon_s - 100.0)  # the frame it shows
+
+
+def test_a_runtime_with_no_start_counts_from_its_construction() -> None:
+    before = time.monotonic()
+    runtime = runtime_of(_timed(0.5))
+
+    assert before <= runtime.started_t <= time.monotonic()
+
+
+def test_a_twin_and_a_transitions_old_look_keep_their_own_elapsed_time() -> None:
+    old = runtime_of(_timed(0.25), started_t=100.0)
+    twin = old.twin()
+    new = runtime_of(_timed(0.75), started_t=150.0)
+    new.begin_transition(FADE, [twin])
+
+    new.tick(200.0)
+
+    assert twin.started_t == old.started_t == 100.0  # a twin is its zone as it is
+    shown = dict(ElapsedField.seen)
+    assert shown[0.75] == pytest.approx(200.0 + new.horizon_s - 150.0)
+    assert shown[0.25] == pytest.approx(200.0 + new.horizon_s - 100.0)  # not the new look's
+
+
+def test_a_restart_and_a_look_update_keep_the_start() -> None:
+    runtime = runtime_of(_timed(0.5), started_t=100.0)
+    runtime.tick(110.0)
+
+    runtime.update_look(_timed(0.7))  # in place
+    assert runtime.started_t == 100.0
+    runtime.update_look(look_of(glow_layer(), replace(field_layer(0.7), kind="elapsed_field")))
+    assert runtime.started_t == 100.0  # rebuilt: other layers
+    runtime.restart()
+    assert runtime.started_t == 100.0
+    ElapsedField.seen.clear()
+    runtime.tick(120.0)
+
+    [(_, elapsed)] = ElapsedField.seen
+    assert elapsed == pytest.approx(120.0 + runtime.horizon_s - 100.0)

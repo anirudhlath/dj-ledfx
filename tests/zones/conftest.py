@@ -34,6 +34,7 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
         frames_watched: Callable[[], bool] | None = None,
         evening: Callable[[], float] | None = None,
         sun: Callable[[], SunPoint | None] | None = None,
+        monotonic: Callable[[], float] | None = None,
     ) -> Home:
         home = await build_home(
             tmp_path,
@@ -44,6 +45,7 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
             frames_watched=frames_watched,
             evening=evening,
             sun=sun,
+            monotonic=monotonic,
         )
         homes.append(home)
         return home

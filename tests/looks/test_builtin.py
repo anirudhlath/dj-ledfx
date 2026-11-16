@@ -19,10 +19,12 @@ from dj_ledfx.looks.builtin import (
     CLASSIC_NAMES,
     FIRMWARE_LOOK_ID,
     NEEDS_UNTIL_M7,
+    STARTS_BY_HAND,
     anchor_named_in,
     builtin_looks,
     classic_look_id,
     handoff_looks,
+    room_named_in,
 )
 from dj_ledfx.looks.model import (
     Look,
@@ -40,7 +42,7 @@ M2 = ("sunset", "aurora", "lava", "carousel", "ripples", "focus")
 M3 = ("shockwave", "scanner", "checker", "speakers")
 M5_AMBIENT = ("fireflies", "embers", "rain", "snow", "spotlights")
 M5_TEMPO = ("bursts", "vortex", "comets", "fountain", "flock", "ball")
-M6 = ("homesunset", "wisp")  # the Home looks built so far; Goodnight joins them
+M6 = ("homesunset", "wisp", "goodnight")  # the Home looks built so far
 SHOWCASE = [  # in looks.json's order
     look_id
     for look_id in handoff_looks()
@@ -82,10 +84,16 @@ def test_the_handoff_looks_come_first_in_its_order_with_its_metadata() -> None:
             entry["category"],
             entry["description"],
         )
-        assert (look.thumbnail, look.scope, list(look.needs)) == (
+        inputs = tuple(entry["inputs"])
+        needs_and_uses = (
+            ((), inputs)  # a look that starts by hand waits for nothing and uses its inputs
+            if look.id in STARTS_BY_HAND
+            else (tuple(NEEDS_UNTIL_M7.get(look.id, inputs)), ())
+        )
+        assert (look.thumbnail, look.scope, look.needs, look.uses) == (
             entry["thumbnail"],
             entry["scope"],
-            list(NEEDS_UNTIL_M7.get(look.id, entry["inputs"])),
+            *needs_and_uses,
         )
         assert look.built_in
 
@@ -106,6 +114,7 @@ def test_each_showcase_look_has_its_fields_and_firmware() -> None:
     assert layers["checker"] == [("field", "checker_cubes")]
     assert layers["speakers"] == [("field", "speaker_waves")]
     assert layers["homesunset"] == [("field", "home_sunset"), ("firmware", "lifx_flame")]
+    assert layers["goodnight"] == [("field", "goodnight")]
     assert builtin_look("shockwave").layers[1].blend == "add"  # the beam adds onto the shell
     sunset_flame, aurora_morph = builtin_look("sunset").layers[1], builtin_look("aurora").layers[1]
     assert (sunset_flame.lights, sunset_flame.settings) == ((Selector("type", "candle"),), {})
@@ -162,6 +171,26 @@ def test_anchored_looks_start_from_the_anchor_their_description_names(look_id: s
     assert anchor.name.lower() in look.description.lower()
 
 
+def test_goodnights_night_room_is_the_room_its_description_names() -> None:
+    look = builtin_look("goodnight")
+
+    [walk] = streamed_layers(look)
+    room = seed_home().room(walk.settings["night_room"])
+
+    assert (walk.id, walk.name) == ("walk", "Goodnight")
+    assert room is not None
+    assert room.name.lower() in look.description.lower()
+
+
+def test_goodnight_starts_by_hand_and_uses_home_assistant() -> None:
+    goodnight = builtin_look("goodnight")
+
+    assert STARTS_BY_HAND == frozenset({"goodnight"})
+    assert handoff_looks()["goodnight"]["inputs"] == ["home-assistant"]  # what M7's bedtime brings
+    assert (goodnight.category, goodnight.scope) == ("home", "whole-home")
+    assert (goodnight.needs, goodnight.uses) == ((), ("home-assistant",))
+
+
 def test_the_handoff_layers_seed_the_map_once(monkeypatch: pytest.MonkeyPatch) -> None:
     seeded: list[Home] = []
 
@@ -189,6 +218,16 @@ def test_an_anchor_is_found_by_the_name_a_text_mentions() -> None:
     assert anchor_named_in("Between the sofa and the speakers", anchors) == ""  # which one?
     assert anchor_named_in("Two sofas", anchors) == ""  # whole words only
     assert anchor_named_in("", anchors) == ""
+
+
+def test_a_room_is_found_by_the_name_a_text_mentions() -> None:
+    rooms = tiny_home().rooms
+    first, second = rooms[0], rooms[1]
+
+    assert room_named_in(f"Calm in the {first.name.lower()}, busy further off.", rooms) == first.id
+    assert room_named_in(f"Between the {first.name} and the {second.name}", rooms) == ""  # which?
+    assert room_named_in(f"Two {first.name.lower()}s", rooms) == ""  # whole words only
+    assert room_named_in("", rooms) == ""
 
 
 def test_the_firmware_showcase_layers_bottom_to_top() -> None:

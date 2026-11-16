@@ -232,11 +232,15 @@ class ZoneRuntime:
         space: Space = NO_SPACE,
         leds: LedSet | None = None,
         emulated: Iterable[str] = (),
+        started_t: float | None = None,
     ) -> None:
         """`leds` is the LED set the lights make in `space`, when the caller has it (a
-        twin); `emulated` the lights that refused their firmware effects (mark_emulated)."""
+        twin); `emulated` the lights that refused their firmware effects (mark_emulated);
+        `started_t` the monotonic time the zone began this look, which a look reads as
+        elapsed_s (now when None: a zone resumed from `since` passes the time it began)."""
         self.zone_id = zone_id
         self._env = env
+        self._started_t = time.monotonic() if started_t is None else started_t
         self.look = look
         self.brightness = brightness
         self.generation = 0  # _compile draws the first
@@ -287,6 +291,13 @@ class ZoneRuntime:
     @property
     def space(self) -> Space:
         return self._space
+
+    @property
+    def started_t(self) -> float:
+        """The monotonic time this zone began its look: a look's elapsed_s counts from it.
+        A restart and a look update keep it, a resume picks it up where it was, and a twin
+        carries it, so a replaced look plays on from where it was."""
+        return self._started_t
 
     @property
     def last_fx(self) -> Fx | None:
@@ -605,6 +616,7 @@ class ZoneRuntime:
             space=self._space,
             leds=self.leds,
             emulated=self._emulated,
+            started_t=self._started_t,
         )
         twin.generation = self.generation
         if twin._waiting != self._waiting:  # the sun moved since this one last ticked
@@ -671,7 +683,12 @@ class ZoneRuntime:
             return
         target = now + self.horizon_s
         ctx = render_context(
-            self._env.clock, target, self._stride / self._env.fps, self._env.evening(), sun=sun
+            self._env.clock,
+            target,
+            self._stride / self._env.fps,
+            self._env.evening(),
+            sun=sun,
+            elapsed_s=target - self._started_t,
         )
         started = self._env.timer()
         try:
@@ -751,7 +768,8 @@ class ZoneRuntime:
         """A replaced look's frame at its own brightness (frames are scaled by this zone's
         at send), scaled in place: nothing else holds it (twins and replaced looks don't
         tick)."""
-        colours = source.render(ctx, in_space=False)
+        # It plays its own walk: a replaced look's elapsed time is its zone's, not the new one's.
+        colours = source.render(replace(ctx, elapsed_s=ctx.t - source.started_t), in_space=False)
         scale = source.brightness / self.brightness if self.brightness > 0.0 else 0.0
         if scale != 1.0:
             colours *= np.float32(scale)

@@ -4,6 +4,7 @@ import asyncio
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ import pytest
 from conftest import FakeLight, events, span
 from runtime_fakes import FADE, TILE
 from sun_fakes import AT_DUSK, FixedSun
-from zone_home import BREATHE_AND_GLOW, GLOW, FakeHome, HomeFactory, zone_record
+from zone_home import BREATHE_AND_GLOW, GLOW, START, FakeHome, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.latency.strategies import StaticLatency
@@ -644,3 +645,65 @@ async def test_lights_that_stay_in_a_zone_keep_their_routes_when_it_loses_one(
 
     assert home.routes.routes["b"] is route and span(route) == (0, 4)
     assert route.source is home.host.runtimes["pair"] and route.source.leds.count == 4
+
+
+# A look's elapsed time (M6 ruling 9) counts from its zone's `since`, on the engine's clock.
+async def test_a_resumed_zone_counts_its_looks_time_from_its_saved_start(
+    make_home: HomeFactory,
+) -> None:
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: 1000.0
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    home.clock[0] = START + timedelta(seconds=30)  # the app was down for half a minute
+
+    home = await home.restart()
+
+    assert home.host.runtimes["z"].started_t == 970.0
+
+
+async def test_a_restart_keeps_the_zones_start(make_home: HomeFactory) -> None:
+    now_s = [1000.0]
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: now_s[0]
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    now_s[0] = 1045.0
+    home.clock[0] = START + timedelta(seconds=45)
+
+    await home.manager.restart("z")
+
+    assert home.host.runtimes["z"].started_t == 1000.0
+
+
+async def test_a_rebuilt_zone_counts_from_its_saved_start(make_home: HomeFactory) -> None:
+    now_s = [1000.0]
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: now_s[0]
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    await home.db.write("UPDATE zone_assignments SET look='{not json' WHERE zone_id='z'")
+    now_s[0] = 1030.0
+    home.clock[0] = START + timedelta(seconds=30)
+    home = await home.restart()  # the saved look can't be read: the zone is crashed
+    now_s[0] = 1050.0
+    home.clock[0] = START + timedelta(seconds=50)
+
+    await home.manager.restart("z")  # it runs the look the store has, from the saved start
+
+    assert home.host.runtimes["z"].started_t == 1000.0
+
+
+async def test_a_new_start_counts_from_zero(make_home: HomeFactory) -> None:
+    now_s = [1000.0]
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: now_s[0]
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    assert home.host.runtimes["z"].started_t == 1000.0
+    now_s[0] = 1050.0
+    home.clock[0] = START + timedelta(seconds=50)
+
+    await home.manager.start("z", home.look("classic-strobe"))
+
+    assert home.host.runtimes["z"].started_t == 1050.0  # not the look before's start

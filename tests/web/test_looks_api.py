@@ -37,6 +37,7 @@ BUILT_INS = [
     "speakers",
     "homesunset",
     "wisp",
+    "goodnight",
     "firmware",
     "classic-beat-pulse",
     "classic-breathe",

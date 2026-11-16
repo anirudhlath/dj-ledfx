@@ -70,6 +70,10 @@ class RenderContext:
     beat_index: int  # beats since the tempo clock started counting
     bar_index: int
     signals: SignalView
+    # Seconds since the zone started this look (ZoneRuntime.started_t): what a look that
+    # plays a walk of its own reads, where `t` is the clock's. A resume picks it up where it
+    # was, and a Restart keeps it; 0 for a moment that belongs to no running look.
+    elapsed_s: float = 0.0
 
     @property
     def beats(self) -> float:
@@ -79,12 +83,18 @@ class RenderContext:
 
 
 def render_context(
-    clock: TempoClock, t: float, dt: float, evening: float = 0.0, *, sun: SunPoint | None = None
+    clock: TempoClock,
+    t: float,
+    dt: float,
+    evening: float = 0.0,
+    *,
+    sun: SunPoint | None = None,
+    elapsed_s: float = 0.0,
 ) -> RenderContext:
     """Read the tempo clock at the frame's target time `t` (spec §7.2): only what a frame
     draws with, so no whole TempoSample. `evening` is how far into the evening it is, which
-    the signals carry as EVENING, and `sun` where the sun is (None: no sun), which they
-    carry as SUN_ELEVATION and SUN_AZIMUTH."""
+    the signals carry as EVENING, `sun` where the sun is (None: no sun), which they carry as
+    SUN_ELEVATION and SUN_AZIMUTH, and `elapsed_s` how long the zone has run its look."""
     beat_index, beat_phase, bar_index, bar_phase = beat_and_bar(clock.position_at(t))
     return RenderContext(
         t=t,
@@ -95,6 +105,7 @@ def render_context(
         beat_index=beat_index,
         bar_index=bar_index,
         signals=_signals(clock.source == "prodjlink" and not clock.stale, evening, sun),
+        elapsed_s=elapsed_s,
     )
 
 

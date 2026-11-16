@@ -2,7 +2,7 @@
 
 The handoff's looks take their metadata from its looks.json (vendored in data/looks.json,
 byte for byte), in its order: M2's six showcase looks, M3's four tempo looks, M5's eleven
-particle looks, M6's Home looks (so far Home sunset and Wisp) and the Firmware showcase. The
+particle looks, M6's Home looks (Home sunset, Wisp and Goodnight) and the Firmware showcase. The
 handoff has no layers, so they live here; a particle look's one particle layer takes the
 look's own name. The six classic looks are today's effects; the handoff has no entry for
 them, so their names and descriptions live here too.
@@ -17,7 +17,7 @@ from importlib.resources import files
 from typing import Any
 
 from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
-from dj_ledfx.home.model import Anchor
+from dj_ledfx.home.model import Anchor, Room
 from dj_ledfx.home.seed import normalise_name, seed_home
 from dj_ledfx.looks.model import Blend, InputKind, Layer, Look
 from dj_ledfx.looks.selectors import parse_selector
@@ -35,6 +35,11 @@ SHOWCASE_LAYERS: tuple[tuple[str, str, str], ...] = (
 # A look whose inputs wait for a later milestone runs on these until then: Speaker waves
 # plays on the beat until M7 brings the music's kicks, snares and hats (M3 ruling 16).
 NEEDS_UNTIL_M7: dict[str, tuple[InputKind, ...]] = {"speakers": ("tempo",)}
+
+# A look that starts by hand: it waits for nothing, and uses the handoff's inputs when they
+# are there (Goodnight's bedtime trigger comes with M7; State-Inputs-Down says it "still
+# starts by hand").
+STARTS_BY_HAND: frozenset[str] = frozenset({"goodnight"})
 
 CLASSIC_NAMES: dict[str, str] = {
     "beat_pulse": "Beat pulse",
@@ -61,6 +66,14 @@ def anchor_named_in(text: str, anchors: Sequence[Anchor]) -> str:
     it names none or more than one."""
     words = f" {normalise_name(text)} "
     named = [anchor.id for anchor in anchors if f" {normalise_name(anchor.name)} " in words]
+    return named[0] if len(named) == 1 else ""
+
+
+def room_named_in(text: str, rooms: Sequence[Room]) -> str:
+    """The id of the one room whose name the text mentions as whole words, or "" when it
+    names none or more than one."""
+    words = f" {normalise_name(text)} "
+    named = [room.id for room in rooms if f" {normalise_name(room.name)} " in words]
     return named[0] if len(named) == 1 else ""
 
 
@@ -96,7 +109,8 @@ def _firmware(
 
 def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
     """The layers of each handoff look this milestone can run, by look id."""
-    anchors = seed_home().anchors
+    home = seed_home()  # once, for the anchors and the rooms alike
+    anchors = home.anchors
     tv, speakers = _anchor_of("shockwave", anchors), _anchor_of("speakers", anchors)
     focus = _anchor_of("focus", anchors)
     bursts, fountain = _anchor_of("bursts", anchors), _anchor_of("fountain", anchors)
@@ -106,6 +120,14 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
         "sunset": (_field("sky", "Gradient", "sunset_gradient"), candles),
         "homesunset": (_field("sky", "Gradient", "home_sunset"), candles),
         "wisp": (_particles("wisp", "wisp"),),
+        "goodnight": (
+            _field(
+                "walk",
+                "Goodnight",
+                "goodnight",
+                night_room=room_named_in(handoff_looks()["goodnight"]["description"], home.rooms),
+            ),
+        ),
         "aurora": (
             _field("curtains", "Curtains", "aurora_curtains"),
             _firmware(
@@ -148,6 +170,7 @@ def _handoff_layers() -> Mapping[str, tuple[Layer, ...]]:
 
 
 def _from_handoff(entry: Mapping[str, Any], layers: tuple[Layer, ...]) -> Look:
+    by_hand = entry["id"] in STARTS_BY_HAND
     return Look(
         id=entry["id"],
         name=entry["name"],
@@ -155,7 +178,8 @@ def _from_handoff(entry: Mapping[str, Any], layers: tuple[Layer, ...]) -> Look:
         description=entry["description"],
         thumbnail=entry["thumbnail"],
         scope=entry["scope"],
-        needs=NEEDS_UNTIL_M7.get(entry["id"], tuple(entry["inputs"])),
+        needs=() if by_hand else NEEDS_UNTIL_M7.get(entry["id"], tuple(entry["inputs"])),
+        uses=tuple(entry["inputs"]) if by_hand else (),
         layers=layers,
         built_in=True,
     )

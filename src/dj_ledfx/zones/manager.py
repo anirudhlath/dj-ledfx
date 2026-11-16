@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -158,6 +159,7 @@ class ZoneManager:
         frames_watched: Callable[[], bool] = lambda: True,
         evening: Callable[[], float] = lambda: 0.0,
         sun: Callable[[], SunPoint | None] = lambda: None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._store = store
         self._looks = looks
@@ -168,6 +170,7 @@ class ZoneManager:
         self._event_bus = event_bus
         self._preview_only = preview_only
         self._now = now
+        self._monotonic = monotonic  # the time a runtime's elapsed_s counts from (_started_t)
         self._home = home
         # What every zone's runtime reads. `frames_watched`: whether anyone watches the live
         # stream, so zones draw lights that run their own effect only then (M1 review,
@@ -816,11 +819,12 @@ class ZoneManager:
         if zone_id in self._running:  # the new start ends the run before it
             previous, stopped = self._end_run(zone_id, remember=True)
         brightness = _brightness_of(previous) if previous is not None else 1.0
-        runtime = self._new_runtime(zone_id, look, lights, brightness)
-        runtime.begin_transition(transition, sources)
-        running = _Running(
-            since=self._now(), lights=lights, runtime=runtime, members=tuple(lights)
+        since = self._now()
+        runtime = self._new_runtime(
+            zone_id, look, lights, brightness, started_t=self._started_t(since)
         )
+        runtime.begin_transition(transition, sources)
+        running = _Running(since=since, lights=lights, runtime=runtime, members=tuple(lights))
         self._running[zone_id] = running
         self._host.add_runtime(runtime)
         self._redraw()  # the zones it took lights from
@@ -847,9 +851,11 @@ class ZoneManager:
         lights: Iterable[str],
         brightness: float,
         env: RuntimeEnv | None = None,
+        started_t: float | None = None,
     ) -> ZoneRuntime:
         """A zone's runtime. A preview passes its own env: no latency (nothing is sent)
-        and always watched (it exists only to be watched)."""
+        and always watched (it exists only to be watched). `started_t` is when the look
+        began, on the monotonic clock (_started_t); a preview, which begins now, passes none."""
         return ZoneRuntime(
             zone_id,
             look,
@@ -857,7 +863,14 @@ class ZoneManager:
             env or self._env,
             brightness=brightness,
             space=self._home.space(),
+            started_t=self._monotonic() if started_t is None else started_t,
         )
+
+    def _started_t(self, since: datetime) -> float:
+        """The monotonic time a look that began at `since` began: a zone resumed after a
+        restart, or one rebuilt, plays its look from where it was, not from the beginning.
+        A `since` in the future (the clock stepped back) counts as now."""
+        return self._monotonic() - max(0.0, (self._now() - since).total_seconds())
 
     def _state_changed(self, runtime: ZoneRuntime) -> None:
         """A running zone crashed, turned slow or recovered by itself (spec §8), started or
@@ -947,7 +960,13 @@ class ZoneManager:
             self.check_scope(zone_id, look)
         except (LookNotFoundError, ZoneError):
             return False
-        running.runtime = self._new_runtime(zone_id, look, running.lights, saved.brightness)
+        running.runtime = self._new_runtime(
+            zone_id,
+            look,
+            running.lights,
+            saved.brightness,
+            started_t=self._started_t(running.since),
+        )
         running.saved = running.broken = None
         self._host.add_runtime(running.runtime)
         return True
@@ -964,7 +983,13 @@ class ZoneManager:
             return _Running(
                 saved.started_at, lights, None, saved=saved, broken=broken, members=members
             )
-        runtime = self._new_runtime(saved.zone_id, look, lights, saved.brightness)
+        runtime = self._new_runtime(
+            saved.zone_id,
+            look,
+            lights,
+            saved.brightness,
+            started_t=self._started_t(saved.started_at),
+        )
         return _Running(saved.started_at, lights, runtime, members=members)
 
     def _look_name(self, running: _Running) -> str:

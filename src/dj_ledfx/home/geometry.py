@@ -45,3 +45,19 @@ def polygon_area(polygon: Polygon) -> float:
     xs = np.array([point[0] for point in polygon], dtype=np.float64)
     ys = np.array([point[1] for point in polygon], dtype=np.float64)
     return float(abs(np.dot(xs, np.roll(ys, -1)) - np.dot(ys, np.roll(xs, -1))) / 2.0)
+
+
+def polygon_centre(polygon: Polygon) -> tuple[float, float]:
+    """The polygon's centre of area (its centroid), whichever way it winds. A polygon of no
+    area (fewer than three points, or all in a line) has the mean of its vertices."""
+    xs = np.array([point[0] for point in polygon], dtype=np.float64)
+    ys = np.array([point[1] for point in polygon], dtype=np.float64)
+    next_xs, next_ys = np.roll(xs, -1), np.roll(ys, -1)
+    cross = xs * next_ys - next_xs * ys  # each edge's share of twice the signed area
+    twice_area = float(cross.sum())
+    span = float(max(np.ptp(xs), np.ptp(ys)))
+    if abs(twice_area) <= 1e-12 * span * span:
+        return float(xs.mean()), float(ys.mean())
+    x = float(np.dot(xs + next_xs, cross)) / (3.0 * twice_area)
+    y = float(np.dot(ys + next_ys, cross)) / (3.0 * twice_area)
+    return x, y
