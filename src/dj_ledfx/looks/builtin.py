@@ -14,7 +14,7 @@ import functools
 import json
 from collections.abc import Mapping, Sequence
 from importlib.resources import files
-from typing import Any
+from typing import Any, Protocol
 
 from dj_ledfx.effects.aurora_curtains import AURORA_PALETTE
 from dj_ledfx.home.model import Anchor, Room
@@ -61,20 +61,34 @@ def handoff_looks() -> dict[str, dict[str, Any]]:
     return {str(entry["id"]): entry for entry in json.loads(raw)["looks"]}
 
 
+class _Named(Protocol):
+    """A thing of the home's with an id and a name: an anchor, a room."""
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def name(self) -> str: ...
+
+
+def _named_in(text: str, items: Sequence[_Named]) -> str:
+    """The id of the one item whose name the text mentions as whole words, or "" when it
+    names none or more than one."""
+    words = f" {normalise_name(text)} "
+    named = [item.id for item in items if f" {normalise_name(item.name)} " in words]
+    return named[0] if len(named) == 1 else ""
+
+
 def anchor_named_in(text: str, anchors: Sequence[Anchor]) -> str:
     """The id of the one anchor whose name the text mentions as whole words, or "" when
     it names none or more than one."""
-    words = f" {normalise_name(text)} "
-    named = [anchor.id for anchor in anchors if f" {normalise_name(anchor.name)} " in words]
-    return named[0] if len(named) == 1 else ""
+    return _named_in(text, anchors)
 
 
 def room_named_in(text: str, rooms: Sequence[Room]) -> str:
     """The id of the one room whose name the text mentions as whole words, or "" when it
     names none or more than one."""
-    words = f" {normalise_name(text)} "
-    named = [room.id for room in rooms if f" {normalise_name(room.name)} " in words]
-    return named[0] if len(named) == 1 else ""
+    return _named_in(text, rooms)
 
 
 def _field(

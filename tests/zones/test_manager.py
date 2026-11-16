@@ -707,3 +707,15 @@ async def test_a_new_start_counts_from_zero(make_home: HomeFactory) -> None:
     await home.manager.start("z", home.look("classic-strobe"))
 
     assert home.host.runtimes["z"].started_t == 1050.0  # not the look before's start
+
+
+async def test_a_since_in_the_future_counts_from_now(make_home: HomeFactory) -> None:
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: 1000.0
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    home.clock[0] = START - timedelta(hours=2)  # the wall clock stepped back before a restart
+
+    home = await home.restart()
+
+    assert home.host.runtimes["z"].started_t == 1000.0
