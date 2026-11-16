@@ -111,5 +111,6 @@ async def api_home(
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             yield Api(home, app, client, monitor, feed, stats, previews, watchers, discovery)
     finally:
+        home.manager.close()
         previews.close()
         await home.db.close()

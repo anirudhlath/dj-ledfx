@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Sequence
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,7 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
         evening: Callable[[], float] | None = None,
         sun: Callable[[], SunPoint | None] | None = None,
         monotonic: Callable[[], float] | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> Home:
         home = await build_home(
             tmp_path,
@@ -46,10 +48,15 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
             evening=evening,
             sun=sun,
             monotonic=monotonic,
+            sleep=sleep,
         )
         homes.append(home)
         return home
 
     yield factory
+    for home in homes:
+        for app in home.lineage:  # the app and each restart of it
+            app.manager.close()
+    await asyncio.sleep(0)  # a cancelled timer ends before its home does
     for home in homes:
         await home.db.close()

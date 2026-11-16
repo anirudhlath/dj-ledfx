@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 import time
 from dataclasses import replace
 from types import MappingProxyType
@@ -8,18 +9,22 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
-from conftest import builtin_look, nearest_frame, span
+from conftest import CallCounts, builtin_look, nearest_frame, span
 from loguru import logger
 from runtime_fakes import (
     BULB,
     FADE,
     LAMP,
+    LIGHTS,
     TILE,
     FlatField,
+    OutField,
+    dot_layer,
     field_layer,
     glow_layer,
     latest,
     look_of,
+    out_layer,
     runtime_of,
     sent,
 )
@@ -32,7 +37,7 @@ from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet, PlacedLeds, Space
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.builtin import classic_look_id
-from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.looks.model import HeightMask, Layer, Look, LookModifiers
 from dj_ledfx.looks.selectors import parse_selector
 from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.tempo.clock import TempoClock
@@ -533,3 +538,64 @@ def test_a_restart_and_a_look_update_keep_the_start() -> None:
 
     [(_, elapsed)] = ElapsedField.seen
     assert elapsed == pytest.approx(120.0 + runtime.horizon_s - 100.0)
+
+
+# M6 ruling 19: when a light is out, the look has it black for good.
+def test_a_light_is_out_after_its_latest_leds_time() -> None:
+    out = {"lamp": [5.0, 7.0, 5.0], "bulb": 3.0, "tile": [2.0, 2.0, 2.0, math.inf]}
+    runtime = runtime_of(look_of(out_layer(out)))
+
+    assert runtime.out_after("lamp") == 7.0  # the latest of its LEDs'
+    assert runtime.out_after("bulb") == 3.0
+    assert runtime.out_after("tile") is None  # one LED is never out
+    assert runtime.out_after("nowhere") is None
+
+
+def test_a_lights_out_time_is_kept_until_the_look_or_the_leds_change(
+    call_counts: CallCounts,
+) -> None:
+    call_counts.spy(OutField, "lights_out")
+    runtime = runtime_of(look_of(out_layer({"lamp": 5.0, "bulb": 6.0, "tile": 7.0})))
+
+    assert (runtime.out_after("lamp"), runtime.out_after("bulb")) == (5.0, 6.0)
+    runtime.tick(100.0)
+    assert runtime.out_after("tile") == 7.0
+    assert call_counts.calls == {"lights_out": 1}  # asked once for the layer's LEDs
+
+    runtime.update_look(look_of(out_layer({"lamp": 9.0, "bulb": 6.0, "tile": 7.0})))
+    assert runtime.out_after("lamp") == 9.0  # a look's new settings count at once
+
+    runtime.set_lights(LIGHTS[1:])  # the LEDs change: the tile goes
+    assert runtime.out_after("tile") is None and runtime.out_after("bulb") == 6.0
+    assert runtime.out_after("lamp") == 9.0
+
+
+def test_nothing_is_out_unless_every_layer_says_so_unmasked_and_unflashed() -> None:
+    out = out_layer({"tile": 4.0, "bulb": 4.0, "lamp": 4.0})
+
+    def after(*layers: Layer, **changes: Any) -> float | None:
+        return runtime_of(look_of(*layers, **changes)).out_after("lamp")
+
+    assert after(out) == 4.0
+    assert after(out, field_layer()) is None  # a second visible layer with no lights_out
+    assert after(field_layer(), out) is None
+    assert after(out, dot_layer()) is None  # a particle layer has none
+    assert after(out, replace(field_layer(), visible=False)) == 4.0  # a hidden one changes nothing
+    assert after(replace(out, mask=HeightMask(0.0, 3.0))) is None
+    assert after(out, modifiers=LookModifiers(downbeat_flash=True)) is None
+    assert after(out, modifiers=LookModifiers(trails_s=0.5)) is None
+    assert after(out, modifiers=LookModifiers(evening=True, brightness_cap=0.5)) == 4.0  # black
+    assert after(glow_layer()) is None  # nothing streams: a look of firmware effects alone
+    assert after() is None
+
+
+def test_a_light_a_firmware_layer_claims_or_copies_onto_is_never_out() -> None:
+    out = out_layer({"c1": 4.0, "tile": 4.0, "lamp": 4.0})
+    runtime = runtime_of(look_of(out, _flame(["c1"])), CANDLES)
+
+    assert runtime.out_after("c1") is None  # it runs the effect itself
+    assert runtime.out_after("tile") == runtime.out_after("lamp") == 4.0
+
+    runtime.mark_emulated("c1")  # it refused the effect: the streamed copy goes to it
+    assert runtime.out_after("c1") is None
+    assert runtime.out_after("tile") == 4.0

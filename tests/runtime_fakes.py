@@ -4,7 +4,7 @@ autouse fixture that calls register_fields() (conftest drops them after each tes
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import fields
 from typing import Any, ClassVar
 
@@ -78,6 +78,42 @@ class PlaceField(FieldEffect, register=False):
         return np.array(leds.pos, dtype=np.float32)
 
 
+class OutField(FieldEffect, register=False):
+    """Black everywhere. Its lights_out gives the LEDs of the lights in `out` (light id to
+    seconds, or a sequence of seconds, one for each LED in order, its last kept for the
+    rest) those times, and every other LED inf: never."""
+
+    @classmethod
+    def parameters(cls) -> dict[str, EffectParam]:
+        return {}
+
+    def __init__(self, out: Mapping[str, float | Sequence[float]] | None = None) -> None:
+        self.out = dict(out or {})
+
+    def set_params(self, **kwargs: Any) -> None:
+        self._apply_params(**kwargs)  # a mapping is none of the types a setting can check
+
+    def get_params(self) -> dict[str, Any]:
+        return {"out": dict(self.out)}
+
+    def _apply_params(self, **kwargs: Any) -> None:
+        self.out = dict(kwargs.get("out", self.out))
+
+    def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
+        return np.zeros((leds.count, 3), dtype=np.float32)
+
+    def lights_out(self, leds: LedSet) -> np.ndarray:
+        times = np.full(leds.count, np.inf, dtype=np.float32)
+        for device_id, seconds in self.out.items():
+            piece = leds.slice_for(device_id)
+            if piece is None:
+                continue
+            given = np.atleast_1d(np.asarray(seconds, dtype=np.float32))
+            padded = np.concatenate([given, np.full(piece.count, given[-1], dtype=np.float32)])
+            times[piece.start : piece.stop] = padded[: piece.count]
+        return times
+
+
 class DotParticles(ParamParticles, register=False):
     """One dot of `level` grey at `x` metres east on the map's axes (y 0, 1 m up), of a 0.3 m
     radius (its light reaches 0.75 m), as the layer sees it: a layer's transform moves it with
@@ -103,6 +139,7 @@ def register_fields() -> None:
     Effect._registry["flat_field"] = FlatField
     Effect._registry["place_field"] = PlaceField
     Effect._registry["dot_particles"] = DotParticles
+    Effect._registry["out_field"] = OutField
     FlatField.mode = "ok"
     PlaceField.seen = []
     DotParticles.lamp_led_counts = []
@@ -117,6 +154,18 @@ def field_layer(level: float = 0.5, opacity: float = 1.0, **changes: Any) -> Lay
         kind="flat_field",
         opacity=opacity,
         settings={"level": level},
+        **changes,
+    )
+
+
+def out_layer(out: Mapping[str, float | Sequence[float]], **changes: Any) -> Layer:
+    """A layer of OutField: black, with these lights' LEDs out at these times."""
+    return Layer(
+        id=changes.pop("id", "out"),
+        name=changes.pop("name", "Out"),
+        type="field",
+        kind="out_field",
+        settings={"out": out},
         **changes,
     )
 

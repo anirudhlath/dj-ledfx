@@ -265,6 +265,8 @@ class ZoneRuntime:
         # Each streamed layer's view of the LEDs (its mask, mirror and transform), with the
         # modifiers it was made for; a new LED set clears them (_place).
         self._views: dict[int, tuple[object, LayerView]] = {}  # by the layer's place
+        # Each light's out_after, kept until the look or the LEDs change; None: not worked out.
+        self._out: dict[str, float | None] | None = None
         self._rendering = ""
         self._last_crash_log = float("-inf")
         self._last_fx_logs: dict[int, float] = {}  # by the layer's place, or _LOOK_FX
@@ -298,6 +300,49 @@ class ZoneRuntime:
         A restart and a look update keep it, a resume picks it up where it was, and a twin
         carries it, so a replaced look plays on from where it was."""
         return self._started_t
+
+    def out_after(self, device_id: str) -> float | None:
+        """The look's elapsed time from which the light is black for good (M6 ruling 19): the
+        latest of its LEDs' `lights_out()` times, kept until the look or the LEDs change.
+        None: the look never has it out. Every visible streamed layer has to say when, and
+        an unmasked field layer alone can: a particle layer, a mask, the downbeat flash or
+        trails (they would light it again) leave it None. So does a light a firmware layer
+        claims or copies onto, which isn't streamed the look, and a look that crashed or
+        waits. The evening and the brightness cap keep black black."""
+        if (
+            self.crash is not None
+            or self.waiting_for
+            or device_id in self._claims
+            or device_id in self._copies
+        ):
+            return None
+        if self._out is None:
+            self._out = self._out_times()
+        return self._out.get(device_id)
+
+    def _out_times(self) -> dict[str, float | None]:
+        modifiers = self.look.modifiers
+        if not self._streamed or modifiers.downbeat_flash or modifiers.trails_s is not None:
+            return {}
+        latest = np.full(self.leds.count, -np.inf, dtype=np.float64)
+        for index, (layer, effect) in enumerate(self._streamed):
+            if layer.mask is not None or isinstance(effect, ParticleEffect):
+                return {}
+            try:
+                # The view's LEDs, the render's own object: an effect keeping per-LED work
+                # with _per_leds keeps it for them.
+                times = effect.lights_out(self._view(index, layer).leds)
+            except Exception as exc:  # a look never takes the manager down (spec §8)
+                logger.warning("{} can't say when it has a light out: {}", layer.name, exc)
+                return {}
+            if times is None:
+                return {}
+            np.maximum(latest, times, out=latest)
+        out: dict[str, float | None] = {}
+        for piece in self.leds.slices:
+            moment = float(latest[piece.start : piece.stop].max(initial=-math.inf))
+            out[piece.device_id] = moment if math.isfinite(moment) else None
+        return out
 
     @property
     def last_fx(self) -> Fx | None:
@@ -498,6 +543,7 @@ class ZoneRuntime:
         run their own effect through their applied key.
         """
         old, self.look = self.look, look
+        self._out = None
         if look.modifiers.trails_s is None:
             self._trails.reset()
         if self.crash is not None or _layout(old) != _layout(look) or old.needs != look.needs:
@@ -958,6 +1004,7 @@ class ZoneRuntime:
 
     def _compile(self) -> None:
         self.generation = next(_GENERATIONS)
+        self._out = None
         self._waiting = self._missing(self._env.sun())
         self.crash = None
         self._trails.reset()
@@ -995,6 +1042,7 @@ class ZoneRuntime:
         if before is None or before.slices != self.leds.slices:
             self.ring = RingBuffer(self._capacity)
         self._views = {}  # the layers' views follow the LED set and its space
+        self._out = None
         ids = {light.device_id for light in self._lights}
         self._emulated &= ids
         self._handover &= ids

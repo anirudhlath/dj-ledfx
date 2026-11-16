@@ -597,6 +597,7 @@ async def _run(args: argparse.Namespace) -> None:
     if web_server is not None:
         await web_server.stop()
 
+    zone_manager.close()
     previews.close()
     scheduler.stop()
     engine.stop()

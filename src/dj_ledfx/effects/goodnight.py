@@ -13,6 +13,10 @@ the zone's LEDs, leaves every room to switch off.
 
 Every frame is a function of the look's elapsed time (RenderContext.elapsed_s) alone, never of
 the tempo clock, so a resume after a restart picks the walk up where it was.
+
+A room that has gone black is out for good (ruling 19): `lights_out()` gives each LED the time
+its room's fade has ended, and OFF_AFTER_S more, from which the zone manager switches its
+light off. The night room is never out.
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ if TYPE_CHECKING:
 FRONT_BOOST = 1.4  # how much brighter a room glows as the walk reaches it (clipped to full)
 FRONT_S = 3.0  # how long before its switch a room starts to brighten
 FADE_S = 2.0  # how long a room takes to go from its brightest to black
+OFF_AFTER_S = 1.0  # how long after a room is black its lights are switched off
 # A room glows with the first stop; the walk lights it with the last, the brighter.
 GOODNIGHT_PALETTE = ("#ff8a3c", "#ffd9a0")
 
@@ -107,6 +112,13 @@ class Goodnight(ParamField):
         )
         colours = palette_at(self._palette, front.astype(np.float32))
         return np.minimum(colours * glow[:, None], 1.0).astype(np.float32)
+
+    def lights_out(self, leds: LedSet) -> NDArray[np.float32]:
+        """Each LED's switch, its fade and OFF_AFTER_S; inf for the night room's. From the
+        render's own builder: `_per_leds` has one slot for the LEDs, so another would be
+        handed the walk back, or hand render another."""
+        walk = self._per_leds(leds, self._walk)
+        return (walk.switch + FADE_S + OFF_AFTER_S).astype(np.float32)
 
     def _walk(self, leds: LedSet) -> _Walk:
         """When each LED switches off, and which are the night room's."""

@@ -89,6 +89,10 @@ class GoveeAdapterBase(DeviceAdapter):
         return self._transport.last_heard(self._record.ip)
 
     @property
+    def switches_power(self) -> bool:
+        return True  # a turn command needs no reply, so a lamp we can't hear is switched too
+
+    @property
     def led_count(self) -> int:
         return self._segments
 

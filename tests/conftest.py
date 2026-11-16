@@ -124,6 +124,7 @@ class FakeLight(DeviceAdapter):
         captured: bytes | None = b"before",
         connected: bool = True,
         geometry: DeviceGeometry | None = None,
+        switches_power: bool = True,
     ) -> None:
         self.stable_id = stable_id
         self.name = name or stable_id
@@ -134,6 +135,7 @@ class FakeLight(DeviceAdapter):
         self.captured = captured
         self.connected = connected
         self._geometry = geometry
+        self._switches_power = switches_power
         self.firmware_running = False
         self.reject_firmware = False
         self.silent_firmware = False  # firmware commands get no answer
@@ -176,6 +178,10 @@ class FakeLight(DeviceAdapter):
     @property
     def last_heard(self) -> float | None:
         return self.heard
+
+    @property
+    def switches_power(self) -> bool:
+        return self._switches_power
 
     @property
     def capabilities(self) -> DeviceCapabilities:

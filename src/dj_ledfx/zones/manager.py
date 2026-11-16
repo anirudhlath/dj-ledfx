@@ -6,6 +6,11 @@ it, switches it on when a look is applied, runs firmware layers on the lights th
 them, and puts the light back how it was when it leaves every running zone. Captures are
 saved in state.db, so Off still works after a restart. A light that couldn't be captured
 is saved as an empty capture: Off leaves it alone rather than guessing (spec §8).
+
+Lights out (M6 ruling 19): a light its look has dark for good (`ZoneRuntime.out_after`) is
+switched off by one timer at that moment, if it can switch power, and left alone after it:
+no route, nothing sent, even when it's switched on elsewhere, until a new run takes it. Off
+and Stop all then put it back with its power.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ import itertools
 import json
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
@@ -82,6 +87,9 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
+# A light whose moment has come while its zone is in a transition is tried again this often.
+LIGHTS_OUT_RETRY_S = 1.0
+
 
 class RuntimeHost(Protocol):
     """Renders the running zones and the preview: the effect engine. It keeps each
@@ -130,6 +138,8 @@ class _Running:
     # A derived zone's lights on the map when it last looked (home_changed): only lights
     # that join these are taken over, so one a newer zone took doesn't come back.
     members: tuple[str, ...] = ()
+    # The lights the lights-out timer switched off in this run: out until a new run takes them.
+    switched_off: set[str] = field(default_factory=set)
 
 
 def _look_id_of(running: _Running) -> str:
@@ -160,6 +170,7 @@ class ZoneManager:
         evening: Callable[[], float] = lambda: 0.0,
         sun: Callable[[], SunPoint | None] = lambda: None,
         monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._store = store
         self._looks = looks
@@ -171,6 +182,7 @@ class ZoneManager:
         self._preview_only = preview_only
         self._now = now
         self._monotonic = monotonic  # the time a runtime's elapsed_s counts from (_started_t)
+        self._sleep = sleep  # the lights-out timer's wait
         self._home = home
         # What every zone's runtime reads. `frames_watched`: whether anyone watches the live
         # stream, so zones draw lights that run their own effect only then (M1 review,
@@ -198,6 +210,15 @@ class ZoneManager:
         self._power_versions: dict[str, int] = {}  # moves on with every change to _power
         self._versions = itertools.count(1)
         self._deferred_power_on: set[str] = set()
+        # Lights out. `_restore_on`: the out lights of runs that ended, which Off and Stop all
+        # put back with their power (emptied as each is released or switched on again).
+        # `_out_pending`: the lights the timer will switch off, seen before their moment (so
+        # one already past at resume is left alone). One timer task, asleep until `_out_due`.
+        self._restore_on: set[str] = set()
+        self._out_pending: set[str] = set()
+        self._out_timer: asyncio.Task[None] | None = None
+        self._out_due: float | None = None
+        self._closed = False
         # The previews the engine hosts (web spec §12.3), and what each calls when its zone
         # is gone or has no lights.
         self._previews: dict[ZoneRuntime, Callable[[], None]] = {}
@@ -489,6 +510,7 @@ class ZoneManager:
                 or adapter is None
                 or self._held(runtime, adapter)
                 or self._power.get(device_id) is False
+                or self._is_out(device_id)  # dark for good: left alone, even switched on
             ):
                 return
             key = runtime.applied_key(device_id)
@@ -649,6 +671,7 @@ class ZoneManager:
         the same way, and ends when the zone is gone or has none."""
         space = self._home.space()
         for running in self._running.values():
+            running.switched_off.intersection_update(running.lights)  # one a zone took is its own
             if running.runtime is not None:
                 self._follow(running.runtime, running.lights, space)
         for runtime, on_end in list(self._previews.items()):
@@ -898,6 +921,7 @@ class ZoneManager:
                 or device_id in handing_over
                 or self._held(runtime, adapter)
                 or self._power.get(device_id) is False
+                or self._is_out(device_id)
             ):
                 continue
             if not self._ready(device_id, runtime):
@@ -1044,7 +1068,15 @@ class ZoneManager:
         """Every end of a run: Off, a take-over, a new start on the zone. The run and its
         runtime are forgotten; returns the run, and its look as "Start again" remembers
         it, unless remember is False. A look started again on its zone is remembered too:
-        recent() leaves it out while it runs."""
+        recent() leaves it out while it runs. The run's out lights are put back with their
+        power (_restore_on), unless nothing was sent to them (preview-only) or they were
+        switched off elsewhere, which Off never undoes (spec §6.4)."""
+        for device_id in self._running[zone_id].lights:
+            if self._is_out(device_id) and (
+                device_id in self._running[zone_id].switched_off
+                or (not self._preview_only and self._power.get(device_id) is not False)
+            ):
+                self._restore_on.add(device_id)
         running = self._running.pop(zone_id)
         if running.runtime is not None:
             self._host.remove_runtime(running.runtime)
@@ -1178,7 +1210,11 @@ class ZoneManager:
         ids = list(dict.fromkeys(device_ids))
         for device_id in ids:
             runtime = self._runtime_of(device_id)
-            if runtime is not None and self._ready(device_id, runtime):
+            if (
+                runtime is not None
+                and self._ready(device_id, runtime)
+                and not self._is_out(device_id)
+            ):
                 self._publish(device_id, runtime)
         captured = await self._each(ids, lambda d: self._look_at(d, d in wanted))
         new = {d: state for d, state in zip(ids, captured, strict=True) if state is not None}
@@ -1188,6 +1224,7 @@ class ZoneManager:
         gone = [d for d, done in zip(ids, released, strict=True) if done]
         if gone:
             await self._db.delete_device_states(gone)
+        self._schedule_lights_out()
 
     @staticmethod
     async def _each(ids: list[str], step: Callable[[str], Awaitable[T]]) -> list[T | None]:
@@ -1217,7 +1254,12 @@ class ZoneManager:
         Returns the new capture, for _sync to save."""
         runtime = self._runtime_of(device_id)
         adapter = self._adapter(device_id)
-        if runtime is None or adapter is None or self._held(runtime, adapter):
+        if (
+            runtime is None
+            or adapter is None
+            or self._held(runtime, adapter)
+            or self._is_out(device_id)  # dark for good: neither read nor captured
+        ):
             return None
         if power_on or device_id not in self._power:  # a look being applied reads it afresh
             self._set_power(device_id, (await self._read(adapter)).power)
@@ -1242,6 +1284,10 @@ class ZoneManager:
         if runtime is None:  # the saved look can't be read: leave the light alone
             self._routes.set_route(device_id, None)
             return False
+        if self._is_out(device_id):  # its look has it dark for good: out, whatever its power
+            self._routes.set_route(device_id, None)
+            self._applied.pop(device_id, None)
+            return False
         if (
             adapter is None
             or self._held(runtime, adapter)
@@ -1249,6 +1295,7 @@ class ZoneManager:
         ):
             self._publish(device_id, runtime)
             return False
+        self._restore_on.discard(device_id)  # a zone has it again: its look decides its power
         if power_on and self._power.get(device_id) is not True:  # off, or it can't say
             await self._switch_on(device_id, adapter)
         if self._power.get(device_id) is False:  # switched off elsewhere: out until it's on
@@ -1370,17 +1417,145 @@ class ZoneManager:
         """Put a light back how it was before dj-ledfx took control, once (spec §4.3).
         True: done, so _sync forgets its capture."""
         state = self._captured.get(device_id)
-        if state is None or not adapter.is_connected:
-            return False  # nothing to release, or offline: released when it's back
+        if state is None:
+            self._restore_on.discard(device_id)
+            return False  # nothing to release
+        if not adapter.is_connected:
+            return False  # offline: released when it's back
         if state:
             # Read afresh: the last poll may be 5 s old. A light that reads off gets its
-            # colour and effect back and stays off: Off never switches a light on (§6.4).
+            # colour and effect back and stays off: Off never switches a light on (§6.4),
+            # unless its look had put it out (lights out): it was on before that.
             power = (await self._read(adapter)).power
+            on = power is not False or device_id in self._restore_on
             try:
                 async with adapter.send_lock:  # the route is gone; no frame lands after this
-                    await adapter.restore_state(state, power=power is not False)
+                    await adapter.restore_state(state, power=on)
             except Exception as exc:
                 logger.warning("Couldn't restore {}: {}", adapter.device_info.name, exc)
                 return False
         del self._captured[device_id]
+        self._restore_on.discard(device_id)
         return True
+
+    # --- lights out (M6 ruling 19) ----------------------------------------------------
+
+    def close(self) -> None:
+        """Stop the lights-out timer, for good: a sync after this starts none."""
+        self._closed = True
+        self._cancel_out_timer()
+
+    def _out_time(self, runtime: ZoneRuntime, device_id: str) -> float | None:
+        """When the light's look has it dark for good, on the monotonic clock. None: never,
+        or it can't be switched off (then it streams black)."""
+        adapter = self._adapter(device_id)
+        if adapter is None or not adapter.switches_power:
+            return None
+        after = runtime.out_after(device_id)
+        return None if after is None else runtime.started_t + after
+
+    def _is_out(self, device_id: str) -> bool:
+        """The light is out: its run's timer switched it off, or its moment has passed and no
+        transition is mixing it (the timer comes within LIGHTS_OUT_RETRY_S, or it was left
+        alone when its moment came: offline, preview-only, a run resumed after it, or
+        switched off elsewhere). An out light is neither readied, captured, routed nor sent
+        anything until a new run takes it."""
+        zone_id = self.owner_of(device_id)
+        running = self._running.get(zone_id) if zone_id is not None else None
+        if running is None:
+            return False
+        if device_id in running.switched_off:
+            return True
+        runtime = running.runtime
+        if runtime is None or runtime.transitioning:
+            return False
+        moment = self._out_time(runtime, device_id)
+        return moment is not None and moment <= self._monotonic()
+
+    def _cancel_out_timer(self) -> None:
+        timer, self._out_timer, self._out_due = self._out_timer, None, None
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:  # closed from outside the loop: nothing is running
+            current = None
+        if timer is not None and timer is not current:
+            timer.cancel()
+
+    def _schedule_lights_out(self) -> None:
+        """Keep the one timer asleep until the next light's moment: called at the end of every
+        sync and after each wake. A light is pending once seen before its moment, and stays
+        so until the timer deals with it, so a moment already past when a run is first seen
+        (resumed after its walk) is left alone. A pending light whose zone is mid-transition
+        is tried again after LIGHTS_OUT_RETRY_S."""
+        if self._closed:
+            return
+        now = self._monotonic()
+        pending: set[str] = set()
+        due: float | None = None
+        for running in self._running.values():
+            runtime = running.runtime
+            if runtime is None:
+                continue
+            for device_id in running.lights:
+                if device_id in running.switched_off:
+                    continue
+                moment = self._out_time(runtime, device_id)
+                if moment is None or (moment <= now and device_id not in self._out_pending):
+                    continue
+                pending.add(device_id)
+                if moment <= now:  # past while a transition held it, or just now
+                    moment = now + LIGHTS_OUT_RETRY_S if runtime.transitioning else now
+                due = moment if due is None else min(due, moment)
+        self._out_pending = pending
+        if due is None:
+            self._cancel_out_timer()
+        elif self._out_due != due or self._out_timer is None or self._out_timer.done():
+            self._cancel_out_timer()
+            self._out_due = due
+            self._out_timer = asyncio.get_running_loop().create_task(self._lights_out_at(due))
+
+    async def _lights_out_at(self, due: float) -> None:
+        await self._sleep(max(0.0, due - self._monotonic()))
+        async with self._lock:
+            if self._out_due == due:  # this timer is the one: the next sync schedules another
+                self._out_timer = self._out_due = None
+            now = max(due, self._monotonic())
+            for running in list(self._running.values()):
+                runtime = running.runtime
+                if runtime is None:
+                    continue
+                for device_id in list(running.lights):
+                    if device_id not in self._out_pending or device_id in running.switched_off:
+                        continue
+                    moment = self._out_time(runtime, device_id)
+                    if moment is None:
+                        self._out_pending.discard(device_id)  # its look changed
+                    elif moment <= now and not runtime.transitioning:
+                        self._out_pending.discard(device_id)
+                        try:
+                            await self._switch_off(running, runtime, device_id)
+                        except Exception as exc:  # one light never stops the timer
+                            logger.opt(exception=exc).warning("Couldn't switch off {}", device_id)
+            self._schedule_lights_out()
+
+    async def _switch_off(self, running: _Running, runtime: ZoneRuntime, device_id: str) -> None:
+        """Switch off a light whose look has it dark for good: its route goes first, then the
+        command, under the adapter's send lock, so no frame lands after it. A light that
+        can't be reached, is switched off already or is held (preview-only, offline) is left
+        as it is, and so is out from now on; a failure is logged and leaves it dark but on."""
+        adapter = self._adapter(device_id)
+        if adapter is None or self._held(runtime, adapter) or self._power.get(device_id) is False:
+            return
+        self._routes.set_route(device_id, None)
+        self._applied.pop(device_id, None)
+        running.switched_off.add(device_id)
+        try:
+            async with adapter.send_lock:
+                await adapter.set_power(False)
+        except Exception as exc:
+            logger.warning(
+                "Couldn't switch off {}: {}; it stays on, dark", adapter.device_info.name, exc
+            )
+            return
+        self._set_power(device_id, False)
+        logger.info("{} is dark for good in its look; switched off", adapter.device_info.name)

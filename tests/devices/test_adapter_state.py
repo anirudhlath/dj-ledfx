@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
+from govee_fakes import lamp_record, lamp_transport, sent
+from lifx_fakes import FakeLifxTransport, lifx_bulb
 from numpy.typing import NDArray
+from openrgb_fakes import adapter_of
 
 from dj_ledfx.devices.adapter import DeviceAdapter
 from dj_ledfx.devices.capabilities import LightReading
+from dj_ledfx.devices.govee.protocol import build_turn_message
+from dj_ledfx.devices.govee.razer import GoveeRazerAdapter
+from dj_ledfx.devices.openrgb import HAS_PER_LED_COLOR
 from dj_ledfx.types import DeviceInfo
 
 
@@ -95,3 +104,30 @@ async def test_default_power_and_stream_hooks_do_nothing() -> None:
 def test_a_light_is_never_heard_from_by_default() -> None:
     """A protocol that can't tell when a light last answered says it never has."""
     assert FakeAdapter().last_heard is None
+
+
+async def test_which_lights_switch_power() -> None:
+    """LIFX and Govee lights switch power on a command; the rest of the lights, OpenRGB's
+    and a bare adapter, can't, so a look that has one dark for good leaves it streaming."""
+    assert lifx_bulb(FakeLifxTransport()).switches_power is True
+    transport = lamp_transport(can_receive=False)  # another program holds the reply port
+    lamp = GoveeRazerAdapter(transport, lamp_record(), 15)
+    assert lamp.switches_power is True
+    await lamp.set_power(False)  # sent though the lamp can't be heard: no status needed
+    assert sent(transport) == [build_turn_message(on=False)]
+
+    device = MagicMock()
+    device.name = "Test keyboard"
+    device.modes = [
+        SimpleNamespace(
+            name="Direct",
+            flags=HAS_PER_LED_COLOR,
+            brightness=None,
+            brightness_min=None,
+            brightness_max=None,
+        )
+    ]
+    device.active_mode = 0
+    device.colors = [SimpleNamespace(red=0, green=0, blue=0)]
+    assert (await adapter_of(device)).switches_power is False
+    assert FakeAdapter().switches_power is False

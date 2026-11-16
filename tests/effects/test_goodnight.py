@@ -15,7 +15,7 @@ from conftest import CallCounts, render_ctx
 
 from dj_ledfx.effects.color import palette_float
 from dj_ledfx.effects.field import FieldEffect
-from dj_ledfx.effects.goodnight import FADE_S, FRONT_BOOST, FRONT_S, Goodnight
+from dj_ledfx.effects.goodnight import FADE_S, FRONT_BOOST, FRONT_S, OFF_AFTER_S, Goodnight
 from dj_ledfx.effects.ledset import (
     NO_ROOM,
     LedSet,
@@ -247,6 +247,29 @@ def test_the_walk_is_worked_out_once_for_a_set_of_leds(call_counts: CallCounts) 
     assert call_counts.calls == {"_walk": 1}
     _frame(goodnight, _leds([0, 1, 2]), 0.0)  # other LEDs: the order and moments again
     assert call_counts.calls == {"_walk": 2}
+
+
+def test_lights_out_is_each_rooms_switch_its_fade_and_a_second(call_counts: CallCounts) -> None:
+    goodnight = _goodnight()
+    call_counts.spy(Goodnight, "_walk")
+
+    _frame(goodnight, THREE, 0.0)
+    out = goodnight.lights_out(THREE)
+    _frame(goodnight, THREE, 1.0)  # lights_out left the render's slot as it was
+
+    assert out is not None and out.dtype == np.float32 and out.shape == (6,)
+    assert np.allclose(out[EAST], FIRST + FADE_S + OFF_AFTER_S)
+    assert np.allclose(out[MIDDLE], SECOND + FADE_S + OFF_AFTER_S)
+    assert np.isinf(out[WEST]).all()  # the night room is never out
+    assert call_counts.calls == {"_walk": 1}  # one builder: the render's walk, never worked twice
+    leds = _leds([0, 1, 2, NO_ROOM])  # LEDs in no room go with the east room
+    times = goodnight.lights_out(leds)
+    assert times is not None and np.allclose(times[6:8], out[EAST])
+    for moment in sorted({float(t) + extra for t in times if np.isfinite(t) for extra in (0, 7)}):
+        frame = _frame(goodnight, leds, moment)
+        out_now = times <= moment
+        assert not frame[out_now].any() and _lit(frame[~out_now])
+    assert _lit(_frame(goodnight, leds, 10.0 * WALK)[WEST])
 
 
 def test_a_zone_with_no_leds_draws_no_colours() -> None:

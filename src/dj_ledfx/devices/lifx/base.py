@@ -113,6 +113,10 @@ class LifxAdapterBase(DeviceAdapter):
         return self._caps
 
     @property
+    def switches_power(self) -> bool:
+        return True
+
+    @property
     def display_ms(self) -> float:
         """How long after a frame lands the light shows it: half-way through its fade."""
         return self._fade_ms / 2.0
