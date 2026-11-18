@@ -720,6 +720,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/running/overlay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Overlay
+         * @description Play a Home look over every running zone for durationS seconds; it replaces any overlay playing
+         */
+        post: operations["start_overlay_api_running_overlay_post"];
+        /**
+         * Stop Overlay
+         * @description End the overlay playing, if one is
+         */
+        delete: operations["stop_overlay_api_running_overlay_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/running/recent": {
         parameters: {
             query?: never;
@@ -1783,6 +1807,19 @@ export interface components {
             /** Progress */
             progress: number;
             /** Trigger */
+            trigger: string;
+        };
+        /** OverlayRequest */
+        OverlayRequest: {
+            /** Durations */
+            durationS: number;
+            look?: components["schemas"]["Look"] | null;
+            /** Lookid */
+            lookId?: string | null;
+            /**
+             * Trigger
+             * @default api
+             */
             trigger: string;
         };
         /** Placement */
@@ -3924,6 +3961,57 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Running"];
                 };
+            };
+        };
+    };
+    start_overlay_api_running_overlay_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverlayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Overlay"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_overlay_api_running_overlay_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

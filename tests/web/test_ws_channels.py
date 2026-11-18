@@ -16,6 +16,7 @@ import pytest_asyncio
 from api_home import Api, api_home
 from conftest import FakeLight
 from tempo_fakes import PLAYER, beat_event
+from zone_home import FakeHome
 
 from dj_ledfx.tempo.model import TempoChanged
 from dj_ledfx.web import ws as hub
@@ -219,3 +220,20 @@ async def test_no_inputs_heartbeat_right_after_a_push(
 
     pushed, following = fake.times_on("inputs")[before : before + 2]
     assert following - pushed >= 0.2
+
+
+async def test_the_running_channel_pushes_the_overlay_as_it_starts_and_ends(
+    tmp_path: Path,
+) -> None:
+    view = FakeHome(rooms={"west": ["a"]})
+    async with api_home(tmp_path, [FakeLight("a")], [], view=view) as api:
+        socket = FakeSocket()
+        async with broadcasting(api.app, socket):
+            await api.client.post("/api/running/overlay", json={"lookId": "wisp", "durationS": 8})
+            await until(lambda: len(socket.on("running")) == 1)
+            assert [o["lookId"] for o in socket.on("running")[0]["overlays"]] == ["wisp"]
+
+            await api.client.delete("/api/running/overlay")
+            await until(lambda: len(socket.on("running")) == 2)
+
+            assert socket.on("running")[1]["overlays"] == []

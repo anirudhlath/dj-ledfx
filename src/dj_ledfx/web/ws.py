@@ -148,7 +148,9 @@ def _running_message(app: Any) -> dict[str, Any] | None:
     zones = getattr(app.state, "zone_manager", None)
     if zones is None:
         return None
-    running = contract.running_out(zones.running(), light_index(app))
+    running = contract.running_out(
+        zones.running(), light_index(app), zones.overlays(), zones.now()
+    )
     return {"channel": "running", **running.model_dump(mode="json", by_alias=True)}
 
 

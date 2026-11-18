@@ -131,6 +131,8 @@ export type RunningZoneTransition = Schemas['RunningZoneTransition']
 export type SunInput = Schemas['SunInput']
 /** A point on the sun's recent path, for the stage's arc (§7.4). */
 export type SunPathPoint = Schemas['SunPathPoint']
+/** POST /running/overlay's body: a Home look by id or a draft, for `durationS` seconds. */
+export type OverlayRequest = Schemas['OverlayRequest']
 
 // ── Pending: engine M7 (Music Assistant, Home Assistant, signals) ─────────────────────────
 // Shaped from §12.3–12.4, §9.3 and the Inputs renders; the milestone that serves them owns the

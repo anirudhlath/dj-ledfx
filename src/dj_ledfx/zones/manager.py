@@ -729,6 +729,10 @@ class ZoneManager:
     def overlay_slot(self) -> OverlaySlot:
         return self._overlay_slot
 
+    def now(self) -> datetime:
+        """The manager's own clock, which an overlay's progress is read against."""
+        return self._now()
+
     def overlays(self) -> list[OverlayInfo]:
         run = self._overlay_slot.run
         if run is None:

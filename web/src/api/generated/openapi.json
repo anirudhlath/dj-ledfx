@@ -2109,6 +2109,49 @@
         "title": "Overlay",
         "type": "object"
       },
+      "OverlayRequest": {
+        "properties": {
+          "durationS": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 3600.0,
+            "title": "Durations",
+            "type": "number"
+          },
+          "look": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Look"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lookId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookid"
+          },
+          "trigger": {
+            "default": "api",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "durationS"
+        ],
+        "title": "OverlayRequest",
+        "type": "object"
+      },
       "Placement": {
         "properties": {
           "confirmed": {
@@ -5695,6 +5738,55 @@
           }
         },
         "summary": "List Running"
+      }
+    },
+    "/api/running/overlay": {
+      "delete": {
+        "description": "End the overlay playing, if one is",
+        "operationId": "stop_overlay_api_running_overlay_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Stop Overlay"
+      },
+      "post": {
+        "description": "Play a Home look over every running zone for durationS seconds; it replaces any overlay playing",
+        "operationId": "start_overlay_api_running_overlay_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverlayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overlay"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Overlay"
       }
     },
     "/api/running/recent": {

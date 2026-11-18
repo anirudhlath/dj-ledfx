@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { components, paths } from './generated/schema'
 import type {
-  ApiPath, Deck, Furniture, Home, InputKind, Inputs, InputState, Light, LightShape, LightStatus, Location, Mask,
+  ApiPath, Overlay, Deck, Furniture, Home, InputKind, Inputs, InputState, Light, LightShape, LightStatus, Location, Mask,
   PendingPath, PendingSchema, Room, RunningZone, RunningZoneTransition, SunInput, TempoLock, TempoSource,
 } from './contract'
 
@@ -71,6 +71,13 @@ describe('the contract', () => {
     expectTypeOf<'SunInput' | 'SunPathPoint'>().toExtend<keyof components['schemas']>()
     expectTypeOf<NonNullable<Inputs['sun']>>().toEqualTypeOf<SunInput>()
     expectTypeOf<SunInput['sunrise']>().toEqualTypeOf<string | null>()
+  })
+
+  // Engine M6 serves overlays over REST and the running channel.
+  it("serves engine M6's overlays", () => {
+    expectTypeOf<'OverlayRequest'>().toExtend<keyof components['schemas']>()
+    expectTypeOf<'/api/running/overlay'>().toExtend<ApiPath>()
+    expectTypeOf<Overlay['progress']>().toEqualTypeOf<number>()
   })
 
   // I1: engine M2 serves the home's size and which rooms hold lights.

@@ -189,13 +189,16 @@ def _home_flat() -> Look:
 
 
 @pytest.mark.usefixtures("_fields")
+@pytest.mark.parametrize("preview_only", [False, True])
 async def test_the_live_feed_shows_the_overlay_on_the_lights_it_reaches(
-    make_home: HomeFactory,
+    make_home: HomeFactory, preview_only: bool
 ) -> None:
+    """Preview-only too: the feed shows what the lights would do (ruling 11)."""
     clock = FakeClock()
     home = await make_home(
         [FakeLight("lamp"), FakeLight("tile", caps=TILE)],
         [zone_record("z", "lamp", "tile")],
+        preview_only=preview_only,
         view=FakeHome(rooms={"r": ["lamp", "tile"]}),
         monotonic=clock.monotonic,
         sleep=clock.sleep,
