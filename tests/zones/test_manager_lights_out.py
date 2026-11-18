@@ -7,9 +7,11 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import FakeLight
+from loguru import logger
 from map_home import tiny_home
 from runtime_fakes import field_layer, look_of, out_layer
 from zone_home import START, FakeClock, FakeHome, Home, HomeFactory, build_home
@@ -339,13 +341,78 @@ async def test_goodnight_switches_the_far_room_off_and_leaves_the_night_room_on(
         )
         await home.manager.start(HOME_ZONE_ID, look_of(walk))
 
-        await clock.advance(walk_s / 2 + FADE_S + OFF_AFTER_S - 0.1)  # just before the far room's
+        # The east room is the one room walked off of two, so its switch comes half way
+        # through the walk; the light then fades and takes OFF_AFTER_S more.
+        moment = walk_s / 2 + FADE_S + OFF_AFTER_S
+        await clock.advance(moment - 0.1)  # just before it
         assert _powers(far) == []
 
-        await clock.advance(walk_s + FADE_S + OFF_AFTER_S)
+        await clock.advance(0.1)  # at it
 
         assert far.calls[-1] == ("power", False) and "far" not in home.routes.routes
         assert _powers(near) == [] and home.routes.routes["near"].streaming
     finally:
         home.manager.close()
         await home.db.close()
+
+
+@pytest.mark.parametrize("reads_on", [False, True])
+@pytest.mark.parametrize("case", ["offline-at-its-moment", "resumed-after-the-walk"])
+async def test_off_puts_back_an_out_light_it_never_switched_off_as_it_reads(
+    make_home: HomeFactory, case: str, reads_on: bool
+) -> None:
+    clock = FakeClock()
+    a = FakeLight("a")
+    home = await _started(make_home, clock, lights=[a, FakeLight("b")])
+    if case == "offline-at-its-moment":
+        await clock.advance(4.0)
+        a.connected = False
+        await home.manager.on_device_offline("a")
+        await clock.advance(2.0)  # its moment passes while it's away
+        await home.manager.off(HOME_ZONE_ID)  # a is still away: its release waits
+        a.calls.clear()
+        a.connected = True
+        a.power = reads_on  # what it reads as it comes back
+        await home.manager.on_device_online("a")
+    else:
+        home.clock[0] = START + timedelta(seconds=60)
+        clock.now += 60.0
+        home = await home.restart()
+        a.power = reads_on
+        await home.manager.off(HOME_ZONE_ID)
+
+    if reads_on:
+        assert a.calls[-1] == ("restore", b"before")
+    else:  # switched off elsewhere: Off leaves it off
+        assert a.calls[-1] == ("restore_off", b"before")
+        assert ("power", True) not in a.calls and ("restore", b"before") not in a.calls
+
+
+async def test_a_light_that_wont_switch_off_stays_on_dark_and_says_so(
+    make_home: HomeFactory,
+) -> None:
+    clock = FakeClock()
+    a = FakeLight("a")
+    home = await _started(make_home, clock, lights=[a, FakeLight("b")])
+    tries: list[bool] = []
+
+    async def refuses(on: bool) -> None:
+        tries.append(on)
+        raise OSError("no answer")
+
+    a.set_power = refuses  # type: ignore[method-assign]
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        await clock.advance(5.0)
+        await clock.advance(3 * LIGHTS_OUT_RETRY_S)  # later wakes, if any
+    finally:
+        logger.remove(sink)
+
+    [warning] = [r for r in records if "switch off" in r["message"]]
+    assert "a" in warning["message"] and "no answer" in warning["message"]
+    assert "a" not in home.routes.routes and a.power is True  # dark, but still on
+    assert tries == [False]  # no second attempt
+    del a.set_power  # the real one back
+    await home.manager.off(HOME_ZONE_ID)
+    assert a.calls[-1] == ("restore", b"before")

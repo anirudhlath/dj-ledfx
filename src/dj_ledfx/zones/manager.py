@@ -210,8 +210,9 @@ class ZoneManager:
         self._power_versions: dict[str, int] = {}  # moves on with every change to _power
         self._versions = itertools.count(1)
         self._deferred_power_on: set[str] = set()
-        # Lights out. `_restore_on`: the out lights of runs that ended, which Off and Stop all
-        # put back with their power (emptied as each is released or switched on again).
+        # Lights out. `_restore_on`: the lights dj-ledfx switched off and hasn't switched on
+        # since, awaiting release: Off and Stop all put their power back (under preview-only,
+        # at the release that turning it off makes).
         # `_out_pending`: the lights the timer will switch off, seen before their moment (so
         # one already past at resume is left alone). One timer task, asleep until `_out_due`.
         self._restore_on: set[str] = set()
@@ -1068,15 +1069,13 @@ class ZoneManager:
         """Every end of a run: Off, a take-over, a new start on the zone. The run and its
         runtime are forgotten; returns the run, and its look as "Start again" remembers
         it, unless remember is False. A look started again on its zone is remembered too:
-        recent() leaves it out while it runs. The run's out lights are put back with their
-        power (_restore_on), unless nothing was sent to them (preview-only) or they were
-        switched off elsewhere, which Off never undoes (spec §6.4)."""
-        for device_id in self._running[zone_id].lights:
-            if self._is_out(device_id) and (
-                device_id in self._running[zone_id].switched_off
-                or (not self._preview_only and self._power.get(device_id) is not False)
-            ):
-                self._restore_on.add(device_id)
+        recent() leaves it out while it runs. The lights this run's timer switched off are
+        put back with their power (_restore_on): the one exception to Off never switching a
+        light on (spec §6.4), because dj-ledfx switched them off. Every other out light
+        (offline, held or switched off elsewhere at its moment, or already past it when the
+        run resumed) gets Off's usual rule: its power as _release reads it afresh."""
+        switched_off = self._running[zone_id].switched_off
+        self._restore_on.update(d for d in self._running[zone_id].lights if d in switched_off)
         running = self._running.pop(zone_id)
         if running.runtime is not None:
             self._host.remove_runtime(running.runtime)
@@ -1425,7 +1424,7 @@ class ZoneManager:
         if state:
             # Read afresh: the last poll may be 5 s old. A light that reads off gets its
             # colour and effect back and stays off: Off never switches a light on (§6.4),
-            # unless its look had put it out (lights out): it was on before that.
+            # unless dj-ledfx switched it off (lights out): it was on before that.
             power = (await self._read(adapter)).power
             on = power is not False or device_id in self._restore_on
             try:
