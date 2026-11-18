@@ -12,8 +12,10 @@ from conftest import FakeLight
 from zone_home import FakeHome
 
 from dj_ledfx.looks.builtin import handoff_looks
+from dj_ledfx.timing import parse_utc
 from dj_ledfx.web.contract import overlay_out
 from dj_ledfx.zones.model import OverlayInfo, ZoneRecord
+from dj_ledfx.zones.overlay import MAX_OVERLAY_S
 from tests.web.conftest import raw_json
 
 OVERLAY = "/api/running/overlay"
@@ -44,9 +46,11 @@ async def test_post_overlay_plays_a_home_look_over_everything(api: Api) -> None:
         "lookId": "wisp",
         "name": WISP["name"],
         "trigger": "api",
-        "endsAt": (started + timedelta(seconds=8)).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "endsAt": body["endsAt"],
         "progress": 0.0,
     }
+    assert parse_utc(body["endsAt"]) == started + timedelta(seconds=8)
+    assert body["endsAt"].endswith("Z")
     running = (await api.client.get("/api/running")).json()
     assert running["overlays"] == [body]
     assert [zone["zoneId"] for zone in running["zones"]] == ["west"]
@@ -81,7 +85,10 @@ async def test_bad_overlays_are_refused_with_the_reason(api: Api) -> None:
         400,
         "Only a Home look plays over everything",
     )
-    assert (await post({"look": breathe, "durationS": 5}))[0] == 400
+    assert await post({"look": breathe, "durationS": 5}) == (
+        400,
+        "Only a Home look plays over everything",
+    )
     for duration in (0, 3601, "eight"):
         assert (await post({"lookId": "wisp", "durationS": duration}))[0] == 422
     nan = await api.client.post(
@@ -91,6 +98,12 @@ async def test_bad_overlays_are_refused_with_the_reason(api: Api) -> None:
     assert (await post({"lookId": "wisp", "durationS": 5, "trigger": "x" * 201}))[0] == 422
     assert (await post({"lookId": "wisp", "durationS": 5, "trigger": ""}))[0] == 422
     assert (await api.client.get("/api/running")).json()["overlays"] == []
+
+
+async def test_the_longest_overlay_is_accepted(api: Api) -> None:
+    resp = await api.client.post(OVERLAY, json={"lookId": "wisp", "durationS": MAX_OVERLAY_S})
+
+    assert resp.status_code == 201
 
 
 async def test_delete_overlay_ends_it_and_answers_204_either_way(api: Api) -> None:

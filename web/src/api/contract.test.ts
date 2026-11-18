@@ -1,8 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { components, paths } from './generated/schema'
 import type {
-  ApiPath, Overlay, Deck, Furniture, Home, InputKind, Inputs, InputState, Light, LightShape, LightStatus, Location, Mask,
-  PendingPath, PendingSchema, Room, RunningZone, RunningZoneTransition, SunInput, TempoLock, TempoSource,
+  ApiPath, Deck, Furniture, Home, InputKind, Inputs, InputState, Light, LightShape, LightStatus, Location, Mask,
+  Overlay, PendingPath, PendingSchema, Room, RunningZone, RunningZoneTransition, SunInput, TempoLock, TempoSource,
 } from './contract'
 
 describe('the contract', () => {
