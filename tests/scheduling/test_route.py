@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 from conftest import nearest_frame, ring_route
 
 from dj_ledfx.effects.ring_buffer import RingBuffer
-from dj_ledfx.scheduling.route import to_device_colors
+from dj_ledfx.scheduling.route import overlaid, to_device_colors
 from dj_ledfx.types import RenderedFrame
 
 
@@ -70,3 +72,57 @@ def test_a_route_sends_its_slice_at_the_zone_s_brightness() -> None:
     assert on_a_frame is not None and on_a_frame.tolist() == [[102] * 3] * 3  # 0.4 of 255
     assert between is not None and between.tolist() == [[89] * 3] * 3  # 0.35 of 255
     assert np.allclose(nearest_frame(ring, 10.0).colors, 0.8)  # the ring keeps the full level
+
+
+class _FakeOver:
+    """An OverSource that answers what it's told, and keeps what it was asked."""
+
+    def __init__(self, answer: tuple[np.ndarray, float] | None) -> None:
+        self.answer = answer
+        self.asked: list[tuple[str, float, int]] = []
+
+    def over_at(self, device_id: str, t: float, count: int) -> tuple[np.ndarray, float] | None:
+        self.asked.append((device_id, t, count))
+        return self.answer
+
+
+def test_overlaid_screens_the_overlay_onto_the_zone_after_its_brightness() -> None:
+    base = np.full((2, 3), 0.5, dtype=np.float32)
+    top = np.full((2, 3), 0.4, dtype=np.float32)
+    before = base.copy(), top.copy()
+
+    full = overlaid(base, 0.5, top, 1.0)
+    half = overlaid(base, 0.5, top, 0.5)
+
+    assert np.allclose(full, 0.25 + 0.4 - 0.1)  # 0.55
+    assert np.allclose(half, 0.25 + 0.2 - 0.05)
+    assert np.array_equal(base, before[0]) and np.array_equal(top, before[1])
+    assert full is not base and full is not top
+
+
+def test_a_route_with_nothing_to_mix_sends_what_it_sent_before() -> None:
+    ring = RingBuffer(capacity=4)
+    colours = np.linspace(0.0, 1.0, 12, dtype=np.float32).reshape(4, 3)
+    ring.write(_frame(colours, 10.0))
+    plain = ring_route(ring, start=0, stop=4, brightness=0.7)
+    expected = to_device_colors(colours, 4, 0.7)
+    silent = _FakeOver(None)
+
+    for over in (None, silent):
+        out = replace(plain, over=over).colors_at(10.0, 4)
+        assert out is not None and np.array_equal(out, expected)
+    assert silent.asked == [("light", 10.0, 4)]
+
+
+def test_a_route_reads_the_overlay_at_its_own_moment() -> None:
+    ring = RingBuffer(capacity=4)
+    ring.write(_frame(np.full((4, 3), 0.5, dtype=np.float32), 10.0))
+    top = np.full((4, 3), 0.4, dtype=np.float32)
+    over = _FakeOver((top, 1.0))
+    route = replace(ring_route(ring, start=0, stop=4, brightness=0.5), over=over)
+
+    out = route.colors_at(10.0, 6)
+
+    assert over.asked == [("light", 10.0, 4)]  # the route's own moment, the slice's LEDs
+    assert out is not None
+    assert out.tolist()[:4] == [[140] * 3] * 4 and out.tolist()[4:] == [[0] * 3] * 2  # 0.55

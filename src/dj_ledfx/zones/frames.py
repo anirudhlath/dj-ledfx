@@ -21,10 +21,11 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from dj_ledfx.scheduling.route import to_device_colors
+from dj_ledfx.scheduling.route import OverSource, overlaid, to_device_colors
 
 if TYPE_CHECKING:
     from dj_ledfx.effects.fx import Fx
+    from dj_ledfx.types import FloatRGB
     from dj_ledfx.zones.runtime import ZoneRuntime
 
 Stream = Literal["live", "preview"]
@@ -72,9 +73,11 @@ class FrameFeed:
         previews: Runtimes = list,
         *,
         clock: Callable[[], float] = time.monotonic,
+        overlay: OverSource | None = None,
     ) -> None:
         self._runtimes: dict[Stream, Runtimes] = {"live": live, "preview": previews}
         self._clock = clock  # the engine's clock: rings are keyed by time.monotonic()
+        self._overlay = overlay  # shown on the lights it reaches, in the live stream only
 
     def frames(
         self, stream: Stream, wanted: Collection[str] | None = None
@@ -97,8 +100,22 @@ class FrameFeed:
                 continue
             whole = to_device_colors(colors, count, runtime.brightness)
             for piece in pieces:
-                out[piece.device_id] = whole[piece.start : piece.stop]
+                over = self._over(stream, runtime, piece.device_id, now, piece.count)
+                if over is None:
+                    out[piece.device_id] = whole[piece.start : piece.stop]
+                else:
+                    mixed = overlaid(colors[piece.start : piece.stop], runtime.brightness, *over)
+                    out[piece.device_id] = to_device_colors(mixed, piece.count)
         return out
+
+    def _over(
+        self, stream: Stream, runtime: ZoneRuntime, device_id: str, now: float, count: int
+    ) -> tuple[FloatRGB, float] | None:
+        """The overlay on a live light that streams (one running its own effect shows its
+        copy alone, as the overlay doesn't reach it), or None."""
+        if self._overlay is None or stream != "live" or not runtime.streams(device_id):
+            return None
+        return self._overlay.over_at(device_id, now, count)
 
     def fx(self) -> list[ZoneFx]:
         """What each zone draws in space now, live zones first, then the preview: the newest

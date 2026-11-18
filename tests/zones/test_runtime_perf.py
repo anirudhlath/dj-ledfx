@@ -33,6 +33,7 @@ from dj_ledfx.looks.model import (
     TransitionKind,
 )
 from dj_ledfx.tempo.clock import TempoClock
+from dj_ledfx.zones.overlay import OverlayRun, OverlaySlot
 from dj_ledfx.zones.runtime import FRAME_BUDGET_S, RuntimeEnv, ZoneLight, ZoneRuntime
 
 pytestmark = pytest.mark.perf
@@ -262,3 +263,60 @@ def test_what_a_zone_draws_in_space_keeps_its_frame_under_5_ms(
     without = home_runtime(dressed, evening=lambda: 0.5)
     share = statistics.median(durations) - statistics.median(tick_times(without))
     assert share < FX_SHARE_S
+
+
+# M6 ruling 10: a route that mixes an overlay in does it per send, in float, then converts once.
+OVERLAY_ROUTE_S = 0.00025
+
+
+def test_a_route_mixing_an_overlay_stays_cheap() -> None:
+    zone = home_runtime(builtin_look("aurora"))
+    over = home_runtime(builtin_look("wisp"))
+    for runtime in (zone, over):
+        runtime.tick(FIRST_TICK)
+    run = OverlayRun(
+        over.look,
+        "api",
+        over,
+        FIRST_TICK - 1,
+        FIRST_TICK + 60,
+        datetime.now(UTC),
+        datetime.now(UTC),
+    )
+    slot = OverlaySlot(reaches=lambda _: True)
+    slot.run = run
+    light = next(light for light in zone.lights if light.led_count > 1)
+    plain = zone.route_for(light.device_id)
+    assert plain is not None
+    route = replace(plain, over=slot)
+    assert route.colors_at(FIRST_TICK, light.led_count) is not None
+    assert slot.over_at(light.device_id, FIRST_TICK, light.led_count) is not None  # it mixes
+
+    started = time.perf_counter()
+    for _ in range(1000):
+        route.colors_at(FIRST_TICK, light.led_count)
+    each = (time.perf_counter() - started) / 1000
+
+    assert each < OVERLAY_ROUTE_S
+
+
+@pytest.mark.parametrize("look_id", ["wisp", "homesunset"])
+def test_an_overlay_renders_in_budget(look_id: str) -> None:
+    """The overlay's own runtime, as the manager makes it: every seeded LED, every light
+    emulated, a Home look, beside the zones' frames and in the same 5 ms."""
+    lights = seeded_zone_lights()
+    runtime = ZoneRuntime(
+        "home",
+        builtin_look(look_id),
+        lights,
+        RuntimeEnv(TempoClock(), lambda _: 0.05, sun=lambda: AT_DUSK),
+        space=seeded_space(),
+        started_t=FIRST_TICK,
+        emulated=[light.device_id for light in lights],
+    )
+
+    durations = tick_times(runtime)
+
+    assert runtime.waiting_for == ()
+    assert statistics.median(durations) < FRAME_BUDGET_S
+    assert runtime.fps_actual >= 59

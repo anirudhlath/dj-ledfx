@@ -392,7 +392,11 @@ async def _run(args: argparse.Namespace) -> None:
     await zone_manager.resume()
     previews = PreviewManager(zone_manager, partial(watchers.watching, "preview"))
     home_map.on_change(zone_manager.home_changed)  # the zones, and the preview, follow the map
-    frame_feed = FrameFeed(zone_manager.live_runtimes, zone_manager.preview_runtimes)
+    frame_feed = FrameFeed(
+        zone_manager.live_runtimes,
+        zone_manager.preview_runtimes,
+        overlay=zone_manager.overlay_slot,
+    )
 
     light_monitor = LightMonitor(devices=device_manager, zones=zone_manager, event_bus=event_bus)
     attention_feed = AttentionFeed(

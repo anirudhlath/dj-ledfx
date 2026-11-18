@@ -18,10 +18,11 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import math
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from loguru import logger
@@ -48,6 +49,7 @@ from dj_ledfx.zones.model import (
     ClaimsChanged,
     CrashInfo,
     LightsChanged,
+    OverlayInfo,
     PreviewOnlyChanged,
     RecentLookInfo,
     RunningZoneInfo,
@@ -61,6 +63,7 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
     ZonesChanged,
 )
+from dj_ledfx.zones.overlay import MAX_OVERLAY_S, OverlayRun, OverlaySlot
 from dj_ledfx.zones.runtime import (
     STREAMS,
     AppliedKey,
@@ -219,6 +222,10 @@ class ZoneManager:
         self._out_pending: set[str] = set()
         self._out_timer: asyncio.Task[None] | None = None
         self._out_due: float | None = None
+        # The overlay playing (M6 rulings 10-14): its slot is what every route and the frame
+        # feed read, so starting and ending one changes no route; one task ends it.
+        self._overlay_slot = OverlaySlot(reaches=lambda d: not self._is_out(d))
+        self._overlay_timer: asyncio.Task[None] | None = None
         self._closed = False
         # The previews the engine hosts (web spec §12.3), and what each calls when its zone
         # is gone or has no lights.
@@ -367,10 +374,12 @@ class ZoneManager:
 
     async def stop_all(self) -> None:
         async with self._lock:
-            if not self._running:
+            ended = self._end_overlay()
+            if not self._running and not ended:
                 return
-            released = await self._stop(*self._running)
-            await self._sync(released)
+            if self._running:
+                released = await self._stop(*self._running)
+                await self._sync(released)
         self._event_bus.emit(ZonesChanged())
 
     async def set_brightness(self, zone_id: str, value: float) -> RunningZoneInfo:
@@ -675,6 +684,7 @@ class ZoneManager:
             running.switched_off.intersection_update(running.lights)  # one a zone took is its own
             if running.runtime is not None:
                 self._follow(running.runtime, running.lights, space)
+        self._redraw_overlay(space)
         for runtime, on_end in list(self._previews.items()):
             zone = self._zones.get(runtime.zone_id)
             members = self._members(zone) if zone is not None else ()
@@ -684,6 +694,27 @@ class ZoneManager:
                 self.end_preview(runtime)
                 on_end()
 
+    def _home_members(self) -> tuple[str, ...]:
+        zone = self._zones.get(HOME_ZONE_ID)
+        return self._members(zone) if zone is not None else ()
+
+    def _redraw_overlay(self, space: Space) -> None:
+        """The overlay covers the whole home's lights, as they are now. A light that joins is
+        emulated like the rest: set_lights never adds one, and a firmware layer would claim it.
+        With no lights left it ends."""
+        run = self._overlay_slot.run
+        if run is None:
+            return
+        members = self._home_members()
+        if not members:
+            self._end_overlay()
+            return
+        before = {light.device_id for light in run.runtime.lights}
+        self._follow(run.runtime, members, space)
+        for device_id in members:
+            if device_id not in before:
+                run.runtime.mark_emulated(device_id)
+
     def _follow(self, runtime: ZoneRuntime, device_ids: Iterable[str], space: Space) -> None:
         lights = self._zone_lights(device_ids)
         if list(runtime.lights) != lights or runtime.space != space:
@@ -691,6 +722,91 @@ class ZoneManager:
 
     def _members(self, zone: ZoneRecord) -> tuple[str, ...]:
         return tuple(light for light in self._lights_of(zone) if self._adapter(light) is not None)
+
+    # --- overlays (M6 rulings 10-14) ----------------------------------------------------
+
+    @property
+    def overlay_slot(self) -> OverlaySlot:
+        return self._overlay_slot
+
+    def overlays(self) -> list[OverlayInfo]:
+        run = self._overlay_slot.run
+        if run is None:
+            return []
+        return [OverlayInfo(run.look.id, run.look.name, run.trigger, run.started_at, run.ends_at)]
+
+    async def start_overlay(
+        self, look: Look, duration_s: float, trigger: str = "api"
+    ) -> OverlayInfo:
+        """Play a Home look over every running zone for duration_s seconds, then get out of
+        the way. A newer overlay replaces the one playing."""
+        validate_look(look)
+        if look.scope != "whole-home":
+            raise ZoneError("Only a Home look plays over everything")
+        if not math.isfinite(duration_s) or not 0.0 < duration_s <= MAX_OVERLAY_S:
+            raise ZoneError(f"An overlay lasts more than 0 and at most {MAX_OVERLAY_S:g} seconds")
+        async with self._lock:
+            members = self._home_members()
+            if not members:
+                raise ZoneError(f"{HOME_ZONE_NAME} has no lights")
+            started_t = self._monotonic()
+            runtime = self._new_runtime(
+                HOME_ZONE_ID,
+                look,
+                members,
+                1.0,
+                env=replace(self._env, on_state_change=None, on_switch=None),
+                emulated=members,
+                started_t=started_t,
+            )
+            if runtime.waiting_for:
+                raise ZoneError(f"{look.name} waits for {', '.join(runtime.waiting_for)}")
+            self._end_overlay()
+            started_at = self._now()
+            run = OverlayRun(
+                look,
+                trigger,
+                runtime,
+                started_t,
+                started_t + duration_s,
+                started_at,
+                started_at + timedelta(seconds=duration_s),
+            )
+            self._overlay_slot.run = run
+            self._host.add_runtime(runtime)
+            if not self._closed:
+                self._overlay_timer = asyncio.get_running_loop().create_task(
+                    self._overlay_ends(run, duration_s)
+                )
+        self._event_bus.emit(ZonesChanged())
+        return OverlayInfo(look.id, look.name, trigger, started_at, run.ends_at)
+
+    async def stop_overlay(self) -> None:
+        """End the overlay playing, if one does. Idempotent."""
+        async with self._lock:
+            ended = self._end_overlay()
+        if ended:
+            self._event_bus.emit(ZonesChanged())
+
+    def _end_overlay(self) -> bool:
+        """Forget the overlay and its timer, and take its runtime from the engine. Returns
+        whether one played. No route changes: they read the slot."""
+        run, self._overlay_slot.run = self._overlay_slot.run, None
+        timer, self._overlay_timer = self._overlay_timer, None
+        if timer is not None and timer is not asyncio.current_task():
+            timer.cancel()
+        if run is None:
+            return False
+        self._host.remove_runtime(run.runtime)
+        return True
+
+    async def _overlay_ends(self, run: OverlayRun, duration_s: float) -> None:
+        await self._sleep(duration_s)
+        async with self._lock:
+            if self._overlay_slot.run is not run:  # a newer one, or stopped, got the lock first
+                return
+            self._end_overlay()
+        self._event_bus.emit(ZonesChanged())
 
     # --- groups (web spec §11.3) --------------------------------------------------------
 
@@ -876,10 +992,12 @@ class ZoneManager:
         brightness: float,
         env: RuntimeEnv | None = None,
         started_t: float | None = None,
+        emulated: Iterable[str] = (),
     ) -> ZoneRuntime:
         """A zone's runtime. A preview passes its own env: no latency (nothing is sent)
         and always watched (it exists only to be watched). `started_t` is when the look
-        began, on the monotonic clock (_started_t); a preview, which begins now, passes none."""
+        began, on the monotonic clock (_started_t); a preview, which begins now, passes none.
+        `emulated`: the lights that take a firmware layer's copy (the overlay's, all)."""
         return ZoneRuntime(
             zone_id,
             look,
@@ -888,6 +1006,7 @@ class ZoneManager:
             brightness=brightness,
             space=self._home.space(),
             started_t=self._monotonic() if started_t is None else started_t,
+            emulated=emulated,
         )
 
     def _started_t(self, since: datetime) -> float:
@@ -955,7 +1074,7 @@ class ZoneManager:
         if not runtime.transitioning:
             for device_id in runtime.handing_over & set(running.lights):
                 if not runtime.streams(device_id):
-                    self._routes.set_route(device_id, runtime.route_for(device_id))
+                    self._routes.set_route(device_id, self._route(device_id, runtime))
         self._event_bus.emit(TransitionSwitched(runtime.zone_id))
 
     async def switch(self, zone_id: str) -> None:
@@ -1310,11 +1429,17 @@ class ZoneManager:
         light for this runtime (a light leaving its own effect, from just before _apply
         stops the effect), and never while preview-only is on; the web preview gets every
         routed slice either way."""
-        route = runtime.route_for(device_id)
+        route = self._route(device_id, runtime)
         ready = self._ready(device_id, runtime)
         if route is not None and route.streaming and (self._preview_only or not ready):
             route = replace(route, streaming=False)
         self._routes.set_route(device_id, route)
+
+    def _route(self, device_id: str, runtime: ZoneRuntime) -> DeviceRoute | None:
+        """The light's route to its zone's frames, with the overlay slot: an overlay mixes in
+        at send wherever one plays, so starting and ending one changes no route."""
+        route = runtime.route_for(device_id)
+        return None if route is None else replace(route, over=self._overlay_slot)
 
     def _ready(self, device_id: str, runtime: ZoneRuntime) -> bool:
         """Whether the light was last given what this runtime gives it (applied_key)."""
@@ -1329,7 +1454,7 @@ class ZoneManager:
         claim = runtime.claim_for(device_id)
         if claim is not None:
             layer, effect = claim
-            self._routes.set_route(device_id, runtime.route_for(device_id))  # stop frames first
+            self._routes.set_route(device_id, self._route(device_id, runtime))  # stop frames first
             brightness = runtime.start_brightness(device_id)
             try:
                 async with adapter.send_lock:
@@ -1367,7 +1492,7 @@ class ZoneManager:
         shows them as it stops) and again just after (one that doesn't gets them then,
         not at its next due send). A light from anything else (idle, offline) is readied
         before any frame reaches it: an effect of its own may be running."""
-        self._routes.set_route(device_id, runtime.route_for(device_id))
+        self._routes.set_route(device_id, self._route(device_id, runtime))
         await self._routes.send_now(device_id)
         await self._prepare(adapter)
         await self._routes.send_now(device_id)
@@ -1440,9 +1565,12 @@ class ZoneManager:
     # --- lights out (M6 ruling 19) ----------------------------------------------------
 
     def close(self) -> None:
-        """Stop the lights-out timer, for good: a sync after this starts none."""
+        """Stop the lights-out timer and the overlay's, for good: a sync after this starts none."""
         self._closed = True
         self._cancel_out_timer()
+        timer, self._overlay_timer = self._overlay_timer, None
+        if timer is not None:
+            timer.cancel()
 
     def _out_time(self, runtime: ZoneRuntime, device_id: str) -> float | None:
         """When the light's look has it dark for good, on the monotonic clock. None: never,

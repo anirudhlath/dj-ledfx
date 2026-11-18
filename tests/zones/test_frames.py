@@ -4,14 +4,23 @@ from functools import partial
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from conftest import FakeLight, nearest_frame
 from runtime_fakes import TILE
-from zone_home import BREATHE_AND_GLOW, GLOW, HomeFactory, zone_record
+from zone_home import (
+    BREATHE_AND_GLOW,
+    GLOW,
+    FakeClock,
+    FakeHome,
+    HomeFactory,
+    zone_record,
+)
 
 from dj_ledfx.effects.fx import Fx
 from dj_ledfx.effects.particle_tools import swarm
 from dj_ledfx.effects.ring_buffer import RingBuffer
-from dj_ledfx.scheduling.route import to_device_colors
+from dj_ledfx.looks.model import Layer, Look
+from dj_ledfx.scheduling.route import overlaid, to_device_colors
 from dj_ledfx.types import RenderedFrame
 from dj_ledfx.zones.frames import FrameFeed, Watchers, ZoneFx
 from dj_ledfx.zones.preview import PreviewManager
@@ -165,3 +174,77 @@ def test_the_feed_reads_each_zones_fx_from_the_newest_frame_at_or_before_now() -
     now[0] = 100.5
     assert feed.fx()[0].fx is late
     assert FrameFeed(lambda: [], clock=lambda: 100.0).fx() == []
+
+
+def _home_flat() -> Look:
+    return Look(
+        id="home-flat",
+        name="Home flat",
+        category="ambient",
+        layers=(
+            Layer(id="f", name="Flat", type="field", kind="flat_field", settings={"level": 0.4}),
+        ),
+        scope="whole-home",
+    )
+
+
+@pytest.mark.usefixtures("_fields")
+async def test_the_live_feed_shows_the_overlay_on_the_lights_it_reaches(
+    make_home: HomeFactory,
+) -> None:
+    clock = FakeClock()
+    home = await make_home(
+        [FakeLight("lamp"), FakeLight("tile", caps=TILE)],
+        [zone_record("z", "lamp", "tile")],
+        view=FakeHome(rooms={"r": ["lamp", "tile"]}),
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+    await home.manager.start("z", BREATHE_AND_GLOW)  # the tile runs Glow itself
+    await home.manager.start_overlay(_home_flat(), 8)
+    at = 1004.0
+    feed = FrameFeed(
+        home.manager.live_runtimes, clock=lambda: at, overlay=home.manager.overlay_slot
+    )
+    for runtime in home.host.hosted:
+        runtime.tick(at)
+    zone = home.host.runtimes["z"]
+    colors = nearest_frame(zone.ring, at).colors
+    flat = np.full((4, 3), 0.4, dtype=np.float32)
+
+    live = feed.frames("live")
+
+    mixed = to_device_colors(overlaid(colors[:4], zone.brightness, flat, 1.0), 4)
+    assert np.array_equal(live["lamp"], mixed)  # the mix, in 8 bits
+    assert not np.array_equal(live["lamp"], to_device_colors(colors[:4], 4))
+    assert np.array_equal(live["tile"], to_device_colors(colors[4:], 4))  # its copy alone
+    assert np.array_equal(  # a feed with no overlay shows the zone alone
+        FrameFeed(home.manager.live_runtimes, clock=lambda: at).frames("live")["lamp"],
+        to_device_colors(colors[:4], 4),
+    )
+
+
+@pytest.mark.usefixtures("_fields")
+async def test_the_feed_leaves_the_overlay_out_of_fx(make_home: HomeFactory) -> None:
+    clock = FakeClock()
+    home = await make_home(
+        [FakeLight("lamp")],
+        [zone_record("z", "lamp")],
+        view=FakeHome(rooms={"r": ["lamp"]}),
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+    await home.manager.start("z", GLOW)
+    feed = FrameFeed(
+        home.manager.live_runtimes, clock=lambda: 1004.0, overlay=home.manager.overlay_slot
+    )
+    for runtime in home.host.hosted:
+        runtime.tick(1004.0)
+    before = feed.fx()
+
+    await home.manager.start_overlay(_home_flat(), 8)
+    for runtime in home.host.hosted:
+        runtime.tick(1004.0)
+
+    assert [(f.zone_id, f.stream) for f in feed.fx()] == [(f.zone_id, f.stream) for f in before]
+    assert all(f.zone_id == "z" for f in feed.fx())
