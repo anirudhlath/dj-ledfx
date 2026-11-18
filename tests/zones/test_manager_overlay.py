@@ -312,3 +312,20 @@ async def test_an_overlay_never_reaches_a_light_its_look_switched_off(
     assert np.array_equal(_sent(home, "b", 1006.0), _screen(0.0, 0.4))
     assert np.array_equal(_sent(home, "c", 1006.0), _screen(0.2, 0.4))
     assert HOME_ZONE_ID not in {i.zone_id for i in home.manager.running()}
+
+
+async def test_an_overlay_ends_when_whole_home_loses_every_light(make_home: HomeFactory) -> None:
+    clock = FakeClock()
+    home = await _home(make_home, clock)
+    assert isinstance(home.view, FakeHome)
+    await home.manager.start_overlay(_home_flat(), 8)
+    runtime = home.host.hosted[-1]
+    changes = len(home.changes)
+
+    home.view.rooms.clear()
+    await home.manager.home_changed()
+
+    assert home.manager.overlays() == [] and runtime not in home.host.hosted
+    assert len(home.changes) == changes + 1
+    assert home.manager.overlay_slot.over_at("a", MID, 4) is None
+    assert clock.waiting() == 0

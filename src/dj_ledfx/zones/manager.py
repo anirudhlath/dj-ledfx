@@ -701,7 +701,7 @@ class ZoneManager:
     def _redraw_overlay(self, space: Space) -> None:
         """The overlay covers the whole home's lights, as they are now. A light that joins is
         emulated like the rest: set_lights never adds one, and a firmware layer would claim it.
-        With no lights left it ends."""
+        With no lights left it ends; the caller announces that (home_changed's ZonesChanged)."""
         run = self._overlay_slot.run
         if run is None:
             return
@@ -803,7 +803,9 @@ class ZoneManager:
     async def _overlay_ends(self, run: OverlayRun, duration_s: float) -> None:
         await self._sleep(duration_s)
         async with self._lock:
-            if self._overlay_slot.run is not run:  # a newer one, or stopped, got the lock first
+            # Every end and replacement cancels this task under the lock, and a task cancelled
+            # while it waits for the lock never gets it: this covers a future end that forgets to.
+            if self._overlay_slot.run is not run:
                 return
             self._end_overlay()
         self._event_bus.emit(ZonesChanged())
