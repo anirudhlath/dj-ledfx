@@ -410,7 +410,10 @@ async def test_a_light_that_wont_switch_off_stays_on_dark_and_says_so(
         logger.remove(sink)
 
     [warning] = [r for r in records if "switch off" in r["message"]]
-    assert "a" in warning["message"] and "no answer" in warning["message"]
+    assert (
+        warning["message"].startswith("Couldn't switch off a:")
+        and "no answer" in warning["message"]
+    )
     assert "a" not in home.routes.routes and a.power is True  # dark, but still on
     assert tries == [False]  # no second attempt
     del a.set_power  # the real one back
