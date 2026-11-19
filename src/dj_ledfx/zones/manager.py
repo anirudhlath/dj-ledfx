@@ -1694,10 +1694,17 @@ class ZoneManager:
     async def _switch_off(self, running: _Running, runtime: ZoneRuntime, device_id: str) -> None:
         """Switch off a light whose look has it dark for good: its route goes first, then the
         command, under the adapter's send lock, so no frame lands after it. A light that
-        can't be reached, is switched off already or is held (preview-only, offline) is left
+        can't be reached, is switched off already, was never captured or is held (preview-only, offline) is left
         as it is, and so is out from now on; a failure is logged and leaves it dark but on."""
         adapter = self._adapter(device_id)
-        if adapter is None or self._held(runtime, adapter) or self._power.get(device_id) is False:
+        if (
+            adapter is None
+            or self._held(runtime, adapter)
+            or self._power.get(device_id) is False
+            or device_id not in self._captured  # came back after _look_at: never taken, so Off
+            # would have nothing to put back (not _ready: a pending light past its moment that
+            # a sync passed is already unapplied, and its walk must go on)
+        ):
             return
         self._routes.set_route(device_id, None)
         self._applied.pop(device_id, None)

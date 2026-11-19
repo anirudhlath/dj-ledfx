@@ -313,6 +313,21 @@ async def test_a_light_whose_moment_passes_in_a_crashed_zone_is_switched_off_aft
     assert a.calls[-1] == ("power", False) and "a" not in home.routes.routes
 
 
+async def test_a_light_routed_but_never_captured_is_left_alone_at_its_moment(
+    make_home: HomeFactory,
+) -> None:
+    """One that came back after _look_at, or whose _look_at failed, may never have been
+    captured: switching it off would leave Off nothing to put back."""
+    clock = FakeClock()
+    a = FakeLight("a")
+    home = await _started(make_home, clock, lights=[a, FakeLight("b")])
+    home.manager._captured.pop("a")  # routed, but never taken: no fake fails a _look_at
+
+    await clock.advance(6.0)
+
+    assert _powers(a) == [] and "a" in home.routes.routes
+
+
 async def test_no_light_is_switched_off_mid_transition(make_home: HomeFactory) -> None:
     clock = FakeClock()
     a = FakeLight("a")
