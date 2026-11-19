@@ -62,6 +62,22 @@ def test_the_sun_point_is_where_the_stage_draws_it_on_the_zones_frame() -> None:
     assert sun_point(leds, 0.0, 0.0).dtype == np.float32
 
 
+def test_a_flat_zones_sun_stands_off_its_end_not_at_its_middle() -> None:
+    """A one-row zone has no depth: the sun 2 degrees off west still stands at the west end,
+    not at the middle for want of a y extent to measure the exit against."""
+    flat = leds_at(ROW, space=Space(ceiling=3.0))  # every LED at one y and one height
+    assert flat.bounds[0][1] == flat.bounds[1][1]
+
+    point = sun_point(flat, 0.0, 268.0)
+    assert point[0] == pytest.approx(0.0, abs=0.01) and point[1] == pytest.approx(1.0, abs=0.1)
+
+    frame = HomeSunset().render(_sun(2.0, 268.0), flat)
+    assert _warm(frame, WEST)[0] > _warm(frame, EAST)[0] + 0.1  # warmest at the west end
+
+    middle = leds_at([(2.0, 1.0, 1.0)], space=Space(ceiling=3.0))  # no extent at all: the middle
+    assert sun_point(middle, 0.0, 268.0) == pytest.approx((2.0, 1.0, 1.0))
+
+
 def test_home_sunset_is_warmest_where_the_sun_stands() -> None:
     leds = _row()
 

@@ -123,6 +123,12 @@ def sun_point(leds: LedSet, elevation_deg: float, azimuth_deg: float) -> F32:
     bearing_rad = math.radians(plan_bearing(azimuth_deg, leds.space.north_offset_deg))
     toward = np.array([math.sin(bearing_rad), -math.cos(bearing_rad)])
     half = (high[:2] - low[:2]) / 2.0
+    # A flat box (every LED in one row or column) has no extent across: measure that axis
+    # against the other's, or the exit would be 0 and the sun would stand at the middle.
+    # With no extent at all it stands at the middle.
+    flat = half < 1e-9
+    if flat.any() and not flat.all():
+        half = np.where(flat, half[::-1], half)
     # The distance along `toward` to each side it leaves through; one it runs along never.
     sides = np.where(np.abs(toward) > 1e-9, half / np.maximum(np.abs(toward), 1e-9), np.inf)
     exit_m = float(sides.min())
