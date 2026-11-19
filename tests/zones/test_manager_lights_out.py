@@ -19,6 +19,7 @@ from zone_home import START, FakeClock, FakeHome, Home, HomeFactory, build_home
 from dj_ledfx.effects.goodnight import FADE_S, OFF_AFTER_S
 from dj_ledfx.home.shapes import PointShape
 from dj_ledfx.looks.model import Layer, Look, Transition
+from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.manager import LIGHTS_OUT_RETRY_S
 from dj_ledfx.zones.model import HOME_ZONE_ID
 
@@ -110,6 +111,31 @@ async def test_an_out_light_switched_on_elsewhere_is_left_alone(make_home: HomeF
 
     assert a.calls == [] and a.frames == []  # no prepare, no frame, no power call
     assert "a" not in home.routes.routes
+
+
+async def test_an_out_light_reads_switched_off_until_it_is_switched_on_elsewhere_and_then_idle(
+    make_home: HomeFactory,
+) -> None:
+    """dj-ledfx sends an out light nothing, so once it reads on again it is no part of the
+    look (idle, no mode), not a dark part of Goodnight; switched off, it reads so."""
+    clock = FakeClock()
+    a = FakeLight("a")
+    home = await _started(make_home, clock, lights=[a, FakeLight("b")])
+    monitor = LightMonitor(
+        devices=home.devices, zones=home.manager, event_bus=home.bus, now=lambda: home.clock[0]
+    )
+    await clock.advance(5.0)
+    await monitor.poll_zone_lights()
+    states = {s.device_id: s.status for s in monitor.states()}
+    assert states["a"] == "switched-off" and home.manager.light_mode("a") is not None
+
+    a.power = True  # someone switched it back on
+    await home.manager.on_power_reading("a", True)
+    await monitor.poll_zone_lights()
+
+    assert home.manager.light_mode("a") is None
+    assert {s.device_id: s.status for s in monitor.states()}["a"] == "idle"
+    assert home.manager.light_mode("b") == "streaming"
 
 
 async def test_a_later_start_switches_it_back_on_and_keeps_its_capture(

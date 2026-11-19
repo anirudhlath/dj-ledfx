@@ -324,9 +324,15 @@ class ZoneManager:
 
     def light_mode(self, device_id: str) -> LightMode | None:
         """How a light shows its zone's look. None when no look drives it: no running zone
-        owns it, or its zone's saved look can't be read, which leaves it as it is."""
+        owns it, or its zone's saved look can't be read, which leaves it as it is. Also an
+        out light that doesn't read off (switched on elsewhere): it is sent nothing, so it is
+        no part of the look. One that reads off keeps its mode, and so its status."""
         runtime = self._runtime_of(device_id)
-        return None if runtime is None else runtime.mode_of(device_id)
+        if runtime is None or (
+            self._is_out(device_id) and self._power.get(device_id) is not False
+        ):
+            return None
+        return runtime.mode_of(device_id)
 
     def effect_name(self, device_id: str) -> str | None:
         """The firmware effect a light runs, or streams a copy of."""
