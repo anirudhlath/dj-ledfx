@@ -301,6 +301,12 @@ class ZoneRuntime:
         carries it, so a replaced look plays on from where it was."""
         return self._started_t
 
+    @started_t.setter
+    def started_t(self, value: float) -> None:
+        """Move the look's start, before it has ticked: an overlay begins one `horizon_s`
+        after its request, which a runtime knows only once it is built."""
+        self._started_t = value
+
     def out_after(self, device_id: str) -> float | None:
         """The look's elapsed time from which the light is black for good (M6 ruling 19): the
         latest of its LEDs' `lights_out()` times, kept until the look or the LEDs change.

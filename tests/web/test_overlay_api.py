@@ -49,7 +49,9 @@ async def test_post_overlay_plays_a_home_look_over_everything(api: Api) -> None:
         "endsAt": body["endsAt"],
         "progress": 0.0,
     }
-    assert parse_utc(body["endsAt"]) == started + timedelta(seconds=8)
+    lead = api.home.host.hosted[-1].horizon_s  # the span begins one lead after the request
+    assert lead > 0
+    assert parse_utc(body["endsAt"]) == started + timedelta(seconds=lead + 8)
     assert body["endsAt"].endswith("Z")
     running = (await api.client.get("/api/running")).json()
     assert running["overlays"] == [body]
@@ -128,8 +130,9 @@ def test_progress_is_the_share_of_the_overlay_played() -> None:
 
 async def test_progress_follows_the_managers_clock(api: Api) -> None:
     await api.client.post(OVERLAY, json={"lookId": "wisp", "durationS": 10})
+    lead = api.home.host.hosted[-1].horizon_s  # progress reads 0 until the span begins
     api.home.clock[0] += timedelta(seconds=4)
 
     running = (await api.client.get("/api/running")).json()
 
-    assert running["overlays"][0]["progress"] == pytest.approx(0.4)
+    assert running["overlays"][0]["progress"] == pytest.approx((4 - lead) / 10)

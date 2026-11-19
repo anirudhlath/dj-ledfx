@@ -12,6 +12,8 @@ from conftest import FakeLight
 from runtime_fakes import TILE, field_layer, look_of, out_layer
 from zone_home import BREATHE_AND_GLOW, GLOW_LAYER, FakeClock, FakeHome, Home, HomeFactory
 
+from dj_ledfx.latency.strategies import StaticLatency
+from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.model import Look
 from dj_ledfx.scheduling.route import overlaid, to_device_colors
 from dj_ledfx.zones.model import HOME_ZONE_ID, ZoneError
@@ -166,16 +168,20 @@ async def test_an_overlay_ends_by_itself_and_says_so(make_home: HomeFactory) -> 
     await _two_zones(home)
     await home.manager.start_overlay(_home_flat(), 8)
     runtime = home.host.hosted[-1]
+    lead = runtime.horizon_s  # the span, and so its end, begins one lead after the request
+    assert 0 < lead < 0.1
     changes = len(home.changes)
 
-    await clock.advance(7.9)
+    await clock.advance(7.9 + lead)
     assert home.manager.overlays() != []
     await clock.advance(0.1)
-    _tick(home, 1008.0)
+    _tick(home, 1008.0 + lead)
 
     assert home.manager.overlays() == [] and runtime not in home.host.hosted
     assert len(home.changes) == changes + 1
-    assert np.array_equal(_sent(home, "a", 1008.0), to_device_colors(np.full((4, 3), 0.5), 4))
+    assert np.array_equal(
+        _sent(home, "a", 1008.0 + lead), to_device_colors(np.full((4, 3), 0.5), 4)
+    )
     assert clock.waiting() == 0
 
 
@@ -329,3 +335,24 @@ async def test_an_overlay_ends_when_whole_home_loses_every_light(make_home: Home
     assert len(home.changes) == changes + 1
     assert home.manager.overlay_slot.over_at("a", MID, 4) is None
     assert clock.waiting() == 0
+
+
+async def test_an_overlay_eases_in_on_a_slow_light_too(make_home: HomeFactory) -> None:
+    """The span begins one lead after the request, so a light 0.4 s ahead of the wall clock
+    sends its first overlaid frame at amount ~0, as a fast one does, not at full."""
+    clock = FakeClock()
+    home = await _home(make_home, clock)
+    await _two_zones(home)
+    slow = home.devices.get_by_stable_id("a")
+    assert slow is not None
+    slow.tracker = LatencyTracker(strategy=StaticLatency(400.0))
+
+    await home.manager.start_overlay(_home_flat(), 8)
+
+    run = home.manager.overlay_slot.run
+    assert run is not None and run.runtime.horizon_s > 0.4
+    asked = 1000.0  # the request, on the fake clock
+    assert run.started_t == pytest.approx(asked + run.runtime.horizon_s)
+    first = asked + 0.4  # the slow light's first send reads a moment 0.4 s ahead
+    over = home.manager.overlay_slot.over_at("a", first, 4)
+    assert over is None or over[1] < 0.05  # its amount, well below full

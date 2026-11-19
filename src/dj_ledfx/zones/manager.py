@@ -766,7 +766,13 @@ class ZoneManager:
             if runtime.waiting_for:
                 raise ZoneError(f"{look.name} waits for {', '.join(runtime.waiting_for)}")
             self._end_overlay()
-            started_at = self._now()
+            # The span begins one lead (the runtime's horizon: its lights' latencies, which it
+            # counts before its first tick, plus a frame) after the request, so the first
+            # frame any light sends already eases in from 0, a slow light's included.
+            lead = runtime.horizon_s
+            started_t += lead
+            runtime.started_t = started_t
+            started_at = self._now() + timedelta(seconds=lead)
             run = OverlayRun(
                 look,
                 trigger,
@@ -780,7 +786,7 @@ class ZoneManager:
             self._host.add_runtime(runtime)
             if not self._closed:
                 self._overlay_timer = asyncio.get_running_loop().create_task(
-                    self._overlay_ends(run, duration_s)
+                    self._overlay_ends(run, lead + duration_s)
                 )
         self._event_bus.emit(ZonesChanged())
         return OverlayInfo(look.id, look.name, trigger, started_at, run.ends_at)
@@ -804,8 +810,8 @@ class ZoneManager:
         self._host.remove_runtime(run.runtime)
         return True
 
-    async def _overlay_ends(self, run: OverlayRun, duration_s: float) -> None:
-        await self._sleep(duration_s)
+    async def _overlay_ends(self, run: OverlayRun, after_s: float) -> None:
+        await self._sleep(after_s)
         async with self._lock:
             # Every end and replacement cancels this task under the lock, and a task cancelled
             # while it waits for the lock never gets it: this covers a future end that forgets to.
