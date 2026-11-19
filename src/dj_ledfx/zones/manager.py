@@ -1694,8 +1694,8 @@ class ZoneManager:
     async def _switch_off(self, running: _Running, runtime: ZoneRuntime, device_id: str) -> None:
         """Switch off a light whose look has it dark for good: its route goes first, then the
         command, under the adapter's send lock, so no frame lands after it. A light that
-        can't be reached, is switched off already, was never captured or is held (preview-only, offline) is left
-        as it is, and so is out from now on; a failure is logged and leaves it dark but on."""
+        can't be reached, is switched off already, was never captured or is held (preview-only,
+        offline) is left as it is, and so is out from now on; a failure is logged and leaves it dark but on."""
         adapter = self._adapter(device_id)
         if (
             adapter is None
