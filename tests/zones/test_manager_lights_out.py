@@ -13,7 +13,7 @@ import pytest
 from conftest import FakeLight
 from loguru import logger
 from map_home import tiny_home
-from runtime_fakes import field_layer, look_of, out_layer
+from runtime_fakes import OutField, field_layer, look_of, out_layer
 from zone_home import START, FakeClock, FakeHome, Home, HomeFactory, build_home
 
 from dj_ledfx.effects.goodnight import FADE_S, OFF_AFTER_S
@@ -287,6 +287,30 @@ async def test_a_zone_the_map_leaves_with_no_lights_puts_back_the_lights_it_swit
     assert HOME_ZONE_ID not in home.host.runtimes
     for light in (a, b):
         assert light.calls == [("restore", b"before")] and light.power is True
+
+
+async def test_a_light_whose_moment_passes_in_a_crashed_zone_is_switched_off_after_restart(
+    make_home: HomeFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = FakeClock()
+    a, b = FakeLight("a"), FakeLight("b")
+    home = await _started(make_home, clock, lights=[a, b])
+    whole = home.host.runtimes[HOME_ZONE_ID]
+    await clock.advance(3.0)
+
+    with monkeypatch.context() as patch:  # Goodnight's stand-in crashes before a's moment
+        patch.setattr(OutField, "render", lambda *_: (_ for _ in ()).throw(RuntimeError("boom")))
+        whole.tick(1003.0)
+    assert whole.state == "crashed"
+    for _ in range(3):  # a few syncs (power readings) and a's moment pass while it's crashed
+        await clock.advance(2.0)
+        await home.manager.on_power_reading("b", True)
+    assert _powers(a) == []
+
+    await home.manager.restart(HOME_ZONE_ID)
+    await clock.advance(LIGHTS_OUT_RETRY_S)
+
+    assert a.calls[-1] == ("power", False) and "a" not in home.routes.routes
 
 
 async def test_no_light_is_switched_off_mid_transition(make_home: HomeFactory) -> None:

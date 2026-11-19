@@ -1630,7 +1630,8 @@ class ZoneManager:
         sync and after each wake. A light is pending once seen before its moment, and stays
         so until the timer deals with it, so a moment already past when a run is first seen
         (resumed after its walk) is left alone. A pending light whose zone is mid-transition
-        is tried again after LIGHTS_OUT_RETRY_S."""
+        is tried again after LIGHTS_OUT_RETRY_S, and so is one whose zone has crashed (a crashed
+        zone has no moments, so its pending lights are kept, not dropped)."""
         if self._closed:
             return
         now = self._monotonic()
@@ -1644,11 +1645,17 @@ class ZoneManager:
                 if device_id in running.switched_off:
                     continue
                 moment = self._out_time(runtime, device_id)
-                if moment is None or (moment <= now and device_id not in self._out_pending):
+                if runtime.crash is not None and device_id in self._out_pending:
+                    # a crashed zone has no moments, but dj-ledfx's own crash isn't a reason
+                    # to leave the light: it stays pending, and a Restart finishes the walk
+                    pending.add(device_id)
+                    moment = now + LIGHTS_OUT_RETRY_S
+                elif moment is None or (moment <= now and device_id not in self._out_pending):
                     continue
-                pending.add(device_id)
-                if moment <= now:  # past while a transition held it, or just now
-                    moment = now + LIGHTS_OUT_RETRY_S if runtime.transitioning else now
+                else:
+                    pending.add(device_id)
+                    if moment <= now:  # past while a transition held it, or just now
+                        moment = now + LIGHTS_OUT_RETRY_S if runtime.transitioning else now
                 due = moment if due is None else min(due, moment)
         self._out_pending = pending
         if due is None:
@@ -1672,6 +1679,8 @@ class ZoneManager:
                     if device_id not in self._out_pending or device_id in running.switched_off:
                         continue
                     moment = self._out_time(runtime, device_id)
+                    if runtime.crash is not None:
+                        continue  # still pending: tried again after a Restart
                     if moment is None:
                         self._out_pending.discard(device_id)  # its look changed
                     elif moment <= now and not runtime.transitioning:
