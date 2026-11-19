@@ -17,7 +17,7 @@ from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.model import Look
 from dj_ledfx.scheduling.route import overlaid, to_device_colors
 from dj_ledfx.zones.model import HOME_ZONE_ID, ZoneError
-from dj_ledfx.zones.overlay import MAX_OVERLAY_S
+from dj_ledfx.zones.overlay import MAX_OVERLAY_S, OVERLAY_EDGE_S
 
 pytestmark = pytest.mark.usefixtures("_fields")
 
@@ -354,5 +354,9 @@ async def test_an_overlay_eases_in_on_a_slow_light_too(make_home: HomeFactory) -
     asked = 1000.0  # the request, on the fake clock
     assert run.started_t == pytest.approx(asked + run.runtime.horizon_s)
     first = asked + 0.4  # the slow light's first send reads a moment 0.4 s ahead
-    over = home.manager.overlay_slot.over_at("a", first, 4)
-    assert over is None or over[1] < 0.05  # its amount, well below full
+    # Before the span begins the amount is 0, so the first send carries no overlay at all.
+    assert home.manager.overlay_slot.over_at("a", first, 4) is None
+    # Half an edge into the span, at that light's moment, it is part way in.
+    _tick(home, run.started_t + OVERLAY_EDGE_S / 2 - run.runtime.horizon_s)  # a frame for it
+    half = home.manager.overlay_slot.over_at("a", run.started_t + OVERLAY_EDGE_S / 2, 4)
+    assert half is not None and 0.0 < half[1] < 1.0
