@@ -124,7 +124,7 @@ async def test_restore_without_power_sends_nothing(transport: MagicMock) -> None
     transport.send_command.assert_not_called()  # a colour command may switch it on
 
 
-@pytest.mark.parametrize(("on_off", "last"), [(0, ["turn"]), (1, [])])
+@pytest.mark.parametrize(("on_off", "last"), [(0, ["turn"]), (1, [])])  # on: turned on first
 async def test_a_restore_leaves_razer_then_puts_colour_and_brightness_back(
     transport: MagicMock, on_off: int, last: list[str]
 ) -> None:
@@ -133,8 +133,11 @@ async def test_a_restore_leaves_razer_then_puts_colour_and_brightness_back(
     state = GoveeDeviceState(on_off=on_off, brightness=50, r=10, g=20, b=30)
     await adapter.restore_state(state.to_bytes())
 
-    first, colour, brightness, *rest = sent(transport)
+    first, *tail = sent(transport)
     assert first == RAZER_OFF
+    if on_off:  # a lamp captured on is switched on before its colour and brightness
+        assert tail.pop(0)["msg"] == {"cmd": "turn", "data": {"value": 1}}
+    colour, brightness, *rest = tail
     assert colour == build_solid_color_message(10, 20, 30)
     assert brightness == build_brightness_message(50)
     assert [m["msg"]["cmd"] for m in rest] == last  # switched off last, if it was off

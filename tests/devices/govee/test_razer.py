@@ -24,6 +24,7 @@ from dj_ledfx.spatial.geometry import StripGeometry
 
 RAZER_ON, RAZER_OFF = build_razer_switch(on=True), build_razer_switch(on=False)
 OFF = build_turn_message(on=False)
+ON = build_turn_message(on=True)
 CAPTURED_OFF = GoveeDeviceState(on_off=0, brightness=50, r=10, g=20, b=30).to_bytes()
 LIT = {**STATUS, "onOff": 1}
 # Out of white: colorwc at colour temperature 0, in black, which can't flash before razer
@@ -171,6 +172,7 @@ async def test_a_lamp_captured_on_white_gets_its_white_back() -> None:
 
     assert sent(transport) == [
         RAZER_OFF,
+        ON,  # a restore with power switches a lamp captured on back on
         build_solid_color_message(0, 0, 0, kelvin=2700),
         build_brightness_message(80),
     ]
@@ -227,3 +229,28 @@ def test_a_still_look_keeps_razer_armed() -> None:
     """The scheduler re-sends an unchanged frame every KEEPALIVE_S, and razer is switched on
     again after RAZER_IDLE_S without a frame: a still look must come round first."""
     assert KEEPALIVE_S < RAZER_IDLE_S
+
+
+async def test_a_restore_with_power_switches_a_lamp_captured_on_back_on(
+    transport: MagicMock,
+) -> None:
+    """A lamp lights out switched off reads off; a captured-on lamp comes back on, before
+    its colour and brightness, a gap after razer's off."""
+    transport.query_status.return_value = STATUS  # it reads off now
+    adapter = GoveeRazerAdapter(transport, lamp_record(), 3)
+    state = GoveeDeviceState(on_off=1, brightness=50, r=10, g=20, b=30)
+    await adapter.restore_state(state.to_bytes())
+    assert sent(transport) == [
+        RAZER_OFF,
+        ON,
+        build_solid_color_message(10, 20, 30),
+        build_brightness_message(50),
+    ]
+
+
+async def test_a_restore_of_a_lamp_captured_off_sends_no_turn_on(transport: MagicMock) -> None:
+    transport.query_status.return_value = STATUS
+    adapter = GoveeRazerAdapter(transport, lamp_record(), 3)
+    await adapter.restore_state(CAPTURED_OFF)
+    assert ON not in sent(transport)
+    assert sent(transport)[-1] == OFF
