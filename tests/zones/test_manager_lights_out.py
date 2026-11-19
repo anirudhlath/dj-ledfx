@@ -243,6 +243,39 @@ async def test_a_resume_mid_walk_switches_off_only_the_lights_still_to_come(
     assert a.calls == []
 
 
+async def test_a_resume_over_ghosts_as_main_does_it_follows_the_walk(
+    make_home: HomeFactory,
+) -> None:
+    """main resumes with every light a ghost (GhostAdapter.switches_power is False), so no
+    light has a moment until it connects: one past its moment when it does is left alone,
+    one whose moment is to come is switched off at it, and one that comes online after its
+    moment is left alone."""
+    clock = FakeClock()
+    a, b, c = FakeLight("a"), FakeLight("b"), FakeLight("c")
+    view = FakeHome(rooms={"west": ["a"], "east": ["b"], "north": ["c"]})
+    home = await make_home([a, b, c], [], view=view, monotonic=clock.monotonic, sleep=clock.sleep)
+    await home.manager.start(HOME_ZONE_ID, _out_look({"a": 5.0, "b": 20.0, "c": 12.0}))
+    home.clock[0] = START + timedelta(seconds=10)  # the app was down for ten seconds
+    clock.now += 10.0
+
+    home = await home.restart(ghosts=True)
+    assert all(light.calls == [] for light in (a, b, c))  # nothing reached a ghost
+    await home.come_online("a")  # at 10 s: its moment (5) passed while the app was down
+    await home.come_online("b")  # at 10 s: its moment (20) is still to come
+    await clock.advance(5.0)
+    await home.come_online("c")  # at 15 s: its moment (12) passed before it connected
+
+    assert _powers(a) == [] and _powers(c) == [] and _powers(b) == []
+    assert "a" not in home.routes.routes and "c" not in home.routes.routes
+    assert home.routes.routes["b"].streaming
+    await clock.advance(4.9)
+    assert _powers(b) == []
+    await clock.advance(0.1)  # 20 s into the look
+
+    assert b.calls[-1] == ("power", False) and "b" not in home.routes.routes
+    assert _powers(a) == [] and _powers(c) == []
+
+
 async def test_a_restart_keeps_the_walk(make_home: HomeFactory) -> None:
     clock = FakeClock()
     a = FakeLight("a")
