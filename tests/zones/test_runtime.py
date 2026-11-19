@@ -589,6 +589,22 @@ def test_nothing_is_out_unless_every_layer_says_so_unmasked_and_unflashed() -> N
     assert after() is None
 
 
+def test_a_lights_out_with_a_nan_is_refused_with_a_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = runtime_of(look_of(out_layer({"lamp": 5.0})))
+    times = np.full(runtime.leds.count, 5.0)
+    times[0] = np.nan
+    monkeypatch.setattr(OutField, "lights_out", lambda self, leds: times)
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        assert runtime.out_after("lamp") is None and runtime.out_after("bulb") is None
+    finally:
+        logger.remove(sink)
+    assert len(warnings) == 1 and "can't say when it has a light out" in warnings[0]
+
+
 @pytest.mark.parametrize("bad", ["one", "twoD", "long"])
 def test_a_lights_out_of_the_wrong_shape_is_refused_not_raised(
     monkeypatch: pytest.MonkeyPatch, bad: str

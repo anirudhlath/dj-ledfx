@@ -342,6 +342,8 @@ class ZoneRuntime:
                     return {}
                 if np.shape(times) != latest.shape:  # one that would broadcast, or not fit
                     raise ValueError(f"shape {np.shape(times)}, not {latest.shape}")
+                if np.isnan(times).any():  # inf is "never"; NaN says nothing
+                    raise ValueError("NaN in the times")
                 np.maximum(latest, times, out=latest)
             except Exception as exc:  # a look never takes the manager down (spec §8)
                 logger.warning("{} can't say when it has a light out: {}", layer.name, exc)
@@ -351,7 +353,7 @@ class ZoneRuntime:
             for piece in self.leds.slices:
                 moment = float(latest[piece.start : piece.stop].max(initial=-math.inf))
                 out[piece.device_id] = moment if math.isfinite(moment) else None
-        except Exception as exc:  # NaN or the like in a result: no moments, as for a raise
+        except Exception as exc:  # no moments, as for a raise
             logger.warning("A look's lights_out gave unusable times: {}", exc)
             return {}
         return out
