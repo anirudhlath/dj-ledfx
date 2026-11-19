@@ -589,6 +589,29 @@ def test_nothing_is_out_unless_every_layer_says_so_unmasked_and_unflashed() -> N
     assert after() is None
 
 
+@pytest.mark.parametrize("bad", ["one", "twoD", "long"])
+def test_a_lights_out_of_the_wrong_shape_is_refused_not_raised(
+    monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    """A future effect's wrong answer (one that would broadcast, or not fit) is a warning and
+    no moments, as an exception is: out_after is read in the scheduler's send path."""
+    runtime = runtime_of(look_of(out_layer({"lamp": 5.0})))
+    count = runtime.leds.count
+    wrong = {
+        "one": lambda: np.full(1, 5.0),  # would broadcast over every LED
+        "twoD": lambda: np.full((count, 2), 5.0),
+        "long": lambda: np.full(count + 3, 5.0),
+    }[bad]
+    monkeypatch.setattr(OutField, "lights_out", lambda self, leds: wrong())
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        assert runtime.out_after("lamp") is None
+    finally:
+        logger.remove(sink)
+    assert len(warnings) == 1 and "can't say when it has a light out" in warnings[0]
+
+
 def test_a_light_a_firmware_layer_claims_or_copies_onto_is_never_out() -> None:
     out = out_layer({"c1": 4.0, "tile": 4.0, "lamp": 4.0})
     runtime = runtime_of(look_of(out, _flame(["c1"])), CANDLES)
