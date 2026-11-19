@@ -252,6 +252,43 @@ async def test_a_take_over_of_another_light_leaves_an_out_light_out(
     assert a.calls == [("restore", b"before")] and a.power is True  # with its power
 
 
+async def test_an_out_light_the_map_takes_out_of_the_zone_is_put_back_with_its_power(
+    make_home: HomeFactory,
+) -> None:
+    clock = FakeClock()
+    a, b = FakeLight("a"), FakeLight("b")
+    home = await _started(make_home, clock, lights=[a, b])
+    await clock.advance(5.0)
+    assert a.power is False
+    a.calls.clear()
+
+    assert isinstance(home.view, FakeHome)
+    home.view.rooms["west"].remove("a")  # a leaves the map, so no zone has it
+    await home.manager.home_changed()
+
+    assert a.calls == [("restore", b"before")] and a.power is True  # with its power
+
+
+async def test_a_zone_the_map_leaves_with_no_lights_puts_back_the_lights_it_switched_off(
+    make_home: HomeFactory,
+) -> None:
+    clock = FakeClock()
+    a, b = FakeLight("a"), FakeLight("b")
+    home = await _started(make_home, clock, lights=[a, b], out={"a": 5.0, "b": 6.0})
+    await clock.advance(6.0)
+    assert a.power is False and b.power is False
+    a.calls.clear()
+    b.calls.clear()
+
+    assert isinstance(home.view, FakeHome)
+    home.view.rooms.clear()  # nothing is on the map: Whole home has no lights and stops
+    await home.manager.home_changed()
+
+    assert HOME_ZONE_ID not in home.host.runtimes
+    for light in (a, b):
+        assert light.calls == [("restore", b"before")] and light.power is True
+
+
 async def test_no_light_is_switched_off_mid_transition(make_home: HomeFactory) -> None:
     clock = FakeClock()
     a = FakeLight("a")

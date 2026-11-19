@@ -214,8 +214,9 @@ class ZoneManager:
         self._versions = itertools.count(1)
         self._deferred_power_on: set[str] = set()
         # Lights out. `_restore_on`: the lights dj-ledfx switched off and hasn't switched on
-        # since, awaiting release: Off and Stop all put their power back (under preview-only,
-        # at the release that turning it off makes).
+        # since, awaiting release: every one that leaves its run (an end, or the map taking
+        # it out of the zone) is put back with its power at its release (under preview-only,
+        # at the release that turning it off makes), unless a zone takes it first.
         # `_out_pending`: the lights the timer will switch off, seen before their moment (so
         # one already past at resume is left alone). One timer task, asleep until `_out_due`.
         self._restore_on: set[str] = set()
@@ -681,7 +682,10 @@ class ZoneManager:
         the same way, and ends when the zone is gone or has none."""
         space = self._home.space()
         for running in self._running.values():
-            running.switched_off.intersection_update(running.lights)  # one a zone took is its own
+            # A switched-off light that leaves the run is put back with its power (the zone
+            # that next applies it discards the mark: _sync_device).
+            self._restore_on.update(running.switched_off.difference(running.lights))
+            running.switched_off.intersection_update(running.lights)
             if running.runtime is not None:
                 self._follow(running.runtime, running.lights, space)
         self._redraw_overlay(space)
@@ -1202,11 +1206,12 @@ class ZoneManager:
         it, unless remember is False. A look started again on its zone is remembered too:
         recent() leaves it out while it runs. The lights this run's timer switched off are
         put back with their power (_restore_on): the one exception to Off never switching a
-        light on (spec §6.4), because dj-ledfx switched them off. Every other out light
-        (offline, held or switched off elsewhere at its moment, or already past it when the
-        run resumed) gets Off's usual rule: its power as _release reads it afresh."""
-        switched_off = self._running[zone_id].switched_off
-        self._restore_on.update(d for d in self._running[zone_id].lights if d in switched_off)
+        light on (spec §6.4), because dj-ledfx switched them off: all of the run's, whether
+        or not the map had already taken them out of it (_follow_members may stop a zone after
+        filtering its lights). Every other out light (offline, held or switched off elsewhere
+        at its moment, or already past it when the run resumed) gets Off's usual rule: its
+        power as _release reads it afresh."""
+        self._restore_on.update(self._running[zone_id].switched_off)
         running = self._running.pop(zone_id)
         if running.runtime is not None:
             self._host.remove_runtime(running.runtime)
