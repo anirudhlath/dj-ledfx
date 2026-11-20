@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Sequence
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from conftest import FakeLight
 from runtime_fakes import register_fields
 from zone_home import Home, HomeFactory, build_home
 
+from dj_ledfx.home.sun import SunPoint
 from dj_ledfx.zones.home_view import HomeView
 from dj_ledfx.zones.model import ZoneRecord
 
@@ -32,6 +34,9 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
         view: HomeView | None = None,
         frames_watched: Callable[[], bool] | None = None,
         evening: Callable[[], float] | None = None,
+        sun: Callable[[], SunPoint | None] | None = None,
+        monotonic: Callable[[], float] | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> Home:
         home = await build_home(
             tmp_path,
@@ -41,10 +46,17 @@ async def make_home(tmp_path: Path) -> AsyncIterator[HomeFactory]:
             view=view,
             frames_watched=frames_watched,
             evening=evening,
+            sun=sun,
+            monotonic=monotonic,
+            sleep=sleep,
         )
         homes.append(home)
         return home
 
     yield factory
+    for home in homes:
+        for app in home.lineage:  # the app and each restart of it
+            app.manager.close()
+    await asyncio.sleep(0)  # a cancelled timer ends before its home does
     for home in homes:
         await home.db.close()

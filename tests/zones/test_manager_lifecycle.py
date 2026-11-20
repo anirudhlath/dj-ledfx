@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 
 from conftest import FakeLight, span
 from runtime_fakes import LAMP, TILE
@@ -215,6 +216,30 @@ async def test_an_unreadable_saved_look_restarts_from_the_look_store(
     assert lamp.names() == ["prepare_stream"]
     [saved] = await home.store.load_assignments()
     assert json.loads(saved.look_json)["name"] == "Breathe"
+
+
+async def test_a_restart_will_not_rebuild_a_zone_from_a_look_that_became_a_home_look(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp")
+    home = await make_home([lamp], [zone_record("z", "lamp")])
+    mine = await home.looks.create(replace(home.look("classic-breathe"), name="Mine"))
+    await home.manager.start("z", mine)
+    await home.db.write("UPDATE zone_assignments SET look='{not json' WHERE zone_id='z'")
+    home = await home.restart()
+    await home.looks.update(mine.id, replace(mine, scope="whole-home"))  # saved under its id
+
+    info = await home.manager.restart("z")
+
+    assert info.state == "crashed" and info.error is not None  # a group can't play a home look
+    assert "can't be read" in info.error.message
+    assert lamp.calls == [] and "z" not in home.host.runtimes
+
+    await home.looks.update(mine.id, replace(mine, scope="any-zone"))
+
+    info = await home.manager.restart("z")
+
+    assert info.state == "running" and info.error is None
 
 
 async def test_a_light_switched_off_during_a_look_drops_out_and_rejoins(

@@ -62,7 +62,7 @@ describe('the sun (§7.4)', () => {
   })
 
   it('draws only the points of the path it can place', () => {
-    const path = [...HERO_SUN.path!, { at: HERO_SUN.sunset, elevation: 5, azimuth: Number.NaN }]
+    const path = [...HERO_SUN.path!, { at: HERO_SUN.sunset!, elevation: 5, azimuth: Number.NaN }]
     expect(sunScene(homeFixture, { ...HERO_SUN, path })!.path.flat().every(Number.isFinite)).toBe(true)
     expect(sunScene(homeFixture, { ...HERO_SUN, path: 'soon' } as unknown as SunInput)!.path).toHaveLength(1)
   })

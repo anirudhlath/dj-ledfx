@@ -7,7 +7,7 @@ the web app generates its types from the OpenAPI schema (spec §9).
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import HTTPException
@@ -25,6 +25,7 @@ from dj_ledfx.home import model as home_model
 from dj_ledfx.home import shapes
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import WallKind
+from dj_ledfx.home.sun import SunPoint, SunReading
 from dj_ledfx.looks import model as looks
 from dj_ledfx.looks.model import (
     MAX_DISTANCE_M,
@@ -51,17 +52,20 @@ from dj_ledfx.tempo.model import (
     TempoLock,
     TempoSource,
 )
+from dj_ledfx.timing import utcnow
 from dj_ledfx.types import RGB, DeviceStats
 from dj_ledfx.zones import attention, preview
 from dj_ledfx.zones.attention import AttentionAction, AttentionKind, Severity, SubjectType
 from dj_ledfx.zones.lights import LightState, LightStatus
 from dj_ledfx.zones.model import (
+    OverlayInfo,
     RecentLookInfo,
     RunningZoneInfo,
     StartResult,
     ZoneKind,
     ZoneRecord,
 )
+from dj_ledfx.zones.overlay import MAX_OVERLAY_S
 from dj_ledfx.zones.runtime import LightMode, ZoneState
 
 if TYPE_CHECKING:
@@ -293,7 +297,7 @@ class Overlay(ContractModel):
 
 class Running(ContractModel):
     zones: list[RunningZone]
-    overlays: list[Overlay] = Field(default_factory=list)  # overlays arrive in M6
+    overlays: list[Overlay] = Field(default_factory=list)  # none or one
 
 
 class TakeOver(ContractModel):
@@ -320,6 +324,13 @@ class StartRequest(ContractModel):
     look_id: str | None = None
     look: Look | None = None  # an unsaved draft
     transition: Transition | None = None  # None: the look's own
+
+
+class OverlayRequest(ContractModel):
+    look_id: str | None = None
+    look: Look | None = None  # an unsaved draft
+    duration_s: float = Field(gt=0, le=MAX_OVERLAY_S, allow_inf_nan=False)
+    trigger: str = Field(default="api", min_length=1, max_length=200)
 
 
 class StartResponse(RunningZone):
@@ -381,8 +392,30 @@ def running_zone_out(info: RunningZoneInfo, index: LightIndex) -> RunningZone:
     return RunningZone.model_validate(_running_fields(info, index))
 
 
-def running_out(infos: Iterable[RunningZoneInfo], index: LightIndex) -> Running:
-    return Running(zones=[running_zone_out(info, index) for info in infos])
+def overlay_out(info: OverlayInfo, now: datetime) -> Overlay:
+    """progress is the share of the overlay played at `now`, clipped to 0..1."""
+    total = (info.ends_at - info.started_at).total_seconds()
+    share = (now - info.started_at).total_seconds() / total if total > 0 else 1.0
+    return Overlay(
+        look_id=info.look_id,
+        name=info.look_name,
+        trigger=info.trigger,
+        ends_at=info.ends_at.astimezone(UTC),
+        progress=min(1.0, max(0.0, share)),
+    )
+
+
+def running_out(
+    infos: Iterable[RunningZoneInfo],
+    index: LightIndex,
+    overlays: Iterable[OverlayInfo] = (),
+    now: datetime | None = None,
+) -> Running:
+    at = now if now is not None else utcnow()
+    return Running(
+        zones=[running_zone_out(info, index) for info in infos],
+        overlays=[overlay_out(info, at) for info in overlays],
+    )
 
 
 def start_out(result: StartResult, index: LightIndex) -> StartResponse:
@@ -961,11 +994,30 @@ class ProDjLinkInput(ContractModel):
     decks: list[Deck]
 
 
+class SunPathPoint(ContractModel):
+    at: datetime
+    elevation: float
+    azimuth: float
+
+
+class SunInput(ContractModel):
+    """The sun where the home is (engine M6): its height and its bearing from true north,
+    in degrees, to 1 decimal."""
+
+    elevation: float  # above the horizon, as the eye sees it
+    azimuth: float  # clockwise from true north; the stage turns it onto the plan
+    sunrise: datetime | None  # None when none falls near now (polar day or night)
+    sunset: datetime | None
+    # The sun at each 10-minute mark of the clock in the last two hours, oldest first
+    path: list[SunPathPoint] = Field(default_factory=list)
+
+
 class Inputs(ContractModel):
-    """GET /inputs: music, Home Assistant and the sun join in M6 and M7 (M3 ruling 12)."""
+    """GET /inputs: the tempo, Pro DJ Link and the sun; music and Home Assistant join in M7."""
 
     tempo: TempoInput
     prodjlink: ProDjLinkInput
+    sun: SunInput | None  # None while the home has no location
 
 
 class TempoRequest(ContractModel):
@@ -996,7 +1048,34 @@ def tempo_out(tempo: TempoClock) -> TempoInput:
     return TempoInput.model_validate(tempo, from_attributes=True)
 
 
-def inputs_out(tempo: TempoClock, listening: Listening) -> Inputs:
+def _azimuth_out(degrees: float) -> float:
+    """An azimuth to 1 decimal, kept in [0, 360): 359.96 rounds to 360.0, which is 0.0."""
+    return round(degrees, 1) % 360.0
+
+
+def _sun_path_point(point: SunPoint) -> SunPathPoint:
+    return SunPathPoint(
+        at=point.at,
+        elevation=round(point.elevation_deg, 1),
+        azimuth=_azimuth_out(point.azimuth_deg),
+    )
+
+
+def sun_out(reading: SunReading | None) -> SunInput | None:
+    """The sun's reading as GET /inputs and the inputs channel send it, every number to 1
+    decimal; None with no reading (the home has no location)."""
+    if reading is None:
+        return None
+    return SunInput(
+        elevation=round(reading.now.elevation_deg, 1),
+        azimuth=_azimuth_out(reading.now.azimuth_deg),
+        sunrise=reading.sunrise,
+        sunset=reading.sunset,
+        path=[_sun_path_point(point) for point in reading.path],
+    )
+
+
+def inputs_out(tempo: TempoClock, listening: Listening, sun: SunReading | None) -> Inputs:
     last = tempo.last_set
     dj_set = (
         None if last is None else DjSet.model_validate({"from": last.started, "to": last.ended})
@@ -1012,4 +1091,5 @@ def inputs_out(tempo: TempoClock, listening: Listening) -> Inputs:
             last_set=dj_set,
             decks=decks_out(tempo),
         ),
+        sun=sun_out(sun),
     )

@@ -1,13 +1,15 @@
-"""The evening at the home (engine spec §5.3): it warms in from an hour before sunset to
-the end of civil twilight, stays through the night, and is off again at sunrise (the
+"""The sun at the home. The evening (engine spec §5.3) warms in from an hour before sunset
+to the end of civil twilight, stays through the night, and is off again at sunrise (the
 owner's decision), fading out from civil dawn. The sun's times come from the home's
-location, worked out with astral; within POLE_DEG of a pole it follows the sun's height."""
+location, worked out with astral; within POLE_DEG of a pole it follows the sun's height.
+The sun's position (§7.3): where it is now, its sunrise and sunset, and its recent path."""
 
 from __future__ import annotations
 
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from types import MappingProxyType
@@ -16,7 +18,10 @@ from typing import TYPE_CHECKING
 from astral import Observer, sun
 from loguru import logger
 
-from dj_ledfx.effects.field_tools import smoothstep
+# plan_bearing is defined in field_tools, where the looks that turn the sun's bearing read
+# it, since this module imports field_tools; it stays importable from here.
+from dj_ledfx.effects.field_tools import plan_bearing as plan_bearing
+from dj_ledfx.effects.field_tools import smoothstep, wrap_degrees
 from dj_ledfx.timing import utcnow
 
 if TYPE_CHECKING:
@@ -24,7 +29,9 @@ if TYPE_CHECKING:
 
 LEAD = timedelta(hours=1)  # the evening starts an hour before sunset
 HORIZON_DEG = -0.833  # the sun's centre at sunrise and sunset (astral's, unrefracted)
-CACHE_S = 1.0  # Evening works the amount out at most this often
+CACHE_S = 1.0  # Evening and Sun work out at most this often
+PATH_SPAN = timedelta(hours=2)  # the sun's path reaches back this far
+PATH_STEP = timedelta(minutes=10)  # and has a point at each of the clock's marks this far apart
 _EVENTS: dict[str, Callable[..., datetime]] = {
     "dawn": sun.dawn,  # civil, the sun 6° below the horizon
     "sunrise": sun.sunrise,
@@ -175,6 +182,37 @@ def _at_a_pole(lat: float, lon: float, at: datetime) -> float:
     return smoothstep(HORIZON_DEG, CIVIL_DEG, height)  # down from the horizon to civil dusk
 
 
+class _HomePlace:
+    """The home's location as Evening and Sun work with it. `due()` is true at most once a
+    `CACHE_S` on the clock; `place()` reads the location, and when there is none logs
+    `missing` at WARNING once, until a location comes back."""
+
+    def __init__(
+        self, location: Callable[[], Location | None], clock: Callable[[], float], missing: str
+    ) -> None:
+        self._location = location
+        self._clock = clock
+        self._missing = missing
+        self._worked_out = -math.inf
+        self._told = False
+
+    def due(self) -> bool:
+        stamp = self._clock()
+        if stamp - self._worked_out < CACHE_S:
+            return False
+        self._worked_out = stamp
+        return True
+
+    def place(self) -> Location | None:
+        place = self._location()
+        if place is not None:
+            self._told = False
+        elif not self._told:
+            logger.warning(self._missing)
+            self._told = True
+        return place
+
+
 class Evening:
     """How far into the evening it is now at the home, 0..1, for the zones' runtimes.
     It reads the home's location each time it works the amount out, at most once a
@@ -188,25 +226,120 @@ class Evening:
         now: Callable[[], datetime] = utcnow,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._location = location
+        self._home = _HomePlace(
+            location, clock, "The home has no location: looks play as they are at evening"
+        )
         self._now = now
-        self._clock = clock
-        self._worked_out = -math.inf
         self._amount = 0.0
-        self._told = False
 
     def __call__(self) -> float:
-        stamp = self._clock()
-        if stamp - self._worked_out < CACHE_S:
-            return self._amount
-        self._worked_out = stamp
-        place = self._location()
-        if place is None:
-            if not self._told:
-                logger.warning("The home has no location: looks play as they are at evening")
-                self._told = True
-            self._amount = 0.0
-        else:
-            self._told = False
-            self._amount = evening_amount(place.lat, place.lon, self._now())
+        if self._home.due():
+            place = self._home.place()
+            self._amount = (
+                0.0 if place is None else evening_amount(place.lat, place.lon, self._now())
+            )
         return self._amount
+
+
+@dataclass(frozen=True, slots=True)
+class SunPoint:
+    """Where the sun is at a moment: its apparent height above the horizon and its bearing
+    clockwise from true north, both in degrees."""
+
+    at: datetime
+    elevation_deg: float
+    azimuth_deg: float
+
+
+@dataclass(frozen=True, slots=True)
+class SunReading:
+    """The sun now, its sunrise and sunset (`daylight()`) and its recent path."""
+
+    now: SunPoint
+    sunrise: datetime | None
+    sunset: datetime | None
+    path: tuple[SunPoint, ...]
+
+
+def sun_position(lat: float, lon: float, at: datetime) -> SunPoint:
+    """The sun at `at` (aware): the apparent elevation (astral's, refraction included: the
+    height that "above the horizon" means) and the azimuth from true north, in [0, 360)."""
+    observer = Observer(latitude=lat, longitude=lon)
+    return SunPoint(
+        at,
+        sun.elevation(observer, at, with_refraction=True),
+        wrap_degrees(sun.azimuth(observer, at)),
+    )
+
+
+def daylight(lat: float, lon: float, at: datetime) -> tuple[datetime | None, datetime | None]:
+    """The latest sunrise at or before `at` (aware) and the first sunset after it, from the
+    events around the date. Either is None where none falls in that window (a pole, polar
+    day or night); with no sunrise there is no window to look in, so both are None."""
+    times = _times(lat, lon, at.astimezone(UTC).date())
+    sunrise = next((rise for rise in reversed(times["sunrise"]) if rise <= at), None)
+    if sunrise is None:
+        return None, None
+    return sunrise, next((set_ for set_ in times["sunset"] if set_ > sunrise), None)
+
+
+def sun_path(lat: float, lon: float, at: datetime) -> tuple[SunPoint, ...]:
+    """The sun at the clock's 10-minute marks (UTC :00, :10, ...) in the two hours up to
+    `at`, oldest first: always the same number of points, and the same ones between two
+    marks, so a path that is sent every second changes only when a mark passes."""
+    now = at.astimezone(UTC)
+    latest = now.replace(minute=now.minute - now.minute % 10, second=0, microsecond=0)
+    steps = PATH_SPAN // PATH_STEP
+    return tuple(
+        sun_position(lat, lon, latest - PATH_STEP * back) for back in range(steps - 1, -1, -1)
+    )
+
+
+class Sun:
+    """Where the sun is now at the home, for the zones' runtimes and the web app's inputs.
+    It reads the home's location each time it works out, at most once a `CACHE_S`, so a
+    location the owner sets or changes applies within a second. `__call__` gives the sun's
+    point; `reading()` adds its sunrise, sunset and path, built only when asked, since the
+    render loop needs the point alone. With no location both give None, and a look that
+    needs the sun waits."""
+
+    def __init__(
+        self,
+        location: Callable[[], Location | None],
+        *,
+        now: Callable[[], datetime] = utcnow,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._home = _HomePlace(
+            location, clock, "The home has no location: looks that need the sun wait"
+        )
+        self._now = now
+        self._place: Location | None = None
+        self._point: SunPoint | None = None
+        self._reading: SunReading | None = None
+
+    def __call__(self) -> SunPoint | None:
+        self._refresh()
+        return self._point
+
+    def reading(self) -> SunReading | None:
+        self._refresh()
+        place, point = self._place, self._point
+        if place is None or point is None:
+            return None
+        if self._reading is None:
+            sunrise, sunset = daylight(place.lat, place.lon, point.at)
+            path = sun_path(place.lat, place.lon, point.at)
+            self._reading = SunReading(point, sunrise, sunset, path)
+        return self._reading
+
+    def _refresh(self) -> None:
+        if not self._home.due():
+            return
+        self._reading = None  # built again, for this moment, when it's asked for
+        self._place = self._home.place()
+        self._point = (
+            None
+            if self._place is None
+            else sun_position(self._place.lat, self._place.lon, self._now())
+        )

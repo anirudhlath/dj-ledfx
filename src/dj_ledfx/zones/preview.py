@@ -104,6 +104,7 @@ class PreviewManager:
         """The editor changed the look: take it in place where the layers allow."""
         preview = self._require(preview_id)
         validate_look(look)
+        self._zones.check_scope(preview.runtime.zone_id, look)
         preview.runtime.update_look(look)
 
     def stop(self, preview_id: str) -> None:

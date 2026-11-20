@@ -720,6 +720,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/running/overlay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Overlay
+         * @description Play a Home look over every running zone for durationS seconds; it replaces any overlay playing
+         */
+        post: operations["start_overlay_api_running_overlay_post"];
+        /**
+         * Stop Overlay
+         * @description End the overlay playing, if one is
+         */
+        delete: operations["stop_overlay_api_running_overlay_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/running/recent": {
         parameters: {
             query?: never;
@@ -1424,10 +1448,11 @@ export interface components {
         };
         /**
          * Inputs
-         * @description GET /inputs: music, Home Assistant and the sun join in M6 and M7 (M3 ruling 12).
+         * @description GET /inputs: the tempo, Pro DJ Link and the sun; music and Home Assistant join in M7.
          */
         Inputs: {
             prodjlink: components["schemas"]["ProDjLinkInput"];
+            sun: components["schemas"]["SunInput"] | null;
             tempo: components["schemas"]["TempoInput"];
         };
         /**
@@ -1782,6 +1807,19 @@ export interface components {
             /** Progress */
             progress: number;
             /** Trigger */
+            trigger: string;
+        };
+        /** OverlayRequest */
+        OverlayRequest: {
+            /** Durations */
+            durationS: number;
+            look?: components["schemas"]["Look"] | null;
+            /** Lookid */
+            lookId?: string | null;
+            /**
+             * Trigger
+             * @default api
+             */
             trigger: string;
         };
         /** Placement */
@@ -2172,6 +2210,35 @@ export interface components {
             ][] | null;
             /** Room */
             room?: string | null;
+        };
+        /**
+         * SunInput
+         * @description The sun where the home is (engine M6): its height and its bearing from true north,
+         *     in degrees, to 1 decimal.
+         */
+        SunInput: {
+            /** Azimuth */
+            azimuth: number;
+            /** Elevation */
+            elevation: number;
+            /** Path */
+            path?: components["schemas"]["SunPathPoint"][];
+            /** Sunrise */
+            sunrise: string | null;
+            /** Sunset */
+            sunset: string | null;
+        };
+        /** SunPathPoint */
+        SunPathPoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Azimuth */
+            azimuth: number;
+            /** Elevation */
+            elevation: number;
         };
         /** TakeOver */
         TakeOver: {
@@ -3894,6 +3961,57 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Running"];
                 };
+            };
+        };
+    };
+    start_overlay_api_running_overlay_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverlayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Overlay"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_overlay_api_running_overlay_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

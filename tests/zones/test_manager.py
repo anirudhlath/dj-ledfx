@@ -4,20 +4,26 @@ import asyncio
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import FakeLight, span
+from conftest import FakeLight, events, span
 from runtime_fakes import FADE, TILE
-from zone_home import BREATHE_AND_GLOW, GLOW, HomeFactory, zone_record
+from sun_fakes import AT_DUSK, FixedSun
+from zone_home import BREATHE_AND_GLOW, GLOW, START, FakeHome, HomeFactory, zone_record
 
 from dj_ledfx.devices.capabilities import DeviceCapabilities
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
-from dj_ledfx.looks.model import Look, LookError, LookModifiers, Transition
+from dj_ledfx.looks.model import Look, LookModifiers, Transition
+from dj_ledfx.main import _resync_on_claims
 from dj_ledfx.types import DeviceInfo
 from dj_ledfx.zones.model import (
+    HOME_ZONE_ID,
+    ClaimsChanged,
+    LightsChanged,
     TakeOver,
     ZoneError,
     ZoneNotFoundError,
@@ -477,6 +483,97 @@ async def test_running_zones_follow_the_managers_evening(make_home: HomeFactory)
     assert asked
 
 
+# M6 ruling 4: the zone manager's sun reaches every runtime it makes, a preview's and a
+# resumed zone's too, so a look that needs the sun runs while there is one.
+async def test_the_zone_manager_hands_its_runtimes_and_previews_the_sun(
+    make_home: HomeFactory,
+) -> None:
+    sun = FixedSun(AT_DUSK)
+    home = await make_home([FakeLight("lamp", caps=LAMP)], [zone_record("z", "lamp")], sun=sun)
+    look = replace(home.look("classic-breathe"), needs=("sun",))
+
+    await home.manager.start("z", look)
+    preview = home.manager.start_preview("z", look, lambda: None)
+
+    assert (home.host.runtimes["z"].state, preview.state) == ("running", "running")
+    resumed = await home.restart()  # the test home keeps its sun across a restart
+    assert resumed.host.runtimes["z"].state == "running"
+    sun.point = None
+    assert home.manager.start_preview("z", look, lambda: None).waiting_for == ("sun",)
+
+
+# M6 scan 2: a look that waits claims no light for its firmware layers, so its lights
+# stream its dark. When the sun arrives after the first tick, the tick claims the tile for
+# the firmware layer and the manager starts it there (main runs resync() for the event);
+# when the sun goes, the tile leaves its effect and streams the dark again.
+async def test_a_sun_arriving_after_the_first_tick_starts_the_firmware_layers(
+    make_home: HomeFactory,
+) -> None:
+    tile, lamp = FakeLight("tile", caps=TILE), FakeLight("lamp", caps=LAMP)
+    sun = FixedSun(None)
+    home = await make_home([tile, lamp], [zone_record("z", "tile", "lamp")], sun=sun)
+    await home.manager.start("z", replace(BREATHE_AND_GLOW, needs=("sun",)))
+    runtime = home.host.runtimes["z"]
+    runtime.tick(1000.0)
+    assert home.manager.light_mode("tile") == "streaming" and "firmware" not in tile.names()
+    claims = events(home.bus, ClaimsChanged)
+    lamp_calls = len(lamp.calls)
+
+    sun.point = AT_DUSK
+    runtime.tick(1000.0 + 1 / 60)
+    assert claims == [ClaimsChanged("z")]
+    await home.manager.resync("z")
+
+    assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": 1.0})
+    assert home.manager.light_mode("tile") == "own-effect"
+    assert not home.routes.routes["tile"].streaming
+    assert lamp.calls[lamp_calls:] == []  # the streamed lamp is left as it was
+
+    sun.point = None
+    runtime.tick(1000.0 + 2 / 60)
+    assert claims == [ClaimsChanged("z")] * 2
+    await home.manager.resync("z")
+
+    assert tile.names()[-1] == "prepare_stream"
+    assert home.manager.light_mode("tile") == "streaming"
+    assert home.routes.routes["tile"].streaming
+    assert lamp.calls[lamp_calls:] == []
+
+
+async def test_the_manager_applies_a_late_suns_claims_by_itself(make_home: HomeFactory) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    sun = FixedSun(None)
+    home = await make_home([tile], [zone_record("z", "tile")], sun=sun)
+    background: set[asyncio.Task[object]] = set()
+    _resync_on_claims(home.bus, home.manager, background)  # as main wires it
+    await home.manager.start("z", replace(GLOW, needs=("sun",)))
+    lights_changed = events(home.bus, LightsChanged)
+
+    sun.point = AT_DUSK
+    home.host.runtimes["z"].tick(1000.0)
+    assert background, "nothing was spawned"
+    await asyncio.wait(set(background))
+
+    assert tile.calls[-1] == ("firmware", {"level": 0.5, "brightness": 1.0})
+    assert lights_changed == [LightsChanged()]
+
+
+async def test_a_zone_whose_lights_are_in_line_needs_no_resync(make_home: HomeFactory) -> None:
+    tile = FakeLight("tile", caps=TILE)
+    sun = FixedSun(None)
+    home = await make_home([tile], [zone_record("z", "tile")], sun=sun)
+    await home.manager.start("z", replace(home.look("classic-breathe"), needs=("sun",)))
+    claims = events(home.bus, ClaimsChanged)
+    calls = len(tile.calls)
+
+    sun.point = AT_DUSK  # no firmware layer: the tile streams either way
+    home.host.runtimes["z"].tick(1000.0)
+    await home.manager.resync("z")
+    await home.manager.resync("gone")  # a zone that isn't running: nothing to do
+
+    assert claims == [] and tile.calls[calls:] == []
+
+
 async def test_a_look_starts_its_firmware_even_when_layer_ids_repeat(
     make_home: HomeFactory,
 ) -> None:
@@ -496,7 +593,7 @@ async def test_a_look_starts_its_firmware_even_when_layer_ids_repeat(
     assert tile.calls[-1] == ("firmware", {"level": 0.9, "brightness": 1.0})
 
 
-async def test_a_zone_with_no_lights_or_a_look_m1_cannot_run_is_refused(
+async def test_a_zone_with_no_lights_or_a_home_look_off_whole_home_is_refused(
     make_home: HomeFactory,
 ) -> None:
     lamp = FakeLight("lamp")
@@ -504,9 +601,34 @@ async def test_a_zone_with_no_lights_or_a_look_m1_cannot_run_is_refused(
     with pytest.raises(ZoneError, match="no lights"):
         await home.manager.start("empty", home.look("classic-breathe"))
     home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)
-    with pytest.raises(LookError, match="M6"):
+    with pytest.raises(ZoneError, match="plays on Whole home only"):
         await home.manager.start("z", home_look)
     assert lamp.calls == []
+
+
+async def test_an_unknown_zone_is_not_found_whatever_look_starts_on_it(
+    make_home: HomeFactory,
+) -> None:
+    lamp = FakeLight("lamp")
+    home = await make_home([lamp], [zone_record("z", "lamp")])
+    home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)
+
+    with pytest.raises(ZoneNotFoundError):  # not "plays on Whole home only"
+        await home.manager.start("nope", home_look)
+
+    with pytest.raises(ZoneNotFoundError):
+        await home.manager.start("nope", home.look("classic-breathe"))
+    assert lamp.calls == []
+
+
+async def test_a_home_look_starts_on_whole_home(make_home: HomeFactory) -> None:
+    home = await make_home([FakeLight("lamp")], [], view=FakeHome(rooms={"west": ["lamp"]}))
+    home_look = Look(id="x", name="X", category="home", scope="whole-home", layers=GLOW.layers)
+
+    result = await home.manager.start(HOME_ZONE_ID, home_look)
+
+    assert (result.running.zone_id, result.running.look_id) == (HOME_ZONE_ID, "x")
+    assert result.running.lights == ("lamp",)
 
 
 # M2 review A1: the lights that stay in a zone keep their routes when it loses others.
@@ -523,3 +645,77 @@ async def test_lights_that_stay_in_a_zone_keep_their_routes_when_it_loses_one(
 
     assert home.routes.routes["b"] is route and span(route) == (0, 4)
     assert route.source is home.host.runtimes["pair"] and route.source.leds.count == 4
+
+
+# A look's elapsed time (M6 ruling 9) counts from its zone's `since`, on the engine's clock.
+async def test_a_resumed_zone_counts_its_looks_time_from_its_saved_start(
+    make_home: HomeFactory,
+) -> None:
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: 1000.0
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    home.clock[0] = START + timedelta(seconds=30)  # the app was down for half a minute
+
+    home = await home.restart()
+
+    assert home.host.runtimes["z"].started_t == 970.0
+
+
+async def test_a_restart_keeps_the_zones_start(make_home: HomeFactory) -> None:
+    now_s = [1000.0]
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: now_s[0]
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    now_s[0] = 1045.0
+    home.clock[0] = START + timedelta(seconds=45)
+
+    await home.manager.restart("z")
+
+    assert home.host.runtimes["z"].started_t == 1000.0
+
+
+async def test_a_rebuilt_zone_counts_from_its_saved_start(make_home: HomeFactory) -> None:
+    now_s = [1000.0]
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: now_s[0]
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    await home.db.write("UPDATE zone_assignments SET look='{not json' WHERE zone_id='z'")
+    now_s[0] = 1030.0
+    home.clock[0] = START + timedelta(seconds=30)
+    home = await home.restart()  # the saved look can't be read: the zone is crashed
+    now_s[0] = 1050.0
+    home.clock[0] = START + timedelta(seconds=50)
+
+    await home.manager.restart("z")  # it runs the look the store has, from the saved start
+
+    assert home.host.runtimes["z"].started_t == 1000.0
+
+
+async def test_a_new_start_counts_from_zero(make_home: HomeFactory) -> None:
+    now_s = [1000.0]
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: now_s[0]
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    assert home.host.runtimes["z"].started_t == 1000.0
+    now_s[0] = 1050.0
+    home.clock[0] = START + timedelta(seconds=50)
+
+    await home.manager.start("z", home.look("classic-strobe"))
+
+    assert home.host.runtimes["z"].started_t == 1050.0  # not the look before's start
+
+
+async def test_a_since_in_the_future_counts_from_now(make_home: HomeFactory) -> None:
+    home = await make_home(
+        [FakeLight("lamp")], [zone_record("z", "lamp")], monotonic=lambda: 1000.0
+    )
+    await home.manager.start("z", home.look("classic-breathe"))
+    home.clock[0] = START - timedelta(hours=2)  # the wall clock stepped back before a restart
+
+    home = await home.restart()
+
+    assert home.host.runtimes["z"].started_t == 1000.0

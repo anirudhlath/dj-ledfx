@@ -3,6 +3,8 @@ fakes for the engine (it hosts runtimes) and the scheduler (it holds routes)."""
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -18,6 +20,7 @@ from dj_ledfx.events import EventBus
 from dj_ledfx.home.map import HomeMap
 from dj_ledfx.home.model import Home as HomeModel
 from dj_ledfx.home.store import HomeStore
+from dj_ledfx.home.sun import SunPoint
 from dj_ledfx.latency.strategies import StaticLatency
 from dj_ledfx.latency.tracker import LatencyTracker
 from dj_ledfx.looks.model import Layer, Look
@@ -68,6 +71,55 @@ class FakeHost:
         """The zones' runtimes it hosts, by zone id: every one but the previews."""
         previews = self.zones.preview_runtimes() if self.zones is not None else []
         return {rt.zone_id: rt for rt in self.hosted if rt not in previews}
+
+
+class FakeClock:
+    """The engine's monotonic time and its sleep, both moved by a test: `monotonic()` reads
+    `now`, `sleep(seconds)` waits until a test has moved `now` that far on, and
+    `advance(seconds)` does, waking each sleeper at its own moment, earliest first, and
+    letting the loop settle after each, so what a woken task does is done before the time
+    goes on. Nothing waits for real."""
+
+    def __init__(self, now: float = 1000.0) -> None:
+        self.now = now
+        self.sleepers: list[tuple[float, asyncio.Future[None]]] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds <= 0.0:
+            await asyncio.sleep(0)
+            return
+        waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self.sleepers.append((self.now + seconds, waiter))
+        await waiter
+
+    def waiting(self) -> int:
+        """How many tasks are asleep on it (a cancelled one isn't)."""
+        return sum(1 for _, waiter in self.sleepers if not waiter.done())
+
+    async def advance(self, seconds: float) -> None:
+        await self.settle()  # a task just started has gone to sleep, at this time
+        target = self.now + seconds
+        while True:
+            self.sleepers = [
+                (moment, waiter) for moment, waiter in self.sleepers if not waiter.done()
+            ]
+            due = [pair for pair in self.sleepers if pair[0] <= target]
+            if not due:
+                break
+            moment, waiter = min(due, key=lambda pair: pair[0])
+            self.sleepers.remove((moment, waiter))
+            self.now = max(self.now, moment)
+            waiter.set_result(None)
+            await self.settle()
+        self.now = target
+        await self.settle()
+
+    async def settle(self) -> None:
+        for _ in range(30):
+            await asyncio.sleep(0)
 
 
 # The moment the fake scheduler reads a route at: past every frame, so the newest (tests
@@ -169,6 +221,15 @@ class Home:
     view: HomeView = NO_HOME  # the home map the manager asks
     home_map: HomeMap | None = None  # a real map, with build_home(plan=...)
     changes: list[ZonesChanged] = field(default_factory=list)
+    # What it was built with, which restart() hands the app it starts again (None: the
+    # factories' defaults).
+    frames_watched: Callable[[], bool] | None = None
+    evening: Callable[[], float] | None = None
+    sun: Callable[[], SunPoint | None] | None = None
+    monotonic: Callable[[], float] | None = None
+    sleep: Callable[[float], Awaitable[None]] | None = None
+    # This home and the ones restart() made from it, which a fixture closes the managers of.
+    lineage: list[Home] = field(default_factory=list, repr=False)
 
     def look(self, look_id: str) -> Look:
         return self.looks.get(look_id)
@@ -179,6 +240,7 @@ class Home:
         With ghosts, as main does it: every light is registered offline from what
         state.db knows, and resume runs before any of them connects (see come_online).
         """
+        self.manager.close()  # the app stopped
         for light in self.lights.values():
             light.calls.clear()
         home = await assemble(
@@ -188,8 +250,15 @@ class Home:
             preview_only,
             ghosts=ghosts,
             view=self.view,
+            frames_watched=self.frames_watched,
             with_map=self.home_map is not None,
+            evening=self.evening,
+            sun=self.sun,
+            monotonic=self.monotonic,
+            sleep=self.sleep,
         )
+        home.lineage = self.lineage
+        self.lineage.append(home)
         await home.manager.resume()
         return home
 
@@ -213,6 +282,9 @@ async def build_home(
     frames_watched: Callable[[], bool] | None = None,
     plan: HomeModel | None = None,
     evening: Callable[[], float] | None = None,
+    sun: Callable[[], SunPoint | None] | None = None,
+    monotonic: Callable[[], float] | None = None,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> Home:
     db = StateDB(tmp_path / "state.db")
     await db.open()
@@ -223,7 +295,7 @@ async def build_home(
         home_store = HomeStore(db)
         await home_store.save_home(plan)
         await home_store.mark_placements_seeded({})  # tests place their lights themselves
-    return await assemble(
+    home = await assemble(
         db,
         lights,
         [START],
@@ -232,7 +304,12 @@ async def build_home(
         frames_watched=frames_watched,
         with_map=plan is not None,
         evening=evening,
+        sun=sun,
+        monotonic=monotonic,
+        sleep=sleep,
     )
+    home.lineage.append(home)
+    return home
 
 
 async def assemble(
@@ -246,6 +323,9 @@ async def assemble(
     frames_watched: Callable[[], bool] | None = None,
     with_map: bool = False,
     evening: Callable[[], float] | None = None,
+    sun: Callable[[], SunPoint | None] | None = None,
+    monotonic: Callable[[], float] | None = None,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> Home:
     """The app's objects around an open state.db and a set of lights."""
     bus = EventBus()
@@ -291,6 +371,9 @@ async def assemble(
         home=view or NO_HOME,
         frames_watched=frames_watched or (lambda: True),
         evening=evening or (lambda: 0.0),
+        sun=sun or (lambda: None),
+        monotonic=monotonic or time.monotonic,
+        sleep=sleep or asyncio.sleep,
     )
     host.zones = manager
     if home_map is not None:
@@ -309,6 +392,11 @@ async def assemble(
         tempo=tempo,
         view=view or NO_HOME,
         home_map=home_map,
+        frames_watched=frames_watched,
+        evening=evening,
+        sun=sun,
+        monotonic=monotonic,
+        sleep=sleep,
     )
     bus.subscribe(ZonesChanged, home.changes.append)
     await manager.load()

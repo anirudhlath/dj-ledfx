@@ -1,4 +1,5 @@
-"""The tempo clock's controls and the inputs it reads (web spec §12.3; engine spec §7.2).
+"""The tempo clock's controls and the inputs it reads: the tempo, Pro DJ Link and the sun
+(web spec §12.3; engine spec §7.2).
 
 Each control is saved before it's answered.
 """
@@ -9,14 +10,14 @@ from fastapi import APIRouter, Request
 
 from dj_ledfx.web import contract as api
 from dj_ledfx.web.errors import answers
-from dj_ledfx.web.state import get_tempo, listening
+from dj_ledfx.web.state import get_sun, get_tempo, listening
 
 router = APIRouter()
 
 
 @router.get("/inputs")
 async def get_inputs(request: Request) -> api.Inputs:
-    return api.inputs_out(get_tempo(request.app), listening(request.app))
+    return api.inputs_out(get_tempo(request.app), listening(request.app), get_sun(request.app))
 
 
 @router.put("/inputs/tempo")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 
@@ -20,7 +21,7 @@ from map_home import (
 )
 
 from dj_ledfx.devices.manager import DeviceManager
-from dj_ledfx.home.map import HomeMap
+from dj_ledfx.home.map import HomeMap, space_of
 from dj_ledfx.home.model import HomeError, HomeNotFoundError
 from dj_ledfx.home.shapes import (
     CylinderShape,
@@ -146,6 +147,15 @@ async def test_the_space_has_the_rooms_and_sub_zones_outlines(db: StateDB) -> No
     moved = home_map.space()
     assert moved.sub_zone_outlines["desk"] == nook
     assert moved != space  # a running zone redraws its masks (zone manager's _follow)
+
+
+# M6 ruling 5: an effect turns the sun's bearing onto the plan by the map's north offset,
+# so turning north is a new space: a running zone redraws and its effects see the new one.
+def test_the_space_carries_the_north_offset() -> None:
+    turned = space_of(replace(tiny_home(), north_offset_deg=30.0))
+
+    assert turned.north_offset_deg == 30.0
+    assert turned != space_of(replace(tiny_home(), north_offset_deg=0.0))
 
 
 async def test_anchors_are_added_changed_and_deleted(db: StateDB) -> None:

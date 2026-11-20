@@ -98,7 +98,9 @@ class Space:
     (k, 3), so the speaker pair has two. rooms: room ids, indexed by LedSet.room.
     ceiling: metres, None without a map. centre: where unplaced lights gather when
     none of the zone's lights is placed. room_outlines and sub_zone_outlines: each room's
-    and sub-zone's floor polygon by id, for a layer's mask.
+    and sub-zone's floor polygon by id, for a layer's mask. north_offset_deg: the plan's
+    turn from true north (Home.north_offset_deg), which field_tools' plan_bearing takes
+    the sun's bearing through.
     """
 
     anchors: Mapping[str, NDArray[np.float32]] = field(default_factory=_empty)
@@ -108,6 +110,7 @@ class Space:
     centre: Vec3 | None = None
     room_outlines: Mapping[str, Outline] = field(default_factory=_empty)
     sub_zone_outlines: Mapping[str, Outline] = field(default_factory=_empty)
+    north_offset_deg: float = 0.0
 
     # By value, so a map edit that leaves the geometry as it was (a rename, a light moved
     # elsewhere) leaves the running zones as they are.
@@ -122,10 +125,13 @@ class Space:
             and _same_points(self.anchor_points, other.anchor_points)
             and self.room_outlines == other.room_outlines  # a mapping compares by value
             and self.sub_zone_outlines == other.sub_zone_outlines
+            and self.north_offset_deg == other.north_offset_deg
         )
 
     def __hash__(self) -> int:
-        return hash((self.rooms, self.ceiling, self.centre, tuple(self.anchors)))
+        return hash(
+            (self.rooms, self.ceiling, self.centre, tuple(self.anchors), self.north_offset_deg)
+        )
 
 
 NO_SPACE = Space()

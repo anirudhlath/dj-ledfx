@@ -130,6 +130,7 @@ async def test_a_bad_preview_request_says_why(api: Api) -> None:
         await api.client.post("/api/preview", json={"zoneId": "nope", "lookId": "classic-strobe"}),
         await api.client.post("/api/preview", json={"zoneId": "desk", "lookId": "nope"}),
         await api.client.post("/api/preview", json={"zoneId": "desk", "look": home_look}),
+        await api.client.post("/api/preview", json={"zoneId": "nope", "look": home_look}),
     ]
 
     assert [(a.status_code, a.json()["detail"]) for a in answers] == [
@@ -137,7 +138,8 @@ async def test_a_bad_preview_request_says_why(api: Api) -> None:
         (400, "Send either lookId or look"),
         (404, "No zone 'nope'"),
         (404, "No look 'nope'"),
-        (400, "Home looks (whole-home scope) arrive in M6"),
+        (400, f"{home_look['name']} plays on Whole home only"),
+        (404, "No zone 'nope'"),  # an unknown zone is not found, whatever look it's sent
     ]
     assert api.previews.runtimes() == []
 

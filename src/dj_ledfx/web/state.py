@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from dj_ledfx.devices.discovery import DiscoveryOrchestrator
     from dj_ledfx.home.map import HomeMap
+    from dj_ledfx.home.sun import SunReading
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.tempo.clock import TempoClock
@@ -112,3 +113,10 @@ def get_tempo(app: Any) -> TempoClock:
     """The tempo clock: create_app always has one. It takes the app, so the socket hub reads
     it as the routes do."""
     return cast("TempoClock", app.state.tempo)
+
+
+def get_sun(app: Any) -> SunReading | None:
+    """The sun at the home now, with its day and path: None with no `Sun` (create_app was
+    given none) or no location."""
+    sun = app.state.sun
+    return None if sun is None else cast("SunReading | None", sun.reading())

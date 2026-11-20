@@ -14,6 +14,8 @@ from dj_ledfx.effects import firmware_openrgb as _firmware_openrgb  # noqa: F401
 from dj_ledfx.effects import flock as _flock  # noqa: F401
 from dj_ledfx.effects import focus_field as _focus_field  # noqa: F401
 from dj_ledfx.effects import fountain as _fountain  # noqa: F401
+from dj_ledfx.effects import goodnight as _goodnight  # noqa: F401
+from dj_ledfx.effects import home_sunset as _home_sunset  # noqa: F401
 from dj_ledfx.effects import lava_plasma as _lava_plasma  # noqa: F401
 from dj_ledfx.effects import lighthouse_beam as _lighthouse_beam  # noqa: F401
 from dj_ledfx.effects import rain_storm as _rain_storm  # noqa: F401
@@ -28,3 +30,4 @@ from dj_ledfx.effects import strobe as _strobe  # noqa: F401
 from dj_ledfx.effects import sunset_gradient as _sunset_gradient  # noqa: F401
 from dj_ledfx.effects import twin_comets as _twin_comets  # noqa: F401
 from dj_ledfx.effects import vortex as _vortex  # noqa: F401
+from dj_ledfx.effects import wisp as _wisp  # noqa: F401

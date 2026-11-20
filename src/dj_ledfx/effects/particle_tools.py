@@ -629,6 +629,14 @@ class Ground:
         return grid
 
 
+def lamp_rooms(ground: Ground) -> NDArray[np.intp]:
+    """Each lamp's room: `LedSet.room` (an index into the space's rooms) of the lamp's first
+    member LED, `NO_ROOM` for a lamp the map puts in none."""
+    lamps = ground.lamps
+    rooms: NDArray[np.intp] = ground.leds.room[lamps.members[lamps.starts[:-1]]].astype(np.intp)
+    return rooms
+
+
 def lit(ground: Ground, particles: Particles) -> FloatRGB:
     """Each LED's light from the particles (spec §5.1: "Particles light LEDs by distance
     falloff"): the sum of each particle's colour times exp(-(d / r)²), d its distance from

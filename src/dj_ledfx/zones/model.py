@@ -144,9 +144,30 @@ class ZonesChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class OverlayInfo:
+    """The overlay playing (web spec §12.2 Overlay): a Home look over every running zone."""
+
+    look_id: str
+    look_name: str
+    trigger: str
+    started_at: datetime
+    ends_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class TransitionSwitched:
     """A running zone's transition passed its midpoint, or ended before it, and the lights
     it held go over to the new look: main runs ZoneManager.switch() for the zone."""
+
+    zone_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimsChanged:
+    """A running zone's state changed while some of its lights aren't as its look now runs
+    them: above all a look that stopped waiting for the sun, which claims its firmware
+    layers' lights, or started, which gives them back. main runs ZoneManager.resync() for
+    the zone."""
 
     zone_id: str
 

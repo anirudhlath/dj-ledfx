@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.presets import PresetStore
     from dj_ledfx.events import EventBus
     from dj_ledfx.home.map import HomeMap
+    from dj_ledfx.home.sun import Sun
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
     from dj_ledfx.prodjlink.listener import Listening
@@ -115,6 +116,7 @@ def create_app(
     previews: PreviewManager | None = None,
     listening: Listening | None = None,
     discovery_orchestrator: DiscoveryOrchestrator | None = None,
+    sun: Sun | None = None,
 ) -> FastAPI:
     # One schema per type, under the contract's name (not Look-Input / Look-Output).
     app = FastAPI(
@@ -152,6 +154,7 @@ def create_app(
     app.state.home_map = home_map
     app.state.previews = previews
     app.state.listening = listening  # where Pro DJ Link is heard; None: not at all
+    app.state.sun = sun  # the sun at the home (GET /inputs); None: no sun is sent
     app.state.discovery_orchestrator = discovery_orchestrator  # scans and lamp outputs
     app.state.ws_sessions = set()  # open /ws sessions: pushes go to them, ws.close_all ends them
     app.state.ws_closing = False

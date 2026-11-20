@@ -65,6 +65,13 @@ class DeviceAdapter(ABC):
         return None
 
     @property
+    def switches_power(self) -> bool:
+        """Whether set_power really switches the light, so that a look with the light dark
+        for good can have it switched off (M6 ruling 19). Default: no, it keeps streaming
+        black."""
+        return False
+
+    @property
     def row_extra(self) -> Mapping[str, Any]:
         """What the light keeps in its device row's extra, by key, whenever the row is
         written: what its backend knows it by next time (an OpenRGB device's identity).

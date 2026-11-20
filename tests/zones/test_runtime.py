@@ -1,23 +1,30 @@
 from __future__ import annotations
 
 import itertools
+import math
+import time
 from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, ClassVar
 
 import numpy as np
 import pytest
-from conftest import builtin_look, nearest_frame, span
+from conftest import CallCounts, builtin_look, nearest_frame, span
 from loguru import logger
 from runtime_fakes import (
     BULB,
+    FADE,
     LAMP,
+    LIGHTS,
     TILE,
     FlatField,
+    OutField,
+    dot_layer,
     field_layer,
     glow_layer,
     latest,
     look_of,
+    out_layer,
     runtime_of,
     sent,
 )
@@ -30,7 +37,7 @@ from dj_ledfx.effects.firmware_lifx import LifxFlame
 from dj_ledfx.effects.ledset import LedSet, PlacedLeds, Space
 from dj_ledfx.effects.params import EffectParam
 from dj_ledfx.looks.builtin import classic_look_id
-from dj_ledfx.looks.model import Layer
+from dj_ledfx.looks.model import HeightMask, Layer, Look, LookModifiers
 from dj_ledfx.looks.selectors import parse_selector
 from dj_ledfx.scheduling.route import to_device_colors
 from dj_ledfx.tempo.clock import TempoClock
@@ -38,6 +45,27 @@ from dj_ledfx.types import FloatRGB, RenderedFrame
 from dj_ledfx.zones.runtime import HORIZON_CAP_S, ZoneLight
 
 pytestmark = pytest.mark.usefixtures("_fields")
+
+
+class ElapsedField(FlatField, register=False):
+    """Flat grey at `level`, keeping the elapsed time of each frame it draws with its level
+    (`seen`), which tells a zone's looks apart."""
+
+    seen: ClassVar[list[tuple[float, float]]] = []
+
+    def render(self, ctx: RenderContext, leds: LedSet) -> FloatRGB:
+        ElapsedField.seen.append((self.level, ctx.elapsed_s))
+        return super().render(ctx, leds)
+
+
+@pytest.fixture(autouse=True)
+def _elapsed_field() -> None:
+    Effect._registry["elapsed_field"] = ElapsedField  # the root conftest drops it after
+    ElapsedField.seen = []
+
+
+def _timed(level: float) -> Look:
+    return look_of(replace(field_layer(level), kind="elapsed_field"), name=f"Level {level}")
 
 
 def test_firmware_runs_where_supported_and_the_field_plays_elsewhere() -> None:
@@ -462,3 +490,151 @@ def test_changing_the_lights_a_layer_picks_plans_the_claims_again() -> None:
     runtime.update_look(look_of(field_layer(), _flame("type:candle")))  # LIGHTS has no candle
 
     assert runtime.mode_of("tile") == "streaming" and runtime.generation > generation
+
+
+def test_a_runtime_counts_its_looks_time_from_its_start() -> None:
+    runtime = runtime_of(_timed(0.5), started_t=100.0)
+
+    runtime.tick(110.0)
+
+    assert runtime.started_t == 100.0
+    [(_, elapsed)] = ElapsedField.seen
+    assert elapsed == pytest.approx(110.0 + runtime.horizon_s - 100.0)  # the frame it shows
+
+
+def test_a_runtime_with_no_start_counts_from_its_construction() -> None:
+    before = time.monotonic()
+    runtime = runtime_of(_timed(0.5))
+
+    assert before <= runtime.started_t <= time.monotonic()
+
+
+def test_a_twin_and_a_transitions_old_look_keep_their_own_elapsed_time() -> None:
+    old = runtime_of(_timed(0.25), started_t=100.0)
+    twin = old.twin()
+    new = runtime_of(_timed(0.75), started_t=150.0)
+    new.begin_transition(FADE, [twin])
+
+    new.tick(200.0)
+
+    assert twin.started_t == old.started_t == 100.0  # a twin is its zone as it is
+    shown = dict(ElapsedField.seen)
+    assert shown[0.75] == pytest.approx(200.0 + new.horizon_s - 150.0)
+    assert shown[0.25] == pytest.approx(200.0 + new.horizon_s - 100.0)  # not the new look's
+
+
+def test_a_restart_and_a_look_update_keep_the_start() -> None:
+    runtime = runtime_of(_timed(0.5), started_t=100.0)
+    runtime.tick(110.0)
+
+    runtime.update_look(_timed(0.7))  # in place
+    assert runtime.started_t == 100.0
+    runtime.update_look(look_of(glow_layer(), replace(field_layer(0.7), kind="elapsed_field")))
+    assert runtime.started_t == 100.0  # rebuilt: other layers
+    runtime.restart()
+    assert runtime.started_t == 100.0
+    ElapsedField.seen.clear()
+    runtime.tick(120.0)
+
+    [(_, elapsed)] = ElapsedField.seen
+    assert elapsed == pytest.approx(120.0 + runtime.horizon_s - 100.0)
+
+
+# M6 ruling 19: when a light is out, the look has it black for good.
+def test_a_light_is_out_after_its_latest_leds_time() -> None:
+    out = {"lamp": [5.0, 7.0, 5.0], "bulb": 3.0, "tile": [2.0, 2.0, 2.0, math.inf]}
+    runtime = runtime_of(look_of(out_layer(out)))
+
+    assert runtime.out_after("lamp") == 7.0  # the latest of its LEDs'
+    assert runtime.out_after("bulb") == 3.0
+    assert runtime.out_after("tile") is None  # one LED is never out
+    assert runtime.out_after("nowhere") is None
+
+
+def test_a_lights_out_time_is_kept_until_the_look_or_the_leds_change(
+    call_counts: CallCounts,
+) -> None:
+    call_counts.spy(OutField, "lights_out")
+    runtime = runtime_of(look_of(out_layer({"lamp": 5.0, "bulb": 6.0, "tile": 7.0})))
+
+    assert (runtime.out_after("lamp"), runtime.out_after("bulb")) == (5.0, 6.0)
+    runtime.tick(100.0)
+    assert runtime.out_after("tile") == 7.0
+    assert call_counts.calls == {"lights_out": 1}  # asked once for the layer's LEDs
+
+    runtime.update_look(look_of(out_layer({"lamp": 9.0, "bulb": 6.0, "tile": 7.0})))
+    assert runtime.out_after("lamp") == 9.0  # a look's new settings count at once
+
+    runtime.set_lights(LIGHTS[1:])  # the LEDs change: the tile goes
+    assert runtime.out_after("tile") is None and runtime.out_after("bulb") == 6.0
+    assert runtime.out_after("lamp") == 9.0
+
+
+def test_nothing_is_out_unless_every_layer_says_so_unmasked_and_unflashed() -> None:
+    out = out_layer({"tile": 4.0, "bulb": 4.0, "lamp": 4.0})
+
+    def after(*layers: Layer, **changes: Any) -> float | None:
+        return runtime_of(look_of(*layers, **changes)).out_after("lamp")
+
+    assert after(out) == 4.0
+    assert after(out, field_layer()) is None  # a second visible layer with no lights_out
+    assert after(field_layer(), out) is None
+    assert after(out, dot_layer()) is None  # a particle layer has none
+    assert after(out, replace(field_layer(), visible=False)) == 4.0  # a hidden one changes nothing
+    assert after(replace(out, mask=HeightMask(0.0, 3.0))) is None
+    assert after(out, modifiers=LookModifiers(downbeat_flash=True)) is None
+    assert after(out, modifiers=LookModifiers(trails_s=0.5)) is None
+    assert after(out, modifiers=LookModifiers(evening=True, brightness_cap=0.5)) == 4.0  # black
+    assert after(glow_layer()) is None  # nothing streams: a look of firmware effects alone
+    assert after() is None
+
+
+def test_a_lights_out_with_a_nan_is_refused_with_a_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = runtime_of(look_of(out_layer({"lamp": 5.0})))
+    times = np.full(runtime.leds.count, 5.0)
+    times[0] = np.nan
+    monkeypatch.setattr(OutField, "lights_out", lambda self, leds: times)
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        assert runtime.out_after("lamp") is None and runtime.out_after("bulb") is None
+    finally:
+        logger.remove(sink)
+    assert len(warnings) == 1 and "can't say when it has a light out" in warnings[0]
+
+
+@pytest.mark.parametrize("bad", ["one", "twoD", "long"])
+def test_a_lights_out_of_the_wrong_shape_is_refused_not_raised(
+    monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    """A future effect's wrong answer (one that would broadcast, or not fit) is a warning and
+    no moments, as an exception is: out_after is read in the scheduler's send path."""
+    runtime = runtime_of(look_of(out_layer({"lamp": 5.0})))
+    count = runtime.leds.count
+    wrong = {
+        "one": lambda: np.full(1, 5.0),  # would broadcast over every LED
+        "twoD": lambda: np.full((count, 2), 5.0),
+        "long": lambda: np.full(count + 3, 5.0),
+    }[bad]
+    monkeypatch.setattr(OutField, "lights_out", lambda self, leds: wrong())
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        assert runtime.out_after("lamp") is None
+    finally:
+        logger.remove(sink)
+    assert len(warnings) == 1 and "can't say when it has a light out" in warnings[0]
+
+
+def test_a_light_a_firmware_layer_claims_or_copies_onto_is_never_out() -> None:
+    out = out_layer({"c1": 4.0, "tile": 4.0, "lamp": 4.0})
+    runtime = runtime_of(look_of(out, _flame(["c1"])), CANDLES)
+
+    assert runtime.out_after("c1") is None  # it runs the effect itself
+    assert runtime.out_after("tile") == runtime.out_after("lamp") == 4.0
+
+    runtime.mark_emulated("c1")  # it refused the effect: the streamed copy goes to it
+    assert runtime.out_after("c1") is None
+    assert runtime.out_after("tile") == 4.0

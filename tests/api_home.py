@@ -16,16 +16,19 @@ from unittest.mock import MagicMock
 import httpx
 from conftest import FakeLight
 from fastapi import FastAPI
+from sun_fakes import FixedSun
 from zone_home import Home, build_home
 
 from dj_ledfx.config import AppConfig
 from dj_ledfx.devices.discovery import DiscoveryOrchestrator
 from dj_ledfx.home.model import Home as HomeModel
+from dj_ledfx.home.sun import Sun
 from dj_ledfx.prodjlink.listener import Listening
 from dj_ledfx.types import DeviceStats
 from dj_ledfx.web.app import create_app
 from dj_ledfx.zones.attention import AttentionFeed
 from dj_ledfx.zones.frames import Watchers
+from dj_ledfx.zones.home_view import HomeView
 from dj_ledfx.zones.lights import LightMonitor
 from dj_ledfx.zones.model import ZoneRecord
 from dj_ledfx.zones.preview import PreviewManager
@@ -51,14 +54,17 @@ async def api_home(
     zones: Sequence[ZoneRecord],
     *,
     plan: HomeModel | None = None,
+    view: HomeView | None = None,
+    sun: Sun | FixedSun | None = None,
     listening: Listening | None = None,
     discovery: Any = None,
     backends: Sequence[Any] | None = None,
 ) -> AsyncIterator[Api]:
     """discovery stands in for the discovery orchestrator: POST /devices/scan and the lamp
     outputs ask it. backends, instead, gives the app a real orchestrator over the home's
-    devices and state.db, scanning those backends."""
-    home = await build_home(tmp_path, lights, zones, plan=plan)
+    devices and state.db, scanning those backends. sun is the zones' sun and the app's, one
+    object for both, as main wires it; view is the home map the zone manager asks."""
+    home = await build_home(tmp_path, lights, zones, plan=plan, view=view, sun=sun)
     config = AppConfig()  # one config, the orchestrator's and the app's
     if backends is not None:
         discovery = DiscoveryOrchestrator(config, home.devices, home.bus, state_db=home.db)
@@ -96,6 +102,7 @@ async def api_home(
         attention_feed=feed,
         home_map=home.home_map,
         previews=previews,
+        sun=sun,
         listening=listening,
         discovery_orchestrator=discovery,
     )
@@ -104,5 +111,6 @@ async def api_home(
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             yield Api(home, app, client, monitor, feed, stats, previews, watchers, discovery)
     finally:
+        home.manager.close()
         previews.close()
         await home.db.close()

@@ -57,7 +57,10 @@ async def delete_group(request: Request, zone_id: str) -> Response:
 
 @router.get("/running")
 async def list_running(request: Request) -> api.Running:
-    return api.running_out(get_zones(request).running(), light_index(request.app))
+    zones = get_zones(request)
+    return api.running_out(
+        zones.running(), light_index(request.app), zones.overlays(), zones.now()
+    )
 
 
 @router.get("/running/recent")
@@ -102,4 +105,21 @@ async def restart_zone(request: Request, zone_id: str) -> api.RunningZone:
 @router.post("/running/stop-all", status_code=204)
 async def stop_all(request: Request) -> Response:
     await get_zones(request).stop_all()
+    return Response(status_code=204)
+
+
+@router.post("/running/overlay", status_code=201)
+async def start_overlay(request: Request, body: api.OverlayRequest) -> api.Overlay:
+    """Play a Home look over every running zone for durationS seconds; it replaces any overlay playing"""  # noqa: E501
+    zones = get_zones(request)
+    with answers():
+        look = requested_look(request, body.look_id, body.look)
+        info = await zones.start_overlay(look, body.duration_s, body.trigger)
+    return api.overlay_out(info, zones.now())
+
+
+@router.delete("/running/overlay", status_code=204)
+async def stop_overlay(request: Request) -> Response:
+    """End the overlay playing, if one is"""
+    await get_zones(request).stop_overlay()
     return Response(status_code=204)

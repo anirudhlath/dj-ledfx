@@ -49,7 +49,10 @@ export interface ScenarioBeat {
  * Every input, the ones engine M6 and M7 bring included, but Pro DJ Link's decks: those are
  * `ScenarioState.decks`, which the mock puts in where it serves the inputs (`inputsOf`), as the server does.
  */
-export type ScenarioInputs = Omit<Required<Inputs>, 'prodjlink'> & { prodjlink: Omit<ProDjLinkInput, 'decks'> }
+export type ScenarioInputs = Omit<Required<Inputs>, 'prodjlink' | 'sun'> & {
+  prodjlink: Omit<ProDjLinkInput, 'decks'>
+  sun: SunInput
+}
 
 export interface ScenarioState {
   name: ScenarioName

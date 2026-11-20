@@ -21,6 +21,7 @@ from dj_ledfx.effects.fx import Fx, fx_joined
 from dj_ledfx.effects.ledset import (
     NO_ROOM,
     NO_SPACE,
+    DeviceSlice,
     LedSet,
     LedSource,
     PlacedLeds,
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
     from dj_ledfx.devices.capabilities import DeviceCapabilities
     from dj_ledfx.effects.context import RenderContext
     from dj_ledfx.effects.field import FieldEffect
+    from dj_ledfx.home.sun import SunPoint
     from dj_ledfx.spatial.geometry import DeviceGeometry
     from dj_ledfx.tempo.clock import TempoClock
     from dj_ledfx.types import FloatRGB
@@ -66,6 +68,7 @@ SLOW_AFTER_S = 30.0
 CRASH_LOG_INTERVAL_S = 60.0
 _LOOK_FX = -1  # the key of the look's own step on its layers' fx (joined, evening, cap)
 ALWAYS_AVAILABLE = frozenset({"tempo"})  # the internal clock at worst (spec §5.2)
+_WITH_SUN = ALWAYS_AVAILABLE | {"sun"}  # and the sun, while the home has a location
 # How far ahead a zone renders at most. A light slower than this gets the newest frame and
 # runs late by the difference. A dozing Govee lamp's latency is its whole round trip, up to
 # about 0.4 s, so a zone with one renders that far ahead, a LIFX matrix's zone about 140 ms
@@ -148,9 +151,10 @@ def _whole(rows: list[_Drawn], count: int) -> bool:
 @dataclass(eq=False)
 class _Transition:
     """A transition while it plays (spec §5.3). `rows` says where each look it replaces
-    drew the zone's lights. `held` lights run a firmware effect in one of the two looks,
-    so they stay with the look they had until the midpoint and then switch whole;
-    `held_rows` are their rows in the frame."""
+    drew the zone's lights, and `drawn_by` which look drew each light. `held` lights run a
+    firmware effect in one of the two looks, so they stay with the look they had until the
+    midpoint and then switch whole; `held_rows` are their rows in the frame. A look's
+    claims that change before the midpoint (the sun came or went) can hold more lights."""
 
     kind: TransitionKind
     duration_s: float
@@ -159,6 +163,7 @@ class _Transition:
     order: NDArray[np.float64] | None  # each LED's place in the switch; None: all at once
     held: dict[str, ZoneRuntime]  # light -> the runtime whose look it keeps until then
     held_rows: dict[str, slice]
+    drawn_by: dict[str, ZoneRuntime]  # light -> the look it replaces that drew it
     started: float | None = None  # the first frame's time: the transition runs from it
     progress: float = 0.0  # of the newest frame, 0..1
     switched: bool = False  # the held lights went over to the new look
@@ -200,8 +205,12 @@ class RuntimeEnv:
     watched: Callable[[], bool] = lambda: True
     # How far into the evening it is now, 0..1 (home/sun.py), for looks that follow it.
     evening: Callable[[], float] = lambda: 0.0
-    # Called when the zone crashes, turns slow, recovers by itself or its transition
-    # starts, passes the midpoint or ends: the zone manager tells the running channel.
+    # Where the sun is now (home/sun.py's Sun; None: no location, so no sun), which every
+    # frame carries and a look that needs the sun waits for.
+    sun: Callable[[], SunPoint | None] = lambda: None
+    # Called when the zone crashes, turns slow, recovers by itself, starts or stops waiting
+    # for an input, or its transition starts, passes the midpoint or ends: the zone manager
+    # tells the running channel, and applies lights the zone now runs otherwise.
     on_state_change: Callable[[ZoneRuntime], None] | None = None
     # Called when lights went over to the zone's new look (its transition passed the
     # midpoint, or ended before it, holding lights): the zone manager applies them.
@@ -223,11 +232,15 @@ class ZoneRuntime:
         space: Space = NO_SPACE,
         leds: LedSet | None = None,
         emulated: Iterable[str] = (),
+        started_t: float | None = None,
     ) -> None:
         """`leds` is the LED set the lights make in `space`, when the caller has it (a
-        twin); `emulated` the lights that refused their firmware effects (mark_emulated)."""
+        twin); `emulated` the lights that refused their firmware effects (mark_emulated);
+        `started_t` the monotonic time the zone began this look, which a look reads as
+        elapsed_s (now when None: a zone resumed from `since` passes the time it began)."""
         self.zone_id = zone_id
         self._env = env
+        self._started_t = time.monotonic() if started_t is None else started_t
         self.look = look
         self.brightness = brightness
         self.generation = 0  # _compile draws the first
@@ -237,6 +250,7 @@ class ZoneRuntime:
         self._trails = Trails()
         self._transition: _Transition | None = None
         self._handover: set[str] = set()  # see handing_over
+        self._waiting: tuple[str, ...] = ()  # see waiting_for
         self._streamed: list[tuple[Layer, FieldEffect | ParticleEffect]] = []  # bottom to top
         self._firmware: list[tuple[Layer, FirmwareEffect]] = []  # top layer first
         self._claims: dict[str, int] = {}  # light -> firmware layer it runs itself
@@ -251,6 +265,8 @@ class ZoneRuntime:
         # Each streamed layer's view of the LEDs (its mask, mirror and transform), with the
         # modifiers it was made for; a new LED set clears them (_place).
         self._views: dict[int, tuple[object, LayerView]] = {}  # by the layer's place
+        # Each light's out_after, kept until the look or the LEDs change; None: not worked out.
+        self._out: dict[str, float | None] | None = None
         self._rendering = ""
         self._last_crash_log = float("-inf")
         self._last_fx_logs: dict[int, float] = {}  # by the layer's place, or _LOOK_FX
@@ -279,6 +295,70 @@ class ZoneRuntime:
         return self._space
 
     @property
+    def started_t(self) -> float:
+        """The monotonic time this zone began its look: a look's elapsed_s counts from it.
+        A restart and a look update keep it, a resume picks it up where it was, and a twin
+        carries it, so a replaced look plays on from where it was."""
+        return self._started_t
+
+    @started_t.setter
+    def started_t(self, value: float) -> None:
+        """Move the look's start, before it has ticked: an overlay begins one `horizon_s`
+        after its request, which a runtime knows only once it is built."""
+        self._started_t = value
+
+    def out_after(self, device_id: str) -> float | None:
+        """The look's elapsed time from which the light is black for good (M6 ruling 19): the
+        latest of its LEDs' `lights_out()` times, kept until the look or the LEDs change.
+        None: the look never has it out. Every visible streamed layer has to say when, and
+        an unmasked field layer alone can: a particle layer, a mask, the downbeat flash or
+        trails (they would light it again) leave it None. So does a light a firmware layer
+        claims or copies onto, which isn't streamed the look, and a look that crashed or
+        waits. The evening and the brightness cap keep black black."""
+        if (
+            self.crash is not None
+            or self.waiting_for
+            or device_id in self._claims
+            or device_id in self._copies
+        ):
+            return None
+        if self._out is None:
+            self._out = self._out_times()
+        return self._out.get(device_id)
+
+    def _out_times(self) -> dict[str, float | None]:
+        modifiers = self.look.modifiers
+        if not self._streamed or modifiers.downbeat_flash or modifiers.trails_s is not None:
+            return {}
+        latest = np.full(self.leds.count, -np.inf, dtype=np.float64)
+        for index, (layer, effect) in enumerate(self._streamed):
+            if layer.mask is not None or isinstance(effect, ParticleEffect):
+                return {}
+            try:
+                # The view's LEDs, the render's own object: an effect keeping per-LED work
+                # with _per_leds keeps it for them.
+                times = effect.lights_out(self._view(index, layer).leds)
+                if times is None:
+                    return {}
+                if np.shape(times) != latest.shape:  # one that would broadcast, or not fit
+                    raise ValueError(f"shape {np.shape(times)}, not {latest.shape}")
+                if np.isnan(times).any():  # inf is "never"; NaN says nothing
+                    raise ValueError("NaN in the times")
+                np.maximum(latest, times, out=latest)
+            except Exception as exc:  # a look never takes the manager down (spec §8)
+                logger.warning("{} can't say when it has a light out: {}", layer.name, exc)
+                return {}
+        out: dict[str, float | None] = {}
+        try:
+            for piece in self.leds.slices:
+                moment = float(latest[piece.start : piece.stop].max(initial=-math.inf))
+                out[piece.device_id] = moment if math.isfinite(moment) else None
+        except Exception as exc:  # no moments, as for a raise
+            logger.warning("A look's lights_out gave unusable times: {}", exc)
+            return {}
+        return out
+
+    @property
     def last_fx(self) -> Fx | None:
         """What the newest frame the zone wrote draws in space, kept when the zone's lights
         change and it starts a new ring: the frame feed shows it until that ring has a
@@ -294,7 +374,10 @@ class ZoneRuntime:
 
     @property
     def waiting_for(self) -> tuple[str, ...]:
-        return tuple(need for need in self.look.needs if need not in ALWAYS_AVAILABLE)
+        """The inputs the look needs that the home hasn't got (spec §5.2): the sun while
+        there is none. Worked out when the look is built and at each tick, from the tick's
+        one read of the sun, so the zone's state, its claims and its frame agree."""
+        return self._waiting
 
     @property
     def state(self) -> ZoneState:
@@ -474,6 +557,7 @@ class ZoneRuntime:
         run their own effect through their applied key.
         """
         old, self.look = self.look, look
+        self._out = None
         if look.modifiers.trails_s is None:
             self._trails.reset()
         if self.crash is not None or _layout(old) != _layout(look) or old.needs != look.needs:
@@ -525,7 +609,7 @@ class ZoneRuntime:
         rows: list[_Drawn] = []
         held: dict[str, ZoneRuntime] = {}
         held_rows: dict[str, slice] = {}
-        sourced: set[str] = set()  # the lights a look before already drew
+        drawn_by: dict[str, ZoneRuntime] = {}  # the lights a look before already drew
         for source in sources:
             if source.zone_id == self.zone_id:
                 source.settle()  # this transition takes its lights on from here
@@ -534,15 +618,13 @@ class ZoneRuntime:
             for piece in self.leds.slices:
                 device_id = piece.device_id
                 old = source.leds.slice_for(device_id)
-                if device_id in sourced or old is None or old.count != piece.count:
+                if device_id in drawn_by or old is None or old.count != piece.count:
                     continue
-                sourced.add(device_id)
+                drawn_by[device_id] = source
                 here = np.arange(piece.start, piece.stop, dtype=np.intp)
                 mine.append(here)
                 theirs.append(np.arange(old.start, old.stop, dtype=np.intp))
-                if source.claim_for(device_id) is not None or device_id in self._claims:
-                    held[device_id] = source._holder(device_id)
-                    held_rows[device_id] = slice(piece.start, piece.stop)
+                self._hold(source, piece, held, held_rows)
             if mine:  # one piece for each light, however many LEDs it has
                 rows.append(_Drawn(source, len(mine), _rows(mine), _rows(theirs)))
         for source in sources:  # three looks at most in the zone's own chain: older end now
@@ -557,15 +639,33 @@ class ZoneRuntime:
             order=switch_order(transition.kind, self.leds, self.generation),
             held=held,
             held_rows=held_rows,
+            drawn_by=drawn_by,
         )
+
+    def _hold(
+        self,
+        source: ZoneRuntime,
+        piece: DeviceSlice,
+        held: dict[str, ZoneRuntime],
+        held_rows: dict[str, slice],
+    ) -> None:
+        """Spec §5.3: a light that runs a firmware effect in either look, `source`'s (the
+        look it replaces that drew the light) or this one's, keeps the look it follows in
+        `source` until the midpoint, then switches whole (its rows, `held_rows`). Added
+        mid-way, a hold makes the light jump back to the old look: _follow_inputs."""
+        device_id = piece.device_id
+        if source.claim_for(device_id) is not None or device_id in self._claims:
+            held[device_id] = source._holder(device_id)
+            held_rows[device_id] = slice(piece.start, piece.stop)
 
     def twin(self) -> ZoneRuntime:
         """This runtime as it is now, for a zone that takes some of its lights: the same
         look on the same LEDs, so the same frames (effects are seeded alike), and the same
         firmware effects under the same generation, so a light that runs one isn't sent it
         again. It carries the mix it's in, the lights its transition holds and its trails,
-        so the taken lights don't jump. It is never ticked or told about, so its own
-        midpoint never passes: the new zone renders it while its transition plays."""
+        so the taken lights don't jump. It is never ticked or told about, so it never
+        switches: the new zone renders it while its transition plays (a sun that comes past
+        its midpoint holds no more of its lights: _follow_inputs)."""
         twin = ZoneRuntime(
             self.zone_id,
             self.look,
@@ -576,12 +676,19 @@ class ZoneRuntime:
             space=self._space,
             leds=self.leds,
             emulated=self._emulated,
+            started_t=self._started_t,
         )
         twin.generation = self.generation
+        if twin._waiting != self._waiting:  # the sun moved since this one last ticked
+            twin._waiting = self._waiting
+            twin._plan_claims()
         twin._trails = self._trails.copy()
         twin._handover = set(self._handover)
-        if self._transition is not None:  # its mix, as it is (it never ticks or switches)
-            twin._transition = replace(self._transition)
+        transition = self._transition
+        if transition is not None:  # its mix, as it is (it never ticks or switches)
+            twin._transition = replace(  # the sun can hold more lights in either: _hold
+                transition, held=dict(transition.held), held_rows=dict(transition.held_rows)
+            )
         return twin
 
     def settle(self) -> None:
@@ -621,9 +728,13 @@ class ZoneRuntime:
     # --- rendering ------------------------------------------------------------------
 
     def tick(self, now: float) -> None:
-        """Render the frame shown at now + horizon, unless crashed or skipping for budget."""
+        """Render the frame shown at now + horizon, unless crashed or skipping for budget.
+        First it reads the sun, once, and waits or stops waiting as it came or went."""
         if self.crash is not None:
             return
+        sun = self._env.sun()
+        if self._follow_inputs(sun, now):
+            self._state_changed()  # the running channel, and the lights it now claims
         transition = self._transition
         if transition is not None and not transition.switched and transition.past_midpoint(now):
             self._switch(transition)  # the frame showing now is past it
@@ -632,7 +743,12 @@ class ZoneRuntime:
             return
         target = now + self.horizon_s
         ctx = render_context(
-            self._env.clock, target, self._stride / self._env.fps, self._env.evening()
+            self._env.clock,
+            target,
+            self._stride / self._env.fps,
+            self._env.evening(),
+            sun=sun,
+            elapsed_s=target - self._started_t,
         )
         started = self._env.timer()
         try:
@@ -712,7 +828,8 @@ class ZoneRuntime:
         """A replaced look's frame at its own brightness (frames are scaled by this zone's
         at send), scaled in place: nothing else holds it (twins and replaced looks don't
         tick)."""
-        colours = source.render(ctx, in_space=False)
+        # It plays its own walk: a replaced look's elapsed time is its zone's, not the new one's.
+        colours = source.render(replace(ctx, elapsed_s=ctx.t - source.started_t), in_space=False)
         scale = source.brightness / self.brightness if self.brightness > 0.0 else 0.0
         if scale != 1.0:
             colours *= np.float32(scale)
@@ -858,8 +975,51 @@ class ZoneRuntime:
         self._views[index] = (modifiers, view)
         return view
 
+    def _follow_inputs(self, sun: SunPoint | None, now: float) -> bool:
+        """Wait, or stop waiting, as the sun comes and goes, here and in the looks this
+        one's transition mixes in (they never tick themselves). A look that stops waiting
+        claims its firmware layers' lights, and one that starts gives them back; before the
+        midpoint a light that now runs a firmware effect in either look is held, as
+        begin_transition holds one (_hold). Returns whether any look's waiting changed.
+
+        "Before the midpoint" is tick's own test of the frame showing `now`, so a twin,
+        which never ticks or switches, stops holding at the tick its zone switched at; a
+        transition a newer start took on (settle()) holds nothing more. Spec §5.3 asks for
+        two things a hold added mid-way does, both kept on purpose: the light jumps from the
+        mix back to the old look's rows, whole, and switches at the midpoint (it can't be
+        held whole and keep mixing); and when the look that woke is the one replaced, the
+        light starts that old look's effect, then goes over to the new look at the midpoint.
+        A light first claimed after the midpoint isn't held: it goes over at once, and its
+        rows mix to the end, as a streamed light's do."""
+        changed = False
+        for source in self.transition_sources:
+            changed = source._follow_inputs(sun, now) or changed
+        waiting = self._missing(sun)
+        if waiting != self._waiting:
+            self._waiting = waiting
+            self._plan_claims()
+            changed = True
+        transition = self._transition
+        if (
+            changed
+            and transition is not None
+            and not transition.switched
+            and not transition.past_midpoint(now)
+        ):
+            for device_id, source in transition.drawn_by.items():
+                piece = self.leds.slice_for(device_id)
+                if device_id not in transition.held and piece is not None:
+                    self._hold(source, piece, transition.held, transition.held_rows)
+        return changed
+
+    def _missing(self, sun: SunPoint | None) -> tuple[str, ...]:
+        available = ALWAYS_AVAILABLE if sun is None else _WITH_SUN
+        return tuple(need for need in self.look.needs if need not in available)
+
     def _compile(self) -> None:
         self.generation = next(_GENERATIONS)
+        self._out = None
+        self._waiting = self._missing(self._env.sun())
         self.crash = None
         self._trails.reset()
         self._streamed = []
@@ -896,6 +1056,7 @@ class ZoneRuntime:
         if before is None or before.slices != self.leds.slices:
             self.ring = RingBuffer(self._capacity)
         self._views = {}  # the layers' views follow the LED set and its space
+        self._out = None
         ids = {light.device_id for light in self._lights}
         self._emulated &= ids
         self._handover &= ids

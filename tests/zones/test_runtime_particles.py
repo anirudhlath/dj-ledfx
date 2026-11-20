@@ -55,6 +55,7 @@ PARTICLE_LOOKS = [
     "fountain",
     "flock",
     "ball",
+    "wisp",
 ]
 
 

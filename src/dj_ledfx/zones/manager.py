@@ -6,6 +6,11 @@ it, switches it on when a look is applied, runs firmware layers on the lights th
 them, and puts the light back how it was when it leaves every running zone. Captures are
 saved in state.db, so Off still works after a restart. A light that couldn't be captured
 is saved as an empty capture: Off leaves it alone rather than guessing (spec §8).
+
+Lights out (M6 ruling 19): a light its look has dark for good (`ZoneRuntime.out_after`) is
+switched off by one timer at that moment, if it can switch power, and left alone after it:
+no route, nothing sent, even when it's switched on elsewhere, until a new run takes it. Off
+and Stop all then put it back with its power.
 """
 
 from __future__ import annotations
@@ -13,9 +18,11 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import math
+import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from loguru import logger
@@ -36,9 +43,13 @@ from dj_ledfx.timing import utcnow
 from dj_ledfx.zones.home_view import NO_HOME, HomeView
 from dj_ledfx.zones.model import (
     DERIVED_KINDS,
+    HOME_ZONE_ID,
+    HOME_ZONE_NAME,
     Assignment,
+    ClaimsChanged,
     CrashInfo,
     LightsChanged,
+    OverlayInfo,
     PreviewOnlyChanged,
     RecentLookInfo,
     RunningZoneInfo,
@@ -52,6 +63,7 @@ from dj_ledfx.zones.model import (
     ZoneRecord,
     ZonesChanged,
 )
+from dj_ledfx.zones.overlay import MAX_OVERLAY_S, OverlayRun, OverlaySlot
 from dj_ledfx.zones.runtime import (
     STREAMS,
     AppliedKey,
@@ -68,6 +80,7 @@ if TYPE_CHECKING:
     from dj_ledfx.effects.field import FieldEffect
     from dj_ledfx.effects.ledset import Space
     from dj_ledfx.events import EventBus
+    from dj_ledfx.home.sun import SunPoint
     from dj_ledfx.looks.model import Look, Transition
     from dj_ledfx.looks.store import LookStore
     from dj_ledfx.persistence.state_db import StateDB
@@ -76,6 +89,9 @@ if TYPE_CHECKING:
     from dj_ledfx.zones.store import ZoneStore
 
 T = TypeVar("T")
+
+# A light whose moment has come while its zone is in a transition is tried again this often.
+LIGHTS_OUT_RETRY_S = 1.0
 
 
 class RuntimeHost(Protocol):
@@ -125,6 +141,8 @@ class _Running:
     # A derived zone's lights on the map when it last looked (home_changed): only lights
     # that join these are taken over, so one a newer zone took doesn't come back.
     members: tuple[str, ...] = ()
+    # The lights the lights-out timer switched off in this run: out until a new run takes them.
+    switched_off: set[str] = field(default_factory=set)
 
 
 def _look_id_of(running: _Running) -> str:
@@ -153,6 +171,9 @@ class ZoneManager:
         home: HomeView = NO_HOME,
         frames_watched: Callable[[], bool] = lambda: True,
         evening: Callable[[], float] = lambda: 0.0,
+        sun: Callable[[], SunPoint | None] = lambda: None,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._store = store
         self._looks = looks
@@ -163,11 +184,15 @@ class ZoneManager:
         self._event_bus = event_bus
         self._preview_only = preview_only
         self._now = now
+        self._monotonic = monotonic  # the time a runtime's elapsed_s counts from (_started_t)
+        self._sleep = sleep  # the lights-out timer's wait
         self._home = home
         # What every zone's runtime reads. `frames_watched`: whether anyone watches the live
         # stream, so zones draw lights that run their own effect only then (M1 review,
         # constraint 3; main passes Watchers.watching_live). `evening`: how far into the
-        # evening it is, for looks that follow it.
+        # evening it is, for looks that follow it. `sun`: where the sun is (None: no sun),
+        # which every frame carries and a look that needs it waits for. Previews and twins
+        # inherit both (dataclasses.replace).
         self._env = RuntimeEnv(
             clock=clock,
             latency_s=self._latency_s,
@@ -176,6 +201,7 @@ class ZoneManager:
             now=now,
             watched=frames_watched,
             evening=evening,
+            sun=sun,
             on_state_change=self._state_changed,
             on_switch=self._switch_due,
         )
@@ -187,6 +213,21 @@ class ZoneManager:
         self._power_versions: dict[str, int] = {}  # moves on with every change to _power
         self._versions = itertools.count(1)
         self._deferred_power_on: set[str] = set()
+        # Lights out. `_restore_on`: the lights dj-ledfx switched off and hasn't switched on
+        # since, awaiting release: every one that leaves its run (an end, or the map taking
+        # it out of the zone) is put back with its power at its release (under preview-only,
+        # at the release that turning it off makes), unless a zone takes it first.
+        # `_out_pending`: the lights the timer will switch off, seen before their moment (so
+        # one already past at resume is left alone). One timer task, asleep until `_out_due`.
+        self._restore_on: set[str] = set()
+        self._out_pending: set[str] = set()
+        self._out_timer: asyncio.Task[None] | None = None
+        self._out_due: float | None = None
+        # The overlay playing (M6 rulings 10-14): its slot is what every route and the frame
+        # feed read, so starting and ending one changes no route; one task ends it.
+        self._overlay_slot = OverlaySlot(reaches=lambda d: not self._is_out(d))
+        self._overlay_timer: asyncio.Task[None] | None = None
+        self._closed = False
         # The previews the engine hosts (web spec §12.3), and what each calls when its zone
         # is gone or has no lights.
         self._previews: dict[ZoneRuntime, Callable[[], None]] = {}
@@ -283,9 +324,15 @@ class ZoneManager:
 
     def light_mode(self, device_id: str) -> LightMode | None:
         """How a light shows its zone's look. None when no look drives it: no running zone
-        owns it, or its zone's saved look can't be read, which leaves it as it is."""
+        owns it, or its zone's saved look can't be read, which leaves it as it is. Also an
+        out light that doesn't read off (switched on elsewhere): it is sent nothing, so it is
+        no part of the look. One that reads off keeps its mode, and so its status."""
         runtime = self._runtime_of(device_id)
-        return None if runtime is None else runtime.mode_of(device_id)
+        if runtime is None or (
+            self._is_out(device_id) and self._power.get(device_id) is not False
+        ):
+            return None
+        return runtime.mode_of(device_id)
 
     def effect_name(self, device_id: str) -> str | None:
         """The firmware effect a light runs, or streams a copy of."""
@@ -302,12 +349,21 @@ class ZoneManager:
 
     # --- commands ---------------------------------------------------------------------
 
+    def check_scope(self, zone_id: str, look: Look) -> None:
+        """A home look plays on the whole home only (spec §5.2): it draws the whole map, so
+        a room or a group would show a piece of it. Raises ZoneError for any other zone,
+        and ZoneNotFoundError first for one that doesn't exist."""
+        if look.scope == "whole-home" and zone_id != HOME_ZONE_ID:
+            self.get_zone(zone_id)
+            raise ZoneError(f"{look.name} plays on {HOME_ZONE_NAME} only")
+
     async def start(
         self, zone_id: str, look: Look, transition: Transition | None = None
     ) -> StartResult:
         """Put a look on a zone. It takes its lights over from running zones (spec §4.3),
         with the transition asked for, or else the look's own (spec §5.3)."""
         validate_look(look)
+        self.check_scope(zone_id, look)
         async with self._lock:
             result = await self._start(zone_id, look, transition)
         self._event_bus.emit(ZonesChanged())
@@ -325,10 +381,12 @@ class ZoneManager:
 
     async def stop_all(self) -> None:
         async with self._lock:
-            if not self._running:
+            ended = self._end_overlay()
+            if not self._running and not ended:
                 return
-            released = await self._stop(*self._running)
-            await self._sync(released)
+            if self._running:
+                released = await self._stop(*self._running)
+                await self._sync(released)
         self._event_bus.emit(ZonesChanged())
 
     async def set_brightness(self, zone_id: str, value: float) -> RunningZoneInfo:
@@ -469,6 +527,7 @@ class ZoneManager:
                 or adapter is None
                 or self._held(runtime, adapter)
                 or self._power.get(device_id) is False
+                or self._is_out(device_id)  # dark for good: left alone, even switched on
             ):
                 return
             key = runtime.applied_key(device_id)
@@ -535,6 +594,7 @@ class ZoneManager:
         frame ahead and asks no light its latency. It follows the zone's lights (_redraw);
         when the zone is gone or has no lights it ends, and on_end is called."""
         validate_look(look)
+        self.check_scope(zone_id, look)
         zone = self.get_zone(zone_id)
         lights = self._members(zone)
         if not lights:
@@ -628,8 +688,13 @@ class ZoneManager:
         the same way, and ends when the zone is gone or has none."""
         space = self._home.space()
         for running in self._running.values():
+            # A switched-off light that leaves the run is put back with its power (the zone
+            # that next applies it discards the mark: _sync_device).
+            self._restore_on.update(running.switched_off.difference(running.lights))
+            running.switched_off.intersection_update(running.lights)
             if running.runtime is not None:
                 self._follow(running.runtime, running.lights, space)
+        self._redraw_overlay(space)
         for runtime, on_end in list(self._previews.items()):
             zone = self._zones.get(runtime.zone_id)
             members = self._members(zone) if zone is not None else ()
@@ -639,6 +704,27 @@ class ZoneManager:
                 self.end_preview(runtime)
                 on_end()
 
+    def _home_members(self) -> tuple[str, ...]:
+        zone = self._zones.get(HOME_ZONE_ID)
+        return self._members(zone) if zone is not None else ()
+
+    def _redraw_overlay(self, space: Space) -> None:
+        """The overlay covers the whole home's lights, as they are now. A light that joins is
+        emulated like the rest: set_lights never adds one, and a firmware layer would claim it.
+        With no lights left it ends; the caller announces that (home_changed's ZonesChanged)."""
+        run = self._overlay_slot.run
+        if run is None:
+            return
+        members = self._home_members()
+        if not members:
+            self._end_overlay()
+            return
+        before = {light.device_id for light in run.runtime.lights}
+        self._follow(run.runtime, members, space)
+        for device_id in members:
+            if device_id not in before:
+                run.runtime.mark_emulated(device_id)
+
     def _follow(self, runtime: ZoneRuntime, device_ids: Iterable[str], space: Space) -> None:
         lights = self._zone_lights(device_ids)
         if list(runtime.lights) != lights or runtime.space != space:
@@ -646,6 +732,103 @@ class ZoneManager:
 
     def _members(self, zone: ZoneRecord) -> tuple[str, ...]:
         return tuple(light for light in self._lights_of(zone) if self._adapter(light) is not None)
+
+    # --- overlays (M6 rulings 10-14) ----------------------------------------------------
+
+    @property
+    def overlay_slot(self) -> OverlaySlot:
+        return self._overlay_slot
+
+    def now(self) -> datetime:
+        """The manager's own clock, which an overlay's progress is read against."""
+        return self._now()
+
+    def overlays(self) -> list[OverlayInfo]:
+        run = self._overlay_slot.run
+        if run is None:
+            return []
+        return [OverlayInfo(run.look.id, run.look.name, run.trigger, run.started_at, run.ends_at)]
+
+    async def start_overlay(
+        self, look: Look, duration_s: float, trigger: str = "api"
+    ) -> OverlayInfo:
+        """Play a Home look over every running zone for duration_s seconds, then get out of
+        the way. A newer overlay replaces the one playing."""
+        validate_look(look)
+        if look.scope != "whole-home":
+            raise ZoneError("Only a Home look plays over everything")
+        if not math.isfinite(duration_s) or not 0.0 < duration_s <= MAX_OVERLAY_S:
+            raise ZoneError(f"An overlay lasts more than 0 and at most {MAX_OVERLAY_S:g} seconds")
+        async with self._lock:
+            members = self._home_members()
+            if not members:
+                raise ZoneError(f"{HOME_ZONE_NAME} has no lights")
+            started_t = self._monotonic()
+            runtime = self._new_runtime(
+                HOME_ZONE_ID,
+                look,
+                members,
+                1.0,
+                env=replace(self._env, on_state_change=None, on_switch=None),
+                emulated=members,
+                started_t=started_t,
+            )
+            if runtime.waiting_for:
+                raise ZoneError(f"{look.name} waits for {', '.join(runtime.waiting_for)}")
+            self._end_overlay()
+            # The span begins one lead (the runtime's horizon: its lights' latencies, which it
+            # counts before its first tick, plus a frame) after the request, so the first
+            # frame any light sends already eases in from 0, a slow light's included.
+            lead = runtime.horizon_s
+            started_t += lead
+            runtime.started_t = started_t
+            started_at = self._now() + timedelta(seconds=lead)
+            run = OverlayRun(
+                look,
+                trigger,
+                runtime,
+                started_t,
+                started_t + duration_s,
+                started_at,
+                started_at + timedelta(seconds=duration_s),
+            )
+            self._overlay_slot.run = run
+            self._host.add_runtime(runtime)
+            if not self._closed:
+                self._overlay_timer = asyncio.get_running_loop().create_task(
+                    self._overlay_ends(run, lead + duration_s)
+                )
+        self._event_bus.emit(ZonesChanged())
+        return OverlayInfo(look.id, look.name, trigger, started_at, run.ends_at)
+
+    async def stop_overlay(self) -> None:
+        """End the overlay playing, if one does. Idempotent."""
+        async with self._lock:
+            ended = self._end_overlay()
+        if ended:
+            self._event_bus.emit(ZonesChanged())
+
+    def _end_overlay(self) -> bool:
+        """Forget the overlay and its timer, and take its runtime from the engine. Returns
+        whether one played. No route changes: they read the slot."""
+        run, self._overlay_slot.run = self._overlay_slot.run, None
+        timer, self._overlay_timer = self._overlay_timer, None
+        if timer is not None and timer is not asyncio.current_task():
+            timer.cancel()
+        if run is None:
+            return False
+        self._host.remove_runtime(run.runtime)
+        return True
+
+    async def _overlay_ends(self, run: OverlayRun, after_s: float) -> None:
+        await self._sleep(after_s)
+        async with self._lock:
+            # Every end and replacement cancels this task under the lock, and a task cancelled
+            # while it waits for the lock never gets it: this covers a future end that forgets to.
+            if self._overlay_slot.run is not run:
+                return
+            self._end_overlay()
+        self._event_bus.emit(ZonesChanged())
 
     # --- groups (web spec §11.3) --------------------------------------------------------
 
@@ -798,11 +981,12 @@ class ZoneManager:
         if zone_id in self._running:  # the new start ends the run before it
             previous, stopped = self._end_run(zone_id, remember=True)
         brightness = _brightness_of(previous) if previous is not None else 1.0
-        runtime = self._new_runtime(zone_id, look, lights, brightness)
-        runtime.begin_transition(transition, sources)
-        running = _Running(
-            since=self._now(), lights=lights, runtime=runtime, members=tuple(lights)
+        since = self._now()
+        runtime = self._new_runtime(
+            zone_id, look, lights, brightness, started_t=self._started_t(since)
         )
+        runtime.begin_transition(transition, sources)
+        running = _Running(since=since, lights=lights, runtime=runtime, members=tuple(lights))
         self._running[zone_id] = running
         self._host.add_runtime(runtime)
         self._redraw()  # the zones it took lights from
@@ -829,9 +1013,13 @@ class ZoneManager:
         lights: Iterable[str],
         brightness: float,
         env: RuntimeEnv | None = None,
+        started_t: float | None = None,
+        emulated: Iterable[str] = (),
     ) -> ZoneRuntime:
         """A zone's runtime. A preview passes its own env: no latency (nothing is sent)
-        and always watched (it exists only to be watched)."""
+        and always watched (it exists only to be watched). `started_t` is when the look
+        began, on the monotonic clock (_started_t); a preview, which begins now, passes none.
+        `emulated`: the lights that take a firmware layer's copy (the overlay's, all)."""
         return ZoneRuntime(
             zone_id,
             look,
@@ -839,14 +1027,63 @@ class ZoneManager:
             env or self._env,
             brightness=brightness,
             space=self._home.space(),
+            started_t=self._monotonic() if started_t is None else started_t,
+            emulated=emulated,
         )
 
+    def _started_t(self, since: datetime) -> float:
+        """The monotonic time a look that began at `since` began: a zone resumed after a
+        restart, or one rebuilt, plays its look from where it was, not from the beginning.
+        A `since` in the future (the clock stepped back) counts as now."""
+        return self._monotonic() - max(0.0, (self._now() - since).total_seconds())
+
     def _state_changed(self, runtime: ZoneRuntime) -> None:
-        """A running zone crashed, turned slow or recovered by itself (spec §8), or its
-        transition started, passed the midpoint or ended (spec §5.3)."""
+        """A running zone crashed, turned slow or recovered by itself (spec §8), started or
+        stopped waiting for an input (spec §5.2), or its transition started, passed the
+        midpoint or ended (spec §5.3). A look that stops waiting claims its firmware layers'
+        lights, and one that starts gives them back, so when any of the zone's lights isn't
+        as its look now runs it, main runs resync() for the zone (ClaimsChanged)."""
         running = self._running.get(runtime.zone_id)
-        if running is not None and running.runtime is runtime:  # not one still starting
-            self._event_bus.emit(ZonesChanged())
+        if running is None or running.runtime is not runtime:  # not one still starting
+            return
+        self._event_bus.emit(ZonesChanged())
+        if self._out_of_line(running, runtime):
+            self._event_bus.emit(ClaimsChanged(runtime.zone_id))
+
+    def _out_of_line(self, running: _Running, runtime: ZoneRuntime) -> list[str]:
+        """The zone's lights that a sync would apply now: last given something other than
+        what its look gives them (applied_key). Not the lights left as they are (_held),
+        switched off elsewhere, or a transition hands over (switch() applies those)."""
+        handing_over = runtime.handing_over
+        out = []
+        for device_id in running.lights:
+            adapter = self._adapter(device_id)
+            if (
+                adapter is None
+                or device_id in handing_over
+                or self._held(runtime, adapter)
+                or self._power.get(device_id) is False
+                or self._is_out(device_id)
+            ):
+                continue
+            if not self._ready(device_id, runtime):
+                out.append(device_id)
+        return out
+
+    async def resync(self, zone_id: str) -> None:
+        """Apply a running zone's lights that aren't as its look now runs them (ClaimsChanged):
+        a firmware layer's effect starts on a light its look claimed when the sun came, and
+        a light it gave back when the sun went streams again."""
+        async with self._lock:
+            running = self._running.get(zone_id)
+            runtime = running.runtime if running is not None else None
+            if running is None or runtime is None:
+                return
+            lights = self._out_of_line(running, runtime)
+            if not lights:
+                return
+            await self._sync(lights)
+        self._event_bus.emit(LightsChanged())
 
     def _switch_due(self, runtime: ZoneRuntime) -> None:
         """Lights went over to a running zone's new look: its transition passed the midpoint,
@@ -859,7 +1096,7 @@ class ZoneManager:
         if not runtime.transitioning:
             for device_id in runtime.handing_over & set(running.lights):
                 if not runtime.streams(device_id):
-                    self._routes.set_route(device_id, runtime.route_for(device_id))
+                    self._routes.set_route(device_id, self._route(device_id, runtime))
         self._event_bus.emit(TransitionSwitched(runtime.zone_id))
 
     async def switch(self, zone_id: str) -> None:
@@ -879,15 +1116,23 @@ class ZoneManager:
         self._event_bus.emit(LightsChanged())
 
     def _rebuild_broken(self, zone_id: str, running: _Running) -> bool:
-        """A zone whose saved look can't be read tries the look saved under its id."""
+        """A zone whose saved look can't be read tries the look saved under its id, unless
+        that is now a Home look and the zone isn't Whole home: it stays broken."""
         saved = running.saved
         if saved is None:
             return False
         try:
             look = self._looks.get(saved.look_id)
-        except LookNotFoundError:
+            self.check_scope(zone_id, look)
+        except (LookNotFoundError, ZoneError):
             return False
-        running.runtime = self._new_runtime(zone_id, look, running.lights, saved.brightness)
+        running.runtime = self._new_runtime(
+            zone_id,
+            look,
+            running.lights,
+            saved.brightness,
+            started_t=self._started_t(running.since),
+        )
         running.saved = running.broken = None
         self._host.add_runtime(running.runtime)
         return True
@@ -904,7 +1149,13 @@ class ZoneManager:
             return _Running(
                 saved.started_at, lights, None, saved=saved, broken=broken, members=members
             )
-        runtime = self._new_runtime(saved.zone_id, look, lights, saved.brightness)
+        runtime = self._new_runtime(
+            saved.zone_id,
+            look,
+            lights,
+            saved.brightness,
+            started_t=self._started_t(saved.started_at),
+        )
         return _Running(saved.started_at, lights, runtime, members=members)
 
     def _look_name(self, running: _Running) -> str:
@@ -959,7 +1210,14 @@ class ZoneManager:
         """Every end of a run: Off, a take-over, a new start on the zone. The run and its
         runtime are forgotten; returns the run, and its look as "Start again" remembers
         it, unless remember is False. A look started again on its zone is remembered too:
-        recent() leaves it out while it runs."""
+        recent() leaves it out while it runs. The lights this run's timer switched off are
+        put back with their power (_restore_on): the one exception to Off never switching a
+        light on (spec §6.4), because dj-ledfx switched them off: all of the run's, whether
+        or not the map had already taken them out of it (_follow_members may stop a zone after
+        filtering its lights). Every other out light (offline, held or switched off elsewhere
+        at its moment, or already past it when the run resumed) gets Off's usual rule: its
+        power as _release reads it afresh."""
+        self._restore_on.update(self._running[zone_id].switched_off)
         running = self._running.pop(zone_id)
         if running.runtime is not None:
             self._host.remove_runtime(running.runtime)
@@ -1093,7 +1351,11 @@ class ZoneManager:
         ids = list(dict.fromkeys(device_ids))
         for device_id in ids:
             runtime = self._runtime_of(device_id)
-            if runtime is not None and self._ready(device_id, runtime):
+            if (
+                runtime is not None
+                and self._ready(device_id, runtime)
+                and not self._is_out(device_id)
+            ):
                 self._publish(device_id, runtime)
         captured = await self._each(ids, lambda d: self._look_at(d, d in wanted))
         new = {d: state for d, state in zip(ids, captured, strict=True) if state is not None}
@@ -1103,6 +1365,7 @@ class ZoneManager:
         gone = [d for d, done in zip(ids, released, strict=True) if done]
         if gone:
             await self._db.delete_device_states(gone)
+        self._schedule_lights_out()
 
     @staticmethod
     async def _each(ids: list[str], step: Callable[[str], Awaitable[T]]) -> list[T | None]:
@@ -1132,7 +1395,12 @@ class ZoneManager:
         Returns the new capture, for _sync to save."""
         runtime = self._runtime_of(device_id)
         adapter = self._adapter(device_id)
-        if runtime is None or adapter is None or self._held(runtime, adapter):
+        if (
+            runtime is None
+            or adapter is None
+            or self._held(runtime, adapter)
+            or self._is_out(device_id)  # dark for good: neither read nor captured
+        ):
             return None
         if power_on or device_id not in self._power:  # a look being applied reads it afresh
             self._set_power(device_id, (await self._read(adapter)).power)
@@ -1157,6 +1425,10 @@ class ZoneManager:
         if runtime is None:  # the saved look can't be read: leave the light alone
             self._routes.set_route(device_id, None)
             return False
+        if self._is_out(device_id):  # its look has it dark for good: out, whatever its power
+            self._routes.set_route(device_id, None)
+            self._applied.pop(device_id, None)
+            return False
         if (
             adapter is None
             or self._held(runtime, adapter)
@@ -1164,6 +1436,7 @@ class ZoneManager:
         ):
             self._publish(device_id, runtime)
             return False
+        self._restore_on.discard(device_id)  # a zone has it again: its look decides its power
         if power_on and self._power.get(device_id) is not True:  # off, or it can't say
             await self._switch_on(device_id, adapter)
         if self._power.get(device_id) is False:  # switched off elsewhere: out until it's on
@@ -1179,11 +1452,17 @@ class ZoneManager:
         light for this runtime (a light leaving its own effect, from just before _apply
         stops the effect), and never while preview-only is on; the web preview gets every
         routed slice either way."""
-        route = runtime.route_for(device_id)
+        route = self._route(device_id, runtime)
         ready = self._ready(device_id, runtime)
         if route is not None and route.streaming and (self._preview_only or not ready):
             route = replace(route, streaming=False)
         self._routes.set_route(device_id, route)
+
+    def _route(self, device_id: str, runtime: ZoneRuntime) -> DeviceRoute | None:
+        """The light's route to its zone's frames, with the overlay slot: an overlay mixes in
+        at send wherever one plays, so starting and ending one changes no route."""
+        route = runtime.route_for(device_id)
+        return None if route is None else replace(route, over=self._overlay_slot)
 
     def _ready(self, device_id: str, runtime: ZoneRuntime) -> bool:
         """Whether the light was last given what this runtime gives it (applied_key)."""
@@ -1198,7 +1477,7 @@ class ZoneManager:
         claim = runtime.claim_for(device_id)
         if claim is not None:
             layer, effect = claim
-            self._routes.set_route(device_id, runtime.route_for(device_id))  # stop frames first
+            self._routes.set_route(device_id, self._route(device_id, runtime))  # stop frames first
             brightness = runtime.start_brightness(device_id)
             try:
                 async with adapter.send_lock:
@@ -1236,7 +1515,7 @@ class ZoneManager:
         shows them as it stops) and again just after (one that doesn't gets them then,
         not at its next due send). A light from anything else (idle, offline) is readied
         before any frame reaches it: an effect of its own may be running."""
-        self._routes.set_route(device_id, runtime.route_for(device_id))
+        self._routes.set_route(device_id, self._route(device_id, runtime))
         await self._routes.send_now(device_id)
         await self._prepare(adapter)
         await self._routes.send_now(device_id)
@@ -1285,17 +1564,165 @@ class ZoneManager:
         """Put a light back how it was before dj-ledfx took control, once (spec §4.3).
         True: done, so _sync forgets its capture."""
         state = self._captured.get(device_id)
-        if state is None or not adapter.is_connected:
-            return False  # nothing to release, or offline: released when it's back
+        if state is None:
+            self._restore_on.discard(device_id)
+            return False  # nothing to release
+        if not adapter.is_connected:
+            return False  # offline: released when it's back
         if state:
             # Read afresh: the last poll may be 5 s old. A light that reads off gets its
-            # colour and effect back and stays off: Off never switches a light on (§6.4).
+            # colour and effect back and stays off: Off never switches a light on (§6.4),
+            # unless dj-ledfx switched it off (lights out): it was on before that.
             power = (await self._read(adapter)).power
+            on = power is not False or device_id in self._restore_on
             try:
                 async with adapter.send_lock:  # the route is gone; no frame lands after this
-                    await adapter.restore_state(state, power=power is not False)
+                    await adapter.restore_state(state, power=on)
             except Exception as exc:
                 logger.warning("Couldn't restore {}: {}", adapter.device_info.name, exc)
                 return False
         del self._captured[device_id]
+        self._restore_on.discard(device_id)
         return True
+
+    # --- lights out (M6 ruling 19) ----------------------------------------------------
+
+    def close(self) -> None:
+        """Stop the lights-out timer and the overlay's, for good: a sync after this starts none."""
+        self._closed = True
+        self._cancel_out_timer()
+        timer, self._overlay_timer = self._overlay_timer, None
+        if timer is not None:
+            timer.cancel()
+
+    def _out_time(self, runtime: ZoneRuntime, device_id: str) -> float | None:
+        """When the light's look has it dark for good, on the monotonic clock. None: never,
+        or it can't be switched off (then it streams black)."""
+        adapter = self._adapter(device_id)
+        if adapter is None or not adapter.switches_power:
+            return None
+        after = runtime.out_after(device_id)
+        return None if after is None else runtime.started_t + after
+
+    def _is_out(self, device_id: str) -> bool:
+        """The light is out: its run's timer switched it off, or its moment has passed and no
+        transition is mixing it (the timer comes within LIGHTS_OUT_RETRY_S, or it was left
+        alone when its moment came: offline, preview-only, a run resumed after it, or
+        switched off elsewhere). An out light is neither readied, captured, routed nor sent
+        anything until a new run takes it."""
+        zone_id = self.owner_of(device_id)
+        running = self._running.get(zone_id) if zone_id is not None else None
+        if running is None:
+            return False
+        if device_id in running.switched_off:
+            return True
+        runtime = running.runtime
+        if runtime is None or runtime.transitioning:
+            return False
+        moment = self._out_time(runtime, device_id)
+        return moment is not None and moment <= self._monotonic()
+
+    def _cancel_out_timer(self) -> None:
+        timer, self._out_timer, self._out_due = self._out_timer, None, None
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:  # closed from outside the loop: nothing is running
+            current = None
+        if timer is not None and timer is not current:
+            timer.cancel()
+
+    def _schedule_lights_out(self) -> None:
+        """Keep the one timer asleep until the next light's moment: called at the end of every
+        sync and after each wake. A light is pending once seen before its moment, and stays
+        so until the timer deals with it, so a moment already past when a run is first seen
+        (resumed after its walk) is left alone. A pending light whose zone is mid-transition
+        is tried again after LIGHTS_OUT_RETRY_S, and so is one whose zone has crashed (a crashed
+        zone has no moments, so its pending lights are kept, not dropped)."""
+        if self._closed:
+            return
+        now = self._monotonic()
+        pending: set[str] = set()
+        due: float | None = None
+        for running in self._running.values():
+            runtime = running.runtime
+            if runtime is None:
+                continue
+            for device_id in running.lights:
+                if device_id in running.switched_off:
+                    continue
+                moment = self._out_time(runtime, device_id)
+                if runtime.crash is not None and device_id in self._out_pending:
+                    # a crashed zone has no moments, but dj-ledfx's own crash isn't a reason
+                    # to leave the light: it stays pending, and a Restart finishes the walk
+                    pending.add(device_id)
+                    moment = now + LIGHTS_OUT_RETRY_S
+                elif moment is None or (moment <= now and device_id not in self._out_pending):
+                    continue
+                else:
+                    pending.add(device_id)
+                    if moment <= now:  # past while a transition held it, or just now
+                        moment = now + LIGHTS_OUT_RETRY_S if runtime.transitioning else now
+                due = moment if due is None else min(due, moment)
+        self._out_pending = pending
+        if due is None:
+            self._cancel_out_timer()
+        elif self._out_due != due or self._out_timer is None or self._out_timer.done():
+            self._cancel_out_timer()
+            self._out_due = due
+            self._out_timer = asyncio.get_running_loop().create_task(self._lights_out_at(due))
+
+    async def _lights_out_at(self, due: float) -> None:
+        await self._sleep(max(0.0, due - self._monotonic()))
+        async with self._lock:
+            if self._out_due == due:  # this timer is the one: the next sync schedules another
+                self._out_timer = self._out_due = None
+            now = max(due, self._monotonic())
+            for running in list(self._running.values()):
+                runtime = running.runtime
+                if runtime is None:
+                    continue
+                for device_id in list(running.lights):
+                    if device_id not in self._out_pending or device_id in running.switched_off:
+                        continue
+                    moment = self._out_time(runtime, device_id)
+                    if runtime.crash is not None:
+                        continue  # still pending: tried again after a Restart
+                    if moment is None:
+                        self._out_pending.discard(device_id)  # its look changed
+                    elif moment <= now and not runtime.transitioning:
+                        self._out_pending.discard(device_id)
+                        try:
+                            await self._switch_off(running, runtime, device_id)
+                        except Exception as exc:  # one light never stops the timer
+                            logger.opt(exception=exc).warning("Couldn't switch off {}", device_id)
+            self._schedule_lights_out()
+
+    async def _switch_off(self, running: _Running, runtime: ZoneRuntime, device_id: str) -> None:
+        """Switch off a light whose look has it dark for good: its route goes first, then the
+        command, under the adapter's send lock, so no frame lands after it. A light that
+        can't be reached, is switched off already, was never captured or is held (preview-only,
+        offline) is left as it is, and so is out from now on; a failure is logged and leaves it
+        dark but on."""
+        adapter = self._adapter(device_id)
+        if (
+            adapter is None
+            or self._held(runtime, adapter)
+            or self._power.get(device_id) is False
+            or device_id not in self._captured  # came back after _look_at: never taken, so Off
+            # would have nothing to put back (not _ready: a pending light past its moment that
+            # a sync passed is already unapplied, and its walk must go on)
+        ):
+            return
+        self._routes.set_route(device_id, None)
+        self._applied.pop(device_id, None)
+        running.switched_off.add(device_id)
+        try:
+            async with adapter.send_lock:
+                await adapter.set_power(False)
+        except Exception as exc:
+            logger.warning(
+                "Couldn't switch off {}: {}; it stays on, dark", adapter.device_info.name, exc
+            )
+            return
+        self._set_power(device_id, False)
+        logger.info("{} is dark for good in its look; switched off", adapter.device_info.name)

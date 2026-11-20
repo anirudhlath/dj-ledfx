@@ -110,14 +110,20 @@ async def test_bad_starts_are_refused_with_the_reason(api: Api) -> None:
     neither = await api.client.post(start, json={})
     no_zone = await api.client.post("/api/zones/nope/start", json={"lookId": "classic-breathe"})
     no_look = await api.client.post(start, json={"lookId": "nope"})
-    too_big = await api.client.post(start, json={"look": {**breathe, "scope": "whole-home"}})
+    home_look = {"look": {**breathe, "scope": "whole-home"}}
+    too_big = await api.client.post(start, json=home_look)
+    no_zone_for_home = await api.client.post("/api/zones/nope/start", json=home_look)
 
     codes = [resp.status_code for resp in (both, neither, no_zone, no_look, too_big)]
     assert codes == [400, 400, 404, 404, 400]
+    assert (no_zone_for_home.status_code, no_zone_for_home.json()["detail"]) == (
+        404,
+        "No zone 'nope'",
+    )  # an unknown zone is not found, whatever look starts on it
     assert both.json()["detail"] == "Send either lookId or look"
     assert no_zone.json()["detail"] == "No zone 'nope'"
     assert no_look.json()["detail"] == "No look 'nope'"
-    assert "M6" in too_big.json()["detail"]
+    assert too_big.json()["detail"] == f"{breathe['name']} plays on Whole home only"
 
 
 async def test_brightness_restart_off_and_stop_all(api: Api) -> None:

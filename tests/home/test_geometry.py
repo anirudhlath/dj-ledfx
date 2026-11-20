@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from dj_ledfx.home.geometry import point_in_polygon, points_in_polygon, polygon_area
+from dj_ledfx.home.geometry import (
+    point_in_polygon,
+    points_in_polygon,
+    polygon_area,
+    polygon_centre,
+)
 
 SQUARE = ((0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0))
 L_SHAPE = ((0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (2.0, 2.0), (2.0, 4.0), (0.0, 4.0))
@@ -27,6 +33,19 @@ def test_polygon_area_either_way_round() -> None:
     assert polygon_area(SQUARE) == 16.0
     assert polygon_area(tuple(reversed(SQUARE))) == 16.0
     assert polygon_area(L_SHAPE) == 12.0
+
+
+def test_polygon_centre_is_the_area_centroid() -> None:
+    rectangle = ((0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0))
+    line = ((0.0, 0.0), (2.0, 0.0), (7.0, 0.0))
+
+    assert polygon_centre(rectangle) == pytest.approx((2.0, 1.0))
+    assert polygon_centre(tuple(reversed(rectangle))) == pytest.approx((2.0, 1.0))  # either way
+    # The L is a 4 x 2 slab (centre 2, 1) and a 2 x 2 block on it (centre 1, 3): the area's
+    # middle sits at 5/3 each way, where the vertices' mean is (2, 2).
+    assert polygon_centre(L_SHAPE) == pytest.approx((5.0 / 3.0, 5.0 / 3.0))
+    assert polygon_centre(line) == pytest.approx((3.0, 0.0))  # no area: the vertices' mean
+    assert polygon_centre(((1.5, 2.5),)) == (1.5, 2.5)
 
 
 def test_one_point_agrees_with_many_on_random_points() -> None:

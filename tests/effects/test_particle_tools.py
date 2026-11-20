@@ -12,7 +12,7 @@ from map_home import HOMES, ROW, bulbs, leds_at, lights_at, upright
 from numpy.typing import NDArray
 
 from dj_ledfx.effects import particle_tools
-from dj_ledfx.effects.ledset import LedSet
+from dj_ledfx.effects.ledset import NO_ROOM, LedSet
 from dj_ledfx.effects.particle_tools import (
     CEILING_OVER_M,
     GRID_FROM_LEDS,
@@ -34,6 +34,7 @@ from dj_ledfx.effects.particle_tools import (
     in_ball,
     in_birth_order,
     joined,
+    lamp_rooms,
     lamp_streams,
     lamps_of,
     lit,
@@ -662,6 +663,31 @@ def test_lights_at_one_spot_make_one_stop() -> None:
 def test_a_zone_with_no_leds_has_no_lamps() -> None:
     assert lamps_of(lights_at()).count == 0
     assert Ground.of(lights_at()).lamps.count == 0
+
+
+def test_lamp_rooms_gives_each_lamp_its_room() -> None:
+    # A lamp in room 0, a lamp in room 1, a bulb the map doesn't place, and a lamp of two
+    # lights a hand apart (one stop) whose first light is in room 1 and second in room 0.
+    leds = lights_at(
+        upright(1.0, 1.0),
+        upright(6.0, 1.0),
+        [(3.0, 3.0, 1.0)],
+        upright(8.0, 3.0),
+        upright(8.1, 3.0),
+        rooms=[0, 1, NO_ROOM, 1, 0],
+    )
+    ground = Ground.of(leds)
+
+    rooms = lamp_rooms(ground)
+
+    assert ground.lamps.count == 4
+    assert rooms.tolist() == [0, 1, NO_ROOM, 1]  # the last stop takes its first member's room
+    assert rooms.dtype == np.intp
+    assert lamp_rooms(Ground.of(lights_at())).tolist() == []  # no lamps, no rooms
+    # Among some LEDs only their lamps are stops: the room of each is its marked LEDs'.
+    among = np.zeros(leds.count, dtype=bool)
+    among[14:28] = True  # the second lamp alone
+    assert lamp_rooms(Ground.of(leds, among)).tolist() == [1]
 
 
 # Three lights with no map: a lamp at x 1, a lamp at x 3 and a bulb at x 5.

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from conftest import tempo_ctx
+from conftest import render_ctx, tempo_ctx
+from sun_fakes import AT_DUSK
 from tempo_fakes import START, FakeTime, play, tempo_clock
 
 from dj_ledfx.effects.context import (
     DJ_BEAT,
     EVENING,
     NO_SIGNALS,
+    SUN_AZIMUTH,
+    SUN_ELEVATION,
     RenderContext,
     SignalView,
     render_context,
@@ -68,6 +71,24 @@ def test_the_evening_is_signalled_to_the_looks() -> None:
     assert render_context(clock, time.now, 1 / 60).signals.get(EVENING) == 0.0
 
 
+# M6 ruling 5: the sun's height and bearing (true north's degrees) while there is a sun,
+# and neither without one, so a look reading them gets its own default.
+def test_a_frame_carries_the_suns_signals_while_there_is_one() -> None:
+    time = FakeTime()
+    clock = tempo_clock(time)
+    play(clock, time, 2)
+
+    sunny = render_context(clock, time.now, 1 / 60, 0.4, sun=AT_DUSK).signals
+    sunless = render_context(clock, time.now, 1 / 60, 0.4, sun=None).signals
+
+    assert (sunny.get(SUN_ELEVATION), sunny.get(SUN_AZIMUTH)) == (2.0, 270.0)
+    assert (sunless.get(SUN_ELEVATION, -99.0), sunless.get(SUN_AZIMUTH, -99.0)) == (-99.0, -99.0)
+    for signals in (sunny, sunless):
+        assert (signals.get(EVENING), signals.get(DJ_BEAT)) == (0.4, 1.0)
+    alone = render_context(tempo_clock(FakeTime()), START, 1 / 60, sun=AT_DUSK).signals
+    assert (alone.get(SUN_ELEVATION), alone.get(EVENING), alone.get(DJ_BEAT)) == (2.0, 0.0, 0.0)
+
+
 def test_a_pro_dj_link_lock_with_no_dj_signals_no_dj() -> None:
     clock = tempo_clock(FakeTime(), settings=TempoSettings(lock="prodjlink"))
 
@@ -101,3 +122,11 @@ def test_to_beat_context_keeps_the_beat_bpm_and_dt() -> None:
 def test_a_moment_says_where_the_music_is_in_beats() -> None:
     assert tempo_ctx(13.25).beats == 13.25
     assert to_beat_context(tempo_ctx(13.25)).beats == 13.25
+
+
+def test_a_frame_carries_the_looks_elapsed_time() -> None:
+    clock = tempo_clock(FakeTime())
+
+    assert render_context(clock, START, 1 / 60, elapsed_s=12.5).elapsed_s == 12.5
+    assert render_context(clock, START, 1 / 60).elapsed_s == 0.0  # a look that keeps no time
+    assert tempo_ctx(4.0).elapsed_s == render_ctx().elapsed_s == 0.0

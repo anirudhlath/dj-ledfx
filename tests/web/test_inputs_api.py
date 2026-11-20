@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator, Callable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from api_home import Api, api_home
 from fastapi.testclient import TestClient
+from sun_fakes import AT_DUSK, FixedSun
 from tempo_fakes import PLAYER, START_WALL, FakeTime, beat_event, tempo_clock
 
+from dj_ledfx.home.sun import SunPoint, SunReading
 from dj_ledfx.prodjlink.listener import Listening
 from dj_ledfx.tempo.model import DjSet, TempoSettings
 from dj_ledfx.tempo.store import TempoStore
@@ -175,6 +177,85 @@ async def test_the_last_dj_set_reads_from_and_to(api: Api) -> None:
         "from": "2026-10-01T19:00:00Z",
         "to": "2026-10-01T21:00:00Z",
     }
+
+
+def _a_day_in_march(sunrise: datetime | None, sunset: datetime | None) -> SunReading:
+    """A reading at made-up numbers (no place's): the sun low in the west, two path points."""
+    at = datetime(2026, 3, 20, 18, 0, tzinfo=UTC)
+    return SunReading(
+        now=SunPoint(at, 2.14, 268.06),
+        sunrise=sunrise,
+        sunset=sunset,
+        path=(
+            SunPoint(at - timedelta(minutes=20), 6.04, 262.52),
+            SunPoint(at - timedelta(minutes=10), 4.06, 265.34),
+        ),
+    )
+
+
+async def test_inputs_carry_the_sun_with_its_day_and_path(tmp_path: Path) -> None:
+    sunrise = datetime(2026, 3, 20, 6, 2, 30, tzinfo=UTC)
+    sunset = datetime(2026, 3, 20, 18, 10, tzinfo=UTC)
+    sun = FixedSun(AT_DUSK, _a_day_in_march(sunrise, sunset))
+    async with api_home(tmp_path, [], [], sun=sun) as api:
+        inputs = (await api.client.get("/api/inputs")).json()
+
+    assert inputs["sun"] == {
+        "elevation": 2.1,
+        "azimuth": 268.1,
+        "sunrise": "2026-03-20T06:02:30Z",
+        "sunset": "2026-03-20T18:10:00Z",
+        "path": [
+            {"at": "2026-03-20T17:40:00Z", "elevation": 6.0, "azimuth": 262.5},
+            {"at": "2026-03-20T17:50:00Z", "elevation": 4.1, "azimuth": 265.3},
+        ],
+    }
+
+
+@pytest.mark.parametrize("sun", [None, FixedSun(None)], ids=["no-sun", "no-location"])
+async def test_inputs_say_no_sun_as_null(tmp_path: Path, sun: FixedSun | None) -> None:
+    async with api_home(tmp_path, [], [], sun=sun) as api:
+        inputs = (await api.client.get("/api/inputs")).json()
+
+    assert "sun" in inputs
+    assert inputs["sun"] is None
+
+
+async def test_a_polar_sun_has_null_sunrise_and_sunset(tmp_path: Path) -> None:
+    sun = FixedSun(AT_DUSK, _a_day_in_march(None, None))
+    async with api_home(tmp_path, [], [], sun=sun) as api:
+        inputs = (await api.client.get("/api/inputs")).json()
+
+    assert (inputs["sun"]["sunrise"], inputs["sun"]["sunset"]) == (None, None)
+    assert inputs["sun"]["elevation"] == 2.1  # the sun itself is still sent
+
+
+async def test_an_azimuth_that_rounds_up_to_360_wraps_to_0(tmp_path: Path) -> None:
+    at = datetime(2026, 3, 20, 18, 0, tzinfo=UTC)
+    reading = SunReading(
+        now=SunPoint(at, 2.14, 359.96),  # 359.96 rounds to 360.0 at 1 decimal
+        sunrise=None,
+        sunset=None,
+        path=(SunPoint(at - timedelta(minutes=10), 4.06, 359.99),),
+    )
+    async with api_home(tmp_path, [], [], sun=FixedSun(AT_DUSK, reading)) as api:
+        sun = (await api.client.get("/api/inputs")).json()["sun"]
+
+    assert sun["azimuth"] == 0.0
+    assert [point["azimuth"] for point in sun["path"]] == [0.0]
+
+
+def test_the_inputs_channel_carries_the_sun() -> None:
+    sunset = datetime(2026, 3, 20, 18, 10, tzinfo=UTC)
+    sun = FixedSun(AT_DUSK, _a_day_in_march(None, sunset))
+    app = create_app(**mock_deps(sun=sun))
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        pushed = until(ws, "inputs")["inputs"]["sun"]
+        asked = client.get("/api/inputs").json()["sun"]
+
+    assert pushed == asked
+    assert pushed["elevation"] == 2.1
+    assert (pushed["sunrise"], pushed["sunset"]) == (None, "2026-03-20T18:10:00Z")
 
 
 async def test_a_nan_comes_back_as_text_in_the_422(api: Api) -> None:
